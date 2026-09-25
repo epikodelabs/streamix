@@ -13,7 +13,7 @@ import {
   type BenchmarkCase,
 } from './benchmark-harness';
 
-const rawDom: BenchmarkCase = {
+export const rawDomTextCase: BenchmarkCase = {
   name: 'raw-dom/text.data',
   setup() {
     const text = document.createTextNode('');
@@ -29,7 +29,7 @@ const rawDom: BenchmarkCase = {
   },
 };
 
-const sxCompiledText: BenchmarkCase = {
+export const sxCompiledTextCase: BenchmarkCase = {
   name: 'sx/compiled-text',
   setup() {
     const source = atom(0);
@@ -56,7 +56,7 @@ export function benchmarkScalarUpdates(
   iterations = 100_000,
 ) {
   return [
-    runBenchmark(rawDom, { iterations }),
-    runBenchmark(sxCompiledText, { iterations }),
+    runBenchmark(rawDomTextCase, { iterations }),
+    runBenchmark(sxCompiledTextCase, { iterations }),
   ];
 }

@@ -318,6 +318,19 @@ export function createBindingTable(
   return new SxBindingTable(size, scheduler);
 }
 
+
+function boundTextNode(target: Element): Text {
+  const first = target.firstChild;
+
+  if (first?.nodeType === 3) {
+    return first as Text;
+  }
+
+  const text = target.ownerDocument.createTextNode('');
+  target.insertBefore(text, first ?? null);
+  return text;
+}
+
 /** Compiler instruction: direct text-content binding. @internal */
 export function ɵsxText(
   table: SxBindingTable,
@@ -326,6 +339,21 @@ export function ɵsxText(
   source: DependencySource<unknown>,
 ): void {
   table.bind(slot, source, writeText(target), equalText);
+}
+
+/**
+ * Compiler instruction: direct binding to Angular's existing interpolation
+ * text node. Keeping the same Text object is required for hydration and for
+ * later Angular checks to remain valid.
+ * @internal
+ */
+export function ɵsxTextNode(
+  table: SxBindingTable,
+  slot: BindingSlot,
+  target: Element,
+  source: DependencySource<unknown>,
+): void {
+  table.bind(slot, source, writeText(boundTextNode(target)), equalText);
 }
 
 /** Compiler instruction: direct reactive text expression. @internal */
@@ -337,6 +365,23 @@ export function ɵsxTextExpression(
   read: () => unknown,
 ): void {
   table.bindExpression(slot, sources, read, writeText(target), equalText);
+}
+
+/** Compiler instruction: reactive expression bound to Angular's text node. @internal */
+export function ɵsxTextExpressionNode(
+  table: SxBindingTable,
+  slot: BindingSlot,
+  target: Element,
+  sources: readonly DependencySource<unknown>[],
+  read: () => unknown,
+): void {
+  table.bindExpression(
+    slot,
+    sources,
+    read,
+    writeText(boundTextNode(target)),
+    equalText,
+  );
 }
 
 /** Compiler instruction: Angular-owned hybrid-expression invalidation. @internal */

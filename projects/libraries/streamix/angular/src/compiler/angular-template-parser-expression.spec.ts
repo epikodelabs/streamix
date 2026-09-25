@@ -33,7 +33,7 @@ describe('sx source expression diagnostics', () => {
     expect(parsed.plan.bindings).toEqual([
       jasmine.objectContaining({
         slot: 0,
-        kind: 'text',
+        kind: 'text-node',
         node: 'node0',
         source: 'count',
       }),
@@ -48,7 +48,7 @@ describe('sx source expression diagnostics', () => {
 
     expect(parsed.plan.bindings).toEqual([
       jasmine.objectContaining({
-        kind: 'text-expression',
+        kind: 'text-expression-node',
         source: 'count.value * price.value',
         dependencies: ['count', 'price'],
       }),
@@ -109,6 +109,39 @@ describe('sx source expression diagnostics', () => {
     const parsed = parseSxTemplate(`
       <button [disabled]="busy.value || locked"></button>
       <div [style.width.px]="width.value"></div>
+    `);
+
+    expect(parsed.plan.size).toBe(0);
+  });
+
+  it('lowers source-transparent interpolation from compile-time source metadata', () => {
+    const sources = new Set(['count', 'price']);
+    const parsed = parseSxTemplate(
+      '<span>{{ count * price }}</span>',
+      'inline.html',
+      { isDependencySource: path => sources.has(path) },
+    );
+
+    expect(parsed.plan.bindings).toEqual([
+      jasmine.objectContaining({
+        kind: 'text-expression-node',
+        source: 'count.value * price.value',
+        dependencies: ['count', 'price'],
+      }),
+    ]);
+    expect(parsed.bindingEdits).toEqual([
+      jasmine.objectContaining({
+        replacement: '{{ count.value * price.value }}',
+      }),
+    ]);
+  });
+
+  it('keeps sanitizer-sensitive .value bindings Angular-owned', () => {
+    const parsed = parseSxTemplate(`
+      <a [href]="url.value"></a>
+      <img [src]="image.value">
+      <div [innerHTML]="html.value"></div>
+      <div [style.background-image]="background.value"></div>
     `);
 
     expect(parsed.plan.size).toBe(0);

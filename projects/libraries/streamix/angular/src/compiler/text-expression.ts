@@ -1,10 +1,12 @@
+import type { SxDependencySourceResolver } from './source-resolution';
+
 export type SxTextExpressionMode =
   | 'direct'
   | 'expression'
   | 'hybrid';
 
 export interface SxTextExpressionAnalysis {
-  /** Expression between the interpolation braces. */
+  /** Expression used by Angular after source-transparent normalization. */
   readonly expression: string;
   /** Component paths whose `.value` reads make the expression reactive. */
   readonly dependencies: readonly string[];
@@ -12,6 +14,8 @@ export interface SxTextExpressionAnalysis {
   readonly mode: SxTextExpressionMode;
   /** Present when the interpolation is exactly `<source>.value`. */
   readonly directSource?: string;
+  /** True when one or more source-transparent paths were rewritten to `.value`. */
+  readonly sourceTransparent: boolean;
 }
 
 interface DependencyRead {
@@ -26,6 +30,9 @@ const SIMPLE_VALUE_READ =
 
 const VALUE_READ_AT_START =
   /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.value\b/;
+
+const PATH_AT_START =
+  /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/;
 
 const ALLOWED_BARE_IDENTIFIERS = new Set([
   'true',
@@ -50,13 +57,16 @@ const ALLOWED_BARE_IDENTIFIERS = new Set([
 ]);
 
 /**
- * Recognizes a text interpolation that reads one or more Streamix `.value`
- * properties.
+ * Recognizes a text interpolation that reads one or more Streamix values.
+ *
+ * With a source resolver, source-transparent expressions such as `{{ count }}`
+ * and `{{ count * 2 }}` are normalized to Angular-safe SSR fallbacks
+ * (`count.value`, `count.value * 2`) before the usual dependency analysis.
  *
  * Execution modes:
  *
- * - `direct`: exactly `<source>.value`; compiled as a normal `sx.text` binding.
- * - `expression`: every dynamic root is a Streamix `.value` read (plus safe
+ * - `direct`: exactly one source read; compiled as a normal direct text binding.
+ * - `expression`: every dynamic root is a Streamix read (plus safe
  *   literals/operators/globals); compiled to a direct multi-source text binding.
  * - `hybrid`: the expression mixes Streamix reads with ordinary Angular state
  *   or Angular-only expression features. Angular keeps the expression; the
@@ -64,13 +74,20 @@ const ALLOWED_BARE_IDENTIFIERS = new Set([
  */
 export function analyzeSxTextInterpolation(
   interpolationSource: string,
+  isDependencySource?: SxDependencySourceResolver,
 ): SxTextExpressionAnalysis | undefined {
   const match = /^\s*\{\{([\s\S]*?)\}\}\s*$/.exec(interpolationSource);
-  const expression = match?.[1]?.trim();
+  const authoredExpression = match?.[1]?.trim();
 
-  if (!expression) {
+  if (!authoredExpression) {
     return undefined;
   }
+
+  const normalized = normalizeSourceTransparentExpression(
+    authoredExpression,
+    isDependencySource,
+  );
+  const expression = normalized.expression;
 
   const direct = SIMPLE_VALUE_READ.exec(expression);
   if (direct) {
@@ -79,6 +96,7 @@ export function analyzeSxTextInterpolation(
       dependencies: [direct[1]],
       directSource: direct[1],
       mode: 'direct',
+      sourceTransparent: normalized.changed,
     };
   }
 
@@ -103,6 +121,7 @@ export function analyzeSxTextInterpolation(
     mode: isSupportedDirectExpression(expression, reads)
       ? 'expression'
       : 'hybrid',
+    sourceTransparent: normalized.changed,
   };
 }
 
@@ -111,6 +130,16 @@ export function extractDirectValueSource(
   expression: string,
 ): string | undefined {
   return SIMPLE_VALUE_READ.exec(expression.trim())?.[1];
+}
+
+/** Extracts a plain component path such as `busy` or `model.busy`. */
+export function extractComponentSourcePath(
+  expression: string,
+): string | undefined {
+  const trimmed = expression.trim();
+  return /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(trimmed)
+    ? trimmed
+    : undefined;
 }
 
 /** Prefixes compiler-recognized Streamix reads with the component context. */
@@ -134,6 +163,103 @@ export function rewriteSxTextExpression(
 
   rewritten += expression.slice(cursor);
   return rewritten;
+}
+
+function normalizeSourceTransparentExpression(
+  expression: string,
+  isDependencySource?: SxDependencySourceResolver,
+): { expression: string; changed: boolean } {
+  if (!isDependencySource) {
+    return { expression, changed: false };
+  }
+
+  const explicitReads = findDependencyReads(expression);
+  const occupied = explicitReads.map(read => ({ start: read.start, end: read.end }));
+  const replacements: Array<{ start: number; end: number; text: string }> = [];
+
+  let quote: '"' | "'" | '`' | undefined;
+  let escaped = false;
+
+  for (let index = 0; index < expression.length;) {
+    const char = expression[index];
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = undefined;
+      }
+      index += 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      index += 1;
+      continue;
+    }
+
+    const containing = occupied.find(range => index >= range.start && index < range.end);
+    if (containing) {
+      index = containing.end;
+      continue;
+    }
+
+    if (isIdentifierStart(char) && !isPathContinuation(expression[index - 1])) {
+      const match = PATH_AT_START.exec(expression.slice(index));
+      const path = match?.[1];
+
+      if (path) {
+        const source = longestDependencySourcePrefix(path, isDependencySource);
+        if (source) {
+          replacements.push({
+            start: index,
+            end: index + source.length,
+            text: `${source}.value`,
+          });
+          index += source.length;
+          continue;
+        }
+
+        index += path.length;
+        continue;
+      }
+    }
+
+    index += 1;
+  }
+
+  if (replacements.length === 0) {
+    return { expression, changed: false };
+  }
+
+  let normalized = expression;
+  for (const replacement of replacements.reverse()) {
+    normalized =
+      normalized.slice(0, replacement.start) +
+      replacement.text +
+      normalized.slice(replacement.end);
+  }
+
+  return { expression: normalized, changed: true };
+}
+
+function longestDependencySourcePrefix(
+  path: string,
+  isDependencySource: SxDependencySourceResolver,
+): string | undefined {
+  const segments = path.split('.');
+
+  for (let count = segments.length; count >= 1; count -= 1) {
+    const candidate = segments.slice(0, count).join('.');
+    if (isDependencySource(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
 }
 
 function findDependencyReads(expression: string): DependencyRead[] {

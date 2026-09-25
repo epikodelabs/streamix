@@ -1,5 +1,6 @@
 import {
   parseSxTemplate,
+  type ParseSxTemplateOptions,
   type ParsedSxTemplate,
 } from './angular-template-parser';
 
@@ -9,35 +10,39 @@ export interface SxTemplateTransformResult {
 }
 
 /**
- * Extracts sx bindings and removes them from Angular's binding system.
+ * Extracts Streamix-owned bindings while preserving Angular SSR/hydration
+ * semantics.
  *
- * Unlike the earlier bridge, no `data-sx` marker is emitted. The parser has
- * already computed stable element-only paths for compiler-generated setup.
+ * - Explicit `[sx.*]` bindings are rewritten to Angular-native `.value`
+ *   fallbacks.
+ * - Authored `.value` bindings/interpolations already are valid Angular
+ *   fallbacks and remain untouched.
+ * - Source-transparent bindings proven by the compile-time source resolver are
+ *   rewritten to `.value` only in the Angular fallback template while the
+ *   browser setup binds directly to the original DependencySource.
  */
 export function transformSxTemplate(
   template: string,
   templateUrl = 'inline-template.html',
+  options: ParseSxTemplateOptions = {},
 ): SxTemplateTransformResult {
-  const parsed = parseSxTemplate(template, templateUrl);
+  const parsed = parseSxTemplate(template, templateUrl, options);
 
-  if (parsed.plan.size === 0) {
+  if (parsed.bindingEdits.length === 0) {
     return { template, parsed };
   }
 
   let transformed = template;
 
-  // Cut by the parser-recorded attribute offsets rather than a regex so both
-  // quote styles are removed exactly and sx-looking text content is never
-  // touched. Cuts run back-to-front so earlier offsets stay valid.
-  const spans = [...parsed.bindingSpans].sort((a, b) => b.start - a.start);
+  // Replace compiler-owned fallbacks from right to left so source offsets stay
+  // stable. The binding plan still points at the authored component paths.
+  const edits = [...parsed.bindingEdits].sort((a, b) => b.start - a.start);
 
-  for (const span of spans) {
-    let start = span.start;
-    while (start > 0 && /\s/.test(transformed[start - 1])) {
-      start--;
-    }
+  for (const edit of edits) {
     transformed =
-      transformed.slice(0, start) + transformed.slice(span.end);
+      transformed.slice(0, edit.start) +
+      edit.replacement +
+      transformed.slice(edit.end);
   }
 
   return { template: transformed, parsed };

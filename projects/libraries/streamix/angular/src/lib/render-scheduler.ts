@@ -19,6 +19,29 @@ export const animationFrameRenderScheduler: RenderScheduler = {
   },
 };
 
+export interface OutsideAngularBoundary {
+  runOutsideAngular<T>(callback: () => T): T;
+}
+
+/**
+ * Wraps a frame scheduler so both registration and execution happen outside
+ * Angular's zone. This wrapper is installed only when a Zone.js-backed
+ * application explicitly enables sx zone scheduling; zoneless applications
+ * keep the native renderer scheduler and never construct this boundary.
+ */
+export function createOutsideAngularRenderScheduler(
+  boundary: OutsideAngularBoundary,
+  delegate: RenderScheduler = animationFrameRenderScheduler,
+): RenderScheduler {
+  return {
+    schedule(callback: () => void): CancelRender {
+      return boundary.runOutsideAngular(() =>
+        delegate.schedule(() => boundary.runOutsideAngular(callback)),
+      );
+    },
+  };
+}
+
 export interface ScheduledBinding {
   readonly id: number;
   markDirty(): void;
@@ -37,9 +60,31 @@ export class RendererScheduler {
   private flushing = false;
 
   constructor(
-    private readonly scheduler: RenderScheduler =
+    private scheduler: RenderScheduler =
       animationFrameRenderScheduler,
   ) {}
+
+  /**
+   * Replaces the frame scheduler used for future flushes. If a frame is
+   * already pending it is rescheduled through the new scheduler so the
+   * execution boundary is applied consistently.
+   */
+  setScheduler(scheduler: RenderScheduler): void {
+    if (this.scheduler === scheduler) {
+      return;
+    }
+
+    this.cancelFrame?.();
+    this.cancelFrame = undefined;
+    this.scheduler = scheduler;
+
+    if (this.dirtyIds.length > 0 && !this.flushing) {
+      this.cancelFrame = this.scheduler.schedule(() => {
+        this.cancelFrame = undefined;
+        this.flush();
+      });
+    }
+  }
 
   register(flush: () => void): ScheduledBinding {
     const id = this.freeIds.pop() ?? this.bindings.length;

@@ -11,3 +11,5 @@ export * from './structural-plan';
 export * from './sx-parser';
 export * from './block-template-compiler';
 export * from './emit-structural-module';
+
+export * from './source-resolution';

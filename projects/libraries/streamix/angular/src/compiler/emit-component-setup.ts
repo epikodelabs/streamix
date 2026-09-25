@@ -62,9 +62,19 @@ export function emitComponentSetup(
           `  ɵsxText(table, ${entry.slot}, ${entry.node}, ${source(entry.source)});`,
         );
         break;
+      case 'text-node':
+        lines.push(
+          `  ɵsxTextNode(table, ${entry.slot}, ${entry.node}, ${source(entry.source)});`,
+        );
+        break;
       case 'text-expression':
         lines.push(
           `  ɵsxTextExpression(table, ${entry.slot}, ${entry.node}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+        );
+        break;
+      case 'text-expression-node':
+        lines.push(
+          `  ɵsxTextExpressionNode(table, ${entry.slot}, ${entry.node}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
         );
         break;
       case 'angular-invalidate':

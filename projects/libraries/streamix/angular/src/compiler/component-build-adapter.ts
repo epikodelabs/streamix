@@ -5,11 +5,23 @@ import {
 import {
   transformAngularComponentTemplate,
 } from './build-transform';
+import { createDependencySourcePathResolver } from './source-resolution';
+import type { SxDependencySourceResolver } from './source-resolution';
 
 export interface SxComponentBuildInput {
   readonly componentPath: string;
   readonly template: string;
   readonly templatePath?: string;
+  /**
+   * TypeScript-checker-backed resolver for source-transparent template syntax.
+   * Prefer this in real builder integrations.
+   */
+  readonly isDependencySource?: SxDependencySourceResolver;
+  /**
+   * Convenience metadata for adapters that have already discovered the exact
+   * DependencySource property paths for this component.
+   */
+  readonly dependencySourcePaths?: readonly string[];
 }
 
 export interface SxGeneratedFile {
@@ -39,14 +51,23 @@ export interface SxComponentBuildOutput {
 export function compileSxComponent(
   input: SxComponentBuildInput,
 ): SxComponentBuildOutput {
+  const isDependencySource = input.isDependencySource ?? (
+    input.dependencySourcePaths
+      ? createDependencySourcePathResolver(input.dependencySourcePaths)
+      : undefined
+  );
+
   const transformed = transformAngularComponentTemplate(
     input.template,
     input.templatePath ?? input.componentPath,
+    { isDependencySource },
   );
 
   if (transformed.bindingCount === 0) {
     return {
-      transformedTemplate: input.template,
+      // A source-transparent sanitizer-sensitive binding may require only an
+      // Angular `.value` fallback edit and no direct browser binding.
+      transformedTemplate: transformed.template,
       bindingCount: 0,
     };
   }

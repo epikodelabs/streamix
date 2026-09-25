@@ -27,7 +27,9 @@ export function emitRuntimeImportHeader(
     `  ɵsxProperty,`,
     `  ɵsxStyle,`,
     `  ɵsxText,`,
+    `  ɵsxTextNode,`,
     `  ɵsxTextExpression,`,
+    `  ɵsxTextExpressionNode,`,
     `} from ${JSON.stringify(runtimeImport)};`,
   ].join('\n');
 }

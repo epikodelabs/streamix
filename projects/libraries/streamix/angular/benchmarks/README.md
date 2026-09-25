@@ -1,30 +1,31 @@
 # Streamix Angular renderer benchmarks
 
-These benchmarks are deliberately claim-free.
+The benchmark suite runs in a real browser and is deliberately claim-free.
 
-Current local cases:
+The browser runner currently executes:
 
 - `raw-dom/text.data`
 - `sx/compiled-text`
 - `sx/coalesced-100-writes`
 - `sx/keyed-reorder-N`
 
-The harness reports sample timings, median milliseconds, and operations per
-second. It does not attempt to turn one microbenchmark into a marketing claim.
+Serve this directory through Vite from a workspace where
+`@epikodelabs/streamix` resolves normally:
 
-## Comparative adapters
+```bash
+npx vite ./angular/benchmarks
+```
 
-`external-adapter.ts` defines the workload boundary for Angular Signals,
-Million.js, or other renderers.
+Open the printed URL. `browser-runner.ts` prints a console table and writes the
+complete JSON result to the page and to `window.__SX_BENCHMARK_RESULTS__`.
 
-Comparative numbers should only be published when all implementations:
+Tune workloads with URL parameters:
 
-1. render the same final DOM;
-2. perform the same number of source mutations;
-3. use production builds;
-4. run in the same browser/process;
-5. use identical warmup/sample counts;
-6. include creation/destruction consistently;
-7. separate scalar-update and structural-reorder workloads.
+```text
+?samples=11&warmup=4&scalar=100000&coalesced=10000&rows=1000&reorders=1000
+```
 
-Raw DOM is the useful lower-bound reference for the scalar path.
+Comparative adapters belong behind the workload contract in
+`external-adapter.ts`. Only compare implementations when they render identical
+DOM, perform the same source mutations, use production builds, run in the same
+browser/process, and include equivalent setup/destruction work.

@@ -3,62 +3,64 @@ import {
 } from './template-transform';
 
 describe('transformSxTemplate', () => {
-  it('removes sx bindings without emitting runtime markers', () => {
+  it('rewrites explicit sx bindings to Angular-native SSR/hydration fallbacks', () => {
     const result = transformSxTemplate(`
       <span [sx.text]="count"></span>
-      <button [sx.disabled]="disabled">Save</button>
+      <button
+        [sx.disabled]="disabled"
+        [sx.attr.aria-label]="label"
+        [sx.class.active]="active"
+        [sx.style.opacity]="opacity">
+        Save
+      </button>
     `);
 
-    expect(result.template).not.toContain('[sx.text]');
-    expect(result.template).not.toContain('[sx.disabled]');
+    expect(result.template).toContain('[textContent]="count.value"');
+    expect(result.template).toContain('[disabled]="disabled.value"');
+    expect(result.template).toContain('[attr.aria-label]="label.value"');
+    expect(result.template).toContain('[class.active]="active.value"');
+    expect(result.template).toContain('[style.opacity]="opacity.value"');
+    expect(result.template).not.toContain('[sx.');
     expect(result.template).not.toContain('data-sx');
-    expect(result.parsed.plan.size).toBe(2);
+    expect(result.parsed.plan.size).toBe(5);
   });
 
-  it('removes single-quoted sx bindings from the template', () => {
+  it('normalizes single-quoted explicit sx bindings to fallback bindings', () => {
     const result = transformSxTemplate(`<span [sx.text]='count'></span>`);
 
-    expect(result.template).toBe('<span></span>');
+    expect(result.template).toBe('<span [textContent]="count.value"></span>');
     expect(result.parsed.plan.bindings[0]?.source).toBe('count');
   });
 
-  it('removes multiple bindings of either quote style', () => {
-    const result = transformSxTemplate(
-      `<button [sx.disabled]='disabled' [sx.class.active]="active">Save</button>`,
-    );
-
-    expect(result.template).toBe('<button>Save</button>');
-  });
-
-  it('does not strip sx-looking text content', () => {
+  it('does not rewrite sx-looking text content', () => {
     const result = transformSxTemplate(
       `<span [sx.text]="count">[sx.text]="shadow"</span>`,
     );
 
+    expect(result.template).toContain('[textContent]="count.value"');
     expect(result.template).toContain('[sx.text]="shadow"');
-    expect(result.template).not.toContain('count');
   });
 });
 
 describe('automatic .value lowering', () => {
-  it('removes direct text interpolation from Angular and owns the text binding', () => {
-    const result = transformSxTemplate('<span>{{ count.value }}</span>');
+  it('preserves direct text interpolation for SSR/hydration and owns its text node', () => {
+    const template = '<span>{{ count.value }}</span>';
+    const result = transformSxTemplate(template);
 
-    expect(result.template).toBe('<span></span>');
+    expect(result.template).toBe(template);
     expect(result.parsed.plan.bindings[0]).toEqual(
-      jasmine.objectContaining({ kind: 'text', source: 'count' }),
+      jasmine.objectContaining({ kind: 'text-node', source: 'count' }),
     );
   });
 
-  it('removes pure Streamix text expressions from Angular', () => {
-    const result = transformSxTemplate(
-      '<span>{{ count.value * 2 }}</span>',
-    );
+  it('preserves pure Streamix text expressions for SSR/hydration', () => {
+    const template = '<span>{{ count.value * 2 }}</span>';
+    const result = transformSxTemplate(template);
 
-    expect(result.template).toBe('<span></span>');
+    expect(result.template).toBe(template);
     expect(result.parsed.plan.bindings[0]).toEqual(
       jasmine.objectContaining({
-        kind: 'text-expression',
+        kind: 'text-expression-node',
         dependencies: ['count'],
       }),
     );
@@ -77,8 +79,8 @@ describe('automatic .value lowering', () => {
     );
   });
 
-  it('removes simple native Angular .value bindings after direct lowering', () => {
-    const result = transformSxTemplate(`
+  it('preserves native Angular .value bindings as SSR/hydration fallbacks', () => {
+    const template = `
       <span>{{ count.value }}</span>
       <button
         [disabled]="busy.value"
@@ -87,13 +89,23 @@ describe('automatic .value lowering', () => {
         [style.opacity]="opacity.value">
         Save
       </button>
-    `);
+    `;
+    const result = transformSxTemplate(template);
 
-    expect(result.template).not.toContain('{{ count.value }}');
-    expect(result.template).not.toContain('[disabled]');
-    expect(result.template).not.toContain('[attr.aria-label]');
-    expect(result.template).not.toContain('[class.active]');
-    expect(result.template).not.toContain('[style.opacity]');
+    expect(result.template).toBe(template);
     expect(result.parsed.plan.size).toBe(5);
+  });
+});
+
+describe('source-transparent fallback-only transforms', () => {
+  it('rewrites sanitizer-sensitive sources to .value without generating a direct binding', () => {
+    const result = transformSxTemplate(
+      '<a [href]="url">open</a>',
+      'inline.html',
+      { isDependencySource: path => path === 'url' },
+    );
+
+    expect(result.template).toBe('<a [href]="url.value">open</a>');
+    expect(result.parsed.plan.size).toBe(0);
   });
 });

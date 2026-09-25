@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import type { DependencySource } from '@epikodelabs/streamix';
 
+import { ɵinstallSxAngularZone } from './angular-zone';
 import {
   bindAttribute,
   bindClass,
@@ -40,6 +41,10 @@ import {
   standalone: true,
 })
 export class SxPropertyBindingsDirective implements OnChanges, OnDestroy {
+  constructor() {
+    ɵinstallSxAngularZone();
+  }
+
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
 
   private readonly bindings = new Map<string, DirectBinding>();
@@ -114,6 +119,10 @@ export class SxPropertyBindingsDirective implements OnChanges, OnDestroy {
   standalone: true,
 })
 export class SxAttributeBindingsDirective implements OnChanges, OnDestroy {
+  constructor() {
+    ɵinstallSxAngularZone();
+  }
+
   private readonly element = inject<ElementRef<Element>>(ElementRef);
   private readonly bindings = new Map<string, DirectBinding>();
 
@@ -183,6 +192,10 @@ export class SxAttributeBindingsDirective implements OnChanges, OnDestroy {
   standalone: true,
 })
 export class SxClassBindingsDirective implements OnChanges, OnDestroy {
+  constructor() {
+    ɵinstallSxAngularZone();
+  }
+
   private readonly element = inject<ElementRef<Element>>(ElementRef);
   private readonly bindings = new Map<string, DirectBinding>();
 
@@ -248,6 +261,10 @@ export class SxClassBindingsDirective implements OnChanges, OnDestroy {
   standalone: true,
 })
 export class SxStyleBindingsDirective implements OnChanges, OnDestroy {
+  constructor() {
+    ɵinstallSxAngularZone();
+  }
+
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly bindings = new Map<string, DirectBinding>();
 

@@ -1,13 +1,15 @@
 export type SxBindingKind =
   | 'text'
+  | 'text-node'
   | 'text-expression'
+  | 'text-expression-node'
   | 'angular-invalidate'
   | 'property'
   | 'attribute'
   | 'class'
   | 'style';
 
-/** Offsets of an sx attribute or compiler-lowered Angular binding. */
+/** Offsets of an sx attribute or compiler-recognized Angular binding. */
 export interface SxSourceSpan {
   readonly start: number;
   readonly end: number;

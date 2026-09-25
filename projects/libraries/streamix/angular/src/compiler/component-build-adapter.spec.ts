@@ -14,9 +14,23 @@ describe('compileSxComponent', () => {
 
     expect(result.bindingCount).toBe(2);
     expect(result.transformedTemplate).not.toContain('[sx.text]');
+    expect(result.transformedTemplate).toContain('[textContent]="count.value"');
+    expect(result.transformedTemplate).toContain('[disabled]="disabled.value"');
     expect(result.transformedTemplate).not.toContain('data-sx');
     expect(result.generatedModule?.contents).not.toContain('querySelector');
     expect(result.generatedModule?.contents).toContain('host.children[0]');
     expect(result.generatedModule?.contents).toContain('host.children[1]');
+  });
+
+  it('accepts DependencySource paths discovered by the TypeScript-aware adapter', () => {
+    const result = compileSxComponent({
+      componentPath: 'src/app/counter.component.ts',
+      template: '<button [disabled]="busy">{{ count }}</button>',
+      dependencySourcePaths: ['busy', 'count'],
+    });
+
+    expect(result.bindingCount).toBe(2);
+    expect(result.transformedTemplate).toContain('[disabled]="busy.value"');
+    expect(result.transformedTemplate).toContain('{{ count.value }}');
   });
 });

@@ -1,6 +1,7 @@
 import {
   emitComponentSetup,
 } from './emit-component-setup';
+import type { ParseSxTemplateOptions } from './angular-template-parser';
 import {
   transformSxTemplate,
 } from './template-transform';
@@ -14,20 +15,15 @@ export interface SxBuildTransformResult {
 /**
  * Build-tool-facing sx transform.
  *
- * Input: an Angular component template.
- * Output:
- *  - Angular-safe template with sx bindings removed
- *  - generated direct-binding setup function
- *  - binding count
- *
- * A Vite/esbuild/Angular builder adapter only needs to provide component
- * template discovery and lifecycle insertion around this deterministic core.
+ * `options.isDependencySource` should be backed by the component TypeScript
+ * checker when source-transparent templates are enabled.
  */
 export function transformAngularComponentTemplate(
   template: string,
   templateUrl = 'inline-template.html',
+  options: ParseSxTemplateOptions = {},
 ): SxBuildTransformResult {
-  const transformed = transformSxTemplate(template, templateUrl);
+  const transformed = transformSxTemplate(template, templateUrl, options);
 
   return {
     template: transformed.template,

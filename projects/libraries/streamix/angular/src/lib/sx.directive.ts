@@ -14,6 +14,7 @@ import type {
   Subscription,
 } from '@epikodelabs/streamix';
 
+import { ɵinstallSxAngularZone } from './angular-zone';
 import {
   rendererScheduler,
   type ScheduledBinding,
@@ -65,6 +66,10 @@ type PendingRender<T> =
   standalone: true,
 })
 export class SxDirective<T = unknown> implements OnChanges, OnDestroy {
+  constructor() {
+    ɵinstallSxAngularZone();
+  }
+
   private readonly templateRef =
     inject<TemplateRef<SourceContext<T>>>(TemplateRef);
   private readonly viewContainerRef = inject(ViewContainerRef);
@@ -214,6 +219,20 @@ export class SxDirective<T = unknown> implements OnChanges, OnDestroy {
     const items = Array.isArray(source) ? source : Array.from(source);
     const count = items.length;
     const trackBy = this.sxTrackBy ?? identityTrackBy;
+    const keys = new Array<unknown>(count);
+    const seenKeys = new Set<unknown>();
+
+    // Match the compiled keyed-block contract: keys must be unique within one
+    // rendered collection. Validate before touching existing views so a bad
+    // update cannot leave the container half-reordered.
+    for (let index = 0; index < count; index += 1) {
+      const key = trackBy(index, items[index]);
+      if (seenKeys.has(key)) {
+        throw new Error(`Duplicate sx collection key: ${String(key)}`);
+      }
+      seenKeys.add(key);
+      keys[index] = key;
+    }
 
     const available = new Map<unknown, CollectionView<T>[]>();
 
@@ -231,7 +250,7 @@ export class SxDirective<T = unknown> implements OnChanges, OnDestroy {
 
     for (let index = 0; index < count; index += 1) {
       const item = items[index];
-      const key = trackBy(index, item);
+      const key = keys[index];
       const bucket = available.get(key);
       const record = bucket?.shift();
 

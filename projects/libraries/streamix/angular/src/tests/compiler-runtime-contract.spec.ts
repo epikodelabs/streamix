@@ -139,6 +139,10 @@ idescribe('compiler/runtime contract', () => {
     const host = document.createElement('div');
     host.innerHTML = result.template;
 
+    const sectionBefore = host.children[0] as Element;
+    const spanTextNode = sectionBefore.children[0].firstChild;
+    const strongTextNode = sectionBefore.children[1].firstChild;
+
     const count = atom(2);
     const disabled = atom(false);
     const label = atom<unknown>('Details');
@@ -164,6 +168,8 @@ idescribe('compiler/runtime contract', () => {
 
     expect(span.textContent).toBe('2');
     expect(strong.textContent).toBe('4');
+    expect(span.firstChild).toBe(spanTextNode);
+    expect(strong.firstChild).toBe(strongTextNode);
     expect(button.disabled).toBeFalse();
     expect(button.getAttribute('aria-label')).toBe('Details');
     expect(button.classList.contains('active')).toBeFalse();
@@ -179,8 +185,78 @@ idescribe('compiler/runtime contract', () => {
 
     expect(span.textContent).toBe('3');
     expect(strong.textContent).toBe('6');
+    expect(span.firstChild).toBe(spanTextNode);
+    expect(strong.firstChild).toBe(strongTextNode);
     expect(button.disabled).toBeTrue();
     expect(button.hasAttribute('aria-label')).toBeFalse();
+    expect(button.classList.contains('active')).toBeTrue();
+    expect(button.style.opacity).toBe('1');
+
+    teardown.destroy();
+  });
+
+
+  it('executes source-transparent bindings with direct runtime ownership', () => {
+    const sources = new Set(['count', 'disabled', 'label', 'active', 'opacity']);
+    const result = transformSxTemplate(`
+      <section>
+        <span>{{ count }}</span>
+        <strong>{{ count * 2 }}</strong>
+        <button
+          [disabled]="disabled"
+          [attr.aria-label]="label"
+          [class.active]="active"
+          [style.opacity]="opacity">
+          Save
+        </button>
+      </section>
+    `, 'inline.html', {
+      isDependencySource: path => sources.has(path),
+    });
+
+    expect(result.template).toContain('{{ count.value }}');
+    expect(result.template).toContain('{{ count.value * 2 }}');
+    expect(result.template).toContain('[disabled]="disabled.value"');
+
+    const host = document.createElement('div');
+    host.innerHTML = result.template;
+
+    const count = atom(2);
+    const disabled = atom(false);
+    const label = atom<unknown>('Details');
+    const active = atom(false);
+    const opacity = atom<unknown>('0.5');
+
+    const setup = compileEmittedSetup(
+      emitComponentModule(result.parsed),
+      'ɵsetupSxBindings',
+    );
+    const teardown = setup(host, { count, disabled, label, active, opacity });
+
+    const section = host.children[0] as Element;
+    const span = section.children[0] as Element;
+    const strong = section.children[1] as Element;
+    const button = section.children[2] as HTMLButtonElement;
+
+    expect(span.textContent).toBe('2');
+    expect(strong.textContent).toBe('4');
+    expect(button.disabled).toBeFalse();
+    expect(button.getAttribute('aria-label')).toBe('Details');
+    expect(button.classList.contains('active')).toBeFalse();
+    expect(button.style.opacity).toBe('0.5');
+
+    count.set(4);
+    disabled.set(true);
+    label.set('Busy');
+    active.set(true);
+    opacity.set('1');
+
+    sxAngular.rendererScheduler.flushNow();
+
+    expect(span.textContent).toBe('4');
+    expect(strong.textContent).toBe('8');
+    expect(button.disabled).toBeTrue();
+    expect(button.getAttribute('aria-label')).toBe('Busy');
     expect(button.classList.contains('active')).toBeTrue();
     expect(button.style.opacity).toBe('1');
 

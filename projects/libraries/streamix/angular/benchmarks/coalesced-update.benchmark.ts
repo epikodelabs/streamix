@@ -13,7 +13,7 @@ import {
   type BenchmarkCase,
 } from './benchmark-harness';
 
-const sxCoalesced: BenchmarkCase = {
+export const sxCoalescedCase: BenchmarkCase = {
   name: 'sx/coalesced-100-writes',
   setup() {
     const source = atom(0);
@@ -43,7 +43,7 @@ export function benchmarkCoalescing(
   batches = 10_000,
 ) {
   return runBenchmark(
-    sxCoalesced,
+    sxCoalescedCase,
     {
       iterations: batches,
     },

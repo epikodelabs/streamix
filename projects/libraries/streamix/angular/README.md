@@ -1,64 +1,31 @@
 # @epikodelabs/streamix/angular
 
-Direct reactive Angular bindings for Streamix.
+Angular bindings for Streamix with compiler-owned direct reactive rendering.
+
+Angular owns component structure, lifecycle, SSR and hydration. Streamix owns
+reactive model state. When the compiler can prove a template expression reads a
+`DependencySource`, browser updates go directly to the exact DOM target instead
+of waiting for a component change-detection pass.
+
+## Source-transparent templates
+
+The preferred template syntax is normal Angular syntax:
 
 ```html
-<span [sx.text]="count"></span>
-
-<input [sx.value]="name">
+<span>{{ count }}</span>
 
 <button
-  [sx.disabled]="disabled"
-  [sx.attr.aria-label]="label"
-  [sx.class.active]="active"
-  [sx.style.opacity]="opacity">
+  [disabled]="busy"
+  [attr.aria-label]="label"
+  [class.active]="active"
+  [style.opacity]="opacity">
   Save
 </button>
 ```
 
-The `sx` binding namespace mirrors normal DOM concepts:
-
-```text
-[sx.text]             -> textContent
-[sx.<property>]       -> DOM property
-[sx.attr.<name>]      -> attribute
-[sx.class.<name>]     -> class toggle
-[sx.style.<property>] -> inline style
-```
-
-After setup, direct and pure-expression bindings do not mark or check Angular views. Hybrid expressions use a coalesced local Angular view check only when ordinary Angular state is part of the expression.
-
-```text
-Streamix source emits
-  -> latest value stored
-  -> integer binding id marked dirty
-  -> one shared animation-frame flush
-  -> direct DOM write
-```
-
-Initial rendering is synchronous. Repeated emissions before a frame are
-coalesced and the latest value wins.
-
-
-## Automatic `.value` lowering
-
-The compiler recognizes ordinary Angular syntax that reads Streamix values and
-lowers the simple cases to the same direct renderer used by explicit `sx`
-bindings.
-
-```html
-<span>{{ count.value }}</span>
-
-<button
-  [disabled]="busy.value"
-  [attr.aria-label]="label.value"
-  [class.active]="active.value"
-  [style.opacity]="opacity.value">
-  Save
-</button>
-```
-
-is compiled equivalently to:
+When the build adapter's TypeScript checker reports that `count`, `busy`,
+`label`, `active`, and `opacity` are Streamix `DependencySource`s, the browser
+binding plan is equivalent to:
 
 ```html
 <span [sx.text]="count"></span>
@@ -72,271 +39,245 @@ is compiled equivalently to:
 </button>
 ```
 
-Pure Streamix text expressions are also compiler-owned:
+Ordinary Angular values stay ordinary Angular bindings. Source transparency is
+compile-time metadata-driven; the runtime never duck-types arbitrary objects.
+
+The low-level explicit `sx` syntax remains available when desired:
 
 ```html
-<span>{{ count.value * 2 }}</span>
-<span>{{ count.value * price.value }}</span>
+<span [sx.text]="count"></span>
+<input [sx.value]="name">
 ```
 
-The generated binding subscribes to the referenced sources, reevaluates the
-expression at most once per renderer flush, and writes the text directly.
+Authored `.value` syntax remains supported too, but is no longer required for
+bindings the build adapter can classify:
+
+```html
+<span>{{ count.value }}</span>
+<button [disabled]="busy.value"></button>
+```
+
+## Expressions
+
+Source-transparent interpolation extends to expressions:
+
+```html
+{{ count }}
+{{ count * 2 }}
+{{ count * price }}
+{{ enabled ? 'On' : 'Off' }}
+```
+
+For Streamix sources these are normalized internally to `.value` reads for the
+Angular SSR fallback and compiled to direct source/expression bindings in the
+browser.
 
 Hybrid expressions keep Angular semantics:
 
 ```html
-<span>{{ count.value * multiplier }}</span>
+{{ count * multiplier }}
 ```
 
-Here `count` is reactive but `multiplier` is ordinary Angular component state.
-The interpolation therefore stays in Angular; Streamix only subscribes to
-`count` and schedules one local view invalidation when it emits. This works
-independently of `ChangeDetectionStrategy.OnPush` while preserving updates when
-Angular-owned state changes through normal Angular mechanisms.
+If `count` is a Streamix source and `multiplier` is ordinary Angular state, the
+compiler subscribes to `count` and coalesces one local Angular view invalidation.
+Angular-owned changes to `multiplier` continue to behave normally.
 
-## Structural rendering
+## SSR and hydration
 
-`*sx` is the Angular structural `TemplateRef` bridge:
+Source-transparent syntax is rewritten only in the Angular fallback template:
+
+```html
+[disabled]="busy"
+{{ count * 2 }}
+```
+
+becomes, for Angular server rendering/hydration:
+
+```html
+[disabled]="busy.value"
+{{ count.value * 2 }}
+```
+
+The generated browser setup still subscribes to `busy` and `count` themselves.
+After hydration, `ɵinstallSxCompiledView()` installs those direct subscriptions
+with `afterNextRender()`.
+
+Interpolation updates Angular's existing `Text` node rather than replacing
+`element.textContent`, preserving hydration node identity.
+
+Explicit `[sx.*]` bindings are likewise rewritten to Angular-native `.value`
+fallbacks on the server.
+
+## Angular sanitization boundary
+
+Automatic direct lowering is intentionally conservative. The compiler does not
+take ownership of bindings whose values normally pass through Angular security
+sanitization, including URL/resource/HTML sinks such as:
+
+```html
+[href]="url"
+[src]="image"
+[innerHTML]="html"
+[attr.href]="url"
+[style.background-image]="background"
+```
+
+Those remain Angular-owned even when their expression is a Streamix source.
+For source-transparent syntax the fallback compiler still unwraps the source,
+for example `[href]="url"` becomes Angular-owned `[href]="url.value"`; it
+just does not install a direct DOM writer for that sink.
+
+Known unsafe explicit direct bindings such as `[sx.href]` and
+`[sx.style.background-image]` are rejected by the compiler rather than silently
+bypassing Angular's sanitizer.
+
+Source-transparent auto-lowering currently covers unambiguous safe DOM
+properties, classes, `aria-*`/`data-*` plus a small safe attribute set, and a
+conservative set of direct styles such as `opacity`, `width`, `height`,
+`display`, and `visibility`.
+
+## Change detection and zones
+
+Direct bindings do not depend on `ChangeDetectionStrategy.OnPush`.
+
+Zoneless applications require no zone integration and Streamix does not resolve
+or call `NgZone` by default.
+
+For an application explicitly configured to use Zone.js-backed Angular change
+detection, opt into outside-zone renderer scheduling:
+
+```ts
+import { provideZoneChangeDetection } from '@angular/core';
+import { provideSxZoneScheduling } from '@epikodelabs/streamix/angular';
+
+bootstrapApplication(AppComponent, {
+  providers: [
+    provideZoneChangeDetection(),
+    provideSxZoneScheduling(),
+  ],
+});
+```
+
+`provideSxZoneScheduling()` is the configuration marker. Without it, the
+Streamix Angular adapter never resolves `NgZone`, even if Zone.js is present on
+the page for another application or library.
+
+```text
+pure Streamix binding
+  source emission
+  -> integer slot dirty
+  -> shared renderer frame
+  -> exact DOM write
+
+zone-backed Angular + provideSxZoneScheduling()
+  shared renderer frame
+  -> scheduled through NgZone.runOutsideAngular(...)
+
+hybrid binding
+  Streamix emission
+  -> shared renderer frame
+  -> one local Angular view invalidation
+```
+
+## Structural `*sx`
+
+`*sx` is the structural bridge for scalar values and keyed collections:
 
 ```html
 <div *sx="user as user">
   {{ user.name }}
 </div>
-```
 
-It is frame-coalesced and collection views are keyed/reused, but arbitrary
-template bodies still render through Angular. The compiler renderer is the path
-for lowering supported structural templates to direct DOM instructions.
-
-## Runtime vs compiler
-
-The directive runtime currently exposes a small set of common dotted bindings.
-The compiler contract is intentionally broader: arbitrary `sx` property,
-attribute, class, and style names can be lowered directly to the corresponding
-low-level binding primitive without adding one Angular directive input per
-name.
-
-## Compiler binding tables
-
-The compiled path removes Angular directive lifecycle work from hot bindings.
-
-A template such as:
-
-```html
-<span [sx.text]="count"></span>
-
-<button
-  [sx.disabled]="disabled"
-  [sx.class.active]="active">
-  Save
-</button>
-```
-
-is represented by a fixed binding plan:
-
-```text
-slot 0 -> text      -> count
-slot 1 -> property  -> disabled
-slot 2 -> class     -> active
-```
-
-and generated setup code is equivalent to:
-
-```ts
-const table = createBindingTable(3);
-
-ɵsxText(table, 0, text0, ctx.count);
-ɵsxProperty(table, 1, button0, 'disabled', ctx.disabled);
-ɵsxClass(table, 2, button0, 'active', ctx.active);
-```
-
-One compiled view has one preallocated table and one scheduler registration,
-regardless of the number of bindings in that table. Source emissions only mark
-integer slots dirty; the frame flush visits those slots directly.
-
-`@epikodelabs/streamix/angular/compiler` currently exposes the compiler-neutral
-binding plan and deterministic emitter. It is intentionally separate from the
-runtime. Wiring this plan to Angular's template parsing/transform pipeline is
-the next compiler-integration step.
-
-## Angular template parsing
-
-The compiler entry point now parses real Angular templates through
-`@angular/compiler` and extracts the public `sx` namespace into a stable binding
-plan.
-
-For:
-
-```html
-<span [sx.text]="count"></span>
-
-<button
-  [sx.disabled]="disabled"
-  [sx.attr.aria-label]="label"
-  [sx.class.active]="active">
-  Save
-</button>
-```
-
-the compiler produces:
-
-```text
-node0 / slot 0 -> text(count)
-node1 / slot 1 -> property(disabled)
-node1 / slot 2 -> attribute(aria-label)
-node1 / slot 3 -> class(active)
-```
-
-The parser reads the exact source span for the public binding name so Angular's
-normalization of property/attribute bindings does not erase the `sx` namespace.
-
-This stage intentionally stops before modifying Angular-generated Ivy code.
-The next integration layer can consume the plan during the application build
-and inject the binding-table setup without making the runtime depend on private
-Ivy instructions.
-
-## Build transform
-
-`@epikodelabs/streamix/angular/compiler` now exposes:
-
-```ts
-transformAngularComponentTemplate(template)
-```
-
-It removes compiler-owned bindings from Angular's normal binding system and generates the direct binding-table setup function. Static element paths are computed at build time, so no runtime marker or `querySelector()` lookup is required.
-
-## Compiled-view lifecycle
-
-Generated component code now has a public-Angular lifecycle bridge:
-
-```ts
-private readonly ɵsx = ɵinstallSxCompiledView(
-  this,
-  ɵsetupSxBindings,
-);
-```
-
-`ɵinstallSxCompiledView` waits until the component DOM exists with
-`afterNextRender()`, installs the generated binding table once, and destroys it
-through `DestroyRef`.
-
-The compiler's `compileSxComponent()` returns the transformed template,
-generated `*.sx.ts` setup module, lifecycle initializer, and binding count. This
-is the deterministic core a builder adapter can consume without private Ivy
-APIs.
-
-## Direct node acquisition
-
-The compiled static-template path no longer emits `data-sx` markers and no
-longer calls `querySelector()` during component setup.
-
-The Angular template parser computes element-only paths at build time, so:
-
-```html
-<section>
-  <span [sx.text]="count"></span>
-</section>
-```
-
-can generate:
-
-```ts
-const node0 = host.children[0] as Element;
-const node1 = host.children[0].children[0] as Element;
-
-ɵsxText(table, 0, node1, ctx.count);
-```
-
-The path uses `Element.children`, so whitespace/text nodes do not affect the
-indices. `ng-container` is treated as transparent — its children join the
-parent's element sequence. Any dynamic topology in the same template —
-structural directives such as `*ngIf` (even as siblings without `sx` bindings),
-built-in control-flow blocks, or content projection — is deliberately rejected
-by this static compiler path; those need the upcoming compiled structural
-renderer rather than an unstable DOM path.
-
-## Compiled structural blocks
-
-The compiler path now has direct structural runtimes for `sx`.
-
-```html
-<div *sx="user as user">
-  {{ user }}
-</div>
-```
-
-lowers toward a direct `SxValueBlock`, while:
-
-```html
-<li *sx="let hero of heroes; trackBy: trackHero">
-  {{ hero }}
+<li *sx="let item of items; trackBy: trackItem; let i = index">
+  {{ i }} — {{ item.name }}
 </li>
 ```
 
-lowers toward a keyed `SxKeyedBlock`.
+Runtime semantics:
 
-Structural records are DOM ranges anchored by comment nodes. Keyed collection
-updates reuse and move those ranges directly. No Angular embedded view or
-Angular change-detection pass is required for the compiled structural runtime.
+- initial rendering is synchronous;
+- emissions are frame-coalesced and the latest value wins;
+- replacing a source unsubscribes the previous source and cancels stale work;
+- `undefined` removes a scalar/collection view;
+- keyed collection views are reused and moved rather than recreated;
+- collection context (`index`, `count`, `first`, `last`, `even`, `odd`) is updated on reuse;
+- duplicate keys are rejected before DOM mutation;
+- host destruction releases subscriptions;
+- only the embedded Angular view is refreshed, so an OnPush parent does not block updates.
 
-The initial structural factory uses a small static HTML block factory. This is
-a transition step only; the next compiler pass should emit block DOM creation
-and nested binding tables directly.
+## Compiler/runtime model
 
-## Direct structural DOM compilation
+Compiler output uses a preallocated binding table:
 
-The transitional structural HTML factory is no longer part of generated code.
-
-A block such as:
-
-```html
-<li *sx="let hero of heroes; trackBy: trackHero">
-  Hello {{ hero.name }}
-</li>
+```text
+slot 0 -> text node       -> count
+slot 1 -> property        -> busy
+slot 2 -> class           -> active
+slot 3 -> text expression -> [count, price]
 ```
 
-now lowers toward direct DOM instructions:
+One component table has one shared scheduler registration. Repeated source
+emissions mark integer slots dirty; a frame flush visits only those slots.
+
+Generated setup uses static `Element.children` paths. There are no `data-sx`
+markers or `querySelector()` calls in the compiled hot path.
+
+Dynamic element topology in the same static region—Angular structural
+directives, built-in control-flow blocks, or content projection—is rejected by
+the static compiler and belongs to the structural compiler path instead.
+
+## Build integration
+
+`@epikodelabs/streamix/angular/compiler` exposes:
 
 ```ts
-const el0 = document.createElement('li');
-const text1 = document.createTextNode('');
-el0.appendChild(text1);
+compileSxComponent(...)
+transformAngularComponentTemplate(...)
+installSxLifecycleIntoComponentSource(...)
+emitComponentModule(...)
+```
 
-return ɵcreateSxCompiledBlock(
-  el0,
-  el0,
-  context => {
-    text1.data =
-      'Hello ' +
-      ɵsxString(ɵsxReadLocal(context, 'hero.name'));
+Source-transparent syntax requires compile-time source metadata. A real builder
+should supply `isDependencySource(path)` from its component TypeScript checker:
+
+```ts
+compileSxComponent({
+  componentPath,
+  template,
+  isDependencySource(path) {
+    return componentTypeChecker.isDependencySource(path);
   },
-  { hero, index },
-);
+});
 ```
 
-There is no `innerHTML`, runtime template parsing, Angular embedded view, or
-Angular change-detection pass in this structural creation/update path.
+For adapters that already discovered exact paths, `dependencySourcePaths` is a
+convenience input:
 
-The first direct block compiler intentionally supports a narrow subset:
-static elements/attributes/text and simple local/property interpolations.
-Unsupported Angular bindings inside a structural block fail at build time.
-They can be added deliberately rather than falling back to a slower hidden
-runtime.
+```ts
+compileSxComponent({
+  componentPath,
+  template,
+  dependencySourcePaths: ['count', 'busy', 'label', 'active', 'opacity'],
+});
+```
 
-## Hardening and benchmarks
+This metadata is compile-time only. It is never emitted as a runtime source
+classifier.
 
-The renderer foundation now has correctness tests for:
+See `src/compiler/BUILD-INTEGRATION.md` for the build-tool contract.
 
-- latest-value-wins coalescing;
-- stale emissions after source rebind;
-- keyed DOM identity across reorder;
-- duplicate key diagnostics;
-- exactly-once destruction of removed keyed records;
-- binding-table cleanup after destroy;
-- strict structural compiler diagnostics.
+## Benchmarks
 
-The benchmark harness contains raw-DOM, compiled scalar, coalesced-write, and
-keyed-reorder workloads. It intentionally publishes no performance claims.
-Million.js and Angular comparisons plug into the same `ExternalRendererAdapter`
-contract so equivalent production workloads can be measured before any claim
-is made.
+The `benchmarks/` directory contains a real-browser runner covering raw DOM,
+compiled scalar text, coalesced writes, and keyed reorders.
+
+From a workspace where Vite can resolve the Streamix packages:
+
+```bash
+npx vite ./angular/benchmarks
+```
+
+Results are printed with `console.table()` and as JSON. The runner is
+intentionally claim-free; comparisons should use the same browser/process,
+production build, workload, warmup/sample counts, and creation/destruction
+policy.
