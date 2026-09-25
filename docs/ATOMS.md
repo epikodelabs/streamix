@@ -169,16 +169,16 @@ const badScope = scope({
 
 ```
 
-### Rule C: Use `.at` Only When You Need streamix Stream APIs
+### Rule C: Use `.refs` Only When You Need streamix Stream APIs
 
-For standard data access in UI templates or basic business logic, read and write values directly. Only use the `.at` namespace when you need access to the underlying streamix `Atom` instance (e.g., to manually subscribe or pipe operators).
+For standard data access in UI templates or basic business logic, read and write values directly. Only use the `.refs` namespace when you need access to the underlying streamix `Atom` instance (e.g., to manually subscribe or pipe operators).
 
 ```ts
 // Reading the resolved value (Standard)
 console.log(taskManager.visibleTasks); 
 
 // Accessing the underlying reactive Atom (For subscribing / stream operations)
-const subscription = taskManager.at.visibleTasks.subscribe(tasks => {
+const subscription = taskManager.refs.visibleTasks.subscribe(tasks => {
   console.log("Tasks updated:", tasks);
 });
 

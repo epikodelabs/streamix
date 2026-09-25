@@ -1,8 +1,8 @@
 import {
-  jsonWebSocketCodec,
-  textWebSocketCodec,
-  webSocket,
-  type WebSocketCodec,
+    jsonWebSocketCodec,
+    textWebSocketCodec,
+    webSocket,
+    type WebSocketCodec,
 } from '@epikodelabs/streamix/networking';
 import { idescribe } from './env.spec';
 

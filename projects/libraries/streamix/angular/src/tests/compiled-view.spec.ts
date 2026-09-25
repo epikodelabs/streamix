@@ -12,30 +12,13 @@ import {
   ɵinstallSxSourceReferences,
 } from '../lib';
 
-import { useAngularTestEnvironment } from './angular-test-environment';
+
 import { idescribe } from '../../../src/tests/env.spec';
+import {
+  ensureAngularTestEnvironment,
+} from './angular-test-environment';
 
-class TestSource<T> {
-  private readonly subscribers = new Set<(value: T) => void>();
-
-  constructor(public value: T) {}
-
-  subscribe(callback: (value: T) => void): () => void {
-    this.subscribers.add(callback);
-    return () => this.subscribers.delete(callback);
-  }
-
-  set(value: T): void {
-    this.value = value;
-    for (const subscriber of [...this.subscribers]) {
-      subscriber(value);
-    }
-  }
-
-  get subscriberCount(): number {
-    return this.subscribers.size;
-  }
-}
+ensureAngularTestEnvironment();
 
 idescribe('ɵinstallSxCompiledView', () => {
   useAngularTestEnvironment();
@@ -196,3 +179,4 @@ idescribe('ɵinstallSxCompiledView', () => {
     expect(setups).toBe(0);
   });
 });
+

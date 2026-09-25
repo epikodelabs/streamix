@@ -286,5 +286,3 @@ idescribe('onResize', () => {
     document.body.removeChild(div);
   });
 });
-
-

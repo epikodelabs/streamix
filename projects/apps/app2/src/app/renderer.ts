@@ -186,10 +186,10 @@ export class ReactiveRenderer {
     private bindModel(el: HTMLElement, path: string, ctx: Ctx): void {
         const { parent, key } = resolvePath(ctx, path);
         let atom = parent?.[key] as Writable<any>;
-        // Scope proxies return atom values, not atoms. Use scope.at(key) to reach
+        // Scope proxies return atom values, not atoms. Use scope.refs(key) to reach
         // the underlying writable atom for two-way binding.
-        if (!isAtom(atom) && typeof parent?.at === 'function') {
-            atom = parent.at(key);
+        if (!isAtom(atom) && typeof parent?.refs === 'function') {
+            atom = parent.refs(key);
         }
         if (!atom || typeof atom.next !== 'function') return;
 

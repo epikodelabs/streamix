@@ -303,7 +303,7 @@ export function mountApp(root: HTMLElement): () => void {
                 ui.toast = `Complete all fields first (${Math.round(ui.completeness)}%)`;
             }
             // Guard against the app being unmounted before the timer fires.
-            setTimeout(() => { if (!ui.at.toast.disposed) ui.toast = null; }, 3000);
+            setTimeout(() => { if (!ui.refs.toast.disposed) ui.toast = null; }, 3000);
         };
 
         return {
