@@ -28,7 +28,7 @@ const RUNTIME_IMPORT =
 function compileEmittedSetup(
   moduleText: string,
   functionName: string,
-): (host: Element, ctx: unknown) => { destroy(): void } {
+): (host: Element, ctx: unknown, invalidate?: () => void) => { destroy(): void } {
   const importMatch = RUNTIME_IMPORT.exec(moduleText);
 
   expect(importMatch).not.toBeNull();
@@ -43,21 +43,23 @@ function compileEmittedSetup(
 
   expect(missing).toEqual([]);
 
-  const signature =
-    `export function ${functionName}(host: Element, ctx: any) {`;
+  const signature = `export function ${functionName}(`;
   const start = moduleText.indexOf(signature);
 
   expect(start).toBeGreaterThanOrEqual(0);
 
+  const bodyStart = moduleText.indexOf('{', start);
+  expect(bodyStart).toBeGreaterThan(start);
+
   const body = moduleText
-    .slice(start + signature.length, moduleText.trimEnd().lastIndexOf('}'))
+    .slice(bodyStart + 1, moduleText.trimEnd().lastIndexOf('}'))
     .replaceAll(' as Element', '');
 
   return new Function(
     ...names,
-    `return function (host, ctx) {\n${body}\n};`,
+    `return function (host, ctx, invalidate = () => {}) {\n${body}\n};`,
   )(...names.map(name => runtime[name])) as
-    (host: Element, ctx: unknown) => { destroy(): void };
+    (host: Element, ctx: unknown, invalidate?: () => void) => { destroy(): void };
 }
 
 idescribe('compiler/runtime contract', () => {
@@ -115,6 +117,113 @@ idescribe('compiler/runtime contract', () => {
     expect(button.hasAttribute('aria-label')).toBeFalse();
     expect(button.classList.contains('active')).toBeTrue();
     expect(button.style.opacity).toBe('1');
+
+    teardown.destroy();
+  });
+
+  it('executes automatic .value text and native bindings without Angular CD', () => {
+    const result = transformSxTemplate(`
+      <section>
+        <span>{{ count.value }}</span>
+        <strong>{{ count.value * 2 }}</strong>
+        <button
+          [disabled]="disabled.value"
+          [attr.aria-label]="label.value"
+          [class.active]="active.value"
+          [style.opacity]="opacity.value">
+          Save
+        </button>
+      </section>
+    `);
+
+    const host = document.createElement('div');
+    host.innerHTML = result.template;
+
+    const count = atom(2);
+    const disabled = atom(false);
+    const label = atom<unknown>('Details');
+    const active = atom(false);
+    const opacity = atom<unknown>('0.5');
+
+    const setup = compileEmittedSetup(
+      emitComponentModule(result.parsed),
+      'ɵsetupSxBindings',
+    );
+    const teardown = setup(host, {
+      count,
+      disabled,
+      label,
+      active,
+      opacity,
+    });
+
+    const section = host.children[0] as Element;
+    const span = section.children[0] as Element;
+    const strong = section.children[1] as Element;
+    const button = section.children[2] as HTMLButtonElement;
+
+    expect(span.textContent).toBe('2');
+    expect(strong.textContent).toBe('4');
+    expect(button.disabled).toBeFalse();
+    expect(button.getAttribute('aria-label')).toBe('Details');
+    expect(button.classList.contains('active')).toBeFalse();
+    expect(button.style.opacity).toBe('0.5');
+
+    count.set(3);
+    disabled.set(true);
+    label.set(null);
+    active.set(true);
+    opacity.set('1');
+
+    sxAngular.rendererScheduler.flushNow();
+
+    expect(span.textContent).toBe('3');
+    expect(strong.textContent).toBe('6');
+    expect(button.disabled).toBeTrue();
+    expect(button.hasAttribute('aria-label')).toBeFalse();
+    expect(button.classList.contains('active')).toBeTrue();
+    expect(button.style.opacity).toBe('1');
+
+    teardown.destroy();
+  });
+
+  it('coalesces hybrid interpolation into one Angular view invalidation', () => {
+    const result = transformSxTemplate(`
+      <section>
+        <span>{{ count.value * multiplier }}</span>
+        <span>{{ price.value + suffix }}</span>
+      </section>
+    `);
+
+    // Hybrid expressions stay in Angular's template; only invalidation is
+    // compiler-generated.
+    expect(result.template).toContain('{{ count.value * multiplier }}');
+    expect(result.template).toContain('{{ price.value + suffix }}');
+
+    const host = document.createElement('div');
+    host.innerHTML = '<section><span></span><span></span></section>';
+
+    const count = atom(1);
+    const price = atom(2);
+    let invalidations = 0;
+
+    const setup = compileEmittedSetup(
+      emitComponentModule(result.parsed),
+      'ɵsetupSxBindings',
+    );
+    const teardown = setup(
+      host,
+      { count, price, multiplier: 3, suffix: '!' },
+      () => { invalidations += 1; },
+    );
+
+    count.set(2);
+    price.set(4);
+    count.set(3);
+
+    sxAngular.rendererScheduler.flushNow();
+
+    expect(invalidations).toBe(1);
 
     teardown.destroy();
   });

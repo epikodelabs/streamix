@@ -26,3 +26,32 @@ describe('transformAngularComponentTemplate', () => {
     );
   });
 });
+
+describe('automatic .value build lowering', () => {
+  it('emits direct and expression bindings for automatic .value lowering', () => {
+    const result = transformAngularComponentTemplate(`
+      <span>{{ count.value * 2 }}</span>
+      <button [disabled]="busy.value"></button>
+    `);
+
+    expect(result.bindingCount).toBe(2);
+    expect(result.setup).toContain(
+      'ɵsxTextExpression(table, 0, node0, [ctx.count], () => ctx.count.value * 2);',
+    );
+    expect(result.setup).toContain(
+      'ɵsxProperty(table, 1, node1, "disabled", ctx.busy);',
+    );
+  });
+
+  it('emits Streamix invalidation for hybrid Angular interpolation', () => {
+    const result = transformAngularComponentTemplate(
+      '<span>{{ count.value * multiplier }}</span>',
+    );
+
+    expect(result.template).toContain('{{ count.value * multiplier }}');
+    expect(result.setup).toContain(
+      'ɵsxInvalidate(table, 0, [ctx.count], invalidate);',
+    );
+  });
+
+});

@@ -39,3 +39,61 @@ describe('transformSxTemplate', () => {
     expect(result.template).not.toContain('count');
   });
 });
+
+describe('automatic .value lowering', () => {
+  it('removes direct text interpolation from Angular and owns the text binding', () => {
+    const result = transformSxTemplate('<span>{{ count.value }}</span>');
+
+    expect(result.template).toBe('<span></span>');
+    expect(result.parsed.plan.bindings[0]).toEqual(
+      jasmine.objectContaining({ kind: 'text', source: 'count' }),
+    );
+  });
+
+  it('removes pure Streamix text expressions from Angular', () => {
+    const result = transformSxTemplate(
+      '<span>{{ count.value * 2 }}</span>',
+    );
+
+    expect(result.template).toBe('<span></span>');
+    expect(result.parsed.plan.bindings[0]).toEqual(
+      jasmine.objectContaining({
+        kind: 'text-expression',
+        dependencies: ['count'],
+      }),
+    );
+  });
+
+  it('preserves hybrid interpolation for Angular while adding invalidation', () => {
+    const template = '<span>{{ count.value * multiplier }}</span>';
+    const result = transformSxTemplate(template);
+
+    expect(result.template).toBe(template);
+    expect(result.parsed.plan.bindings[0]).toEqual(
+      jasmine.objectContaining({
+        kind: 'angular-invalidate',
+        dependencies: ['count'],
+      }),
+    );
+  });
+
+  it('removes simple native Angular .value bindings after direct lowering', () => {
+    const result = transformSxTemplate(`
+      <span>{{ count.value }}</span>
+      <button
+        [disabled]="busy.value"
+        [attr.aria-label]="label.value"
+        [class.active]="active.value"
+        [style.opacity]="opacity.value">
+        Save
+      </button>
+    `);
+
+    expect(result.template).not.toContain('{{ count.value }}');
+    expect(result.template).not.toContain('[disabled]');
+    expect(result.template).not.toContain('[attr.aria-label]');
+    expect(result.template).not.toContain('[class.active]');
+    expect(result.template).not.toContain('[style.opacity]');
+    expect(result.parsed.plan.size).toBe(5);
+  });
+});

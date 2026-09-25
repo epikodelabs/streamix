@@ -13,6 +13,10 @@ import {
   type SxBindingPlan,
   type SxSourceSpan,
 } from './binding-plan';
+import {
+  analyzeSxTextInterpolation,
+  extractDirectValueSource,
+} from './text-expression';
 
 export type { SxSourceSpan } from './binding-plan';
 
@@ -21,6 +25,7 @@ export interface SxTemplateBinding {
   readonly node: string;
   readonly source: string;
   readonly name?: string;
+  readonly dependencies?: readonly string[];
   readonly span: SxSourceSpan;
 }
 
@@ -34,6 +39,7 @@ export type SxElementPath = readonly number[];
 
 export interface ParsedSxTemplate {
   readonly plan: SxBindingPlan;
+  /** Source ranges that are removed from Angular's template after lowering. */
   readonly bindingSpans: readonly SxSourceSpan[];
   readonly nodes: readonly string[];
   readonly nodePaths: Readonly<Record<string, SxElementPath>>;
@@ -49,6 +55,48 @@ interface WalkState {
   nextNode: number;
 }
 
+
+const SAFE_DOM_PROPERTIES: Readonly<Record<string, string>> = {
+  alt: 'alt',
+  checked: 'checked',
+  className: 'className',
+  cols: 'cols',
+  colSpan: 'colSpan',
+  colspan: 'colSpan',
+  contentEditable: 'contentEditable',
+  disabled: 'disabled',
+  draggable: 'draggable',
+  height: 'height',
+  hidden: 'hidden',
+  href: 'href',
+  htmlFor: 'htmlFor',
+  id: 'id',
+  innerHTML: 'innerHTML',
+  max: 'max',
+  min: 'min',
+  multiple: 'multiple',
+  name: 'name',
+  open: 'open',
+  placeholder: 'placeholder',
+  readOnly: 'readOnly',
+  readonly: 'readOnly',
+  required: 'required',
+  rows: 'rows',
+  rowSpan: 'rowSpan',
+  rowspan: 'rowSpan',
+  selected: 'selected',
+  spellcheck: 'spellcheck',
+  src: 'src',
+  step: 'step',
+  tabIndex: 'tabIndex',
+  tabindex: 'tabIndex',
+  textContent: 'textContent',
+  title: 'title',
+  type: 'type',
+  value: 'value',
+  width: 'width',
+};
+
 const DYNAMIC_TOPOLOGY_ERROR =
   'Direct sx bindings require a static element topology: Angular ' +
   'structural/template blocks, structural directives (*ngIf), and content ' +
@@ -56,13 +104,17 @@ const DYNAMIC_TOPOLOGY_ERROR =
   'dynamic structure with the sx structural compiler stage.';
 
 /**
- * Parses an Angular template and extracts Streamix `sx` bindings.
+ * Parses an Angular template and extracts Streamix-owned bindings.
  *
- * Direct node acquisition currently requires a static element topology.
- * Any dynamic topology in the same template — structural directives, built-in
- * control-flow blocks, content projection — can shift `Element.children`
- * indices, so it is rejected at the AST level rather than parsed into
- * silently wrong paths. Structural sx lowering is a separate compiler stage.
+ * In addition to explicit `[sx.*]` bindings, the compiler recognizes:
+ *
+ * - a sole interpolation reading one or more Streamix `.value` properties;
+ * - native Angular property/attribute/class/unitless-style bindings whose
+ *   expression is exactly `<source>.value`.
+ *
+ * Pure Streamix expressions are removed from Angular's binding graph and
+ * emitted as direct bindings. Hybrid text expressions stay in Angular and
+ * receive Streamix-driven local view invalidation.
  */
 export function parseSxTemplate(
   template: string,
@@ -82,7 +134,7 @@ export function parseSxTemplate(
     bindingSpans: [],
     nodes: [],
     nodePaths: {},
-    strict: containsSxBinding(parsed.nodes, template),
+    strict: containsCompiledBinding(parsed.nodes, template),
     nextNode: 0,
   };
 
@@ -111,10 +163,6 @@ function walkStaticChildren(
       continue;
     }
 
-    // Anything that is not a plain element or inert text — structural
-    // directives, built-in control-flow blocks, content projection, and any
-    // node class this compiler does not know — can change the runtime element
-    // topology. Reject it instead of walking past a wrong path.
     if (state.strict && !isInertText(node)) {
       throw new Error(DYNAMIC_TOPOLOGY_ERROR);
     }
@@ -156,63 +204,156 @@ function visitElement(
   state.nodes.push(nodeId);
   state.nodePaths[nodeId] = [...path];
 
+  let hasExplicitTextBinding = false;
+
   for (const input of element.inputs) {
     const raw = sourceText(state.template, input.sourceSpan);
     const publicName = extractPublicBindingName(raw);
 
-    if (!publicName?.startsWith('sx.')) {
+    if (!publicName) {
       continue;
     }
 
-    const source = extractBindingExpression(raw);
-    assertDependencySourceExpression(source, publicName);
+    const expression = extractBindingExpression(raw);
+    const span = {
+      start: input.sourceSpan.start.offset,
+      end: input.sourceSpan.end.offset,
+    };
 
-    const binding = classifyBinding(
-      publicName,
-      nodeId,
-      source,
-    );
+    if (publicName.startsWith('sx.')) {
+      assertDependencySourceExpression(expression, publicName);
 
-    if (binding) {
-      const span = {
-        start: input.sourceSpan.start.offset,
-        end: input.sourceSpan.end.offset,
-      };
+      const binding = classifySxBinding(publicName, nodeId, expression);
+      if (!binding) {
+        continue;
+      }
 
       state.bindings.push({ ...binding, span });
       state.bindingSpans.push(span);
+      hasExplicitTextBinding ||= binding.kind === 'text';
+      continue;
+    }
+
+    // Native Angular bindings are compiler-owned only for the exact
+    // `<source>.value` shape. Compound native expressions remain Angular-owned.
+    const source = extractDirectValueSource(expression);
+    if (!source) {
+      continue;
+    }
+
+    const binding = classifyNativeAngularBinding(publicName, nodeId, source);
+    if (!binding) {
+      continue;
+    }
+
+    state.bindings.push({ ...binding, span });
+    state.bindingSpans.push(span);
+  }
+
+  // Direct text rendering targets the element's textContent, so only steal a
+  // sole interpolation. Mixed text/child-node content stays Angular-owned.
+  if (!hasExplicitTextBinding && element.children.length === 1) {
+    const child = element.children[0];
+
+    if (child instanceof TmplAstBoundText) {
+      const raw = sourceText(state.template, child.sourceSpan);
+      const analysis = analyzeSxTextInterpolation(raw);
+
+      if (analysis) {
+        const span = {
+          start: child.sourceSpan.start.offset,
+          end: child.sourceSpan.end.offset,
+        };
+
+        if (analysis.mode === 'direct') {
+          state.bindings.push({
+            kind: 'text',
+            node: nodeId,
+            source: analysis.directSource!,
+            span,
+          });
+          state.bindingSpans.push(span);
+        } else if (analysis.mode === 'expression') {
+          state.bindings.push({
+            kind: 'text-expression',
+            node: nodeId,
+            source: analysis.expression,
+            dependencies: analysis.dependencies,
+            span,
+          });
+          state.bindingSpans.push(span);
+        } else {
+          // Hybrid expression: Angular keeps and evaluates the interpolation;
+          // Streamix only subscribes to `.value` dependencies and invalidates
+          // this component view when any of them emit.
+          state.bindings.push({
+            kind: 'angular-invalidate',
+            node: nodeId,
+            source: analysis.expression,
+            dependencies: analysis.dependencies,
+            span,
+          });
+        }
+      }
     }
   }
 }
 
 /**
- * Deep sx-binding detection. Structural blocks (`@if` branches, `@for`
- * bodies, `@switch` cases) store their children in version-specific shapes,
- * so this walks object values generically instead of enumerating node
- * classes that change across Angular versions.
+ * Deep compiled-binding detection. Structural blocks store children in
+ * version-specific shapes, so this walks object values generically instead of
+ * enumerating Angular node classes that change across versions.
  */
-function containsSxBinding(node: unknown, template: string): boolean {
+function containsCompiledBinding(node: unknown, template: string): boolean {
   if (Array.isArray(node)) {
-    return node.some(child => containsSxBinding(child, template));
+    return node.some(child => containsCompiledBinding(child, template));
   }
 
   if (!node || typeof node !== 'object') {
     return false;
   }
 
-  const record = node as {
-    inputs?: readonly { sourceSpan: ParseSourceSpan }[];
-  };
+  if (node instanceof TmplAstElement) {
+    let hasExplicitTextBinding = false;
 
-  for (const input of record.inputs ?? []) {
-    const raw = sourceText(template, input.sourceSpan);
-    if (extractPublicBindingName(raw)?.startsWith('sx.')) {
-      return true;
+    for (const input of node.inputs) {
+      const raw = sourceText(template, input.sourceSpan);
+      const publicName = extractPublicBindingName(raw);
+
+      if (!publicName) {
+        continue;
+      }
+
+      if (publicName.startsWith('sx.')) {
+        hasExplicitTextBinding ||= publicName === 'sx.text';
+        return true;
+      }
+
+      const expression = tryExtractBindingExpression(raw);
+      if (
+        expression &&
+        extractDirectValueSource(expression) &&
+        classifyNativeAngularBinding(publicName, 'node', 'source')
+      ) {
+        return true;
+      }
+    }
+
+    if (!hasExplicitTextBinding && node.children.length === 1) {
+      const child = node.children[0];
+      if (child instanceof TmplAstBoundText) {
+        const raw = sourceText(template, child.sourceSpan);
+        if (analyzeSxTextInterpolation(raw)) {
+          return true;
+        }
+      }
     }
   }
 
+  const record = node as Record<string, unknown>;
   return Object.values(record).some(
-    value => value !== record.inputs && containsSxBinding(value, template),
+    value => value !== (record as { inputs?: unknown }).inputs &&
+      containsCompiledBinding(value, template),
   );
 }
 
@@ -221,19 +362,24 @@ function sourceText(template: string, span: ParseSourceSpan): string {
 }
 
 function extractBindingExpression(source: string): string {
+  const expression = tryExtractBindingExpression(source);
+
+  if (expression === undefined) {
+    throw new Error(
+      `Unable to read binding expression from ${JSON.stringify(source)}.`,
+    );
+  }
+
+  return expression;
+}
+
+function tryExtractBindingExpression(source: string): string | undefined {
   const match = /^\s*\[[^\]]+\]\s*=\s*(?:"([^"]*)"|'([^']*)')\s*$/.exec(
     source,
   );
 
   const expression = match?.[1] ?? match?.[2];
-
-  if (expression === undefined) {
-    throw new Error(
-      `Unable to read sx binding expression from ${JSON.stringify(source)}.`,
-    );
-  }
-
-  return expression.trim();
+  return expression?.trim();
 }
 
 function extractPublicBindingName(source: string): string | undefined {
@@ -245,9 +391,7 @@ function assertDependencySourceExpression(
   source: string,
   bindingName: string,
 ): void {
-  if (
-    !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(source)
-  ) {
+  if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(source)) {
     throw new Error(
       `Unsupported ${bindingName} source expression: ${JSON.stringify(source)}. ` +
       'Compiled sx bindings currently require a component property path that resolves to a DependencySource.',
@@ -255,7 +399,7 @@ function assertDependencySourceExpression(
   }
 }
 
-function classifyBinding(
+function classifySxBinding(
   publicName: string,
   node: string,
   source: string,
@@ -281,4 +425,57 @@ function classifyBinding(
 
   const name = publicName.slice('sx.'.length);
   return name ? { kind: 'property', node, source, name } : undefined;
+}
+
+/**
+ * Maps simple Angular native binding syntax to the equivalent direct sx kind.
+ *
+ * Unit-qualified styles (`[style.width.px]`) intentionally remain Angular-owned
+ * because direct `sx.style.*` currently writes the provided value verbatim.
+ */
+function classifyNativeAngularBinding(
+  publicName: string,
+  node: string,
+  source: string,
+): Omit<SxTemplateBinding, 'span'> | undefined {
+  if (publicName.startsWith('attr.')) {
+    const name = publicName.slice('attr.'.length);
+    return name ? { kind: 'attribute', node, source, name } : undefined;
+  }
+
+  if (publicName.startsWith('class.')) {
+    const name = publicName.slice('class.'.length);
+    return name && !name.includes('.')
+      ? { kind: 'class', node, source, name }
+      : undefined;
+  }
+
+  if (publicName.startsWith('style.')) {
+    const name = publicName.slice('style.'.length);
+    return name && !name.includes('.')
+      ? { kind: 'style', node, source, name }
+      : undefined;
+  }
+
+  // Angular gives `[class]` and `[style]` special merge semantics, so do not
+  // reinterpret them as ordinary DOM properties.
+  if (
+    !publicName ||
+    publicName === 'class' ||
+    publicName === 'style' ||
+    publicName.startsWith('@') ||
+    publicName.includes('.') ||
+    publicName.includes('(') ||
+    publicName.includes(')')
+  ) {
+    return undefined;
+  }
+
+  // A plain Angular `[name]` may be a directive/component input rather than a
+  // DOM property. Only auto-lower names with unambiguous native DOM semantics;
+  // arbitrary properties remain available through explicit `[sx.<property>]`.
+  const property = SAFE_DOM_PROPERTIES[publicName];
+  return property
+    ? { kind: 'property', node, source, name: property }
+    : undefined;
 }

@@ -26,7 +26,7 @@ The `sx` binding namespace mirrors normal DOM concepts:
 [sx.style.<property>] -> inline style
 ```
 
-After setup, direct bindings do not mark or check Angular views.
+After setup, direct and pure-expression bindings do not mark or check Angular views. Hybrid expressions use a coalesced local Angular view check only when ordinary Angular state is part of the expression.
 
 ```text
 Streamix source emits
@@ -38,6 +38,61 @@ Streamix source emits
 
 Initial rendering is synchronous. Repeated emissions before a frame are
 coalesced and the latest value wins.
+
+
+## Automatic `.value` lowering
+
+The compiler recognizes ordinary Angular syntax that reads Streamix values and
+lowers the simple cases to the same direct renderer used by explicit `sx`
+bindings.
+
+```html
+<span>{{ count.value }}</span>
+
+<button
+  [disabled]="busy.value"
+  [attr.aria-label]="label.value"
+  [class.active]="active.value"
+  [style.opacity]="opacity.value">
+  Save
+</button>
+```
+
+is compiled equivalently to:
+
+```html
+<span [sx.text]="count"></span>
+
+<button
+  [sx.disabled]="busy"
+  [sx.attr.aria-label]="label"
+  [sx.class.active]="active"
+  [sx.style.opacity]="opacity">
+  Save
+</button>
+```
+
+Pure Streamix text expressions are also compiler-owned:
+
+```html
+<span>{{ count.value * 2 }}</span>
+<span>{{ count.value * price.value }}</span>
+```
+
+The generated binding subscribes to the referenced sources, reevaluates the
+expression at most once per renderer flush, and writes the text directly.
+
+Hybrid expressions keep Angular semantics:
+
+```html
+<span>{{ count.value * multiplier }}</span>
+```
+
+Here `count` is reactive but `multiplier` is ordinary Angular component state.
+The interpolation therefore stays in Angular; Streamix only subscribes to
+`count` and schedules one local view invalidation when it emits. This works
+independently of `ChangeDetectionStrategy.OnPush` while preserving updates when
+Angular-owned state changes through normal Angular mechanisms.
 
 ## Structural rendering
 
@@ -148,12 +203,7 @@ Ivy instructions.
 transformAngularComponentTemplate(template)
 ```
 
-It removes `sx` bindings from Angular's normal binding system, emits stable
-`data-sx` node markers, and generates the direct binding-table setup function.
-
-This gives the build integration a concrete boundary without depending on
-private Ivy instructions. The marker lookup is transitional: the final
-performance path should replace it with direct generated node references.
+It removes compiler-owned bindings from Angular's normal binding system and generates the direct binding-table setup function. Static element paths are computed at build time, so no runtime marker or `querySelector()` lookup is required.
 
 ## Compiled-view lifecycle
 

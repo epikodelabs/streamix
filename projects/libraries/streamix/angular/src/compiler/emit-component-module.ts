@@ -23,9 +23,11 @@ export function emitRuntimeImportHeader(
     `  createBindingTable,`,
     `  ɵsxAttribute,`,
     `  ɵsxClass,`,
+    `  ɵsxInvalidate,`,
     `  ɵsxProperty,`,
     `  ɵsxStyle,`,
     `  ɵsxText,`,
+    `  ɵsxTextExpression,`,
     `} from ${JSON.stringify(runtimeImport)};`,
   ].join('\n');
 }

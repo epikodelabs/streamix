@@ -2,9 +2,16 @@ import type {
   ParsedSxTemplate,
   SxElementPath,
 } from './angular-template-parser';
+import {
+  rewriteSxTextExpression,
+} from './text-expression';
 
 function source(entrySource: string): string {
   return `ctx.${entrySource}`;
+}
+
+function sources(dependencies: readonly string[] | undefined): string {
+  return `[${(dependencies ?? []).map(source).join(', ')}]`;
 }
 
 function elementPathExpression(path: SxElementPath): string {
@@ -25,14 +32,18 @@ export function emitComponentSetup(
   functionName = 'ɵsetupSxBindings',
 ): string {
   const lines: string[] = [
-    `export function ${functionName}(host: Element, ctx: any) {`,
+    `export function ${functionName}(`,
+    `  host: Element,`,
+    `  ctx: any,`,
+    `  invalidate: () => void = () => {},`,
+    `) {`,
     `  const table = createBindingTable(${parsed.plan.size});`,
   ];
 
   const declared = new Set<string>();
 
   for (const entry of parsed.plan.bindings) {
-    if (!declared.has(entry.node)) {
+    if (entry.kind !== 'angular-invalidate' && !declared.has(entry.node)) {
       declared.add(entry.node);
       const path = parsed.nodePaths[entry.node];
 
@@ -49,6 +60,16 @@ export function emitComponentSetup(
       case 'text':
         lines.push(
           `  ɵsxText(table, ${entry.slot}, ${entry.node}, ${source(entry.source)});`,
+        );
+        break;
+      case 'text-expression':
+        lines.push(
+          `  ɵsxTextExpression(table, ${entry.slot}, ${entry.node}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+        );
+        break;
+      case 'angular-invalidate':
+        lines.push(
+          `  ɵsxInvalidate(table, ${entry.slot}, ${sources(entry.dependencies)}, invalidate);`,
         );
         break;
       case 'property':
