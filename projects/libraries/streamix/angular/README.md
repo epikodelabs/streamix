@@ -41,10 +41,10 @@ coalesced and the latest value wins.
 
 ## Structural rendering
 
-`sxAtom` remains the Angular `TemplateRef` bridge:
+`*sx` is the Angular structural `TemplateRef` bridge:
 
 ```html
-<div *sxAtom="user as user">
+<div *sx="user as user">
   {{ user.name }}
 </div>
 ```
@@ -60,7 +60,6 @@ The compiler contract is intentionally broader: arbitrary `sx` property,
 attribute, class, and style names can be lowered directly to the corresponding
 low-level binding primitive without adding one Angular directive input per
 name.
-
 
 ## Compiler binding tables
 
@@ -105,7 +104,6 @@ binding plan and deterministic emitter. It is intentionally separate from the
 runtime. Wiring this plan to Angular's template parsing/transform pipeline is
 the next compiler-integration step.
 
-
 ## Angular template parsing
 
 The compiler entry point now parses real Angular templates through
@@ -142,7 +140,6 @@ The next integration layer can consume the plan during the application build
 and inject the binding-table setup without making the runtime depend on private
 Ivy instructions.
 
-
 ## Build transform
 
 `@epikodelabs/streamix/angular/compiler` now exposes:
@@ -157,7 +154,6 @@ It removes `sx` bindings from Angular's normal binding system, emits stable
 This gives the build integration a concrete boundary without depending on
 private Ivy instructions. The marker lookup is transitional: the final
 performance path should replace it with direct generated node references.
-
 
 ## Compiled-view lifecycle
 
@@ -178,7 +174,6 @@ The compiler's `compileSxComponent()` returns the transformed template,
 generated `*.sx.ts` setup module, lifecycle initializer, and binding count. This
 is the deterministic core a builder adapter can consume without private Ivy
 APIs.
-
 
 ## Direct node acquisition
 
@@ -210,13 +205,12 @@ built-in control-flow blocks, or content projection — is deliberately rejected
 by this static compiler path; those need the upcoming compiled structural
 renderer rather than an unstable DOM path.
 
-
 ## Compiled structural blocks
 
-The compiler path now has direct structural runtimes for `sxAtom`.
+The compiler path now has direct structural runtimes for `sx`.
 
 ```html
-<div *sxAtom="user as user">
+<div *sx="user as user">
   {{ user }}
 </div>
 ```
@@ -224,7 +218,7 @@ The compiler path now has direct structural runtimes for `sxAtom`.
 lowers toward a direct `SxValueBlock`, while:
 
 ```html
-<li *sxAtom="let hero of heroes; trackBy: trackHero">
+<li *sx="let hero of heroes; trackBy: trackHero">
   {{ hero }}
 </li>
 ```
@@ -239,7 +233,6 @@ The initial structural factory uses a small static HTML block factory. This is
 a transition step only; the next compiler pass should emit block DOM creation
 and nested binding tables directly.
 
-
 ## Direct structural DOM compilation
 
 The transitional structural HTML factory is no longer part of generated code.
@@ -247,7 +240,7 @@ The transitional structural HTML factory is no longer part of generated code.
 A block such as:
 
 ```html
-<li *sxAtom="let hero of heroes; trackBy: trackHero">
+<li *sx="let hero of heroes; trackBy: trackHero">
   Hello {{ hero.name }}
 </li>
 ```
@@ -279,7 +272,6 @@ static elements/attributes/text and simple local/property interpolations.
 Unsupported Angular bindings inside a structural block fail at build time.
 They can be added deliberately rather than falling back to a slower hidden
 runtime.
-
 
 ## Hardening and benchmarks
 

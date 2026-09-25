@@ -8,6 +8,6 @@ export * from './emit-component-setup';
 export * from './template-transform';
 export * from './emit-structural-block';
 export * from './structural-plan';
-export * from './sx-atom-parser';
+export * from './sx-parser';
 export * from './block-template-compiler';
 export * from './emit-structural-module';

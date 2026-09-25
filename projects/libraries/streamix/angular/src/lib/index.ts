@@ -5,6 +5,6 @@ export * from './compiled-view';
 export * from './binding-table';
 export * from './direct-binding';
 export * from './render-scheduler';
-export * from './sx-atom.directive';
+export * from './sx.directive';
 export * from './sx-bindings.directive';
 export * from './sx-text.directive';
