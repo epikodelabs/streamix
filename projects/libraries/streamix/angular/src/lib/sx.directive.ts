@@ -219,8 +219,9 @@ export class SxDirective<T = unknown> implements OnDestroy {
       this.boundSource = source as DependencySource<unknown>;
       this.renderValue(source.value);
 
+      let subscribing = true;
       this.unsubscribe = source.subscribe((value) => {
-        if (this.boundSource !== source) {
+        if (this.boundSource !== source || subscribing) {
           return;
         }
         this.schedule({
@@ -230,6 +231,7 @@ export class SxDirective<T = unknown> implements OnDestroy {
           source: source as DependencySource<unknown>,
         });
       });
+      subscribing = false;
 
       return;
     }
@@ -248,8 +250,9 @@ export class SxDirective<T = unknown> implements OnDestroy {
       this.boundSource = source as DependencySource<unknown>;
       this.renderCollection(source.value);
 
+      let subscribing = true;
       this.unsubscribe = source.subscribe((value) => {
-        if (this.boundSource !== source) {
+        if (this.boundSource !== source || subscribing) {
           return;
         }
         this.schedule({
@@ -259,6 +262,7 @@ export class SxDirective<T = unknown> implements OnDestroy {
           source: source as DependencySource<unknown>,
         });
       });
+      subscribing = false;
 
       return;
     }

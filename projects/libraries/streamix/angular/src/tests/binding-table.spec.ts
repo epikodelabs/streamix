@@ -53,6 +53,8 @@ idescribe('SxBindingTable', () => {
 
     expect(text.textContent).toBe('1');
     expect(button.disabled).toBeFalse();
+    expect(table.pendingCount).toBe(0);
+    expect(frame.scheduleCount).toBe(0);
 
     table.destroy();
   });

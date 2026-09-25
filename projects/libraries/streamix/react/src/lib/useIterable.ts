@@ -51,7 +51,11 @@ function createDependencyStore<T>(
       return value === undefined && initialValue !== undefined ? initialValue : value;
     },
     subscribe(listener) {
-      const subscription = source.subscribe(() => listener());
+      let subscribing = true;
+      const subscription = source.subscribe(() => {
+        if (!subscribing) listener();
+      });
+      subscribing = false;
       return () => {
         void subscription();
       };

@@ -89,6 +89,36 @@ describe('createSharedSource', () => {
     await sub();
   });
 
+  it('delivers the current value immediately to a later subscriber', async () => {
+    let push!: Push<number>;
+    const source = createSharedSource<number>((p) => {
+      push = p;
+      return () => {};
+    });
+
+    const firstValues: number[] = [];
+    const first = source.subscribe(value => firstValues.push(value));
+
+    await push(10);
+    await flush();
+    expect(firstValues).toEqual([10]);
+
+    const secondValues: Array<[number, number]> = [];
+    const second = source.subscribe((current, previous) => {
+      secondValues.push([current, previous]);
+    });
+
+    expect(secondValues).toEqual([[10, 10]]);
+
+    await push(20);
+    await flush();
+    expect(firstValues).toEqual([10, 20]);
+    expect(secondValues).toEqual([[10, 10], [20, 20]]);
+
+    await first();
+    await second();
+  });
+
   it('shares one producer between multiple subscribers', async () => {
     let connectCount = 0;
     let push!: Push<number>;

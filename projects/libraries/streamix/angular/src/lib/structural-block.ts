@@ -66,12 +66,14 @@ export class SxValueBlock<T> {
 
     const generation = ++this.generation;
 
+    let subscribing = true;
     this.unsubscribe = source.subscribe(value => {
-      if (generation !== this.generation) return;
+      if (generation !== this.generation || subscribing) return;
 
       this.pending = value;
       this.ensureScheduled(generation);
     });
+    subscribing = false;
   }
 
   destroy(): void {
@@ -170,12 +172,14 @@ export class SxKeyedBlock<T> {
 
     const generation = ++this.generation;
 
+    let subscribing = true;
     this.unsubscribe = source.subscribe(value => {
-      if (generation !== this.generation) return;
+      if (generation !== this.generation || subscribing) return;
 
       this.pending = toArray(value);
       this.ensureScheduled(generation);
     });
+    subscribing = false;
   }
 
   destroy(): void {

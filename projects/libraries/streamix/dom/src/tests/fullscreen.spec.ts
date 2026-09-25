@@ -170,15 +170,15 @@ idescribe("fullscreen", () => {
 
     const sub2 = stream.subscribe(v => values2.push(v));
 
-    // second subscriber gets NO initial replay
-    expect(values2).toEqual([]);
+    // Every Atom subscription starts with its current value.
+    expect(values2).toEqual([false]);
 
     fullscreenElement = document.createElement("div");
     triggerEvent("fullscreenchange");
     await delay();
 
     expect(values1).toEqual([false, true]);
-    expect(values2).toEqual([true]);
+    expect(values2).toEqual([false, true]);
 
     sub1();
     sub2();
@@ -444,4 +444,3 @@ idescribe("fullscreen", () => {
     expect(document.removeEventListener).not.toHaveBeenCalled();
   });
 });
-

@@ -713,9 +713,6 @@ function createScopeInternal<T extends Record<string, any>>(
           if (!node?.subscribe) {
             throw new Error(`Cannot subscribe to non-atom structure at key: ${String(key)}`);
           }
-          if (emittedAtomsRegistry.has(node)) {
-            callback(node.value, node.previous);
-          }
           return node.subscribe(callback);
         },
         enumerable: false,

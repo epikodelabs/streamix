@@ -23,7 +23,19 @@ import type { MaybePromise } from "./operator";
  * }
  * ```
  */
-export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIterator<T> {
+export interface IterateOptions {
+  /**
+   * Whether an Atom's current value should be delivered when iteration starts.
+   * Defaults to true. Internal adapters can disable this when they already
+   * captured the same current value and only need future emissions.
+   */
+  replayCurrent?: boolean;
+}
+
+export function iterate<T>(
+  source: Atom<T> | AsyncIterable<T>,
+  options?: IterateOptions,
+): AsyncIterableIterator<T> {
   if (!("type" in source) || (source as any).type !== "atom") {
     return source as AsyncIterableIterator<T>;
   }
@@ -55,8 +67,10 @@ export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIte
     if (initialized) return;
     initialized = true;
 
+    let subscribing = true;
     const unsubscribe = atom.subscribe((value) => {
       if (done) return;
+      if (options?.replayCurrent === false && subscribing) return;
       if (resolveNext) {
         resolveNext({ value, done: false });
         resolveNext = null;
@@ -68,6 +82,7 @@ export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIte
       }
       notifyPush();
     });
+    subscribing = false;
 
     finish = () => {
       if (done) return;

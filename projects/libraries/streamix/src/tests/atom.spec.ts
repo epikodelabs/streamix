@@ -34,8 +34,36 @@ describe('Atom System', () => {
 
     it('should create an atom without initial value', () => {
       const a = atom<number>();
+      const values: number[] = [];
+
+      a.subscribe(value => values.push(value));
+
       expect(a.value).toBeUndefined();
       expect(a.safeValue).toBeUndefined();
+      expect(values).toEqual([]);
+
+      a.next(3);
+      expect(values).toEqual([3]);
+      a.dispose();
+    });
+
+    it('should replay an explicit undefined initial value', () => {
+      const a = atom<number | undefined>(undefined);
+      const values: Array<number | undefined> = [];
+
+      a.subscribe(value => values.push(value));
+
+      expect(values).toEqual([undefined]);
+      a.dispose();
+    });
+
+    it('should replay the current value immediately on subscription', () => {
+      const a = atom(42);
+      const values: Array<[number, number]> = [];
+
+      a.subscribe((current, previous) => values.push([current, previous]));
+
+      expect(values).toEqual([[42, 42]]);
       a.dispose();
     });
 
@@ -52,11 +80,11 @@ describe('Atom System', () => {
       let calls = 0;
       a.subscribe(() => calls++);
       a.next(0); // Same value still notifies
-      expect(calls).toBe(1);
-      a.next(1);
       expect(calls).toBe(2);
       a.next(1);
       expect(calls).toBe(3);
+      a.next(1);
+      expect(calls).toBe(4);
       a.dispose();
     });
 
@@ -76,8 +104,8 @@ describe('Atom System', () => {
       a.subscribe((current, previous) => { currents.push(current); previouses.push(previous); });
       a.next(5);
       a.next(10);
-      expect(currents).toEqual([5, 10]);
-      expect(previouses).toEqual([0, 5]);
+      expect(currents).toEqual([0, 5, 10]);
+      expect(previouses).toEqual([0, 0, 5]);
       a.dispose();
     });
 
@@ -99,11 +127,11 @@ describe('Atom System', () => {
       const unsubscribe = a.subscribe(() => calls++);
       a.next(1);
       await delay(); // Allow microtask queue to drain
-      expect(calls).toBe(1);
+      expect(calls).toBe(2);
       unsubscribe();
       a.next(2);
       await delay(); // Allow microtask queue to drain
-      expect(calls).toBe(1);
+      expect(calls).toBe(2);
       a.dispose();
     });
 
@@ -170,7 +198,7 @@ describe('Atom System', () => {
 
         a.fail(new Error('hidden'));
 
-        expect(broadcasts).toBe(0);
+        expect(broadcasts).toBe(1);
         expect(getScheduler().isDirty).toBe(false);
         a.dispose();
       });
@@ -455,6 +483,22 @@ describe('Atom System', () => {
       broken.dispose();
     });
 
+    it('should compute and replay a derived current value on subscription', () => {
+      const source = atom(4);
+      const doubled = derived(() => source.value * 2);
+      const values: number[] = [];
+
+      doubled.subscribe(value => values.push(value));
+
+      expect(values).toEqual([8]);
+
+      source.next(5);
+      expect(values).toEqual([8, 10]);
+
+      source.dispose();
+      doubled.dispose();
+    });
+
     it('should expose derived subscriberCount as subscriptions change', () => {
       const source = atom(1);
       const doubled = derived((self: DerivedScope) => self.read(source) * 2);
@@ -541,9 +585,71 @@ describe('Atom System', () => {
       source.next(9);
       await delay(10);
 
-      expect(values).toContain(9);
+      expect(values).toEqual([7, 9]);
 
       unsubscribe();
+      streamed.dispose();
+      source.dispose();
+    });
+
+    it('should replay an explicit undefined current value through a flow', async () => {
+      const source = atom<number | undefined>(undefined);
+      const streamed = flow(source);
+      const values: Array<number | undefined> = [];
+      const unsubscribe = streamed.subscribe(value => values.push(value));
+
+      expect(values).toEqual([undefined]);
+
+      source.next(5);
+      await delay(10);
+      expect(values).toEqual([undefined, 5]);
+
+      unsubscribe();
+      streamed.dispose();
+      source.dispose();
+    });
+
+    it('should not replay a value for a flow whose source has not emitted yet', async () => {
+      const source = atom<number>();
+      const streamed = flow(source);
+      const values: number[] = [];
+      const unsubscribe = streamed.subscribe(value => values.push(value));
+
+      expect(values).toEqual([]);
+
+      source.next(5);
+      await delay(10);
+
+      expect(values).toEqual([5]);
+
+      unsubscribe();
+      streamed.dispose();
+      source.dispose();
+    });
+
+    it('should replay a flow current value to late subscribers', async () => {
+      const source = atom(1);
+      const streamed = flow(source);
+      const first: number[] = [];
+      const second: number[] = [];
+
+      const unsubscribeFirst = streamed.subscribe(value => first.push(value));
+      expect(first).toEqual([1]);
+
+      source.next(2);
+      await delay(10);
+      expect(first).toEqual([1, 2]);
+
+      const unsubscribeSecond = streamed.subscribe(value => second.push(value));
+      expect(second).toEqual([2]);
+
+      source.next(3);
+      await delay(10);
+      expect(first).toEqual([1, 2, 3]);
+      expect(second).toEqual([2, 3]);
+
+      unsubscribeSecond();
+      unsubscribeFirst();
       streamed.dispose();
       source.dispose();
     });
@@ -779,10 +885,10 @@ describe('Atom System', () => {
         expect(a.value).toBe(3);
         expect(a.dirty).toBe(true);
         expect(getScheduler().isDirty).toBe(true);
-        expect(values).toEqual([]);
+        expect(values).toEqual([[0, 0]]);
       });
 
-      expect(values).toEqual([[3, 0]]);
+      expect(values).toEqual([[0, 0], [3, 0]]);
       expect(a.previous).toBe(0);
       expect(a.dirty).toBe(false);
       expect(getScheduler().isDirty).toBe(false);
@@ -801,11 +907,11 @@ describe('Atom System', () => {
       transaction(() => {
         left.set(10);
         right.set(20);
-        expect(values).toEqual([]);
+        expect(values).toEqual([3]);
       });
 
       expect(total.value).toBe(30);
-      expect(values).toEqual([30]);
+      expect(values).toEqual([3, 30]);
       left.dispose();
       right.dispose();
       total.dispose();
@@ -824,10 +930,10 @@ describe('Atom System', () => {
         transaction(() => {
           b.set(2);
         });
-        expect(snapshots).toEqual([]);
+        expect(snapshots).toEqual([[0, 0]]);
       });
 
-      expect(snapshots).toEqual([[1, 2]]);
+      expect(snapshots).toEqual([[0, 0], [1, 2]]);
       a.dispose();
       b.dispose();
       combined.dispose();
@@ -844,7 +950,7 @@ describe('Atom System', () => {
       })).toThrow(new Error('boom'));
 
       expect(a.value).toBe(1);
-      expect(values).toEqual([1]);
+      expect(values).toEqual([0, 1]);
       a.dispose();
     });
 

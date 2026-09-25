@@ -68,9 +68,15 @@ function combineAtoms<T extends unknown[]>(sources: Atom<any>[]): AsyncIterable<
       let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
       let done = false;
 
-      const subs = sources.map((s, i) =>
-        s.subscribe((v) => {
+      const subs = sources.map((s, i) => {
+        // `values` already snapshots every source synchronously. Atom
+        // subscriptions replay that same current value, so suppress only the
+        // synchronous subscription replay here and keep future emissions.
+        let subscribing = true;
+        const subscription = s.subscribe((v) => {
           values[i] = v;
+          if (subscribing) return;
+
           const emitted = values.slice() as T;
           if (resolveNext) {
             resolveNext({ value: emitted, done: false });
@@ -78,8 +84,10 @@ function combineAtoms<T extends unknown[]>(sources: Atom<any>[]): AsyncIterable<
           } else {
             queue.push(emitted);
           }
-        })
-      );
+        });
+        subscribing = false;
+        return subscription;
+      });
 
       return {
         async next() {

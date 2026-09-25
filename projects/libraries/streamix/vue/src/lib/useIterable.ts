@@ -103,7 +103,11 @@ function dependencyRef<T>(
       : value;
   });
 
-  const subscription = source.subscribe(() => bridge.invalidate());
+  let subscribing = true;
+  const subscription = source.subscribe(() => {
+    if (!subscribing) bridge.invalidate();
+  });
+  subscribing = false;
   const errorSubscription = isErrorSource(source)
     ? source.onError(() => bridge.invalidate())
     : undefined;

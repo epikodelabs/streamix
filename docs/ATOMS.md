@@ -19,13 +19,24 @@ interface Atom<T> {
   readonly previous: T | undefined;
   readonly disposed: boolean;
   readonly error?: any;
-  subscribe(callback: (value: T) => void): Subscription;
+  subscribe(callback: (current: T, previous: T) => void): Subscription;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
 ```
 
 > **Note:** Writable atoms extend this base interface with mutation methods like `.next(value)`, `.set(value)`, and `.fail(error)`.
+
+Subscriptions are **stateful**. If an atom already has a current value, `subscribe()` synchronously delivers that value once before future emissions. This applies equally to writable atoms, derived atoms, and flows. An atom or flow that has not produced a value yet stays silent until its first real emission; no placeholder `undefined` is invented. Explicit state is still state, so `atom(undefined)` does replay `undefined`.
+
+```ts
+const count = atom(3);
+count.subscribe(value => console.log(value)); // 3 immediately
+
+const pending = atom<number>();
+pending.subscribe(value => console.log(value)); // nothing yet
+pending.next(4);                                // 4
+```
 
 ---
 
@@ -271,7 +282,7 @@ transaction(() => {
   console.log(a.value); // 3 — reads see the latest write
 });
 
-console.log(seen);        // [[3, 0]] — one collapsed notification
+console.log(seen);        // [[0, 0], [3, 0]] — current state, then one collapsed notification
 console.log(a.previous);  // 0 — captured before the transaction began
 ```
 
@@ -351,7 +362,7 @@ a.subscribe((current, previous) => {
 
 transaction(() => a.set(1));
 
-console.log(seen); // [[1, 0], [2, 1]] — both transitions delivered
+console.log(seen); // [[0, 0], [1, 0], [2, 1]] — current state, then both transitions
 ```
 
 Analog/discrete semantics belong to sequences, not state containers. For a flow, choose delivery explicitly when needed:

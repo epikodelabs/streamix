@@ -72,6 +72,7 @@ idescribe('direct bindings', () => {
     const binding = bindProperty(value, input, 'value', { scheduler });
 
     expect(input.value).toBe('first');
+    expect(scheduler.pendingCount).toBe(0);
 
     value.set('second');
     frame.flush();

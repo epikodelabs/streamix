@@ -6,13 +6,14 @@ import { normalizeError } from "../atoms";
  *
  * This operator multicasts the upstream iterator through an internal subject so
  * that every subsequent consumer receives the same values without re-running the source.
- * The subject does not replay values for late subscribers; they receive only values
- * emitted after they subscribe.
+ * Because the shared subject is an Atom, a late consumer first receives the
+ * subject's current value when one exists, then continues with live emissions.
+ * This is a one-value current snapshot, not a replay history; use `shareReplay()`
+ * when multiple past values must be retained.
  *
- * **Timing caveat:** the internal subject drops values that are produced before
- * the first subscriber attaches. Subscribe (or start iterating) synchronously
- * after applying the operator; values produced while zero consumers are
- * attached cannot be recovered.
+ * **Timing caveat:** values produced before the internal subject has acquired a
+ * current value are not recoverable, and only the latest current value is visible
+ * to a later consumer.
  *
  * @template T Value type in the shared stream.
  * @returns An operator that can be inserted into a pipeline to share the source.

@@ -39,7 +39,7 @@ describe('regression: engine fixes', () => {
 
     transaction(() => a.set(1));
 
-    expect(seen).toEqual([[1, 0], [2, 1]]);
+    expect(seen).toEqual([[0, 0], [1, 0], [2, 1]]);
     expect(a.previous).toBe(1);
   });
 
@@ -89,7 +89,7 @@ describe('regression: engine fixes', () => {
 
     expect(reentered).toBe(false);
     expect(order).toEqual(
-      Array.from({ length: 50 }, (_, index) => index + 1),
+      Array.from({ length: 51 }, (_, index) => index),
     );
   });
 });

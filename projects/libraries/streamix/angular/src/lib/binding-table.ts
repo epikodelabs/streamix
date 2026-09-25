@@ -87,16 +87,18 @@ export class SxBindingTable {
 
     write(initial);
 
-    this.subscriptions[slot] = [
-      source.subscribe((value) => {
-        if (this.destroyed) {
-          return;
-        }
+    let subscribing = true;
+    const subscription = source.subscribe((value) => {
+      if (this.destroyed || subscribing) {
+        return;
+      }
 
-        this.pending[slot] = value;
-        this.markSlotDirty(slot);
-      }),
-    ];
+      this.pending[slot] = value;
+      this.markSlotDirty(slot);
+    });
+    subscribing = false;
+
+    this.subscriptions[slot] = [subscription];
   }
 
   /**
@@ -125,13 +127,16 @@ export class SxBindingTable {
 
     write(initial);
 
-    this.subscriptions[slot] = sources.map(source =>
-      source.subscribe(() => {
-        if (!this.destroyed) {
+    this.subscriptions[slot] = sources.map(source => {
+      let subscribing = true;
+      const subscription = source.subscribe(() => {
+        if (!this.destroyed && !subscribing) {
           this.markSlotDirty(slot);
         }
-      }),
-    );
+      });
+      subscribing = false;
+      return subscription;
+    });
   }
 
   /**
@@ -150,13 +155,16 @@ export class SxBindingTable {
     this.unbind(slot);
 
     this.invalidators[slot] = invalidate;
-    this.subscriptions[slot] = sources.map(source =>
-      source.subscribe(() => {
-        if (!this.destroyed) {
+    this.subscriptions[slot] = sources.map(source => {
+      let subscribing = true;
+      const subscription = source.subscribe(() => {
+        if (!this.destroyed && !subscribing) {
           this.markSlotDirty(slot);
         }
-      }),
-    );
+      });
+      subscribing = false;
+      return subscription;
+    });
   }
 
   /** Removes one slot binding without destroying the table. */

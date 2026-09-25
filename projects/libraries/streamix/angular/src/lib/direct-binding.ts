@@ -73,10 +73,13 @@ function bindDirect<T>(
     writer.write(rendered);
   });
 
+  let subscribing = true;
   subscription = source.subscribe((value) => {
+    if (subscribing) return;
     pending = value;
     scheduled?.markDirty();
   });
+  subscribing = false;
 
   return {
     destroy(): void {

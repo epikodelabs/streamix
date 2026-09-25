@@ -31,10 +31,10 @@ describe('share', () => {
 
     expect(executions).toBe(1);
     expect(first).toEqual([1, 2, 3]);
-    expect(second).toEqual([2, 3]);
+    expect(second).toEqual([1, 2, 3]);
   });
 
-  it('does not replay values emitted before a later consumer subscribes', async () => {
+  it('delivers the current shared value to a later consumer without replaying history', async () => {
     const source = atom<number>();
     const shared = pipe(source, share());
 
@@ -58,7 +58,7 @@ describe('share', () => {
     await Promise.all([firstRun, secondRun]);
 
     expect(first).toEqual([1, 2, 3]);
-    expect(second).toEqual([2, 3]);
+    expect(second).toEqual([1, 2, 3]);
   });
 
   it('propagates source errors to consumers', async () => {

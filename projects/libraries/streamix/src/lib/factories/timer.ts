@@ -5,8 +5,9 @@ import { createSharedSource } from '../utils/sharedSource';
  * Creates a hot timer atom that emits numbers starting from 0.
  *
  * The underlying timer is shared between all subscribers. It starts on the
- * first subscription and stops when the last subscriber unsubscribes. Values
- * emitted before a subscription are not replayed.
+ * first subscription and stops when the last subscriber unsubscribes. As with
+ * every Atom, a new subscriber receives the timer atom's current value first
+ * when one exists; earlier history is not replayed.
  *
  * In analog mode each subscriber keeps only the latest value (skipping
  * intermittent ticks); in discrete mode each subscriber queues all values.

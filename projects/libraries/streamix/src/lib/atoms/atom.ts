@@ -5,6 +5,7 @@ import { DONE, isPromiseLike, NEXT, type MaybePromise } from "./operator";
 
 import { ANALOG_DELIVERY } from "./delivery";
 import {
+  hasAtomEmitted,
   markAtomAsEmitted,
   registerWithCurrentScope,
 } from "./scope";
@@ -72,10 +73,13 @@ export interface Atom<T = any> {
   /** Number of active subscribers, when exposed by the implementation. */
   readonly subscriberCount?: number;
   /**
-   * Subscribes to value changes.
+   * Subscribes to this atom's current state and future value changes.
    *
-   * The callback receives `(current, previous)`. The returned subscription must
-   * be disposed when the listener is no longer needed.
+   * If the atom already has a current value, the callback is invoked
+   * synchronously once with `(current, previous)` during subscription. Atoms
+   * that have not produced a value yet wait for their first emission. The
+   * returned subscription must be disposed when the listener is no longer
+   * needed.
    */
   subscribe(callback?: (current: T, previous: T) => MaybePromise): Subscription;
   /** Subscribes to atom errors. */
@@ -713,6 +717,16 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
     add(callback: Callback) {
       subs.set(callback, { callback, busy: false, pending: [] });
     },
+    emit(callback: Callback, current: T, previous: T) {
+      const sub = subs.get(callback);
+      if (!sub) return;
+      if (sub.busy) {
+        if (conflate) sub.pending.length = 0;
+        sub.pending.push({ current, previous });
+      } else {
+        invoke(sub, { current, previous });
+      }
+    },
     delete(callback: Callback) { subs.delete(callback); },
     clear() { subs.clear(); },
     has(callback: Callback) { return subs.has(callback); },
@@ -874,6 +888,16 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
         await config.onUnsubscribe?.(callback, unsubscribe, instance);
       });
       config.onSubscribed?.(callback, unsubscribe, instance);
+
+      // Atom subscriptions are stateful: once an atom has produced a value,
+      // every new subscriber observes that current value immediately. Use the
+      // subscriber queue rather than invoking the callback directly so async
+      // callbacks keep the same serialization/conflation guarantees as normal
+      // emissions.
+      if (callback && !config.getDisposed() && hasAtomEmitted(instance)) {
+        subs.emit(callback, instance.safeValue, config.getPrevious(instance));
+      }
+
       return unsubscribe;
     },
 
@@ -919,7 +943,9 @@ function atomFromIteratorInternal<T>(
 ): Atom<T> {
   const maxSubscribers = options?.maxSubscribers ?? 1000;
 
-  let current: T = options?.initialValue !== undefined ? options.initialValue : undefined as T;
+  const hasInitialValue = options != null
+    && Object.prototype.hasOwnProperty.call(options, "initialValue");
+  let current: T = hasInitialValue ? options!.initialValue as T : undefined as T;
   let previous: T = current;
   let disposed = false;
   let started = false;
@@ -1071,6 +1097,10 @@ function atomFromIteratorInternal<T>(
 
   const { instance: baseInstance, errorHandlers, subs } = base;
   instance = baseInstance as typeof instance;
+  if (hasInitialValue) {
+    markAtomAsEmitted(instance as any);
+    notifyEmitHandlers(instance as any);
+  }
   instance[META].startOnEmitObserve = () => {
     if (!started) {
       started = true;
@@ -1189,7 +1219,7 @@ export function flow<T>(
   if (isAtom(source)) {
     try {
       initialValue = (source as any).safeValue;
-      hasInitialValue = true;
+      hasInitialValue = hasAtomEmitted(source);
     } catch {}
   }
 
@@ -1214,6 +1244,20 @@ export function flow<T>(
             produced = typeof source === "function"
               ? source(signal)
               : source;
+
+            // A direct Atom source may already have seeded this Flow's current
+            // value. In that case its subscription replay is state, not a new
+            // sequence emission, so suppress only that synchronous replay. If
+            // the source changed before the Flow actually starts, keep the
+            // replay so the Flow catches up to the newer current value.
+            if (hasInitialValue && isAtom(source) && produced === source) {
+              try {
+                const sourceCurrent = source.safeValue;
+                if (hasAtomEmitted(source) && Object.is(sourceCurrent, initialValue)) {
+                  produced = iterate(source, { replayCurrent: false });
+                }
+              } catch {}
+            }
           } finally {
             popFormulaContext();
           }

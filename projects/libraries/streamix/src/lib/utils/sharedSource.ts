@@ -44,6 +44,7 @@ export function createSharedSource<T>(
   let cleanup: (() => MaybePromise<void>) | null = null;
   let connected = false;
   let completed = false;
+  let hasCurrentValue = false;
   let readerRunning = false;
   let pendingDistributions = 0;
 
@@ -133,6 +134,7 @@ export function createSharedSource<T>(
 
   const distribute = async (value: T): Promise<void> => {
     stateAtom.next(value);
+    hasCurrentValue = true;
     const current = stateAtom.value;
 
     if (iterator !== null && !iterator.closed) {
@@ -255,16 +257,46 @@ export function createSharedSource<T>(
   });
 
   instance.subscribe = (callback?: (current: T, previous: T) => MaybePromise): Subscription => {
-      if (completed) return createSubscription(() => {});
-
       const cb = callback ?? (() => {});
-      callbacks.add(cb);
-      startSession();
 
-      return createSubscription(() => {
+      if (completed) {
+        if (callback && hasCurrentValue && stateAtom.error === undefined) {
+          try {
+            const current = stateAtom.safeValue;
+            void Promise.resolve(callback(current, current)).catch(() => {});
+          } catch {
+            // Keep subscriber callback failures isolated from source lifecycle.
+          }
+        }
+        return createSubscription(() => {});
+      }
+
+      callbacks.add(cb);
+
+      const subscription = createSubscription(() => {
         callbacks.delete(cb);
         endSessionIfIdle();
       });
+
+      if (callback && hasCurrentValue && stateAtom.error === undefined) {
+        try {
+          const current = stateAtom.safeValue;
+          const replay = callback(current, current);
+          if (isPromiseLike(replay)) {
+            void Promise.resolve(replay)
+              .catch(() => {})
+              .finally(() => {
+                if (!subscription.unsubscribed && callbacks.has(cb)) startSession();
+              });
+            return subscription;
+          }
+        } catch {
+          // Keep subscriber callback failures isolated from source lifecycle.
+        }
+      }
+
+      startSession();
+      return subscription;
   };
 
   instance[Symbol.asyncIterator] = (): AsyncIterator<T> => {

@@ -1,6 +1,25 @@
 import { atom, createAsyncPushable, EMPTY, firstValueFrom, flow, from, iterate, lastValueFrom } from '@epikodelabs/streamix';
 
 describe('iterate', () => {
+  it('yields an atom current value immediately when one exists', async () => {
+    const source = atom(5);
+    const iterator = iterate(source);
+
+    expect(await iterator.next()).toEqual({ done: false, value: 5 });
+    await iterator.return?.();
+  });
+
+  it('can suppress only the subscription replay for internal state bridges', async () => {
+    const source = atom(1);
+    const iterator = iterate(source, { replayCurrent: false });
+    const next = iterator.next();
+
+    source.next(2);
+
+    expect(await next).toEqual({ done: false, value: 2 });
+    await iterator.return?.();
+  });
+
   it('releases atom dispose hooks when an iterator is returned early', async () => {
     const source = atom<number>();
     const iterator = iterate(source);
