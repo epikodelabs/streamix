@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -21,40 +21,39 @@ if (!existsSync(angularCli)) {
   console.error(
     'Angular CLI is not installed. Run npm install before building Streamix.',
   );
-  process.exit(1);
-}
+  process.exitCode = 1;
+} else {
+  // ng-packagr 22 schedules independent entry points concurrently using:
+  //
+  //   Math.max(1, Math.min(availableParallelism() - 1, 8))
+  //
+  // Streamix has several secondary entry points. Concurrent ng-packagr
+  // transforms each create their own Ora spinner, which causes terminal
+  // corruption warnings. Restrict the build process to one available worker
+  // so ng-packagr schedules entry points sequentially.
+  const require = createRequire(import.meta.url);
+  const os = require('node:os');
 
-const child = spawn(
-  process.execPath,
-  [
+  Object.defineProperty(os, 'availableParallelism', {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: () => 1,
+  });
+
+  // Keep `import { availableParallelism } from 'node:os'` in sync with the
+  // CommonJS built-in module object patched above.
+  syncBuiltinESMExports();
+
+  const extraArgs = process.argv.slice(2);
+
+  process.argv = [
+    process.execPath,
     angularCli,
     'build',
     'streamix',
-    ...process.argv.slice(2),
-  ],
-  {
-    cwd: root,
-    env: {
-      ...process.env,
-      // ng-packagr currently starts multiple Ora instances while building
-      // secondary entry points. Running the finite package build as
-      // non-interactive keeps Ora from competing for the terminal.
-      CI: '1',
-    },
-    stdio: 'inherit',
-  },
-);
+    ...extraArgs,
+  ];
 
-child.on('error', (error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
-
-child.on('exit', (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
-  }
-
-  process.exitCode = code ?? 1;
-});
+  await import(pathToFileURL(angularCli).href);
+}
