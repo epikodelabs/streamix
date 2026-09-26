@@ -1,6 +1,16 @@
 # Changelog
 
-## 4.0.2 - 2026-09-25
+## 3.0.3 - 2026-09-26
+
+- Atom subscription replay: Subscribing to an initialized Atom now immediately replays its current value.
+Initialized and derived Atoms replay synchronously.
+atom(undefined) correctly replays undefined.
+Uninitialized Atoms remain silent until their first value.
+Atoms produced from Flows preserve replay semantics without emitting duplicate initial values.
+
+- Flow replay behavior: Flow-backed Atoms now expose the current value consistently with normal Atoms. For example, flow(atom(7)) produces the current 7 followed by subsequent updates without duplicating the replayed value.
+
+## 3.0.2 - 2026-09-25
 
 - Added Angular, React, and Vue adoption layers for Streamix, including direct reactive bindings and framework-native lifecycle integration.
 - Expanded the Angular compiler/runtime with direct DOM bindings, compiled structural `sx` blocks, keyed rendering, lifecycle/build integration, coalesced scheduling, and renderer correctness/benchmark coverage.

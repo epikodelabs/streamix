@@ -1,6 +1,6 @@
 {
   "name": "@epikodelabs/streamix",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "description": "Pull-based reactive streams with async iterators",
   "license": "MIT",
   "keywords": [

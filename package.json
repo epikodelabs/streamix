@@ -1,6 +1,6 @@
 {
   "name": "streamix",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
@@ -33,7 +33,6 @@
     "@angular/core": "^22.1.0",
     "@angular/platform-browser": "^22.1.0",
     "@angular/platform-browser-dynamic": "^22.1.0",
-    "blockdom": "0.9.29",
     "fflate": "^0.8.3",
     "tslib": "^2.8.1",
     "zone.js": "^0.16.2"
@@ -44,7 +43,7 @@
     "@angular/build": "^22.1.0",
     "@angular/cli": "^22.1.0",
     "@angular/compiler-cli": "^22.1.0",
-    "@epikodelabs/testify": "^1.0.54",
+    "@epikodelabs/testify": "file:epikodelabs-testify-1.0.55.tgz",
     "@types/jasmine": "^6.0.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^26.1.2",
