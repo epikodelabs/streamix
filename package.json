@@ -43,7 +43,7 @@
     "@angular/build": "^22.1.0",
     "@angular/cli": "^22.1.0",
     "@angular/compiler-cli": "^22.1.0",
-    "@epikodelabs/testify": "file:epikodelabs-testify-1.0.55.tgz",
+    "@epikodelabs/testify": "^1.0.54",
     "@types/jasmine": "^6.0.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^26.1.2",
