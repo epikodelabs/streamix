@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.0.3 - 2026-09-26
+## 3.0.3 - 2026-09-28
 
 - Atom subscription replay: Subscribing to an initialized Atom now immediately replays its current value.
 Initialized and derived Atoms replay synchronously.

@@ -61,7 +61,7 @@ pnpm add @epikodelabs/streamix
 
 ### ⚛️ Atoms: state that reads like a variable
 
-An atom is a reactive value. Read it synchronously, write to it, subscribe to it, or consume it as an async iterable — whichever fits the code you're writing.
+An atom is a reactive value. Read it synchronously, write to it, subscribe to it, or consume it as an async iterable — whichever fits the code you're writing. 
 
 * `atom(initial)` creates a writable value you can read right away
 * `atom<T>()` creates one whose value arrives later
@@ -69,6 +69,8 @@ An atom is a reactive value. Read it synchronously, write to it, subscribe to it
 * `flow()` wraps async work — with cancellation and cleanup built in
 
 `derived()` is synchronous by design. If a computation needs `await`, cancellation, or restart behavior, that's a job for `flow()`.
+
+**Every atom emits its current value on subscription when it has one. Flows included.**
 
 ### 🧭 Scopes: state with a lifecycle
 
