@@ -15,7 +15,7 @@ import {
   tap,
   type Subscription,
 } from '@epikodelabs/streamix';
-import { SxBindingsDirective } from '@epikodelabs/streamix/angular';
+import { SxBindingsDirective, SxDirective } from '@epikodelabs/streamix/angular';
 import { on } from '@epikodelabs/streamix/dom';
 
 const RAINBOW_DURATION = 2200;
@@ -23,7 +23,7 @@ const RAINBOW_DURATION = 2200;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SxBindingsDirective],
+  imports: [SxBindingsDirective, SxDirective],
   template: `
     <canvas
       #rainbowCanvas
@@ -31,7 +31,7 @@ const RAINBOW_DURATION = 2200;
       aria-hidden="true"
     ></canvas>
 
-    <main>
+    <main #page [sx.style.transform]="pageTransform">
       <p class="tiny-title">Streamix + Angular</p>
       <h1>Make the rainbow grow!</h1>
       <p>Click the big button. The number and colors will move.</p>
@@ -54,22 +54,32 @@ const RAINBOW_DURATION = 2200;
 
       <p class="message" [sx.text]="message"></p>
     </main>
+
+    <div class="celebration-slot" aria-live="polite">
+      <strong class="celebration" *sx="celebration as text">{{ text }}</strong>
+    </div>
   `,
   styles: [`
-    :host { display:grid; min-height:100vh; place-items:center; background:#f1f8ff; color:#26324d; font-family:system-ui, sans-serif; text-align:center; position:relative; overflow:hidden; }
+    :host { display:grid; width:100%; height:100dvh; place-items:center; background:#f1f8ff; color:#26324d; font-family:system-ui, sans-serif; text-align:center; position:relative; overflow:hidden; }
     .rainbow-canvas { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; opacity:.78; z-index:0; }
-    main { position:relative; z-index:1; width:min(92vw, 520px); padding:34px 22px; }
+    main { position:relative; z-index:1; width:min(92vw, 520px); padding:34px 22px; box-sizing:border-box; transform-origin:center center; will-change:transform; }
     .tiny-title { color:#6b74a7; font-weight:700; letter-spacing:.12em; text-transform:uppercase; font-size:.75rem; } h1 { font-size:clamp(2rem, 8vw, 3.5rem); margin:.2em 0; } p { color:#586683; }
     .number-box { display:grid; place-items:center; margin:25px auto 18px; width:165px; height:165px; border-radius:50%; background:white; border:8px solid #d9e8ff; box-shadow:0 8px 22px #7597c638; } .number-box.active { border-color:#9f75ff; transform:rotate(4deg) scale(1.05); } .number { display:block; font-size:4rem; font-weight:900; line-height:1; color:#6041c7; }
     button { border:0; border-radius:999px; padding:13px 23px; font-size:1rem; font-weight:800; cursor:pointer; background:#6041c7; color:white; box-shadow:0 5px 0 #44279b; } button:active { transform:translateY(4px); box-shadow:0 1px 0 #44279b; } .reset { background:transparent; color:#586683; box-shadow:none; margin-left:8px; font-weight:600; }
     .rainbow { display:grid; gap:9px; margin:35px 0 18px; } .rainbow i { display:block; height:18px; min-width:8px; border-radius:999px; transition:width .16s ease; } .red { background:#ff6b6b; } .orange { background:#ff9f43; } .yellow { background:#feca57; } .green { background:#43c59e; } .blue { background:#4d96ff; } .message { font-size:1.08rem; font-weight:700; min-height:1.5em; }
+    .celebration-slot { position:fixed; left:50%; bottom:22px; z-index:2; transform:translateX(-50%); pointer-events:none; } .celebration { display:block; padding:10px 16px; border-radius:999px; background:rgba(255,255,255,.88); color:#6041c7; box-shadow:0 8px 24px #4b3b7a2b; backdrop-filter:blur(8px); white-space:nowrap; }
   `],
 })
 export class AppComponent implements AfterViewInit, OnDestroy {
   @ViewChild('rainbowCanvas', { static: true })
   private rainbowCanvas!: ElementRef<HTMLCanvasElement>;
 
+  @ViewChild('page', { static: true })
+  private page!: ElementRef<HTMLElement>;
+
   readonly count = atom(0);
+  readonly pageScale = atom(1);
+  readonly pageTransform = derived($ => `scale(${$(this.pageScale)})`);
   readonly isPartyTime = derived($ => $(this.count) > 0 && $(this.count) % 10 === 0);
   readonly redWidth = derived($ => `${15 + ($(this.count) * 7) % 86}%`);
   readonly orangeWidth = derived($ => `${15 + ($(this.count) * 11) % 86}%`);
@@ -77,6 +87,9 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   readonly greenWidth = derived($ => `${15 + ($(this.count) * 17) % 86}%`);
   readonly blueWidth = derived($ => `${15 + ($(this.count) * 19) % 86}%`);
   readonly message = derived($ => messageFor($(this.count)));
+  readonly celebration = derived($ =>
+    $(this.count) >= 5 ? 'Rainbow unlocked! 🌈' : undefined,
+  );
 
   private animation?: Subscription;
   private viewport?: Subscription;
@@ -85,11 +98,13 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     this.resizeCanvas();
+    this.fitPage();
 
     this.viewport = pipe(
       on('viewportChange'),
       tap(() => {
         this.resizeCanvas();
+        this.fitPage();
         if (this.rainbowActive) {
           this.drawRainbow(this.rainbowProgress);
         }
@@ -144,6 +159,25 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     const animation = this.animation;
     this.animation = undefined;
     animation?.();
+  }
+
+  private fitPage(): void {
+    const page = this.page.nativeElement;
+    const viewportPadding = 16;
+    const availableWidth = Math.max(1, window.innerWidth - viewportPadding * 2);
+    const availableHeight = Math.max(1, window.innerHeight - viewportPadding * 2);
+
+    // offsetWidth/offsetHeight report the natural, untransformed page size.
+    // That lets us preserve the original layout and scale it only when needed.
+    const naturalWidth = Math.max(1, page.offsetWidth);
+    const naturalHeight = Math.max(1, page.offsetHeight);
+    const scale = Math.min(
+      1,
+      availableWidth / naturalWidth,
+      availableHeight / naturalHeight,
+    );
+
+    this.pageScale.set(scale);
   }
 
   private resizeCanvas(): void {
