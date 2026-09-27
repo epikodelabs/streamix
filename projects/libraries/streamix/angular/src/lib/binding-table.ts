@@ -8,9 +8,13 @@ import {
   equalText,
   writeAttribute,
   writeClass,
+  writeClassMap,
   writeProperty,
   writeStyle,
+  writeStyleMap,
   writeText,
+  type SxClassMap,
+  type SxStyleMap,
 } from './binding-writers';
 import {
   rendererScheduler,
@@ -435,6 +439,16 @@ export function ɵsxClass(
   table.bind(slot, source, writeClass(target, className), equalClass);
 }
 
+/** Compiler instruction: direct reactive class-map binding. @internal */
+export function ɵsxClassMap(
+  table: SxBindingTable,
+  slot: BindingSlot,
+  target: Element,
+  source: DependencySource<SxClassMap | null | undefined>,
+): void {
+  table.bind(slot, source, writeClassMap(target));
+}
+
 /** Compiler instruction: direct style binding. @internal */
 export function ɵsxStyle(
   table: SxBindingTable,
@@ -445,3 +459,14 @@ export function ɵsxStyle(
 ): void {
   table.bind(slot, source, writeStyle(target, property));
 }
+
+/** Compiler instruction: direct reactive style-map binding. @internal */
+export function ɵsxStyleMap(
+  table: SxBindingTable,
+  slot: BindingSlot,
+  target: HTMLElement,
+  source: DependencySource<SxStyleMap | null | undefined>,
+): void {
+  table.bind(slot, source, writeStyleMap(target));
+}
+

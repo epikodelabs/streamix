@@ -107,4 +107,48 @@ describe('parseSxTemplate', () => {
     expect(parsed.plan.size).toBe(1);
   });
 
+
+
+
+  it('parses dynamic sx class maps as one direct binding', () => {
+    const template = '<section [sx.class]="classes"></section>';
+    const parsed = parseSxTemplate(template);
+
+    expect(parsed.plan.bindings).toEqual([
+      jasmine.objectContaining({
+        slot: 0,
+        kind: 'class-map',
+        node: 'node0',
+        source: 'classes',
+      }),
+    ]);
+  });
+
+  it('normalizes camelCase explicit style names for the direct writer', () => {
+    const parsed = parseSxTemplate(
+      '<main [sx.style.transformOrigin]="origin"></main>',
+    );
+
+    expect(parsed.plan.bindings[0]).toEqual(
+      jasmine.objectContaining({
+        kind: 'style',
+        name: 'transform-origin',
+        source: 'origin',
+      }),
+    );
+  });
+
+  it('parses dynamic sx style maps as one direct binding', () => {
+    const template = '<main [sx.style]="pageStyles"></main>';
+    const parsed = parseSxTemplate(template);
+
+    expect(parsed.plan.bindings).toEqual([
+      jasmine.objectContaining({
+        slot: 0,
+        kind: 'style-map',
+        node: 'node0',
+        source: 'pageStyles',
+      }),
+    ]);
+  });
 });

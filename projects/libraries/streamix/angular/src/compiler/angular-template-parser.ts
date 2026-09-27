@@ -532,6 +532,14 @@ function assertDependencySourceExpression(
   }
 }
 
+function normalizeStylePropertyName(property: string): string {
+  if (property.startsWith('--') || property.includes('-')) {
+    return property;
+  }
+
+  return property.replace(/[A-Z]/g, match => `-${match.toLowerCase()}`);
+}
+
 function angularFallbackForSxBinding(
   publicName: string,
   source: string,
@@ -546,12 +554,23 @@ function angularFallbackForSxBinding(
     return `[attr.${publicName.slice('sx.attr.'.length)}]="${value}"`;
   }
 
+  if (publicName === 'sx.class') {
+    return `[class]="${value}"`;
+  }
+
   if (publicName.startsWith('sx.class.')) {
     return `[class.${publicName.slice('sx.class.'.length)}]="${value}"`;
   }
 
+  if (publicName === 'sx.style') {
+    return `[style]="${value}"`;
+  }
+
   if (publicName.startsWith('sx.style.')) {
-    return `[style.${publicName.slice('sx.style.'.length)}]="${value}"`;
+    const property = normalizeStylePropertyName(
+      publicName.slice('sx.style.'.length),
+    );
+    return `[style.${property}]="${value}"`;
   }
 
   return `[${publicName.slice('sx.'.length)}]="${value}"`;
@@ -584,13 +603,22 @@ function classifySxBinding(
     return name ? { kind: 'attribute', node, source, name } : undefined;
   }
 
+  if (publicName === 'sx.class') {
+    return { kind: 'class-map', node, source };
+  }
+
   if (publicName.startsWith('sx.class.')) {
     const name = publicName.slice('sx.class.'.length);
     return name ? { kind: 'class', node, source, name } : undefined;
   }
 
+  if (publicName === 'sx.style') {
+    return { kind: 'style-map', node, source };
+  }
+
   if (publicName.startsWith('sx.style.')) {
-    const name = publicName.slice('sx.style.'.length);
+    const rawName = publicName.slice('sx.style.'.length);
+    const name = normalizeStylePropertyName(rawName);
     if (name && SECURITY_SENSITIVE_STYLES.has(name.toLowerCase())) {
       throw new Error(
         `Direct ${publicName} may contain a URL-bearing CSS value and bypass Angular sanitization. Use the native Angular binding instead.`,

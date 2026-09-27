@@ -25,6 +25,38 @@ describe('transformSxTemplate', () => {
     expect(result.parsed.plan.size).toBe(5);
   });
 
+
+  it("rewrites a dynamic sx class map to Angular's class-map fallback", () => {
+    const result = transformSxTemplate('<section [sx.class]="classes"></section>');
+
+    expect(result.template).toBe('<section [class]="classes.value"></section>');
+    expect(result.parsed.plan.bindings[0]).toEqual(
+      jasmine.objectContaining({ kind: 'class-map', source: 'classes' }),
+    );
+  });
+
+  it('normalizes camelCase dotted style names in the Angular fallback', () => {
+    const result = transformSxTemplate(
+      '<main [sx.style.transformOrigin]="origin"></main>',
+    );
+
+    expect(result.template).toBe(
+      '<main [style.transform-origin]="origin.value"></main>',
+    );
+    expect(result.parsed.plan.bindings[0]).toEqual(
+      jasmine.objectContaining({ kind: 'style', name: 'transform-origin' }),
+    );
+  });
+
+  it("rewrites a dynamic sx style map to Angular's style-map fallback", () => {
+    const result = transformSxTemplate('<main [sx.style]="pageStyles"></main>');
+
+    expect(result.template).toBe('<main [style]="pageStyles.value"></main>');
+    expect(result.parsed.plan.bindings[0]).toEqual(
+      jasmine.objectContaining({ kind: 'style-map', source: 'pageStyles' }),
+    );
+  });
+
   it('normalizes single-quoted explicit sx bindings to fallback bindings', () => {
     const result = transformSxTemplate(`<span [sx.text]='count'></span>`);
 

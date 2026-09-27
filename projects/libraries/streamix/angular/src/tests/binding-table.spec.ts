@@ -4,8 +4,10 @@ import {
   createBindingTable,
   ɵsxAttribute,
   ɵsxClass,
+  ɵsxClassMap,
   ɵsxProperty,
   ɵsxStyle,
+  ɵsxStyleMap,
   ɵsxText,
 } from '../lib/binding-table';
 import {
@@ -175,6 +177,54 @@ idescribe('SxBindingTable', () => {
     const text = document.createTextNode('');
 
     expect(() => ɵsxText(table, 1, text, source)).toThrowError(RangeError);
+
+    table.destroy();
+  });
+
+
+
+  it('supports a dynamic class-map instruction', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const table = createBindingTable(1, scheduler);
+    const classes = atom<Record<string, unknown>>({ active: true, stale: false });
+    const div = document.createElement('div');
+    div.classList.add('static');
+
+    ɵsxClassMap(table, 0, div, classes);
+
+    expect(div.classList.contains('static')).toBeTrue();
+    expect(div.classList.contains('active')).toBeTrue();
+    expect(div.classList.contains('stale')).toBeFalse();
+
+    classes.set({ fresh: true, active: false });
+    frame.flush();
+
+    expect(div.classList.contains('static')).toBeTrue();
+    expect(div.classList.contains('active')).toBeFalse();
+    expect(div.classList.contains('stale')).toBeFalse();
+    expect(div.classList.contains('fresh')).toBeTrue();
+
+    table.destroy();
+  });
+
+  it('supports a dynamic style-map instruction', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const table = createBindingTable(1, scheduler);
+    const styles = atom<Record<string, unknown>>({ transform: 'scale(1)', opacity: '0.8' });
+    const div = document.createElement('div');
+
+    ɵsxStyleMap(table, 0, div, styles);
+
+    expect(div.style.transform).toBe('scale(1)');
+    expect(div.style.opacity).toBe('0.8');
+
+    styles.set({ transform: 'scale(0.5)' });
+    frame.flush();
+
+    expect(div.style.transform).toBe('scale(0.5)');
+    expect(div.style.opacity).toBe('');
 
     table.destroy();
   });

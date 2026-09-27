@@ -3,8 +3,10 @@ import { atom } from '@epikodelabs/streamix';
 import {
   bindAttribute,
   bindClass,
+  bindClassMap,
   bindProperty,
   bindStyle,
+  bindStyleMap,
   bindText,
 } from '../lib/direct-binding';
 import {
@@ -118,6 +120,31 @@ idescribe('direct bindings', () => {
     binding.destroy();
   });
 
+
+  it('diffs class maps directly', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const classes = atom<Record<string, unknown>>({ active: true, stale: false });
+    const element = document.createElement('div');
+    element.classList.add('static');
+
+    const binding = bindClassMap(classes, element, { scheduler });
+
+    expect(element.classList.contains('static')).toBeTrue();
+    expect(element.classList.contains('active')).toBeTrue();
+    expect(element.classList.contains('stale')).toBeFalse();
+
+    classes.set({ fresh: true, active: false });
+    frame.flush();
+
+    expect(element.classList.contains('static')).toBeTrue();
+    expect(element.classList.contains('active')).toBeFalse();
+    expect(element.classList.contains('stale')).toBeFalse();
+    expect(element.classList.contains('fresh')).toBeTrue();
+
+    binding.destroy();
+  });
+
   it('writes styles directly', () => {
     const frame = new ManualFrameScheduler();
     const scheduler = new RendererScheduler(frame);
@@ -134,6 +161,61 @@ idescribe('direct bindings', () => {
     expect(element.style.width).toBe('20px');
 
     binding.destroy();
+  });
+
+
+
+  it('normalizes camelCase direct style names', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const origin = atom<unknown>('top center');
+    const element = document.createElement('div');
+
+    const binding = bindStyle(origin, element, 'transformOrigin', { scheduler });
+
+    expect(element.style.transformOrigin).toBe('top center');
+
+    origin.set('bottom center');
+    frame.flush();
+
+    expect(element.style.transformOrigin).toBe('bottom center');
+    binding.destroy();
+  });
+
+  it('diffs style maps directly', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const styles = atom<Record<string, unknown>>({
+      transform: 'scale(0.75)',
+      transformOrigin: 'center center',
+    });
+    const element = document.createElement('div');
+    element.style.color = 'red';
+
+    const binding = bindStyleMap(styles, element, { scheduler });
+
+    expect(element.style.transform).toBe('scale(0.75)');
+    expect(element.style.transformOrigin).toBe('center center');
+    expect(element.style.color).toBe('red');
+
+    styles.set({ transform: 'scale(0.5)' });
+    frame.flush();
+
+    expect(element.style.transform).toBe('scale(0.5)');
+    expect(element.style.transformOrigin).toBe('');
+    expect(element.style.color).toBe('red');
+
+    binding.destroy();
+  });
+
+  it('rejects sanitizer-sensitive style-map properties', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const styles = atom({ backgroundImage: 'url(https://example.test/x.png)' });
+    const element = document.createElement('div');
+
+    expect(() => bindStyleMap(styles, element, { scheduler }))
+      .toThrowError(/sanitization/i);
   });
 });
 import { idescribe } from '../../../src/tests/env.spec';

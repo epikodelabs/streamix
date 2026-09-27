@@ -127,6 +127,91 @@ idescribe('compiler/runtime contract', () => {
     teardown.destroy();
   });
 
+
+  it('executes emitted dynamic class-map bindings', () => {
+    const result = transformSxTemplate(
+      '<section class="static" [sx.class]="classes"></section>',
+    );
+    const host = document.createElement('div');
+    host.innerHTML = result.template;
+    const classes = atom<Record<string, unknown>>({ active: true, stale: false });
+
+    const setup = compileEmittedSetup(
+      emitComponentModule(result.parsed),
+      'ɵsetupSxBindings',
+    );
+    const teardown = setup(host, { classes });
+    const section = host.children[0] as HTMLElement;
+
+    expect(section.classList.contains('static')).toBeTrue();
+    expect(section.classList.contains('active')).toBeTrue();
+    expect(section.classList.contains('stale')).toBeFalse();
+
+    classes.set({ fresh: true, active: false });
+    sxAngular.rendererScheduler.flushNow();
+
+    expect(section.classList.contains('static')).toBeTrue();
+    expect(section.classList.contains('active')).toBeFalse();
+    expect(section.classList.contains('stale')).toBeFalse();
+    expect(section.classList.contains('fresh')).toBeTrue();
+
+    teardown.destroy();
+  });
+
+  it('executes camelCase explicit style bindings with CSS normalization', () => {
+    const result = transformSxTemplate(
+      '<main [sx.style.transformOrigin]="origin"></main>',
+    );
+    const host = document.createElement('div');
+    host.innerHTML = result.template;
+    const origin = atom<unknown>('top center');
+
+    const setup = compileEmittedSetup(
+      emitComponentModule(result.parsed),
+      'ɵsetupSxBindings',
+    );
+    const teardown = setup(host, { origin });
+    const main = host.children[0] as HTMLElement;
+
+    expect(main.style.transformOrigin).toBe('top center');
+
+    origin.set('bottom center');
+    sxAngular.rendererScheduler.flushNow();
+
+    expect(main.style.transformOrigin).toBe('bottom center');
+    teardown.destroy();
+  });
+
+  it('executes emitted dynamic style-map bindings', () => {
+    const result = transformSxTemplate(
+      '<main [sx.style]="styles"></main>',
+    );
+    const host = document.createElement('div');
+    host.innerHTML = result.template;
+    const styles = atom<Record<string, unknown>>({
+      transform: 'scale(0.8)',
+      transformOrigin: 'center center',
+    });
+
+    const setup = compileEmittedSetup(
+      emitComponentModule(result.parsed),
+      'ɵsetupSxBindings',
+    );
+    const teardown = setup(host, { styles });
+    const main = host.children[0] as HTMLElement;
+
+    expect(main.style.transform).toBe('scale(0.8)');
+    expect(main.style.transformOrigin).toBe('center center');
+
+    styles.set({ transform: 'scale(0.5)' });
+    sxAngular.rendererScheduler.flushNow();
+
+    expect(main.style.transform).toBe('scale(0.5)');
+    expect(main.style.transformOrigin).toBe('');
+
+    teardown.destroy();
+  });
+
   it('executes automatic .value text and native bindings without Angular CD', () => {
     const result = transformSxTemplate(`
       <section>

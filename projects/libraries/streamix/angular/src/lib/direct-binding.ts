@@ -8,9 +8,13 @@ import {
   equalText,
   writeAttribute,
   writeClass,
+  writeClassMap,
   writeProperty,
   writeStyle,
+  writeStyleMap,
   writeText,
+  type SxClassMap,
+  type SxStyleMap,
 } from './binding-writers';
 import {
   rendererScheduler,
@@ -162,6 +166,24 @@ export function bindClass(
   }, options);
 }
 
+
+/**
+ * Directly binds a reactive class map.
+ *
+ * The map is diffed against the previously rendered map. Missing keys are
+ * removed while unrelated classes remain untouched.
+ */
+export function bindClassMap(
+  source: DependencySource<SxClassMap | null | undefined>,
+  target: Element,
+  options: DirectBindingOptions = {},
+): DirectBinding {
+  return bindDirect(source, {
+    read: current => current.value,
+    write: writeClassMap(target),
+  }, options);
+}
+
 /**
  * Directly binds one inline style property.
  *
@@ -178,3 +200,24 @@ export function bindStyle(
     write: writeStyle(target, property),
   }, options);
 }
+
+/**
+ * Directly binds a reactive style map.
+ *
+ * The map is diffed against the previously rendered map. Keys removed from the
+ * next value are removed from the element, while unrelated inline styles remain
+ * untouched.
+ */
+export function bindStyleMap(
+  source: DependencySource<SxStyleMap | null | undefined>,
+  target: HTMLElement,
+  options: DirectBindingOptions = {},
+): DirectBinding {
+  return bindDirect(source, {
+    read: current => current.value,
+    write: writeStyleMap(target),
+  }, options);
+}
+
+export type { SxClassMap, SxStyleMap } from './binding-writers';
+

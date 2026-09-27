@@ -97,9 +97,19 @@ export function emitComponentSetup(
           `  ɵsxClass(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${source(entry.source)});`,
         );
         break;
+      case 'class-map':
+        lines.push(
+          `  ɵsxClassMap(table, ${entry.slot}, ${entry.node}, ${source(entry.source)});`,
+        );
+        break;
       case 'style':
         lines.push(
           `  ɵsxStyle(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${source(entry.source)});`,
+        );
+        break;
+      case 'style-map':
+        lines.push(
+          `  ɵsxStyleMap(table, ${entry.slot}, ${entry.node}, ${source(entry.source)});`,
         );
         break;
     }

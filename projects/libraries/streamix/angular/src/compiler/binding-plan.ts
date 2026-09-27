@@ -7,7 +7,9 @@ export type SxBindingKind =
   | 'property'
   | 'attribute'
   | 'class'
-  | 'style';
+  | 'class-map'
+  | 'style'
+  | 'style-map';
 
 /** Offsets of an sx attribute or compiler-recognized Angular binding. */
 export interface SxSourceSpan {
