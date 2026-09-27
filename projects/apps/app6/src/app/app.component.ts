@@ -6,17 +6,24 @@ import {
   OnDestroy,
   ViewChild,
 } from '@angular/core';
-import { atom, derived } from '@epikodelabs/streamix';
 import {
-  SxClassBindingsDirective,
-  SxStyleBindingsDirective,
-  SxTextDirective,
-} from '@epikodelabs/streamix/angular';
+  atom,
+  derived,
+  map,
+  pipe,
+  scan,
+  tap,
+  type Subscription,
+} from '@epikodelabs/streamix';
+import { SxBindingsDirective } from '@epikodelabs/streamix/angular';
+import { on } from '@epikodelabs/streamix/dom';
+
+const RAINBOW_DURATION = 2200;
 
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SxTextDirective, SxClassBindingsDirective, SxStyleBindingsDirective],
+  imports: [SxBindingsDirective],
   template: `
     <canvas
       #rainbowCanvas
@@ -71,22 +78,29 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   readonly blueWidth = derived($ => `${15 + ($(this.count) * 19) % 86}%`);
   readonly message = derived($ => messageFor($(this.count)));
 
-  private animationFrame = 0;
+  private animation?: Subscription;
+  private viewport?: Subscription;
   private rainbowProgress = 0;
   private rainbowActive = false;
-  private readonly onResize = () => {
-    this.resizeCanvas();
-    if (this.rainbowActive) this.drawRainbow(this.rainbowProgress);
-  };
 
   ngAfterViewInit(): void {
     this.resizeCanvas();
-    window.addEventListener('resize', this.onResize, { passive: true });
+
+    this.viewport = pipe(
+      on('viewportChange'),
+      tap(() => {
+        this.resizeCanvas();
+        if (this.rainbowActive) {
+          this.drawRainbow(this.rainbowProgress);
+        }
+      }),
+    ).subscribe();
   }
 
   ngOnDestroy(): void {
-    window.removeEventListener('resize', this.onResize);
-    cancelAnimationFrame(this.animationFrame);
+    this.stopRainbowAnimation();
+    this.viewport?.();
+    this.viewport = undefined;
   }
 
   addClick(): void {
@@ -103,28 +117,33 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     this.count.set(0);
     this.rainbowActive = false;
     this.rainbowProgress = 0;
-    cancelAnimationFrame(this.animationFrame);
+    this.stopRainbowAnimation();
     this.clearCanvas();
   }
 
   private animateRainbow(): void {
-    cancelAnimationFrame(this.animationFrame);
+    this.stopRainbowAnimation();
     this.rainbowProgress = 0;
 
-    const duration = 2200;
-    const startedAt = performance.now();
-
-    const frame = (now: number) => {
-      const elapsed = now - startedAt;
-      this.rainbowProgress = Math.min(elapsed / duration, 1);
-      this.drawRainbow(this.rainbowProgress);
-
-      if (this.rainbowProgress < 1) {
-        this.animationFrame = requestAnimationFrame(frame);
+    this.animation = pipe(
+      on('animationFrame'),
+      scan((elapsed, delta) => elapsed + delta, 0),
+      map(elapsed => Math.min(elapsed / RAINBOW_DURATION, 1)),
+      tap(progress => {
+        this.rainbowProgress = progress;
+        this.drawRainbow(progress);
+      }),
+    ).subscribe(progress => {
+      if (progress >= 1) {
+        this.stopRainbowAnimation();
       }
-    };
+    });
+  }
 
-    this.animationFrame = requestAnimationFrame(frame);
+  private stopRainbowAnimation(): void {
+    const animation = this.animation;
+    this.animation = undefined;
+    animation?.();
   }
 
   private resizeCanvas(): void {
@@ -172,14 +191,12 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     const centerX = width / 2;
     const centerY = height * 0.95;
     const outerRadius = Math.max(width * 0.58, height * 0.72);
-    const totalBands = colors.length;
 
     context.save();
     context.lineCap = 'round';
     context.globalCompositeOperation = 'source-over';
 
-    for (let index = 0; index < totalBands; index += 1) {
-      // Stagger every band slightly so the individual color lines visibly grow.
+    for (let index = 0; index < colors.length; index += 1) {
       const delay = index * 0.055;
       const local = Math.max(0, Math.min(1, (progress - delay) / (1 - delay)));
       if (local <= 0) continue;

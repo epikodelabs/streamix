@@ -9,4 +9,3 @@ export * from './render-scheduler';
 export * from './angular-zone';
 export * from './sx.directive';
 export * from './sx-bindings.directive';
-export * from './sx-text.directive';
