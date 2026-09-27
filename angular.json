@@ -468,6 +468,81 @@
         }
       }
     },
+    "app6": {
+      "projectType": "application",
+      "schematics": {
+        "@schematics/angular:component": {
+          "style": "scss"
+        }
+      },
+      "root": "projects/apps/app6",
+      "sourceRoot": "projects/apps/app6/src",
+      "prefix": "app",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "outputPath": "dist/apps/app6",
+            "index": "projects/apps/app6/src/index.html",
+            "browser": "projects/apps/app6/src/main.ts",
+            "polyfills": [],
+            "tsConfig": "projects/apps/app6/tsconfig.app.json",
+            "inlineStyleLanguage": "scss",
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "projects/apps/app6/public"
+              }
+            ],
+            "styles": [
+              "projects/apps/app6/src/styles.scss"
+            ],
+            "scripts": []
+          },
+          "configurations": {
+            "production": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                }
+              ],
+              "outputHashing": "all"
+            },
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "configurations": {
+            "production": {
+              "buildTarget": "app6:build:production"
+            },
+            "development": {
+              "buildTarget": "app6:build:development"
+            }
+          },
+          "defaultConfiguration": "development"
+        },
+        "test": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "tsConfig": "projects/apps/app6/tsconfig.spec.json",
+            "inlineStyleLanguage": "scss",
+            "assets": [{ "glob": "**/*", "input": "projects/apps/app6/public" }],
+            "styles": ["projects/apps/app6/src/styles.scss"],
+            "scripts": []
+          }
+        }
+      }
+    },
     "streamix": {
       "projectType": "library",
       "root": "projects/libraries/streamix",
