@@ -4,6 +4,7 @@ import {
 import {
   TestBed,
 } from '@angular/core/testing';
+import { atom } from '@epikodelabs/streamix';
 
 import {
   createBindingTable,
@@ -16,6 +17,7 @@ import {
 import { idescribe } from '../../../src/tests/env.spec';
 import {
   ensureAngularTestEnvironment,
+  useAngularTestEnvironment,
 } from './angular-test-environment';
 
 ensureAngularTestEnvironment();
@@ -87,8 +89,8 @@ idescribe('ɵinstallSxCompiledView', () => {
       template: '<span></span>',
     })
     class HostComponent {
-      source = new TestSource('first');
-      readonly replacement = new TestSource('second');
+      source = atom('first');
+      readonly replacement = atom('second');
       readonly __sxRefs = ɵinstallSxSourceReferences(this, ['source']);
 
       constructor() {
