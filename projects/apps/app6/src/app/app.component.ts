@@ -80,7 +80,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   readonly count = atom(0);
   readonly pageScale = atom(1);
   readonly pageTransform = derived($ => `scale(${$(this.pageScale)})`);
-  readonly isPartyTime = derived($ => $(this.count) > 0 && $(this.count) % 10 === 0);
+  readonly isPartyTime = derived($ => $(this.count) > 0 && $(this.count) % 5 === 0);
   readonly redWidth = derived($ => `${15 + ($(this.count) * 7) % 86}%`);
   readonly orangeWidth = derived($ => `${15 + ($(this.count) * 11) % 86}%`);
   readonly yellowWidth = derived($ => `${15 + ($(this.count) * 13) % 86}%`);
@@ -255,7 +255,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
 function messageFor(count: number): string {
   if (count === 0) return 'The rainbow is waiting for you.';
-  if (count === 10) return 'Watch it grow! 🌈';
-  if (count > 10 && count % 10 === 0) return 'Party time! Another ten! 🎉';
+  if (count === 5) return 'Watch it grow! 🌈';
+  if (count > 5 && count % 5 === 0) return 'Party time! Another five! 🎉';
   return 'Nice! Click again to move the colors.';
 }
