@@ -54,7 +54,7 @@ describe('compileSxComponent', () => {
     expect(result.generatedModule).toBeUndefined();
     expect(result.sourceReferenceFields).toEqual(['source']);
     expect(result.transformedTemplate).toContain(
-      '*sx="source as value; sourceRef: __sxRefs.source"',
+      '*sx="source as value; sourceRef: __sxRefs[\'source\']"',
     );
     expect(result.lifecycleInitializer).toContain('public readonly __sxRefs');
     expect(result.lifecycleInitializer).not.toContain('ɵinstallSxCompiledView');

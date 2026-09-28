@@ -52,7 +52,7 @@ export function installSxLifecycleIntoComponentSource(
   }
 
   const classMatch =
-    /export\s+class\s+[A-Za-z_$][\w$]*\s*(?:extends\s+[^{]+)?\{/m.exec(source);
+    /export\s+class\s+[A-Za-z_$][\w$]*\s*(?:extends\s+[^{]+)?(?:implements\s+[^{]+)?\{/m.exec(source);
 
   if (!classMatch || classMatch.index == null) {
     throw new Error(

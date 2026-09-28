@@ -245,7 +245,11 @@ function walkStaticChildren(
       continue;
     }
 
-    if (state.strict && !isInertText(node)) {
+    if (
+      state.strict &&
+      !isInertText(node) &&
+      containsCompiledBinding(node, state.template, state.resolveReactiveSource)
+    ) {
       throw new Error(DYNAMIC_TOPOLOGY_ERROR);
     }
   }

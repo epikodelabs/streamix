@@ -33,7 +33,7 @@ export function transformAngularComponentTemplate(
   templateUrl = 'inline-template.html',
   options: ParseSxTemplateOptions = {},
 ): SxBuildTransformResult {
-  const structural = instrumentStructuralSourceReferences(template);
+  const structural = instrumentStructuralSourceReferences(template, options);
   const transformed = transformSxTemplate(
     structural.template,
     templateUrl,
@@ -86,13 +86,21 @@ function collectSourceReferenceFields(
  *
  * becomes
  *
- *   *sx="source as value; sourceRef: __sxRefs.source"
+ *   *sx="source as value; sourceRef: __sxRefs['source']"
  *
  * Angular desugars `sourceRef` to the directive input `sxSourceRef`. Authored
  * templates never need to mention this bridge.
+ *
+ * Member-path sources such as value-first Scope members are rewritten through
+ * the resolver-mapped reactive path (`model.value` -> `model.refs.value`).
+ * They register the root field in the source-reference registry so compiled
+ * bindings can rebind, but do not get a `sourceRef` entry: the reference cell
+ * emits the raw field value, which for a Scope field is the Scope itself, not
+ * the member source the directive consumes.
  */
 function instrumentStructuralSourceReferences(
   template: string,
+  options: ParseSxTemplateOptions = {},
 ): { template: string; fields: readonly string[] } {
   const fields: string[] = [];
   const seen = new Set<string>();
@@ -111,7 +119,17 @@ function instrumentStructuralSourceReferences(
       continue;
     }
 
-    const field = structuralSourceField(microsyntax);
+    const source = structuralSourceExpression(microsyntax);
+    if (!source) {
+      continue;
+    }
+
+    const isSimpleField = /^[A-Za-z_$][\w$]*$/.test(source);
+    const resolved = isSimpleField
+      ? source
+      : options.resolveReactiveSource?.(source);
+
+    const field = resolved ? rootComponentField(resolved) : undefined;
     if (!field) {
       continue;
     }
@@ -122,7 +140,12 @@ function instrumentStructuralSourceReferences(
     }
 
     const normalized = microsyntax.trim().replace(/;\s*$/, '');
-    const next = `${normalized}; sourceRef: ${SX_SOURCE_REFERENCES_FIELD}.${field}`;
+    const rewritten = resolved && resolved !== source
+      ? normalized.replace(source, resolved)
+      : normalized;
+    const next = isSimpleField
+      ? `${rewritten}; sourceRef: ${SX_SOURCE_REFERENCES_FIELD}['${field}']`
+      : rewritten;
     const valueStart = match.index + full.indexOf(microsyntax);
 
     edits.push({
@@ -143,7 +166,7 @@ function instrumentStructuralSourceReferences(
   return { template: transformed, fields };
 }
 
-function structuralSourceField(microsyntax: string): string | undefined {
+function structuralSourceExpression(microsyntax: string): string | undefined {
   const collection = /^\s*let\s+[A-Za-z_$][\w$]*\s+of\s+([^;]+)/.exec(
     microsyntax,
   );
@@ -155,7 +178,7 @@ function structuralSourceField(microsyntax: string): string | undefined {
         .replace(/\s+as\s+[A-Za-z_$][\w$]*\s*$/, '')
         .trim();
 
-  return /^[A-Za-z_$][\w$]*$/.test(source)
+  return /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(source)
     ? source
     : undefined;
 }

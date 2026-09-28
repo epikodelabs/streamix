@@ -58,10 +58,21 @@ describe('parseSxTemplate', () => {
       }
     `)).toThrowError(/structural\/template blocks/i);
   });
-  it('rejects static sx paths when Angular built-in control flow can change topology', () => {
-    expect(() => parseSxTemplate(`
+  it('allows built-in control-flow siblings without compiled bindings', () => {
+    const parsed = parseSxTemplate(`
       @if (visible) {
         <span>conditional</span>
+      }
+      <span [sx.text]="count"></span>
+    `);
+
+    expect(parsed.plan.size).toBe(1);
+  });
+
+  it('rejects control-flow siblings that contain compiled bindings', () => {
+    expect(() => parseSxTemplate(`
+      @if (visible) {
+        <span [sx.text]="other"></span>
       }
       <span [sx.text]="count"></span>
     `)).toThrowError(/structural\/template blocks/i);
@@ -78,25 +89,38 @@ describe('parseSxTemplate', () => {
     expect(parsed.nodePaths['node2']).toEqual([2]);
   });
 
-  it('rejects structural directive siblings that shift element paths', () => {
-    expect(() => parseSxTemplate(`
+  it('allows structural directive siblings without compiled bindings', () => {
+    const parsed = parseSxTemplate(`
       <div *ngIf="visible"></div>
       <span [sx.text]="count"></span>
+    `);
+
+    expect(parsed.plan.size).toBe(1);
+  });
+
+  it('rejects structural directive siblings that contain compiled bindings', () => {
+    expect(() => parseSxTemplate(`
+      <div *ngIf="visible"><span [sx.text]="other"></span></div>
+      <span [sx.text]="count"></span>
     `)).toThrowError(/structural\/template blocks/i);
   });
 
-  it('rejects custom structural directive siblings', () => {
-    expect(() => parseSxTemplate(`
+  it('allows custom structural directive siblings without compiled bindings', () => {
+    const parsed = parseSxTemplate(`
       <span [sx.text]="count"></span>
       <header *appUnless="cond"></header>
-    `)).toThrowError(/structural\/template blocks/i);
+    `);
+
+    expect(parsed.plan.size).toBe(1);
   });
 
-  it('rejects content projection next to sx bindings', () => {
-    expect(() => parseSxTemplate(`
+  it('allows content projection next to sx bindings', () => {
+    const parsed = parseSxTemplate(`
       <span [sx.text]="count"></span>
       <ng-content></ng-content>
-    `)).toThrowError(/structural\/template blocks/i);
+    `);
+
+    expect(parsed.plan.size).toBe(1);
   });
 
   it('does not reject sx bindings for control-flow text in attribute values', () => {

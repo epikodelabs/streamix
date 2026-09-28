@@ -39,7 +39,7 @@ describe('structural source-reference instrumentation', () => {
     expect(result.bindingCount).toBe(0);
     expect(result.sourceReferenceFields).toEqual(['source']);
     expect(result.template).toContain(
-      '*sx="source as value; sourceRef: __sxRefs.source"',
+      '*sx="source as value; sourceRef: __sxRefs[\'source\']"',
     );
   });
 
@@ -51,7 +51,7 @@ describe('structural source-reference instrumentation', () => {
     expect(result.bindingCount).toBe(0);
     expect(result.sourceReferenceFields).toEqual(['items']);
     expect(result.template).toContain(
-      'sourceRef: __sxRefs.items',
+      'sourceRef: __sxRefs[\'items\']',
     );
     expect(result.template).toContain('trackBy: trackItem');
     expect(result.template).toContain('let i = index');
@@ -63,6 +63,22 @@ describe('structural source-reference instrumentation', () => {
 
     expect(result.sourceReferenceFields).toEqual([]);
     expect(result.template).toBe(template);
+  });
+
+  it('rewrites scoped member sources through the resolver-mapped refs path', () => {
+    const result = transformAngularComponentTemplate(
+      '<span *sx="model.celebration as text">{{ text }}</span>',
+      'inline.html',
+      {
+        resolveReactiveSource: path =>
+          path === 'model.celebration' ? 'model.refs.celebration' : undefined,
+      },
+    );
+
+    expect(result.template).toBe(
+      '<span *sx="model.refs.celebration as text">{{ text }}</span>',
+    );
+    expect(result.sourceReferenceFields).toEqual(['model']);
   });
 });
 
