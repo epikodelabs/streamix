@@ -1,16 +1,16 @@
 import { createBuilder } from '@angular-devkit/architect';
 import { spawn, spawnSync } from 'node:child_process';
-import { watch } from 'node:fs';
+import { readFileSync, watch } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Must stay in sync with the source inputs read by generate-app6.ts.
-const GENERATOR_INPUTS = [{ dir: 'projects/apps/app6/src/app', file: 'app.component.ts' }];
+const GENERATOR_INPUTS = [{ dir: 'projects/apps/app6/src', file: '' }];
 const REGENERATE_DEBOUNCE_MS = 50;
 
-const generator = fileURLToPath(new URL('./generate-app6.ts', import.meta.url));
+const generator = fileURLToPath(new URL('./generate-project.ts', import.meta.url));
 
-const generatorArgs = () => ['--loader', 'ts-node/esm/transpile-only', generator];
+const generatorArgs = () => ['--loader', 'ts-node/esm/transpile-only', generator, 'projects/apps/app6/src'];
 
 async function* delegateOutputs(run) {
   const pending = [];
@@ -149,9 +149,13 @@ export default createBuilder(async function* (options, context) {
     delegateOptions[key] = value;
   }
 
+  const replacements = JSON.parse(readFileSync(
+    join(context.workspaceRoot, '.angular/streamix/app6/src/streamix-replacements.json'),
+    'utf8',
+  ));
   const run = await context.scheduleTarget(
     { project, target, configuration: context.target?.configuration },
-    delegateOptions,
+    { ...delegateOptions, fileReplacements: replacements },
   );
 
   // Rebuild hook: re-run the generator when its source inputs change. The
