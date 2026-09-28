@@ -1,5 +1,6 @@
 import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
+import ts from 'typescript';
 
 import { compileSxComponent } from '../src/compiler/component-build-adapter.ts';
 import { installSxLifecycleIntoComponentSource } from '../src/compiler/component-source-transform.ts';
@@ -10,6 +11,16 @@ const virtualRoot = `.angular/streamix/${sourceRoot.replace(/^projects\/apps\//,
 const sourceDirectory = resolve(root, sourceRoot);
 const outputDirectory = resolve(root, virtualRoot);
 const replacements: Array<{ replace: string; with: string }> = [];
+
+const tsconfigPath = resolve(sourceDirectory, '..', 'tsconfig.app.json');
+const tsconfig = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+const parsedConfig = ts.parseJsonConfigFileContent(
+  tsconfig.config,
+  ts.sys,
+  dirname(tsconfigPath),
+);
+const program = ts.createProgram(parsedConfig.fileNames, parsedConfig.options);
+const checker = program.getTypeChecker();
 
 await cp(sourceDirectory, outputDirectory, { recursive: true, force: true });
 
@@ -23,6 +34,23 @@ async function files(directory: string): Promise<string[]> {
   return result;
 }
 
+function standaloneDependencySources(sourcePath: string): string[] {
+  const file = program.getSourceFile(sourcePath);
+  if (!file) return [];
+  const fields: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name)) {
+      const type = checker.getTypeAtLocation(node.initializer ?? node.name);
+      if (type.getProperty('value') && type.getProperty('subscribe')) {
+        fields.push(node.name.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(file, visit);
+  return fields;
+}
+
 for (const sourcePath of await files(sourceDirectory)) {
   const source = await readFile(sourcePath, 'utf8');
   if (!source.includes('@Component')) continue;
@@ -33,7 +61,12 @@ for (const sourcePath of await files(sourceDirectory)) {
   const scopeValuePaths = scope ? {
     [scope[1]]: [...scope[2].matchAll(/^\s*(\w+)\s*:/gm)].map(item => item[1]),
   } : undefined;
-  const compiled = compileSxComponent({ componentPath: sourcePath, template: match[1], scopeValuePaths });
+  const compiled = compileSxComponent({
+    componentPath: sourcePath,
+    template: match[1],
+    dependencySourcePaths: standaloneDependencySources(sourcePath),
+    scopeValuePaths,
+  });
   if (!compiled.generatedModule || !compiled.lifecycleInitializer) continue;
   const lifecycle = installSxLifecycleIntoComponentSource(source, {
     setupImportPath: `./${relativePath.split('/').at(-1)!.replace(/\.ts$/, '.sx')}`,

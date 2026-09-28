@@ -130,6 +130,7 @@ const SAFE_AUTO_STYLES = new Set([
   'display',
   'height',
   'opacity',
+  'transform',
   'visibility',
   'width',
 ]);
