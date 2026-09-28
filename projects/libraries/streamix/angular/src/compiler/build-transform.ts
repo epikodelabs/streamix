@@ -13,7 +13,7 @@ export interface SxBuildTransformResult {
   readonly bindingCount: number;
   /**
    * Top-level component fields whose object identity is consumed by generated
-   * Streamix bindings or by compiler-linked structural `*sx` directives.
+   * Streamix bindings or compiler-linked Angular control-flow blocks.
    */
   readonly sourceReferenceFields: readonly string[];
   /** True only when at least one generated slot delegates rendering to Angular. */
@@ -65,9 +65,10 @@ export function transformAngularComponentTemplate(
 }
 
 /**
- * Lowers a direct source-valued Angular `@if` condition to its reactive
- * source's `.value` fallback. Angular remains responsible for block DOM;
- * generated subscriptions only refresh that local view when the source emits.
+ * Lowers direct source-valued Angular control-flow expressions (`@if`, `@for`
+ * and `@switch`) to their reactive source's `.value` fallback. Angular remains
+ * responsible for block DOM; generated subscriptions only refresh that local
+ * view when the source emits.
  */
 function instrumentAngularControlFlow(
   template: string,
@@ -77,23 +78,29 @@ function instrumentAngularControlFlow(
   sources: readonly string[];
   fields: readonly string[];
 } {
-  const pattern = /@if\s*\(\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\)/g;
+  const patterns = [
+    /@if\s*\(\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\)/g,
+    /@switch\s*\(\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\)/g,
+    /@for\s*\(\s*[A-Za-z_$][\w$]*\s+of\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*(?=[;)])/g,
+  ];
   const replacements = new Map<string, string>();
   const sources: string[] = [];
   const fields: string[] = [];
 
-  for (const match of template.matchAll(pattern)) {
-    const valuePath = match[1];
-    const source = options.resolveReactiveSource?.(valuePath);
-    if (!source || replacements.has(valuePath)) {
-      continue;
-    }
+  for (const pattern of patterns) {
+    for (const match of template.matchAll(pattern)) {
+      const valuePath = match[1];
+      const source = options.resolveReactiveSource?.(valuePath);
+      if (!source || replacements.has(valuePath)) {
+        continue;
+      }
 
-    replacements.set(valuePath, `${source}.value`);
-    sources.push(source);
-    const field = rootComponentField(source);
-    if (field && !fields.includes(field)) {
-      fields.push(field);
+      replacements.set(valuePath, `${source}.value`);
+      sources.push(source);
+      const field = rootComponentField(source);
+      if (field && !fields.includes(field)) {
+        fields.push(field);
+      }
     }
   }
 

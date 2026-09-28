@@ -104,6 +104,24 @@ describe('standard Angular control flow', () => {
       'ЙµsxInvalidate(table, 0, [ctx.model.refs.celebration], invalidate);',
     );
   });
+
+  it('lowers scoped @for and @switch expressions and invalidates their views', () => {
+    const result = transformAngularComponentTemplate(`
+      @for (item of model.items; track item.id) { <span>{{ item.name }}</span> }
+      @switch (model.status) { @case ('ready') { <span>Ready</span> } }
+    `, 'inline.html', {
+      resolveReactiveSource: path => ({
+        'model.items': 'model.refs.items',
+        'model.status': 'model.refs.status',
+      } as Record<string, string>)[path],
+    });
+
+    expect(result.requiresAngularInvalidation).toBeTrue();
+    expect(result.sourceReferenceFields).toEqual(['model']);
+    expect(result.template).toContain('@for (item of model.refs.items.value;');
+    expect(result.template).toContain('@switch (model.refs.status.value)');
+    expect(result.setup).toContain('[ctx.model.refs.items,ctx.model.refs.status]');
+  });
 });
 
 describe('automatic .value build lowering', () => {

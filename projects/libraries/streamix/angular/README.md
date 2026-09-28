@@ -77,6 +77,29 @@ subscribe to `refs`; the Angular SSR/hydration fallback reads `.value` from the
 ref internally. `refs` mirrors nested scope state recursively, so
 `model.user.name` can map to `model.refs.user.name`.
 
+### Structural statements
+
+Use Angular's native control flow—there is no Streamix structural directive:
+
+```html
+@if (model.ready) {
+  <p>{{ model.message }}</p>
+}
+
+@for (item of model.items; track item.id) {
+  <app-item [item]="item" />
+}
+
+@switch (model.status) {
+  @case ('ready') { <p>Ready</p> }
+}
+```
+
+When the condition, iterable, or switch value is a compile-time-resolved atom
+or Scope member, the virtual compiler input reads its backing ref's `.value`
+and subscribes to the atom for local Angular view invalidation. Angular itself
+continues to create, destroy, and hydrate the structural DOM.
+
 ## Expressions
 
 Source-transparent interpolation extends to expressions:
