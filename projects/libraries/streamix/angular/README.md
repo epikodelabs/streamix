@@ -24,20 +24,8 @@ The preferred template syntax is normal Angular syntax:
 ```
 
 When the build adapter's TypeScript checker reports that `count`, `busy`,
-`label`, `active`, and `opacity` are Streamix `DependencySource`s, the browser
-binding plan is equivalent to:
-
-```html
-<span [sx.text]="count"></span>
-
-<button
-  [sx.disabled]="busy"
-  [sx.attr.aria-label]="label"
-  [sx.class.active]="active"
-  [sx.style.opacity]="opacity">
-  Save
-</button>
-```
+`label`, `active`, and `opacity` are Streamix `DependencySource`s, it emits
+direct browser bindings while retaining the authored Angular syntax.
 
 These are bare component fields. Angular templates do not automatically
 destructure a Scope into the component context; use `model.count` (not
@@ -46,12 +34,9 @@ destructure a Scope into the component context; use `model.count` (not
 Ordinary Angular values stay ordinary Angular bindings. Source transparency is
 compile-time metadata-driven; the runtime never duck-types arbitrary objects.
 
-The low-level explicit `sx` syntax remains available when desired:
-
-```html
-<span [sx.text]="count"></span>
-<input [sx.value]="name">
-```
+Application templates use only standard Angular bindings. The compiler owns
+the reactive subscriptions and direct DOM updates; `[sx.*]` bindings are not
+part of the public template API.
 
 Authored `.value` syntax remains supported too, but is no longer required for
 bindings the build adapter can classify:
@@ -140,8 +125,6 @@ with `afterNextRender()`.
 Interpolation updates Angular's existing `Text` node rather than replacing
 `element.textContent`, preserving hydration node identity.
 
-Explicit `[sx.*]` bindings are likewise rewritten to Angular-native `.value`
-fallbacks on the server.
 
 ## Angular sanitization boundary
 
@@ -162,9 +145,8 @@ For source-transparent syntax the fallback compiler still unwraps the source,
 for example `[href]="url"` becomes Angular-owned `[href]="url.value"`; it
 just does not install a direct DOM writer for that sink.
 
-Known unsafe explicit direct bindings such as `[sx.href]` and
-`[sx.style.background-image]` are rejected by the compiler rather than silently
-bypassing Angular's sanitizer.
+Security-sensitive standard Angular bindings remain Angular-owned, preserving
+Angular's sanitizer.
 
 Source-transparent auto-lowering currently covers unambiguous safe DOM
 properties, classes, `aria-*`/`data-*` plus a small safe attribute set, and a

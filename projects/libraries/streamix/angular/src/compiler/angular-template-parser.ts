@@ -145,28 +145,6 @@ const SECURITY_SENSITIVE_PROPERTIES = new Set([
   'srcdoc',
 ]);
 
-const SECURITY_SENSITIVE_ATTRIBUTES = new Set([
-  'action',
-  'formaction',
-  'href',
-  'src',
-  'srcdoc',
-  'srcset',
-  'style',
-]);
-
-const SECURITY_SENSITIVE_STYLES = new Set([
-  'background',
-  'background-image',
-  'clip-path',
-  'cursor',
-  'filter',
-  'list-style',
-  'list-style-image',
-  'mask',
-  'mask-image',
-]);
-
 const DYNAMIC_TOPOLOGY_ERROR =
   'Direct sx bindings require a static element topology: Angular ' +
   'structural/template blocks, structural directives (*ngIf), and content ' +
@@ -308,21 +286,10 @@ function visitElement(
     };
 
     if (publicName.startsWith('sx.')) {
-      assertDependencySourceExpression(expression, publicName);
-
-      const binding = classifySxBinding(publicName, nodeId, expression);
-      if (!binding) {
-        continue;
-      }
-
-      state.bindings.push({ ...binding, span });
-      state.bindingSpans.push(span);
-      state.bindingEdits.push({
-        ...span,
-        replacement: angularFallbackForSxBinding(publicName, expression),
-      });
-      hasExplicitTextBinding ||= binding.kind === 'text';
-      continue;
+      throw new Error(
+        `Unsupported legacy Streamix binding ${JSON.stringify(publicName)}. ` +
+        'Use the equivalent standard Angular binding instead.',
+      );
     }
 
     // Native Angular bindings can be authored either as `<source>.value` or,
@@ -525,120 +492,11 @@ function extractPublicBindingName(source: string): string | undefined {
   return match?.[1]?.trim();
 }
 
-function assertDependencySourceExpression(
-  source: string,
-  bindingName: string,
-): void {
-  if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(source)) {
-    throw new Error(
-      `Unsupported ${bindingName} source expression: ${JSON.stringify(source)}. ` +
-      'Compiled sx bindings currently require a component property path that resolves to a DependencySource.',
-    );
-  }
-}
-
-function normalizeStylePropertyName(property: string): string {
-  if (property.startsWith('--') || property.includes('-')) {
-    return property;
-  }
-
-  return property.replace(/[A-Z]/g, match => `-${match.toLowerCase()}`);
-}
-
-function angularFallbackForSxBinding(
-  publicName: string,
-  source: string,
-): string {
-  const value = `${source}.value`;
-
-  if (publicName === 'sx.text') {
-    return `[textContent]="${value}"`;
-  }
-
-  if (publicName.startsWith('sx.attr.')) {
-    return `[attr.${publicName.slice('sx.attr.'.length)}]="${value}"`;
-  }
-
-  if (publicName === 'sx.class') {
-    return `[class]="${value}"`;
-  }
-
-  if (publicName.startsWith('sx.class.')) {
-    return `[class.${publicName.slice('sx.class.'.length)}]="${value}"`;
-  }
-
-  if (publicName === 'sx.style') {
-    return `[style]="${value}"`;
-  }
-
-  if (publicName.startsWith('sx.style.')) {
-    const property = normalizeStylePropertyName(
-      publicName.slice('sx.style.'.length),
-    );
-    return `[style.${property}]="${value}"`;
-  }
-
-  return `[${publicName.slice('sx.'.length)}]="${value}"`;
-}
-
-
 function angularFallbackForNativeBinding(
   publicName: string,
   source: string,
 ): string {
   return `[${publicName}]=\"${source}.value\"`;
-}
-
-function classifySxBinding(
-  publicName: string,
-  node: string,
-  source: string,
-): Omit<SxTemplateBinding, 'span'> | undefined {
-  if (publicName === 'sx.text') {
-    return { kind: 'text', node, source };
-  }
-
-  if (publicName.startsWith('sx.attr.')) {
-    const name = publicName.slice('sx.attr.'.length);
-    if (name && SECURITY_SENSITIVE_ATTRIBUTES.has(name.toLowerCase())) {
-      throw new Error(
-        `Direct ${publicName} bypasses Angular sanitization. Use the native Angular binding instead.`,
-      );
-    }
-    return name ? { kind: 'attribute', node, source, name } : undefined;
-  }
-
-  if (publicName === 'sx.class') {
-    return { kind: 'class-map', node, source };
-  }
-
-  if (publicName.startsWith('sx.class.')) {
-    const name = publicName.slice('sx.class.'.length);
-    return name ? { kind: 'class', node, source, name } : undefined;
-  }
-
-  if (publicName === 'sx.style') {
-    return { kind: 'style-map', node, source };
-  }
-
-  if (publicName.startsWith('sx.style.')) {
-    const rawName = publicName.slice('sx.style.'.length);
-    const name = normalizeStylePropertyName(rawName);
-    if (name && SECURITY_SENSITIVE_STYLES.has(name.toLowerCase())) {
-      throw new Error(
-        `Direct ${publicName} may contain a URL-bearing CSS value and bypass Angular sanitization. Use the native Angular binding instead.`,
-      );
-    }
-    return name ? { kind: 'style', node, source, name } : undefined;
-  }
-
-  const name = publicName.slice('sx.'.length);
-  if (name && SECURITY_SENSITIVE_PROPERTIES.has(name)) {
-    throw new Error(
-      `Direct ${publicName} bypasses Angular sanitization. Use the native Angular binding instead.`,
-    );
-  }
-  return name ? { kind: 'property', node, source, name } : undefined;
 }
 
 function isNativeAngularValueSink(publicName: string): boolean {
