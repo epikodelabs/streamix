@@ -39,6 +39,10 @@ binding plan is equivalent to:
 </button>
 ```
 
+These are bare component fields. Angular templates do not automatically
+destructure a Scope into the component context; use `model.count` (not
+`count`) when the source belongs to a Scope.
+
 Ordinary Angular values stay ordinary Angular bindings. Source transparency is
 compile-time metadata-driven; the runtime never duck-types arbitrary objects.
 
@@ -70,7 +74,15 @@ Templates stay value-first too:
 
 ```html
 <span>{{ model.count }}</span>
-<button [disabled]="model.busy">Save</button>
+
+<button
+  [disabled]="model.busy"
+  [attr.aria-label]="model.label"
+  [class.active]="model.active"
+  [style.opacity]="model.opacity">
+  Save
+</button>
+
 <p>{{ model.count * model.price }}</p>
 ```
 
