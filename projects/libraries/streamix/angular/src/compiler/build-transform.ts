@@ -66,9 +66,10 @@ export function transformAngularComponentTemplate(
 
 /**
  * Lowers direct source-valued Angular control-flow expressions (`@if`, `@for`,
- * `@switch`, `*ngIf`, `*ngFor`, and `ngSwitch`) to their reactive source's
- * `.value` fallback. Angular remains responsible for block DOM; generated
- * subscriptions only refresh that local view when the source emits.
+ * `@switch`, `*ngIf`, `*ngFor`, and `ngSwitch`) and their block content to
+ * reactive-source `.value` fallbacks. Angular remains responsible for block
+ * DOM; generated subscriptions only refresh that local view when a referenced
+ * source emits.
  */
 function instrumentAngularControlFlow(
   template: string,
@@ -86,6 +87,9 @@ function instrumentAngularControlFlow(
     /\*ngFor\s*=\s*["'][\s\S]*?\bof\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*(?=;|["'])/g,
     /\[ngSwitch\]\s*=\s*["']\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*["']/g,
   ];
+  const hasStructuralRegion = /@(?:if|for|switch)\s*\(|\*ng(?:If|For|SwitchCase)\s*=|\[ngSwitch\]\s*=/.test(
+    template,
+  );
   const replacements = new Map<string, string>();
   const sources: string[] = [];
   const fields: string[] = [];
@@ -93,6 +97,30 @@ function instrumentAngularControlFlow(
   for (const pattern of patterns) {
     for (const match of template.matchAll(pattern)) {
       const valuePath = match[1];
+      const source = options.resolveReactiveSource?.(valuePath);
+      if (!source || replacements.has(valuePath)) {
+        continue;
+      }
+
+      replacements.set(valuePath, `${source}.value`);
+      sources.push(source);
+      const field = rootComponentField(source);
+      if (field && !fields.includes(field)) {
+        fields.push(field);
+      }
+    }
+  }
+
+  // Angular owns nodes below a structural boundary, so the static-node parser
+  // deliberately does not visit them. Find any additional direct atom paths
+  // in that template and make their Angular fallback value-readable too. The
+  // matching source subscriptions are what keep an already-created block fresh
+  // when its condition/iterable has not changed.
+  if (hasStructuralRegion) {
+    const pathPattern = /\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\b/g;
+
+    for (const match of template.matchAll(pathPattern)) {
+      const valuePath = match[0];
       const source = options.resolveReactiveSource?.(valuePath);
       if (!source || replacements.has(valuePath)) {
         continue;

@@ -89,10 +89,14 @@ describe('standard Angular control flow', () => {
     const result = transformAngularComponentTemplate(`
       @if (model.celebration) {
         <strong>{{ model.celebration }}</strong>
+        <small>{{ model.message }}</small>
       }
     `, 'inline.html', {
       resolveReactiveSource: path =>
-        path === 'model.celebration' ? 'model.refs.celebration' : undefined,
+        ({
+          'model.celebration': 'model.refs.celebration',
+          'model.message': 'model.refs.message',
+        } as Record<string, string>)[path],
     });
 
     expect(result.bindingCount).toBe(1);
@@ -100,8 +104,9 @@ describe('standard Angular control flow', () => {
     expect(result.sourceReferenceFields).toEqual(['model']);
     expect(result.template).toContain('@if (model.refs.celebration.value)');
     expect(result.template).toContain('{{ model.refs.celebration.value }}');
+    expect(result.template).toContain('{{ model.refs.message.value }}');
     expect(result.setup).toContain(
-      'ЙµsxInvalidate(table, 0, [ctx.model.refs.celebration], invalidate);',
+      'ЙµsxInvalidate(table, 0, [ctx.model.refs.celebration,ctx.model.refs.message], invalidate);',
     );
   });
 
