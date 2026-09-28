@@ -65,10 +65,10 @@ export function transformAngularComponentTemplate(
 }
 
 /**
- * Lowers direct source-valued Angular control-flow expressions (`@if`, `@for`
- * and `@switch`) to their reactive source's `.value` fallback. Angular remains
- * responsible for block DOM; generated subscriptions only refresh that local
- * view when the source emits.
+ * Lowers direct source-valued Angular control-flow expressions (`@if`, `@for`,
+ * `@switch`, `*ngIf`, `*ngFor`, and `ngSwitch`) to their reactive source's
+ * `.value` fallback. Angular remains responsible for block DOM; generated
+ * subscriptions only refresh that local view when the source emits.
  */
 function instrumentAngularControlFlow(
   template: string,
@@ -82,6 +82,9 @@ function instrumentAngularControlFlow(
     /@if\s*\(\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\)/g,
     /@switch\s*\(\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\)/g,
     /@for\s*\(\s*[A-Za-z_$][\w$]*\s+of\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*(?=[;)])/g,
+    /\*ngIf\s*=\s*["']\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*(?=;|as\s|["'])/g,
+    /\*ngFor\s*=\s*["'][\s\S]*?\bof\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*(?=;|["'])/g,
+    /\[ngSwitch\]\s*=\s*["']\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*["']/g,
   ];
   const replacements = new Map<string, string>();
   const sources: string[] = [];

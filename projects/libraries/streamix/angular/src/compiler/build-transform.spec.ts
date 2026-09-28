@@ -122,6 +122,31 @@ describe('standard Angular control flow', () => {
     expect(result.template).toContain('@switch (model.refs.status.value)');
     expect(result.setup).toContain('[ctx.model.refs.items,ctx.model.refs.status]');
   });
+
+  it('lowers scoped classic structural directives', () => {
+    const result = transformAngularComponentTemplate(`
+      <p *ngIf="model.ready">Ready</p>
+      <span *ngFor="let item of model.items">{{ item.name }}</span>
+      <div [ngSwitch]="model.status">
+        <span *ngSwitchCase="'ready'">Ready</span>
+      </div>
+    `, 'inline.html', {
+      resolveReactiveSource: path => ({
+        'model.ready': 'model.refs.ready',
+        'model.items': 'model.refs.items',
+        'model.status': 'model.refs.status',
+      } as Record<string, string>)[path],
+    });
+
+    expect(result.requiresAngularInvalidation).toBeTrue();
+    expect(result.sourceReferenceFields).toEqual(['model']);
+    expect(result.template).toContain('*ngIf="model.refs.ready.value"');
+    expect(result.template).toContain('*ngFor="let item of model.refs.items.value"');
+    expect(result.template).toContain('[ngSwitch]="model.refs.status.value"');
+    expect(result.setup).toContain(
+      '[ctx.model.refs.ready,ctx.model.refs.items,ctx.model.refs.status]',
+    );
+  });
 });
 
 describe('automatic .value build lowering', () => {

@@ -100,6 +100,15 @@ or Scope member, the virtual compiler input reads its backing ref's `.value`
 and subscribes to the atom for local Angular view invalidation. Angular itself
 continues to create, destroy, and hydrate the structural DOM.
 
+Existing Angular structural directives are supported too when their reactive
+input is a direct atom or Scope value:
+
+```html
+<p *ngIf="model.ready">Ready</p>
+<li *ngFor="let item of model.items">{{ item.name }}</li>
+<section [ngSwitch]="model.status">...</section>
+```
+
 ## Expressions
 
 Source-transparent interpolation extends to expressions:
