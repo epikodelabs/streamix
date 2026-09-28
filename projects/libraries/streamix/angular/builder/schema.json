@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "type": "object",
+  "properties": {
+    "delegateTarget": {
+      "type": "string",
+      "description": "The project:target pair that receives the generated Streamix component."
+    },
+    "buildTarget": { "type": "string" },
+    "port": { "type": "number" },
+    "host": { "type": "string" },
+    "proxyConfig": { "type": "string" },
+    "ssl": { "type": "boolean" },
+    "sslCert": { "type": "string" },
+    "sslKey": { "type": "string" },
+    "allowedHosts": { "type": "array", "items": { "type": "string" } },
+    "headers": { "type": "object" },
+    "open": { "type": "boolean" },
+    "liveReload": { "type": "boolean" },
+    "servePath": { "type": "string" },
+    "hmr": { "type": "boolean" },
+    "watch": { "type": "boolean" },
+    "poll": { "type": "number" },
+    "inspect": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] },
+    "prebundle": { "type": "boolean" },
+    "verbose": { "type": "boolean" },
+    "define": { "type": "object" },
+    "aot": { "type": "boolean" },
+    "optimization": { "oneOf": [{ "type": "boolean" }, { "type": "object" }] },
+    "outputHashing": { "enum": ["none", "all", "media"] },
+    "sourceMap": { "oneOf": [{ "type": "boolean" }, { "type": "object" }] },
+    "extractLicenses": { "type": "boolean" },
+    "deleteOutputPath": { "type": "boolean" },
+    "clearScreen": { "type": "boolean" },
+    "progress": { "type": "boolean" }
+  },
+  "required": ["delegateTarget"],
+  "additionalProperties": true
+}

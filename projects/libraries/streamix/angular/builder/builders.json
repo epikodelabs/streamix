@@ -1,0 +1,9 @@
+{
+  "builders": {
+    "application": {
+      "implementation": "./application.mjs",
+      "schema": "./schema.json",
+      "description": "Build an Angular application through Streamix's virtual compiler layer."
+    }
+  }
+}

@@ -479,7 +479,7 @@
       "sourceRoot": "projects/apps/app6/src",
       "prefix": "app",
       "architect": {
-        "build": {
+        "application": {
           "builder": "@angular/build:application",
           "options": {
             "outputPath": "dist/apps/app6",
@@ -487,6 +487,12 @@
             "browser": "projects/apps/app6/src/main.ts",
             "polyfills": [],
             "tsConfig": "projects/apps/app6/tsconfig.app.json",
+            "fileReplacements": [
+              {
+                "replace": "projects/apps/app6/src/app/app.component.ts",
+                "with": ".angular/streamix/app6/app.component.ts"
+              }
+            ],
             "inlineStyleLanguage": "scss",
             "assets": [
               {
@@ -518,14 +524,36 @@
           },
           "defaultConfiguration": "production"
         },
+        "build": {
+          "builder": "@epikodelabs/streamix-angular-builder:application",
+          "options": {
+            "delegateTarget": "app6:application"
+          },
+          "configurations": {
+            "production": {},
+            "development": {}
+          },
+          "defaultConfiguration": "production"
+        },
         "serve": {
+          "builder": "@epikodelabs/streamix-angular-builder:application",
+          "options": {
+            "delegateTarget": "app6:dev-server"
+          },
+          "configurations": {
+            "production": {},
+            "development": {}
+          },
+          "defaultConfiguration": "development"
+        },
+        "dev-server": {
           "builder": "@angular/build:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "app6:build:production"
+              "buildTarget": "app6:application:production"
             },
             "development": {
-              "buildTarget": "app6:build:development"
+              "buildTarget": "app6:application:development"
             }
           },
           "defaultConfiguration": "development"

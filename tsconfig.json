@@ -59,7 +59,8 @@
   },
   "exclude": [
     "dist",
-    "node_modules"
+    "node_modules",
+    "projects/libraries/streamix/angular/builder"
   ],
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
