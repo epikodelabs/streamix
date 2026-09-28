@@ -6,11 +6,6 @@ let observedElement: HTMLDivElement;
 
 idescribe('onMutation', () => {
   beforeEach(function() {
-    // Skip all tests if MutationObserver is not available
-    if (typeof MutationObserver === 'undefined') {
-      pending('MutationObserver is not available in this environment');
-      return;
-    }
     // Create a DOM element for testing
     observedElement = document.createElement('div');
     document.body.appendChild(observedElement); // Attach to DOM

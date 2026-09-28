@@ -14,8 +14,9 @@ import {
 import { SxDirective } from '../lib/sx.directive';
 
 import { useAngularTestEnvironment } from './angular-test-environment';
+import { idescribe } from './env.spec';
 
-describe('SxDirective', () => {
+idescribe('SxDirective', () => {
   useAngularTestEnvironment();
   it('accepts Angular empty structural marker for collection microsyntax', () => {
     const marker: SxDirective<{ id: number }>['sx'] = '';
@@ -77,7 +78,7 @@ describe('SxDirective', () => {
       imports: [SxDirective],
       changeDetection: ChangeDetectionStrategy.OnPush,
       template: `
-        <span *sx="source as value; sourceRef: __sxRefs.source">{{ value }}</span>
+        <span *sx="source as value; sourceRef: __sxRefs['source']">{{ value }}</span>
       `,
     })
     class HostComponent {
