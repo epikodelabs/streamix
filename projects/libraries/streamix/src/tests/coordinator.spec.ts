@@ -179,7 +179,7 @@ describe('createAsyncCoordinator', () => {
     deferred.resolve(NEXT(7));
 
     expect(await next).toEqual(
-      NEXT({ type: 'value', value: 7, sourceIndex: 0 })
+      NEXT({ type: 'value' as const, value: 7, sourceIndex: 0 })
     );
 
     await coordinator.return?.();

@@ -14,7 +14,7 @@ import {
   tap,
   type Subscription,
 } from '@epikodelabs/streamix';
-import { SxBindingsDirective, SxDirective } from '@epikodelabs/streamix/angular';
+import { SxDirective } from '@epikodelabs/streamix/angular';
 import { on } from '@epikodelabs/streamix/dom';
 
 const RAINBOW_DURATION = 2200;
@@ -36,7 +36,7 @@ interface AppState {
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SxBindingsDirective, SxDirective],
+  imports: [SxDirective],
   template: `
     <canvas
       #rainbowCanvas
@@ -44,7 +44,7 @@ interface AppState {
       aria-hidden="true"
     ></canvas>
 
-    <main #page [sx.style.transform]="model.refs.pageTransform">
+    <main #page [style.transform]="model.pageTransform">
       <p class="tiny-title">Streamix + Angular</p>
       <h1>Make the rainbow grow!</h1>
       <p>Click the big button. The number and colors will move.</p>
