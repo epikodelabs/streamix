@@ -59,7 +59,7 @@ export function equalClass(previous: unknown, next: unknown): boolean {
   return Boolean(previous) === Boolean(next);
 }
 
-/** Reactive class-map value accepted by `[sx.class]`. */
+/** Reactive class-map value accepted by the generated class-map writer. */
 export type SxClassMap = Readonly<Record<string, unknown>>;
 
 function assertClassToken(className: string): void {
@@ -103,7 +103,7 @@ export function writeClassMap(
   };
 }
 
-/** Reactive style-map value accepted by `[sx.style]`. */
+/** Reactive style-map value accepted by the generated style-map writer. */
 export type SxStyleMap = Readonly<Record<string, unknown>>;
 
 const SECURITY_SENSITIVE_STYLE_PROPERTIES = new Set([

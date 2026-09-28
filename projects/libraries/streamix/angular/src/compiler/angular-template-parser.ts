@@ -156,7 +156,7 @@ const DYNAMIC_TOPOLOGY_ERROR =
 /**
  * Parses an Angular template and extracts Streamix-owned bindings.
  *
- * In addition to explicit `[sx.*]` bindings, the compiler recognizes:
+ * The compiler recognizes:
  *
  * - interpolation reading Streamix sources either explicitly through `.value`
  *   or transparently when a compile-time resolver proves the source type;
@@ -584,7 +584,7 @@ function classifyNativeAngularBinding(
 
   // A plain Angular `[name]` may be a directive/component input rather than a
   // DOM property. Only auto-lower names with unambiguous native DOM semantics;
-  // arbitrary properties remain available through explicit `[sx.<property>]`.
+  // arbitrary properties remain Angular-owned.
   const property = SAFE_DOM_PROPERTIES[publicName];
   return property
     ? { kind: 'property', node, source, name: property }
