@@ -173,12 +173,12 @@ idescribe('compiler/runtime contract', () => {
     const teardown = setup(host, { origin });
     const main = host.children[0] as HTMLElement;
 
-    expect(main.style.transformOrigin).toBe('top center');
+    expect(main.style.transformOrigin).toBe('center top');
 
     origin.set('bottom center');
     sxAngular.rendererScheduler.flushNow();
 
-    expect(main.style.transformOrigin).toBe('bottom center');
+    expect(main.style.transformOrigin).toBe('center bottom');
     teardown.destroy();
   });
 

@@ -173,12 +173,12 @@ idescribe('direct bindings', () => {
 
     const binding = bindStyle(origin, element, 'transformOrigin', { scheduler });
 
-    expect(element.style.transformOrigin).toBe('top center');
+    expect(element.style.transformOrigin).toBe('center top');
 
     origin.set('bottom center');
     frame.flush();
 
-    expect(element.style.transformOrigin).toBe('bottom center');
+    expect(element.style.transformOrigin).toBe('center bottom');
     binding.destroy();
   });
 

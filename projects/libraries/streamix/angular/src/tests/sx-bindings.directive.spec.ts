@@ -89,7 +89,7 @@ idescribe('SxBindingsDirective', () => {
     expect(button.classList.contains('visible')).toBeTrue();
     expect(button.style.opacity).toBe('1');
     expect(button.style.transform).toBe('translateY(2px)');
-    expect(button.style.transformOrigin).toBe('top center');
+    expect(button.style.transformOrigin).toBe('center top');
     expect(button.style.maxWidth).toBe('240px');
   });
 
@@ -129,7 +129,7 @@ idescribe('SxBindingsDirective', () => {
     expect(button.classList.contains('visible')).toBeFalse();
     expect(button.style.opacity).toBe('0.5');
     expect(button.style.transform).toBe('translateY(6px)');
-    expect(button.style.transformOrigin).toBe('bottom center');
+    expect(button.style.transformOrigin).toBe('center bottom');
     expect(button.style.maxWidth).toBe('320px');
   });
 
