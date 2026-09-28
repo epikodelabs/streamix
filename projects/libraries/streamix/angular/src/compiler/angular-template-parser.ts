@@ -55,6 +55,8 @@ export interface ParseSxTemplateOptions {
   readonly resolveReactiveSource?: SxReactiveSourceResolver;
   /** @deprecated Prefer `resolveReactiveSource`. */
   readonly isDependencySource?: SxDependencySourceResolver;
+  /** Reactive sources used by compiler-rewritten Angular control flow. */
+  readonly angularInvalidationSources?: readonly string[];
 }
 
 export interface ParsedSxTemplate {
@@ -199,6 +201,16 @@ export function parseSxTemplate(
   };
 
   walkStaticChildren(parsed.nodes, state, []);
+
+  for (const source of new Set(options.angularInvalidationSources ?? [])) {
+    state.bindings.push({
+      kind: 'angular-invalidate',
+      node: '',
+      source,
+      dependencies: [source],
+      span: { start: 0, end: 0 },
+    });
+  }
 
   return {
     plan: createBindingPlan(state.bindings),
@@ -407,6 +419,10 @@ function containsCompiledBinding(
     return false;
   }
 
+  if (isAngularDynamicNode(node)) {
+    return false;
+  }
+
   if (node instanceof TmplAstElement) {
     let hasExplicitTextBinding = false;
 
@@ -573,4 +589,13 @@ function classifyNativeAngularBinding(
   return property
     ? { kind: 'property', node, source, name: property }
     : undefined;
+}
+
+function isAngularDynamicNode(node: object): boolean {
+  const name = (node as { constructor?: { name?: string } }).constructor?.name;
+  return name === 'Template' ||
+    name === 'IfBlock' ||
+    name === 'ForLoopBlock' ||
+    name === 'SwitchBlock' ||
+    name === 'DeferredBlock';
 }

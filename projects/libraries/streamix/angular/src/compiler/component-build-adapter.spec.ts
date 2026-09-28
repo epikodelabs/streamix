@@ -3,13 +3,14 @@ import {
 } from './component-build-adapter';
 
 describe('compileSxComponent', () => {
-  it('returns marker-free generated direct-node setup', () => {
+  it('returns generated direct-node setup for standard Angular bindings', () => {
     const result = compileSxComponent({
       componentPath: 'src/app/counter.component.ts',
       template: `
-        <span [sx.text]="count"></span>
-        <button [sx.disabled]="disabled">Save</button>
+        <span>{{ count }}</span>
+        <button [disabled]="disabled">Save</button>
       `,
+      dependencySourcePaths: ['count', 'disabled'],
     });
 
     expect(result.bindingCount).toBe(2);
@@ -19,8 +20,7 @@ describe('compileSxComponent', () => {
     expect(result.lifecycleInitializer).toContain(
       'sourceReferences: this.__sxRefs',
     );
-    expect(result.transformedTemplate).not.toContain('[sx.text]');
-    expect(result.transformedTemplate).toContain('[textContent]="count.value"');
+    expect(result.transformedTemplate).toContain('{{ count.value }}');
     expect(result.transformedTemplate).toContain('[disabled]="disabled.value"');
     expect(result.transformedTemplate).not.toContain('data-sx');
     expect(result.generatedModule?.contents).not.toContain('querySelector');

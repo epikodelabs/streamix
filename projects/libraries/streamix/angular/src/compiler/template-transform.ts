@@ -13,8 +13,6 @@ export interface SxTemplateTransformResult {
  * Extracts Streamix-owned bindings while preserving Angular SSR/hydration
  * semantics.
  *
- * - Explicit `[sx.*]` bindings are rewritten to Angular-native `.value`
- *   fallbacks.
  * - Authored `.value` bindings/interpolations already are valid Angular
  *   fallbacks and remain untouched.
  * - Source-transparent bindings proven by the compile-time source resolver are

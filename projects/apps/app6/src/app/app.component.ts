@@ -14,7 +14,6 @@ import {
   tap,
   type Subscription,
 } from '@epikodelabs/streamix';
-import { SxDirective } from '@epikodelabs/streamix/angular';
 import { on } from '@epikodelabs/streamix/dom';
 
 const RAINBOW_DURATION = 2200;
@@ -36,7 +35,6 @@ interface AppState {
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SxDirective],
   template: `
     <canvas
       #rainbowCanvas
@@ -69,7 +67,9 @@ interface AppState {
     </main>
 
     <div class="celebration-slot" aria-live="polite">
-      <strong class="celebration" *sx="model.celebration as text">{{ text }}</strong>
+      @if (model.celebration) {
+        <strong class="celebration">{{ model.celebration }}</strong>
+      }
     </div>
   `,
   styles: [`

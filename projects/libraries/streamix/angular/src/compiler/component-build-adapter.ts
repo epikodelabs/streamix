@@ -92,8 +92,6 @@ export function compileSxComponent(
     return {
       // A source-transparent sanitizer-sensitive binding may require only an
       // Angular `.value` fallback edit and no direct browser binding. A
-      // structural `*sx` template may still need the source-reference registry
-      // even though it does not emit a static binding table.
       transformedTemplate: transformed.template,
       lifecycleInitializer: transformed.sourceReferenceFields.length > 0
         ? emitSourceReferenceInitializer(transformed.sourceReferenceFields)

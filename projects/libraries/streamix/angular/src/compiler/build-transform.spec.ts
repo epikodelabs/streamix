@@ -3,11 +3,13 @@ import {
 } from './build-transform';
 
 describe('transformAngularComponentTemplate', () => {
-  it('emits direct static-node acquisition and binding setup', () => {
+  it('emits direct static-node acquisition for standard Angular bindings', () => {
     const result = transformAngularComponentTemplate(`
-      <span [sx.text]="count"></span>
-      <button [sx.disabled]="disabled"></button>
-    `);
+      <span>{{ count }}</span>
+      <button [disabled]="disabled"></button>
+    `, 'inline.html', {
+      resolveReactiveSource: path => ['count', 'disabled'].includes(path) ? path : undefined,
+    });
 
     expect(result.bindingCount).toBe(2);
     expect(result.sourceReferenceFields).toEqual(['count', 'disabled']);
@@ -79,6 +81,28 @@ describe('structural source-reference instrumentation', () => {
       '<span *sx="model.refs.celebration as text">{{ text }}</span>',
     );
     expect(result.sourceReferenceFields).toEqual(['model']);
+  });
+});
+
+describe('standard Angular control flow', () => {
+  it('lowers a scope-valued @if and invalidates Angular-owned block DOM', () => {
+    const result = transformAngularComponentTemplate(`
+      @if (model.celebration) {
+        <strong>{{ model.celebration }}</strong>
+      }
+    `, 'inline.html', {
+      resolveReactiveSource: path =>
+        path === 'model.celebration' ? 'model.refs.celebration' : undefined,
+    });
+
+    expect(result.bindingCount).toBe(1);
+    expect(result.requiresAngularInvalidation).toBeTrue();
+    expect(result.sourceReferenceFields).toEqual(['model']);
+    expect(result.template).toContain('@if (model.refs.celebration.value)');
+    expect(result.template).toContain('{{ model.refs.celebration.value }}');
+    expect(result.setup).toContain(
+      'ЙµsxInvalidate(table, 0, [ctx.model.refs.celebration], invalidate);',
+    );
   });
 });
 

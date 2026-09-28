@@ -7,4 +7,3 @@ export * from './binding-table';
 export * from './direct-binding';
 export * from './render-scheduler';
 export * from './angular-zone';
-export * from './sx.directive';
