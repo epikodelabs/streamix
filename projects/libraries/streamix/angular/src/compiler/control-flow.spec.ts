@@ -41,6 +41,17 @@ describe('standard Angular atom templates', () => {
     );
   });
 
+  it('does not reinterpret atom-like static text in a structural block', () => {
+    const result = transformAngularComponentTemplate(
+      '@if (model.ready) { <p title="model.message">{{ model.message }}</p> }',
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toContain('title="model.message"');
+    expect(result.template).toContain('{{ model.refs.message.value }}');
+  });
+
   it('rejects the removed Streamix structural directive', () => {
     expect(() => transformAngularComponentTemplate(
       '<span *sx="count as value">{{ value }}</span>',

@@ -117,10 +117,8 @@ function instrumentAngularControlFlow(
   // matching source subscriptions are what keep an already-created block fresh
   // when its condition/iterable has not changed.
   if (hasStructuralRegion) {
-    const pathPattern = /\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\b/g;
-
-    for (const match of template.matchAll(pathPattern)) {
-      const valuePath = match[0];
+    for (const expression of angularExpressionFragments(template)) {
+      for (const valuePath of componentPathsInExpression(expression)) {
       const source = options.resolveReactiveSource?.(valuePath);
       if (!source || replacements.has(valuePath)) {
         continue;
@@ -131,6 +129,7 @@ function instrumentAngularControlFlow(
       const field = rootComponentField(source);
       if (field && !fields.includes(field)) {
         fields.push(field);
+      }
       }
     }
   }
@@ -145,6 +144,55 @@ function instrumentAngularControlFlow(
   }
 
   return { template: transformed, sources, fields };
+}
+
+/** Returns only Angular expression text, never ordinary static attributes. */
+function angularExpressionFragments(template: string): readonly string[] {
+  const expressions: string[] = [];
+  const patterns = [
+    /\{\{([\s\S]*?)\}\}/g,
+    /\[[^\]]+\]\s*=\s*(["'])([\s\S]*?)\1/g,
+    /\*ng[A-Za-z_$][\w$]*\s*=\s*(["'])([\s\S]*?)\1/g,
+    /@(?:if|switch|for)\s*\(([\s\S]*?)\)/g,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of template.matchAll(pattern)) {
+      expressions.push(match[2] ?? match[1] ?? '');
+    }
+  }
+
+  return expressions;
+}
+
+function componentPathsInExpression(expression: string): readonly string[] {
+  const paths: string[] = [];
+  const pattern = /\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\b/g;
+
+  for (const match of expression.matchAll(pattern)) {
+    if (match.index == null || isInsideString(expression, match.index)) {
+      continue;
+    }
+    paths.push(match[0]);
+  }
+
+  return paths;
+}
+
+function isInsideString(expression: string, offset: number): boolean {
+  let quote: string | undefined;
+  let escaped = false;
+  for (let index = 0; index < offset; index += 1) {
+    const char = expression[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = undefined;
+    } else if (char === "'" || char === '"' || char === '`') {
+      quote = char;
+    }
+  }
+  return quote !== undefined;
 }
 
 function collectSourceReferenceFields(
