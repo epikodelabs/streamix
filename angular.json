@@ -489,8 +489,8 @@
             "tsConfig": "projects/apps/app6/tsconfig.app.json",
             "fileReplacements": [
               {
-                "replace": "projects/apps/app6/src/app/app.component.ts",
-                "with": ".angular/streamix/app6/app.component.ts"
+                "replace": "projects/apps/app6/src/main.ts",
+                "with": ".angular/streamix/app6/src/main.ts"
               }
             ],
             "inlineStyleLanguage": "scss",

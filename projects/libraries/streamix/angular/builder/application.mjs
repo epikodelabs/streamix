@@ -1,6 +1,6 @@
 import { createBuilder } from '@angular-devkit/architect';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, watch } from 'node:fs';
+import { watch } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -149,13 +149,9 @@ export default createBuilder(async function* (options, context) {
     delegateOptions[key] = value;
   }
 
-  const replacements = JSON.parse(readFileSync(
-    join(context.workspaceRoot, '.angular/streamix/app6/src/streamix-replacements.json'),
-    'utf8',
-  ));
   const run = await context.scheduleTarget(
     { project, target, configuration: context.target?.configuration },
-    { ...delegateOptions, fileReplacements: replacements },
+    delegateOptions,
   );
 
   // Rebuild hook: re-run the generator when its source inputs change. The
