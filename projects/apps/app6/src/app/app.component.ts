@@ -7,11 +7,10 @@ import {
   ViewChild,
 } from '@angular/core';
 import {
-  atom,
-  derived,
   map,
   pipe,
   scan,
+  scope,
   tap,
   type Subscription,
 } from '@epikodelabs/streamix';
@@ -19,6 +18,20 @@ import { SxBindingsDirective, SxDirective } from '@epikodelabs/streamix/angular'
 import { on } from '@epikodelabs/streamix/dom';
 
 const RAINBOW_DURATION = 2200;
+
+interface AppState {
+  count: number;
+  pageScale: number;
+  pageTransform: string;
+  isPartyTime: boolean;
+  redWidth: string;
+  orangeWidth: string;
+  yellowWidth: string;
+  greenWidth: string;
+  blueWidth: string;
+  message: string;
+  celebration: string;
+}
 
 @Component({
   selector: 'app-root',
@@ -31,13 +44,13 @@ const RAINBOW_DURATION = 2200;
       aria-hidden="true"
     ></canvas>
 
-    <main #page [sx.style.transform]="pageTransform">
+    <main #page [sx.style.transform]="model.refs.pageTransform">
       <p class="tiny-title">Streamix + Angular</p>
       <h1>Make the rainbow grow!</h1>
       <p>Click the big button. The number and colors will move.</p>
 
-      <section class="number-box" [sx.class.active]="isPartyTime">
-        <span class="number" [sx.text]="count"></span>
+      <section class="number-box" [class.active]="model.isPartyTime">
+        <span class="number">{{ model.count }}</span>
         <span>clicks</span>
       </section>
 
@@ -45,18 +58,18 @@ const RAINBOW_DURATION = 2200;
       <button type="button" class="reset" (click)="reset()">Start over</button>
 
       <section class="rainbow" aria-label="Growing rainbow">
-        <i class="red" [sx.style.width]="redWidth"></i>
-        <i class="orange" [sx.style.width]="orangeWidth"></i>
-        <i class="yellow" [sx.style.width]="yellowWidth"></i>
-        <i class="green" [sx.style.width]="greenWidth"></i>
-        <i class="blue" [sx.style.width]="blueWidth"></i>
+        <i class="red" [style.width]="model.redWidth"></i>
+        <i class="orange" [style.width]="model.orangeWidth"></i>
+        <i class="yellow" [style.width]="model.yellowWidth"></i>
+        <i class="green" [style.width]="model.greenWidth"></i>
+        <i class="blue" [style.width]="model.blueWidth"></i>
       </section>
 
-      <p class="message" [sx.text]="message"></p>
+      <p class="message">{{ model.message }}</p>
     </main>
 
     <div class="celebration-slot" aria-live="polite">
-      <strong class="celebration" *sx="celebration as text">{{ text }}</strong>
+      <strong class="celebration" *sx="model.celebration as text">{{ text }}</strong>
     </div>
   `,
   styles: [`
@@ -77,19 +90,20 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   @ViewChild('page', { static: true })
   private page!: ElementRef<HTMLElement>;
 
-  readonly count = atom(0);
-  readonly pageScale = atom(1);
-  readonly pageTransform = derived($ => `scale(${$(this.pageScale)})`);
-  readonly isPartyTime = derived($ => $(this.count) > 0 && $(this.count) % 5 === 0);
-  readonly redWidth = derived($ => `${15 + ($(this.count) * 7) % 86}%`);
-  readonly orangeWidth = derived($ => `${15 + ($(this.count) * 11) % 86}%`);
-  readonly yellowWidth = derived($ => `${15 + ($(this.count) * 13) % 86}%`);
-  readonly greenWidth = derived($ => `${15 + ($(this.count) * 17) % 86}%`);
-  readonly blueWidth = derived($ => `${15 + ($(this.count) * 19) % 86}%`);
-  readonly message = derived($ => messageFor($(this.count)));
-  readonly celebration = derived($ =>
-    $(this.count) >= 5 ? 'Rainbow unlocked! 🌈' : undefined,
-  );
+  readonly model = scope<AppState>({
+    count: 0,
+    pageScale: 1,
+    pageTransform: self => `scale(${self.pageScale})`,
+    isPartyTime: self => self.count > 0 && self.count % 5 === 0,
+    redWidth: self => `${15 + (self.count * 7) % 86}%`,
+    orangeWidth: self => `${15 + (self.count * 11) % 86}%`,
+    yellowWidth: self => `${15 + (self.count * 13) % 86}%`,
+    greenWidth: self => `${15 + (self.count * 17) % 86}%`,
+    blueWidth: self => `${15 + (self.count * 19) % 86}%`,
+    message: self => messageFor(self.count),
+    celebration: self =>
+      self.count >= 5 ? 'Rainbow unlocked! 🌈' : '',
+  });
 
   private animation?: Subscription;
   private viewport?: Subscription;
@@ -119,8 +133,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   }
 
   addClick(): void {
-    const next = this.count.value + 1;
-    this.count.set(next);
+    const next = this.model.count + 1;
+    this.model.count = next;
 
     if (next === 5) {
       this.rainbowActive = true;
@@ -129,7 +143,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   }
 
   reset(): void {
-    this.count.set(0);
+    this.model.count = 0;
     this.rainbowActive = false;
     this.rainbowProgress = 0;
     this.stopRainbowAnimation();
@@ -177,7 +191,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
       availableHeight / naturalHeight,
     );
 
-    this.pageScale.set(scale);
+    this.model.pageScale = scale;
   }
 
   private resizeCanvas(): void {

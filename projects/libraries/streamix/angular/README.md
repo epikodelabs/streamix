@@ -323,6 +323,103 @@ classifier.
 
 See `src/compiler/BUILD-INTEGRATION.md` for the build-tool contract.
 
+## App builder (`@epikodelabs/streamix-angular-builder`)
+
+The `builder/` directory is a workspace-local Architect builder package,
+linked into `node_modules` via a `file:` dependency. It runs the Streamix
+generator (`builder/generate-app6.ts`, currently app6-specific) which writes
+the virtual component into `.angular/streamix/app6/` (generated output, not
+committed), then delegates the actual build or serve to the standard Angular
+targets.
+
+The app6 wiring in `angular.json` (trimmed to the Streamix-relevant parts):
+
+```json
+{
+  "application": {
+    "builder": "@angular/build:application",
+    "options": {
+      "fileReplacements": [
+        {
+          "replace": "projects/apps/app6/src/app/app.component.ts",
+          "with": ".angular/streamix/app6/app.component.ts"
+        }
+      ]
+    }
+  },
+  "build": {
+    "builder": "@epikodelabs/streamix-angular-builder:application",
+    "options": { "delegateTarget": "app6:application" }
+  },
+  "serve": {
+    "builder": "@epikodelabs/streamix-angular-builder:application",
+    "options": { "delegateTarget": "app6:dev-server" }
+  },
+  "dev-server": {
+    "builder": "@angular/build:dev-server",
+    "configurations": {
+      "development": { "buildTarget": "app6:application:development" },
+      "production": { "buildTarget": "app6:application:production" }
+    }
+  }
+}
+```
+
+`fileReplacements` live on the `application` target itself so both build and
+serve pick up the virtual component from one place.
+
+### Why the wrapper sits around the dev-server
+
+The dev-server never *executes* the builder of its `buildTarget`. It reads
+that target's raw options, validates them against that target's builder
+schema, and feeds them directly into the application builder internals. A
+delegating builder used as the `buildTarget` therefore never runs: its
+options reach the application builder without `tsConfig` or `optimization`
+and crash option normalization with `The "path" argument must be of type
+string. Received undefined`, while the missing `optimization` defaults to
+`true` and produces the misleading `Prebundling has been configured but will
+not be used because scripts optimization is enabled` warning.
+
+The delegation chain must therefore be inverted for serving:
+`serve` (wrapper) -> `dev-server` (real) -> `application` (real).
+
+### Option forwarding
+
+The wrapper forwards every option it receives except `delegateTarget`. Two
+Architect/CLI behaviors shape that code:
+
+- CLI schema validation materializes every schema-declared option as a key;
+  unset ones carry `undefined`. Architect merges target options with a
+  shallow spread, so an explicit `undefined` would clobber the delegate's
+  configured `buildTarget`/`tsConfig`. The wrapper strips `undefined`/`null`.
+- Array/object options materialize as empty containers (`allowedHosts: []`,
+  `define: {}`), which the application builder's strict schema rejects as
+  unknown options. Empty containers are stripped as well.
+
+`builder/schema.json` declares the common dev-server and application builder
+flags so the CLI accepts them (`ng serve app6 --port 4300`). Flags it does
+not declare are rejected by the CLI up front, and flag/delegate mismatches
+fail validation in the delegate target with the standard schema error.
+
+The wrapper is an async-generator builder: it streams the delegate's outputs
+back (so watch mode and the dev-server stay alive) and stops the delegate run
+when it is itself torn down.
+
+### Rebuild hook
+
+While the delegate runs, the wrapper watches the generator's source inputs
+(declared in `GENERATOR_INPUTS`, kept in sync with `generate-app6.ts`) and
+re-runs the generator when they change. Editing `app.component.ts` under
+`ng serve` therefore flows through the full chain — regenerate the virtual
+component, the dev-server rebuilds on its own (the virtual file is in its
+module graph), HMR ships the update — with no restart. Regeneration runs
+asynchronously and is serialized per run; a mid-edit save that fails
+compilation keeps the previously generated component serving and logs a
+warning, and the next successful save retries.
+
+Inputs are watched via their directory (filtered by filename) so editors
+that save by rename/replace do not invalidate the watcher.
+
 ## Benchmarks
 
 The `benchmarks/` directory contains a real-browser runner covering raw DOM,
