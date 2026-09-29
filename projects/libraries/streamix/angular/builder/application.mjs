@@ -1,6 +1,7 @@
 import { createBuilder } from '@angular-devkit/architect';
 import { spawn, spawnSync } from 'node:child_process';
 import { watch } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -107,35 +108,78 @@ function createRegenerator(context, sourceRoot) {
 function startSourceWatcher(context, sourceRoot, onChange) {
   const watchers = [];
   let timer;
+  let stopped = false;
+
   const schedule = () => {
     clearTimeout(timer);
     timer = setTimeout(onChange, REGENERATE_DEBOUNCE_MS);
   };
-  const inputs = [{ dir: sourceRoot, file: '' }];
-  for (const input of inputs) {
-    try {
-      // Watch the directory recursively rather than individual files:
-      // editors saving via rename/replace would invalidate a direct file
-      // watcher on Windows, and components typically live in subdirectories
-      // a plain directory watch would never report.
-      watchers.push(
-        watch(
-          join(context.workspaceRoot, input.dir),
-          { recursive: true },
-          (_event, filename) => {
-            if (shouldRegenerateOn(filename, input.file)) {
-              schedule();
-            }
-          },
-        ),
-      );
-    } catch (error) {
-      context.logger.warn(
-        `Streamix rebuild hook could not watch ${input.dir}: ${error.message}`,
-      );
+
+  const track = (watcher) => {
+    if (stopped) {
+      watcher.close();
+      return;
     }
+    // Watchers emit 'error' asynchronously (the watched directory being
+    // renamed or deleted, permission loss); left unhandled it would crash
+    // the dev-server process.
+    watcher.on('error', (error) => {
+      context.logger.warn(
+        `Streamix rebuild hook stopped watching ${sourceRoot}: ${error.message}`,
+      );
+    });
+    watchers.push(watcher);
+  };
+
+  const handleEvent = (_event, filename) => {
+    if (shouldRegenerateOn(filename, '')) {
+      schedule();
+    }
+  };
+
+  const watchEachDirectory = async (rootDirectory) => {
+    const directories = [rootDirectory];
+    while (directories.length > 0) {
+      const directory = directories.pop();
+      let entries;
+      try {
+        entries = await readdir(directory, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          directories.push(join(directory, entry.name));
+        }
+      }
+      try {
+        track(watch(directory, handleEvent));
+      } catch (error) {
+        context.logger.warn(
+          `Streamix rebuild hook could not watch ${directory}: ${error.message}`,
+        );
+      }
+    }
+  };
+
+  const rootDirectory = join(context.workspaceRoot, sourceRoot);
+  try {
+    // Recursive so components anywhere below the source root (src/app/...)
+    // trigger regeneration; editors saving via rename/replace would
+    // invalidate a direct file watcher on Windows.
+    track(watch(rootDirectory, { recursive: true }, handleEvent));
+  } catch {
+    // Some platforms cannot watch recursively; fall back to one watch per
+    // existing directory. Directories created after startup are not picked
+    // up until the builder restarts.
+    context.logger.warn(
+      `Streamix rebuild hook fell back to per-directory watching for ${sourceRoot}.`,
+    );
+    void watchEachDirectory(rootDirectory);
   }
+
   return () => {
+    stopped = true;
     clearTimeout(timer);
     for (const watcher of watchers) {
       watcher.close();
