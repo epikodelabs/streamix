@@ -20,8 +20,8 @@ describe('standard Angular atom templates', () => {
 
     expect(result.template).toContain('[disabled]="count.value"');
     expect(result.template).toContain('{{ count.value }}');
-    expect(result.setup).toContain('ЙµsxProperty');
-    expect(result.setup).toContain('ЙµsxTextNode');
+    expect(result.setup).toContain('ɵsxProperty');
+    expect(result.setup).toContain('ɵsxTextNode');
   });
 
   it('refreshes all scoped atoms read by native and classic structural blocks', () => {
@@ -36,9 +36,9 @@ describe('standard Angular atom templates', () => {
     expect(result.template).toContain('*ngFor="let item of model.refs.items.value"');
     expect(result.template).toContain('[ngSwitch]="model.refs.status.value"');
     expect(result.requiresAngularInvalidation).toBeTrue();
-    expect(result.setup).toContain(
-      '[ctx.model.refs.ready,ctx.model.refs.message,ctx.model.refs.items,ctx.model.refs.status]',
-    );
+    for (const source of ['ready', 'message', 'items', 'status']) {
+      expect(result.setup).toContain(`[ctx.model.refs.${source}], invalidate)`);
+    }
   });
 
   it('does not reinterpret atom-like static text in a structural block', () => {
