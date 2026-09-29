@@ -1,5 +1,6 @@
 import {
   TmplAstBoundText,
+  TmplAstContent,
   TmplAstElement,
   TmplAstText,
   parseTemplate,
@@ -227,8 +228,11 @@ function walkStaticChildren(
   parentPath: readonly number[],
 ): void {
   let elementIndex = 0;
+  const siblings = flattenTransparentContainers(nodes);
 
-  for (const node of flattenTransparentContainers(nodes)) {
+  for (let index = 0; index < siblings.length; index += 1) {
+    const node = siblings[index];
+
     if (node instanceof TmplAstElement) {
       const path = [...parentPath, elementIndex++];
       visitElement(node, state, path);
@@ -236,14 +240,43 @@ function walkStaticChildren(
       continue;
     }
 
-    if (
-      state.strict &&
-      !isInertText(node) &&
-      containsCompiledBinding(node, state.template, state.resolveReactiveSource)
-    ) {
-      throw new Error(DYNAMIC_TOPOLOGY_ERROR);
+    if (state.strict && !isInertText(node)) {
+      // A structural block or projected content renders a variable number of
+      // element children, so a compiled binding on any following sibling (or
+      // in its subtree) would be addressed by a path that shifts whenever the
+      // dynamic region renders. containsCompiledBinding deliberately skips
+      // dynamic-node interiors, so bindings owned by the Angular control-flow
+      // lowering do not trip this guard.
+      if (
+        shiftsElementTopology(node) &&
+        siblings
+          .slice(index + 1)
+          .some(sibling =>
+            containsCompiledBinding(
+              sibling,
+              state.template,
+              state.resolveReactiveSource,
+            ),
+          )
+      ) {
+        throw new Error(DYNAMIC_TOPOLOGY_ERROR);
+      }
+
+      if (
+        containsCompiledBinding(node, state.template, state.resolveReactiveSource)
+      ) {
+        throw new Error(DYNAMIC_TOPOLOGY_ERROR);
+      }
     }
   }
+}
+
+/**
+ * Nodes whose rendered content joins the sibling element sequence at runtime,
+ * shifting the element indices the static path compiler computes.
+ */
+function shiftsElementTopology(node: TmplAstNode): boolean {
+  return isAngularDynamicNode(node) || node instanceof TmplAstContent;
 }
 
 /**
