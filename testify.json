@@ -13,7 +13,8 @@
     "./projects/libraries/streamix/networking/src/tests",
     "./projects/libraries/streamix/src/tests",
     "./projects/libraries/streamix/angular/src/tests",
-    "./projects/libraries/streamix/angular/src/compiler"
+    "./projects/libraries/streamix/angular/src/compiler",
+    "./projects/libraries/streamix/angular/builder"
   ],
   "exclude": [
     "**/node_modules/**",
