@@ -11,7 +11,6 @@ const sourceRoot = process.argv[2] ?? 'projects/apps/app6/src';
 const virtualRoot = virtualRootOf(sourceRoot);
 const sourceDirectory = resolve(root, sourceRoot);
 const outputDirectory = resolve(root, virtualRoot);
-const replacements: Array<{ replace: string; with: string }> = [];
 
 const tsconfigPath = resolve(sourceDirectory, '..', 'tsconfig.app.json');
 const tsconfig = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
@@ -167,7 +166,6 @@ for (const sourcePath of await listFiles(sourceDirectory, false)) {
       `// @ts-nocheck\n${compiled.generatedModule.contents}`,
     );
   }
-  replacements.push({ replace: `${sourceRoot}/${relativePath}`, with: `${virtualRoot}/${relativePath}` });
 }
 
 /**
@@ -198,10 +196,5 @@ async function pruneStaleEntries(): Promise<void> {
 
   await prune(outputDirectory);
 }
-
-await writeFile(
-  resolve(outputDirectory, 'streamix-replacements.json'),
-  JSON.stringify(replacements),
-);
 
 await pruneStaleEntries();
