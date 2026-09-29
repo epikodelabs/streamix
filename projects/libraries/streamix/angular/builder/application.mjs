@@ -10,9 +10,19 @@ const REGENERATE_DEBOUNCE_MS = 50;
 
 const generator = fileURLToPath(new URL('./generate-project.ts', import.meta.url));
 
+// Registration form of the deprecated `--loader ts-node/esm/transpile-only`
+// flag: the same hooks, installed through register() so no Experimental
+// Warning is emitted and the flag cannot be removed from under us. The
+// snippet resolves ts-node relative to the spawn cwd (the workspace root).
+const TSNODE_IMPORT =
+  'data:text/javascript,' +
+  'import { register } from "node:module"; ' +
+  'import { pathToFileURL } from "node:url"; ' +
+  'register("ts-node/esm/transpile-only", pathToFileURL("./"));';
+
 const generatorArgs = (sourceRoot) => [
-  '--loader',
-  'ts-node/esm/transpile-only',
+  '--import',
+  TSNODE_IMPORT,
   generator,
   sourceRoot,
 ];
