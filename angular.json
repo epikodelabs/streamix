@@ -527,7 +527,8 @@
         "build": {
           "builder": "@epikodelabs/streamix-angular-builder:application",
           "options": {
-            "delegateTarget": "app6:application"
+            "delegateTarget": "app6:application",
+            "sourceRoot": "projects/apps/app6/src"
           },
           "configurations": {
             "production": {},
@@ -538,7 +539,8 @@
         "serve": {
           "builder": "@epikodelabs/streamix-angular-builder:application",
           "options": {
-            "delegateTarget": "app6:dev-server"
+            "delegateTarget": "app6:dev-server",
+            "sourceRoot": "projects/apps/app6/src"
           },
           "configurations": {
             "production": {},

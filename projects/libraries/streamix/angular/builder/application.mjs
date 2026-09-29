@@ -4,13 +4,19 @@ import { watch } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Must stay in sync with the source inputs read by generate-app6.ts.
-const GENERATOR_INPUTS = [{ dir: 'projects/apps/app6/src', file: '' }];
+// Default keeps the in-repo app6 demo building; consuming workspaces pass
+// their own `sourceRoot` builder option.
+const DEFAULT_SOURCE_ROOT = 'projects/apps/app6/src';
 const REGENERATE_DEBOUNCE_MS = 50;
 
 const generator = fileURLToPath(new URL('./generate-project.ts', import.meta.url));
 
-const generatorArgs = () => ['--loader', 'ts-node/esm/transpile-only', generator, 'projects/apps/app6/src'];
+const generatorArgs = (sourceRoot) => [
+  '--loader',
+  'ts-node/esm/transpile-only',
+  generator,
+  sourceRoot,
+];
 
 async function* delegateOutputs(run) {
   const pending = [];
@@ -49,12 +55,12 @@ async function* delegateOutputs(run) {
   }
 }
 
-function createRegenerator(context) {
+function createRegenerator(context, sourceRoot) {
   let child;
   let queued = false;
 
   const run = () => {
-    child = spawn(process.execPath, generatorArgs(), {
+    child = spawn(process.execPath, generatorArgs(sourceRoot), {
       cwd: context.workspaceRoot,
       stdio: 'inherit',
     });
@@ -89,23 +95,33 @@ function createRegenerator(context) {
   };
 }
 
-function startSourceWatcher(context, onChange) {
+function startSourceWatcher(context, sourceRoot, onChange) {
   const watchers = [];
   let timer;
   const schedule = () => {
     clearTimeout(timer);
     timer = setTimeout(onChange, REGENERATE_DEBOUNCE_MS);
   };
-  for (const input of GENERATOR_INPUTS) {
+  const inputs = [{ dir: sourceRoot, file: '' }];
+  for (const input of inputs) {
     try {
-      // Watch the directory and filter by filename: editors saving via
-      // rename/replace would invalidate a direct file watcher on Windows.
+      // Watch the directory recursively rather than individual files:
+      // editors saving via rename/replace would invalidate a direct file
+      // watcher on Windows, and components typically live in subdirectories
+      // a plain directory watch would never report. An empty `file` accepts
+      // every entry: fs.watch reports the changed entry's (possibly
+      // relative) name on Windows/macOS/Linux, and `null` only on platforms
+      // that do not provide one.
       watchers.push(
-        watch(join(context.workspaceRoot, input.dir), (_event, filename) => {
-          if (filename === null || filename === input.file) {
-            schedule();
-          }
-        }),
+        watch(
+          join(context.workspaceRoot, input.dir),
+          { recursive: true },
+          (_event, filename) => {
+            if (filename === null || !input.file || filename === input.file) {
+              schedule();
+            }
+          },
+        ),
       );
     } catch (error) {
       context.logger.warn(
@@ -127,20 +143,22 @@ export default createBuilder(async function* (options, context) {
     throw new Error('delegateTarget must be formatted as "project:target".');
   }
 
-  const generated = spawnSync(process.execPath, generatorArgs(), {
+  const sourceRoot = options.sourceRoot || DEFAULT_SOURCE_ROOT;
+
+  const generated = spawnSync(process.execPath, generatorArgs(sourceRoot), {
     cwd: context.workspaceRoot,
     stdio: 'inherit',
   });
-  if (generated.status !== 0) throw new Error('Streamix App6 compilation failed.');
+  if (generated.status !== 0) throw new Error(`Streamix compilation failed for ${sourceRoot}.`);
 
   // The CLI's schema validation materializes every declared option as a key
   // (unset ones carry `undefined`, array/object ones empty containers), which
   // would clobber the delegate target's own options during architect's
-  // shallow merge or trip the delegate's strict schema. Drop empty values
-  // before forwarding.
+  // shallow merge or trip the delegate's strict schema. Drop empty values and
+  // this builder's own keys before forwarding.
   const delegateOptions = {};
   for (const [key, value] of Object.entries(options)) {
-    if (key === 'delegateTarget' || value === undefined || value === null) {
+    if (key === 'delegateTarget' || key === 'sourceRoot' || value === undefined || value === null) {
       continue;
     }
     if (Array.isArray(value) ? value.length === 0 : typeof value === 'object' && Object.keys(value).length === 0) {
@@ -157,8 +175,8 @@ export default createBuilder(async function* (options, context) {
   // Rebuild hook: re-run the generator when its source inputs change. The
   // delegate (dev-server or watch build) rebuilds on its own once the
   // regenerated virtual component is rewritten.
-  const regenerator = createRegenerator(context);
-  const stopWatcher = startSourceWatcher(context, regenerator.trigger);
+  const regenerator = createRegenerator(context, sourceRoot);
+  const stopWatcher = startSourceWatcher(context, sourceRoot, regenerator.trigger);
   try {
     yield* delegateOutputs(run);
   } finally {

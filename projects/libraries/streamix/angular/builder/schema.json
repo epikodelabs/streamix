@@ -6,6 +6,10 @@
       "type": "string",
       "description": "The project:target pair that receives the generated Streamix component."
     },
+    "sourceRoot": {
+      "type": "string",
+      "description": "Application source directory processed by the Streamix virtual compiler layer, relative to the workspace root."
+    },
     "buildTarget": { "type": "string" },
     "port": { "type": "number" },
     "host": { "type": "string" },
