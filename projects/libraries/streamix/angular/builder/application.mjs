@@ -4,9 +4,8 @@ import { watch } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Default keeps the in-repo app6 demo building; consuming workspaces pass
-// their own `sourceRoot` builder option.
-const DEFAULT_SOURCE_ROOT = 'projects/apps/app6/src';
+import { buildDelegateOptions, resolveSourceRoot, shouldRegenerateOn } from './options.mjs';
+
 const REGENERATE_DEBOUNCE_MS = 50;
 
 const generator = fileURLToPath(new URL('./generate-project.ts', import.meta.url));
@@ -108,16 +107,13 @@ function startSourceWatcher(context, sourceRoot, onChange) {
       // Watch the directory recursively rather than individual files:
       // editors saving via rename/replace would invalidate a direct file
       // watcher on Windows, and components typically live in subdirectories
-      // a plain directory watch would never report. An empty `file` accepts
-      // every entry: fs.watch reports the changed entry's (possibly
-      // relative) name on Windows/macOS/Linux, and `null` only on platforms
-      // that do not provide one.
+      // a plain directory watch would never report.
       watchers.push(
         watch(
           join(context.workspaceRoot, input.dir),
           { recursive: true },
           (_event, filename) => {
-            if (filename === null || !input.file || filename === input.file) {
+            if (shouldRegenerateOn(filename, input.file)) {
               schedule();
             }
           },
@@ -143,7 +139,7 @@ export default createBuilder(async function* (options, context) {
     throw new Error('delegateTarget must be formatted as "project:target".');
   }
 
-  const sourceRoot = options.sourceRoot || DEFAULT_SOURCE_ROOT;
+  const sourceRoot = resolveSourceRoot(options);
 
   const generated = spawnSync(process.execPath, generatorArgs(sourceRoot), {
     cwd: context.workspaceRoot,
@@ -151,21 +147,7 @@ export default createBuilder(async function* (options, context) {
   });
   if (generated.status !== 0) throw new Error(`Streamix compilation failed for ${sourceRoot}.`);
 
-  // The CLI's schema validation materializes every declared option as a key
-  // (unset ones carry `undefined`, array/object ones empty containers), which
-  // would clobber the delegate target's own options during architect's
-  // shallow merge or trip the delegate's strict schema. Drop empty values and
-  // this builder's own keys before forwarding.
-  const delegateOptions = {};
-  for (const [key, value] of Object.entries(options)) {
-    if (key === 'delegateTarget' || key === 'sourceRoot' || value === undefined || value === null) {
-      continue;
-    }
-    if (Array.isArray(value) ? value.length === 0 : typeof value === 'object' && Object.keys(value).length === 0) {
-      continue;
-    }
-    delegateOptions[key] = value;
-  }
+  const delegateOptions = buildDelegateOptions(options);
 
   const run = await context.scheduleTarget(
     { project, target, configuration: context.target?.configuration },

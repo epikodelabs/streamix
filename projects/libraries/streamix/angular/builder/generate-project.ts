@@ -4,10 +4,11 @@ import ts from 'typescript';
 
 import { compileSxComponent } from '../src/compiler/component-build-adapter.ts';
 import { installSxLifecycleIntoComponentSource } from '../src/compiler/component-source-transform.ts';
+import { sourceTwinOf, virtualRootOf } from './options.mjs';
 
 const root = resolve(import.meta.dirname, '../../../../..');
 const sourceRoot = process.argv[2] ?? 'projects/apps/app6/src';
-const virtualRoot = `.angular/streamix/${sourceRoot.replace(/^projects\/apps\//, '').replace(/\/src$/, '')}/src`;
+const virtualRoot = virtualRootOf(sourceRoot);
 const sourceDirectory = resolve(root, sourceRoot);
 const outputDirectory = resolve(root, virtualRoot);
 const replacements: Array<{ replace: string; with: string }> = [];
@@ -188,8 +189,7 @@ async function pruneStaleEntries(): Promise<void> {
         continue;
       }
       const virtualPath = relative(outputDirectory, path).replace(/\\/g, '/');
-      if (virtualPath === 'streamix-replacements.json') continue;
-      const baseTwin = virtualPath.replace(/\.sx\.ts$/, '.ts');
+      const baseTwin = sourceTwinOf(virtualPath);
       if (!sourceTwinPaths.has(virtualPath) && !sourceTwinPaths.has(baseTwin)) {
         await rm(path, { force: true });
       }
@@ -199,6 +199,9 @@ async function pruneStaleEntries(): Promise<void> {
   await prune(outputDirectory);
 }
 
-await pruneStaleEntries();
+await writeFile(
+  resolve(outputDirectory, 'streamix-replacements.json'),
+  JSON.stringify(replacements),
+);
 
-await writeFile(resolve(outputDirectory, 'streamix-replacements.json'), JSON.stringify(replacements));
+await pruneStaleEntries();
