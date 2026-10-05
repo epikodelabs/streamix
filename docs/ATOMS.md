@@ -139,8 +139,8 @@ const taskManager = scope({
 
 ### Understanding the Compiled Output:
 
-* **Direct Read/Write (`taskManager.filter`)**: Accessing a property retrieves the current value. Assigning a new value (e.g., `taskManager.filter = "active"`) automatically pushes the update through the reactive system.
-* **Dependency Tracking (`taskManager.visibleTasks`)**: Whenever `taskManager.filter` or `taskManager.tasks` is updated, `visibleTasks` automatically recalculates. You read it like a plain property: `console.log(taskManager.visibleTasks)`.
+* **Direct Read/Write (`taskManager.filter`)**: Accessing a property reads the current value; assigning a value pushes it into the backing writable atom. The keyed alternatives are `taskManager.get("filter")` and `taskManager.set("filter", "active")`.
+* **Dependency Tracking (`taskManager.visibleTasks`)**: Whenever the input atoms update, `visibleTasks` automatically recalculates. Read it as `taskManager.visibleTasks`.
 * **Action Execution (`taskManager.addTask("...")`)**: Methods are called as standard imperative functions to safely execute side effects and mutations.
 * **Typing `self`**: TypeScript cannot infer `self` for you here. `method()` gives its callback's `self` no inference site (it always needs an annotation), and computed properties only infer `self` when the scope declares an explicit shape. Quick samples use `self: any`; for real code, prefer a shape interface — `scope<TaskManagerShape>(...)` infers `self` in computed properties, and `method((self: TaskManagerShape, id: number) => ...)` types your methods end to end.
 
@@ -152,7 +152,7 @@ To keep your scopes predictable, highly performant, and bug-free, follow these c
 
 ### Rule A: Treat All State as Immutable
 
-When updating arrays or objects inside a scope's methods, **always reassign the property** instead of mutating the existing reference.
+When updating arrays or objects inside a scope's methods, **always set a new reference** instead of mutating the current value.
 
 ```ts
 // ❌ WRONG: Mutating the array directly avoids the setter proxy. 
@@ -180,16 +180,16 @@ const badScope = scope({
 
 ```
 
-### Rule C: Use `.refs` Only When You Need streamix Stream APIs
+### Rule C: Use Named Scope Accessors in Templates
 
-For standard data access in UI templates or basic business logic, read and write values directly. Only use the `.refs` namespace when you need access to the underlying streamix `Atom` instance (e.g., to manually subscribe or pipe operators).
+`scope.get("name")` reads the current value and `scope.set("name", value)` writes it. The key and value are inferred from the scope definition, making these helpers useful for generated template bindings without exposing a `.refs` namespace.
 
 ```ts
 // Reading the resolved value (Standard)
-console.log(taskManager.visibleTasks); 
+console.log(taskManager.get("visibleTasks")); 
 
 // Accessing the underlying reactive Atom (For subscribing / stream operations)
-const subscription = taskManager.refs.visibleTasks.subscribe(tasks => {
+const subscription = taskManager.subscribeTo("visibleTasks", tasks => {
   console.log("Tasks updated:", tasks);
 });
 

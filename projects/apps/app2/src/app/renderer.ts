@@ -185,13 +185,11 @@ export class ReactiveRenderer {
 
     private bindModel(el: HTMLElement, path: string, ctx: Ctx): void {
         const { parent, key } = resolvePath(ctx, path);
-        let atom = parent?.[key] as Writable<any>;
-        // Scope proxies return atom values, not atoms. Use scope.refs(key) to reach
-        // the underlying writable atom for two-way binding.
-        if (!isAtom(atom) && typeof parent?.refs === 'function') {
-            atom = parent.refs(key);
-        }
-        if (!atom || typeof atom.next !== 'function') return;
+        const atom = parent?.[key] as Writable<any>;
+        const setScopeValue = typeof parent?.set === 'function'
+            ? (value: unknown) => parent.set(key, value)
+            : undefined;
+        if ((!atom || typeof atom.next !== 'function') && !setScopeValue) return;
 
         const input = el as HTMLInputElement | HTMLSelectElement;
         const isCheckbox = input instanceof HTMLInputElement && input.type === 'checkbox';
@@ -208,8 +206,11 @@ export class ReactiveRenderer {
         }));
 
         const listener = () => {
-            if (isCheckbox) atom.next((input as HTMLInputElement).checked);
-            else if (!isRadio || (input as HTMLInputElement).checked) atom.next(input.value);
+            const value = isCheckbox ? (input as HTMLInputElement).checked : input.value;
+            if (!isRadio || (input as HTMLInputElement).checked) {
+                if (setScopeValue) setScopeValue(value);
+                else atom.next(value);
+            }
         };
         input.addEventListener('input', listener);
         input.addEventListener('change', listener);

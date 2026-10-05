@@ -1,6 +1,5 @@
 import { isAtom, isAtomLike } from "../utils/helpers";
 import {
-  asReadable,
   atom,
   derived,
   getCurrentFormulaContext,
@@ -77,6 +76,26 @@ function unwrapDynamicValue<T>(value: T | Atom<T>): T {
 
 type ScopeAtomReader = <T>(atom: Atom<T>) => T;
 
+/**
+ * Reads an atom's current value. When called while evaluating a derived scope
+ * expression, the atom is also registered as a dependency.
+ */
+export function get<T>(source: DependencySource<T>): T {
+  const formulaContext = getCurrentFormulaContext();
+  if (formulaContext) formulaContext.dependencies.add(source);
+  return source.value;
+}
+
+/**
+ * Pushes a value into a writable atom.
+ */
+export function set<T>(target: Writable<T>, value: T): void {
+  if (typeof target?.next !== "function") {
+    throw new TypeError("Cannot set a read-only atom.");
+  }
+  target.next(value);
+}
+
 function isRuntimeAtom(value: unknown): value is Atom<any> {
   return isAtom(value) && typeof (value as Atom<any>).dispose === "function";
 }
@@ -84,7 +103,7 @@ function isRuntimeAtom(value: unknown): value is Atom<any> {
 function createTrackedScope(scopeRef: Scope, reader: ScopeAtomReader): any {
   return new Proxy(scopeRef as any, {
     get(target, prop, receiver) {
-      const resolved = target.refs?.(prop);
+      const resolved = Reflect.get(target, prop, receiver);
       if (isRuntimeAtom(resolved)) {
         return reader(resolved);
       }
@@ -230,28 +249,26 @@ export type AtomOf<T> = T extends Writable<infer U> ? Writable<U> : T extends At
  */
 export type AtomValueOf<T> = T extends Atom<infer U> ? U : T extends Readable<infer U> ? U : never;
 
-type ScopeRefOf<T> =
-  T extends Scope<infer U> ? ScopeRefs<U>
+type ScopeAtomOf<T> =
+  T extends Scope<infer U> ? ScopeAtoms<U>
   : T extends Writable<infer U> ? Writable<U>
   : T extends Atom<infer U> ? Atom<U>
   : T extends Readable<infer U> ? Readable<U>
   : never;
 
 /**
- * Reactive backing surface for a scope. Public scope properties expose current
- * values; `scope.refs` exposes their writable/readable reactive counterparts.
- * Nested scopes are mirrored recursively, so `scope.refs.user.name` refers to
- * the atom backing `scope.user.name`.
+ * Atom graph available to scope expressions. Scope properties are the atoms;
+ * nested scopes retain their own atom graph.
  */
-export type ScopeRefs<T> = { [K in keyof T]: ScopeRefOf<T[K]> } &
-  (<K extends keyof T>(key: K) => ScopeRefOf<T[K]>);
+export type ScopeAtoms<T> = { [K in keyof T]: ScopeAtomOf<T[K]> } &
+  (<K extends keyof T>(key: K) => ScopeAtomOf<T[K]>);
 
-type DefinedScopeRefs<Shape extends Record<string, any>> = {
+type DefinedScopeAtoms<Shape extends Record<string, any>> = {
   [K in keyof Shape]: Shape[K] extends Record<string, any>
-    ? DefinedScopeRefs<Shape[K]>
+    ? DefinedScopeAtoms<Shape[K]>
     : Atom<Shape[K]>;
 } & (<K extends keyof Shape>(key: K) =>
-  Shape[K] extends Record<string, any> ? DefinedScopeRefs<Shape[K]> : Atom<Shape[K]>);
+  Shape[K] extends Record<string, any> ? DefinedScopeAtoms<Shape[K]> : Atom<Shape[K]>);
 
 type DefinedValue<Top extends Record<string, any>, T> =
   | T
@@ -260,7 +277,7 @@ type DefinedValue<Top extends Record<string, any>, T> =
   | DerivedExpr<T, Top>
   | PipeExpr<T, Top>
   | FlowExpr<T, Top>
-  | ((self: Top, refs: DefinedScopeRefs<Top>) => T | Atom<T>);
+  | ((self: Top, atoms: DefinedScopeAtoms<Top>) => T | Atom<T>);
 
 type ScopeValue<T> =
   | T extends ScopeReturn<any> ? T
@@ -331,7 +348,7 @@ type ScopeSetupCallback<TSelf, TScope, TResult extends ScopeSetupResult = ScopeS
 /**
  * Built-in atoms that every scope owns in addition to user-defined state.
  */
-export type ScopeReservedRefs = {
+export type ScopeReservedAtoms = {
   loading: Readable<boolean>;
   dirty: Readable<boolean>;
 };
@@ -353,9 +370,7 @@ type ReadonlyScopeConfigKeys<T extends Record<string, any>> = {
 type WritableScopeConfigKeys<T extends Record<string, any>> = Exclude<keyof T, ReadonlyScopeConfigKeys<T>>;
 type IfEquals<X, Y, A = X, B = never> =
   (<T>() => T extends X ? 1 : 2) extends
-  (<T>() => T extends Y ? 1 : 2)
-    ? A
-    : B;
+  (<T>() => T extends Y ? 1 : 2) ? A : B;
 type ReadonlyKeysOf<T extends Record<string, any>> = {
   [K in keyof T]-?: IfEquals<{ [Q in K]: T[K] }, { -readonly [Q in K]: T[K] }, never, K>;
 }[keyof T];
@@ -380,30 +395,45 @@ export type UnwrapScopeValuesFromConfig<T extends Record<string, any>> = Simplif
 }>;
 
 /**
- * Maps a scope state shape to the reactive ref graph used by expression helpers.
+ * Maps a scope state shape to the atom graph used by expression helpers.
  */
-export type ScopeRefGraph<T> = T extends Record<string, any>
-  ? { [K in keyof T]: T[K] extends Scope<infer U> ? ScopeRefGraph<U> : AtomOf<ScopeValue<T[K]>> }
+export type ScopeAtomGraph<T> = T extends Record<string, any>
+  ? { [K in keyof T]: T[K] extends Scope<infer U> ? ScopeAtomGraph<U> : AtomOf<ScopeValue<T[K]>> }
   : any;
 
 type ScopeRuntimeShape<T extends Record<string, any>> = Scope<T>;
-type ScopeValueShape<T extends Record<string, any>> = UnwrapScopeValues<T>;
-type ScopeConfigValueShape<T extends Record<string, any>> = UnwrapScopeValuesFromConfig<T>;
 type ScopeProxy<TRuntime extends Record<string, any>, TValues extends Record<string, any>> =
   ScopeRuntimeShape<TRuntime> &
   TValues &
   ScopeApi<TRuntime>;
+type ScopeValueShape<T extends Record<string, any>> = UnwrapScopeValues<T>;
+type ScopeConfigValueShape<T extends Record<string, any>> = UnwrapScopeValuesFromConfig<T>;
 type NormalizedScope<T extends Record<string, any>> = ScopeProxy<T, ScopeValueShape<T>>;
 type ConfiguredScope<T extends Record<string, any>> = ScopeProxy<ScopeRuntimeFromPublicShape<T>, T>;
 type ConfiguredScopeDefinition<T extends Record<string, any>> = ScopeProxy<ScopeOfConfig<T>, ScopeConfigValueShape<T>>;
 type ScopeReturnFromDefinition<T extends Record<string, any>> = ConfiguredScopeDefinition<T>;
 type ScopeWithSetup<TScope, TSetup extends ScopeSetupResult> = TScope & ScopeSetupReturn<TSetup>;
+type WritableScopeKey<T extends Record<string, any>> = {
+  [K in keyof T]-?: T[K] extends Writable<any> ? K : never;
+}[keyof T];
+type WritableScopeValue<T extends Record<string, any>, K extends keyof T> =
+  T[K] extends Writable<infer TValue> ? TValue : never;
 
 interface ScopeApi<T extends Record<string, any>> {
-  refs: ScopeRefs<T & ScopeReservedRefs>;
-  subscribeTo<K extends keyof (T & ScopeReservedRefs)>(
+  /** Returns the current value for a named scope atom. */
+  get<K extends keyof (T & ScopeReservedAtoms)>(
     key: K,
-    callback: (value: AtomValueOf<(T & ScopeReservedRefs)[K]>) => void
+  ): (T & ScopeReservedAtoms)[K] extends Scope<any>
+    ? (T & ScopeReservedAtoms)[K]
+    : AtomValueOf<(T & ScopeReservedAtoms)[K]>;
+  /** Pushes a value into a named writable scope atom. */
+  set<K extends WritableScopeKey<T>>(
+    key: K,
+    value: WritableScopeValue<T, K>,
+  ): void;
+  subscribeTo<K extends keyof (T & ScopeReservedAtoms)>(
+    key: K,
+    callback: (value: AtomValueOf<(T & ScopeReservedAtoms)[K]>) => void
   ): Subscription;
 }
 
@@ -429,7 +459,6 @@ export interface Scope<T extends Record<string, any> = Record<string, any>> {
   <A extends Atom<any>>(atom: A): ScopeAtomValue<A>;
   <A extends Atom<any>[]>(...atoms: A): { [K in keyof A]: ScopeAtomValue<A[K]> };
   type: "scope";
-  atoms: Set<Atom<any> | Scope>;
   cleanups: Set<() => void>;
   parent: Scope | RootScope | null;
   readonly loading: boolean;
@@ -441,6 +470,7 @@ export interface Scope<T extends Record<string, any> = Record<string, any>> {
   _exports: Set<string | symbol>;
   _disposed: boolean;
   _rawState: Record<string | symbol, any>;
+  _ownedAtoms: Set<Atom<any> | Scope>;
 }
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
@@ -540,41 +570,23 @@ function defineScopeStateProperty(
   const descriptor: PropertyDescriptor = {
     get() {
       const activeItem = read(key);
-      if (isRuntimeAtom(activeItem)) {
-        const formulaContext = getCurrentFormulaContext();
-        if (formulaContext) {
-          formulaContext.dependencies.add(activeItem as any);
-        }
-        return activeItem.value;
-      }
-
-      if (isAtomLike(activeItem)) {
-        return activeItem.value;
-      }
-
-      if (activeItem && (typeof activeItem === "object" || typeof activeItem === "function")) {
-        if (activeItem.type === "scope") return activeItem;
-      }
+      if (isRuntimeAtom(activeItem)) return get(activeItem);
+      if (isAtomLike(activeItem)) return activeItem.value;
       return activeItem;
     },
     enumerable: true,
     configurable: true,
   };
 
-  descriptor.set = (value: any) => {
-    const activeItem = read(key);
-    if (activeItem && (typeof activeItem === "object" || typeof activeItem === "function") && activeItem.type === "atom") {
-      if (typeof activeItem.next !== "function") {
-        throw new TypeError(`Cannot assign to read-only scope property: ${String(key)}`);
+  if (!isReadonlyScopeStateKey(key, scopeRef._rawState[key])) {
+    descriptor.set = (value: any) => {
+      const activeItem = read(key);
+      if (isRuntimeAtom(activeItem)) {
+        set(activeItem as Writable<any>, value);
+        return;
       }
-      activeItem.next(value);
-      return;
-    }
-    scopeRef._rawState[key] = value;
-  };
-
-  if (isReadonlyScopeStateKey(key, scopeRef._rawState[key])) {
-    delete descriptor.set;
+      scopeRef._rawState[key] = value;
+    };
   }
 
   Object.defineProperty(scopeRef, key, descriptor);
@@ -582,7 +594,7 @@ function defineScopeStateProperty(
 
 function defineScopeExtensionProperties(scopeRef: Scope, extensions: Record<string | symbol, any>): void {
   for (const key of Reflect.ownKeys(extensions)) {
-    if (key === "loading" || key === "dirty" || key === "refs" || key === "subscribeTo") {
+    if (key === "loading" || key === "dirty" || key === "get" || key === "set" || key === "subscribeTo") {
       throw new Error(`Cannot define reserved scope property: ${String(key)}`);
     }
 
@@ -612,14 +624,13 @@ function createScopeInternal<T extends Record<string, any>>(
 
   const scopeCallable = function (first: any, ...rest: any[]) {
     if (rest.length > 0) {
-      return [first, ...rest].map((item) => (isAtom(item) ? item.value : item));
+      return [first, ...rest].map((item) => (isAtomLike(item) ? get(item) : item));
     }
-    return isAtom(first) ? first.value : first;
+    return isAtomLike(first) ? get(first) : first;
   };
 
   const newScope = Object.assign(scopeCallable, {
     type: "scope",
-    atoms: new Set(),
     cleanups: new Set(),
     parent,
     loading: true,
@@ -637,10 +648,11 @@ function createScopeInternal<T extends Record<string, any>>(
     _exports: new Set(),
     _disposed: false,
     _rawState: {},
-  }) as Scope;
+    _ownedAtoms: new Set(),
+  }) as unknown as Scope;
 
   if (isScope(parent)) {
-    parent.atoms.add(newScope);
+    parent._ownedAtoms.add(newScope);
   }
 
   const previousScope = currentScope;
@@ -667,7 +679,7 @@ function createScopeInternal<T extends Record<string, any>>(
         if (evaluating.has(key)) throw new Error(`Circular dependency loop encountered on: ${String(key)}`);
         evaluating.add(key);
         try {
-          current = evaluateExprMarker(current, newScope, refsAccessor);
+          current = evaluateExprMarker(current, newScope, atomsAccessor);
           newScope._rawState[key] = current;
           defineScopeStateProperty(newScope, key, getScopeItem);
         } finally {
@@ -677,36 +689,39 @@ function createScopeInternal<T extends Record<string, any>>(
       return current;
     };
 
-    const getRefItem = (key: string | symbol) => {
-      const item = getScopeItem(key);
-      if ((key === "loading" || key === "dirty") && isAtomLike(item)) {
-        return asReadable(item as Atom<any>);
-      }
-      if (isScope(item)) {
-        return (item as any).refs;
-      }
-      return item;
-    };
-
-    const refsAccessor: any = new Proxy(
-      (key: string | symbol) => getRefItem(key),
-      {
-        get(target, prop, receiver) {
-          if (
-            prop === "loading" ||
-            prop === "dirty" ||
-            newScope._exports.has(prop) ||
-            Object.prototype.hasOwnProperty.call(newScope._rawState, prop)
-          ) {
-            return getRefItem(prop);
-          }
-          return Reflect.get(target, prop, receiver);
-        },
+    const getAtomItem = (key: string | symbol) => getScopeItem(key);
+    const atomsAccessor: any = new Proxy((key: string | symbol) => getAtomItem(key), {
+      get(target, prop, receiver) {
+        if (prop === "loading" || prop === "dirty" || newScope._exports.has(prop) || Object.prototype.hasOwnProperty.call(newScope._rawState, prop)) {
+          return getAtomItem(prop);
+        }
+        return Reflect.get(target, prop, receiver);
       },
-    );
+    });
 
     Object.defineProperties(newScope, {
-      refs: { value: refsAccessor, enumerable: false, configurable: true, writable: false },
+      get: {
+        value: (key: string | symbol) => {
+          const item = getScopeItem(key);
+          if (isAtomLike(item)) return get(item);
+          return item;
+        },
+        enumerable: false,
+        configurable: true,
+        writable: false,
+      },
+      set: {
+        value: (key: string | symbol, value: any) => {
+          const item = getScopeItem(key);
+          if (!isRuntimeAtom(item) || typeof (item as Writable<any>).next !== "function") {
+            throw new TypeError(`Cannot set non-writable scope atom: ${String(key)}`);
+          }
+          set(item as Writable<any>, value);
+        },
+        enumerable: false,
+        configurable: true,
+        writable: false,
+      },
       subscribeTo: {
         value: (key: string | symbol, callback: Function) => {
           const node = getScopeItem(key);
@@ -729,7 +744,7 @@ function createScopeInternal<T extends Record<string, any>>(
 
     if (dataState && typeof dataState === "object") {
       for (const key of Reflect.ownKeys(dataState)) {
-        if (key === "loading" || key === "dirty" || key === "refs" || key === "subscribeTo") {
+        if (key === "loading" || key === "dirty" || key === "get" || key === "set" || key === "subscribeTo") {
           console.warn(`[streamix] scope(): '${String(key)}' key is reserved and was ignored.`);
           continue;
         }
@@ -943,17 +958,17 @@ export function disposeScope(sc: Scope): void {
   sc._dirtyCount = 0;
 
   if (isScope(sc.parent)) {
-    sc.parent.atoms.delete(sc);
+    sc.parent._ownedAtoms.delete(sc);
   }
 
-  for (const activeItem of sc.atoms) {
+  for (const activeItem of sc._ownedAtoms) {
     try {
       (activeItem as any).dispose();
     } catch (err) {
       console.error("[streamix] atom disposal threw during scope disposal:", err);
     }
   }
-  sc.atoms.clear();
+  sc._ownedAtoms.clear();
 }
 
 /* ── Registry Linkage Handlers ───────────────────────────────────────────── */
@@ -965,7 +980,7 @@ export function registerWithCurrentScope(atomInstance: Atom<any>): void {
   if (!currentScope) return;
 
   const targetContext = currentScope;
-  targetContext.atoms.add(atomInstance);
+  targetContext._ownedAtoms.add(atomInstance);
   atomScopeRegistry.set(atomInstance, targetContext);
 
   updateScopeHierarchy(targetContext, { pending: 1, dirty: atomInstance.dirty ? 1 : 0 });
@@ -973,7 +988,7 @@ export function registerWithCurrentScope(atomInstance: Atom<any>): void {
   const disposers = (atomInstance as any)._onDispose;
   if (disposers instanceof Set) {
     const earlyDetachmentHook = () => {
-      targetContext.atoms.delete(atomInstance);
+      targetContext._ownedAtoms.delete(atomInstance);
       if (!targetContext._disposed) {
         updateScopeHierarchy(targetContext, {
           pending: emittedAtomsRegistry.has(atomInstance) ? 0 : -1,
