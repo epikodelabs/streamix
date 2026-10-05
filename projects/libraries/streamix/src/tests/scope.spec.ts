@@ -33,6 +33,18 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('rejects async factories', () => {
+      expect(() => scope((async () => ({ count: 0 })) as any))
+        .toThrowError(/factories must return state synchronously/i);
+    });
+
+    it('rejects reserved lifecycle keys', () => {
+      for (const key of ['type', 'parent', 'dispose', 'snapshot']) {
+        expect(() => scope({ [key]: 'unsafe' } as any))
+          .toThrowError(/reserved property/i);
+      }
+    });
+
     it('should expose value properties and typed get/set helpers', () => {
       const s = scope({
         count: 1,

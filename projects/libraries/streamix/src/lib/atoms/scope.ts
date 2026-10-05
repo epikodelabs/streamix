@@ -31,6 +31,12 @@ import type { Subscription } from "./subscription";
 
 const DYNAMIC_EXPR = Symbol("streamix.dynamicExpr");
 const METHOD = Symbol("streamix.method");
+const RESERVED_SCOPE_KEYS = new Set<PropertyKey>([
+  "type", "parent", "cleanups", "snapshot", "dispose",
+  "loading", "dirty", "get", "set", "subscribeTo",
+  "_pendingCount", "_dirtyCount", "_exports", "_disposed",
+  "_rawState", "_ownedAtoms",
+]);
 
 interface DynamicExpr<T = any, Self = any> {
   [DYNAMIC_EXPR]: true;
@@ -569,10 +575,7 @@ function defineScopeStateProperty(
 ): void {
   const descriptor: PropertyDescriptor = {
     get() {
-      const activeItem = read(key);
-      if (isRuntimeAtom(activeItem)) return get(activeItem);
-      if (isAtomLike(activeItem)) return activeItem.value;
-      return activeItem;
+      return read(key);
     },
     enumerable: true,
     configurable: true,
@@ -582,10 +585,13 @@ function defineScopeStateProperty(
     descriptor.set = (value: any) => {
       const activeItem = read(key);
       if (isRuntimeAtom(activeItem)) {
-        set(activeItem as Writable<any>, value);
+        if (typeof (activeItem as Writable<any>).next !== "function") {
+          throw new TypeError(`Cannot assign to read-only scope atom: ${String(key)}`);
+        }
+        (activeItem as Writable<any>).next(value);
         return;
       }
-      scopeRef._rawState[key] = value;
+      throw new TypeError(`Cannot assign to non-atom scope member: ${String(key)}`);
     };
   }
 
@@ -594,7 +600,7 @@ function defineScopeStateProperty(
 
 function defineScopeExtensionProperties(scopeRef: Scope, extensions: Record<string | symbol, any>): void {
   for (const key of Reflect.ownKeys(extensions)) {
-    if (key === "loading" || key === "dirty" || key === "get" || key === "set" || key === "subscribeTo") {
+    if (RESERVED_SCOPE_KEYS.has(key)) {
       throw new Error(`Cannot define reserved scope property: ${String(key)}`);
     }
 
@@ -744,9 +750,8 @@ function createScopeInternal<T extends Record<string, any>>(
 
     if (dataState && typeof dataState === "object") {
       for (const key of Reflect.ownKeys(dataState)) {
-        if (key === "loading" || key === "dirty" || key === "get" || key === "set" || key === "subscribeTo") {
-          console.warn(`[streamix] scope(): '${String(key)}' key is reserved and was ignored.`);
-          continue;
+        if (RESERVED_SCOPE_KEYS.has(key)) {
+          throw new Error(`scope() cannot define reserved property: ${String(key)}`);
         }
 
         newScope._rawState[key] = dataState[key];
@@ -881,6 +886,12 @@ export function scope(
   return createScopeInternal(
     function (this: any) {
       const source = isFactory ? definition.call(this) : definition;
+      if (source && typeof source.then === "function") {
+        throw new TypeError(
+          "scope() factories must return state synchronously. " +
+          "Use flow() or flowExpr() for asynchronous work.",
+        );
+      }
       const current = getCurrentScope() as Scope;
       return materializeState(current, source, new WeakMap());
     },

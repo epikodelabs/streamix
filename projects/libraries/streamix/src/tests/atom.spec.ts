@@ -47,6 +47,7 @@ describe('Atom System', () => {
       a.dispose();
     });
 
+
     it('should replay an explicit undefined initial value', () => {
       const a = atom<number | undefined>(undefined);
       const values: Array<number | undefined> = [];

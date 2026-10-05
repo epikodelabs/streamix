@@ -280,7 +280,13 @@ class DefaultScheduler implements Scheduler {
         if (node.queued && !node.flushing) {
           node.queued = false;
           this.queuedCount--;
-          node.flush();
+          try {
+            node.flush();
+          } catch (error) {
+            // A user formula must not strand later queued atoms with their
+            // `queued` flag set. Report the failure and continue draining.
+            console.error("streamix scheduler flush failed.", error);
+          }
         }
         node = this.heapPop();
       }
@@ -1378,7 +1384,7 @@ export function atom<T = any>(
     previous = initialValue as T;
   } else {
     current = undefined as T;
-    previous = undefined as T;
+    previous = current;
   }
   let disposed = false;
   let lastNotified = current;
