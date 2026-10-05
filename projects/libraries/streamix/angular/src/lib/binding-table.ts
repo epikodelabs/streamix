@@ -131,16 +131,7 @@ export class SxBindingTable {
 
     write(initial);
 
-    this.subscriptions[slot] = sources.map(source => {
-      let subscribing = true;
-      const subscription = source.subscribe(() => {
-        if (!this.destroyed && !subscribing) {
-          this.markSlotDirty(slot);
-        }
-      });
-      subscribing = false;
-      return subscription;
-    });
+    this.subscriptions[slot] = this.subscribeForFlush(slot, sources);
   }
 
   /**
@@ -159,34 +150,14 @@ export class SxBindingTable {
     this.unbind(slot);
 
     this.invalidators[slot] = invalidate;
-    this.subscriptions[slot] = sources.map(source => {
-      let subscribing = true;
-      const subscription = source.subscribe(() => {
-        if (!this.destroyed && !subscribing) {
-          this.markSlotDirty(slot);
-        }
-      });
-      subscribing = false;
-      return subscription;
-    });
+    this.subscriptions[slot] = this.subscribeForFlush(slot, sources);
   }
 
   /** Removes one slot binding without destroying the table. */
   unbind(slot: BindingSlot): void {
     this.assertSlot(slot);
-
-    for (const subscription of this.subscriptions[slot] ?? []) {
-      subscription();
-    }
-    this.subscriptions[slot] = undefined;
-
-    this.writers[slot] = undefined;
-    this.equals[slot] = undefined;
-    this.readers[slot] = undefined;
-    this.invalidators[slot] = undefined;
-    this.rendered[slot] = undefined;
-    this.pending[slot] = undefined;
-    this.dirtyFlags[slot] = 0;
+    this.unsubscribeSlot(slot);
+    this.clearSlot(slot);
   }
 
   /** Flushes this table immediately. Primarily useful for tests/benchmarks. */
@@ -208,18 +179,8 @@ export class SxBindingTable {
     this.scheduled = undefined;
 
     for (let slot = 0; slot < this.size; slot += 1) {
-      for (const subscription of this.subscriptions[slot] ?? []) {
-        subscription();
-      }
-      this.subscriptions[slot] = undefined;
-
-      this.writers[slot] = undefined;
-      this.equals[slot] = undefined;
-      this.readers[slot] = undefined;
-      this.invalidators[slot] = undefined;
-      this.rendered[slot] = undefined;
-      this.pending[slot] = undefined;
-      this.dirtyFlags[slot] = 0;
+      this.unsubscribeSlot(slot);
+      this.clearSlot(slot);
     }
 
     this.dirtySlots.length = 0;
@@ -244,6 +205,45 @@ export class SxBindingTable {
     }
 
     this.scheduled.markDirty();
+  }
+
+  /**
+   * Subscribes a slot to sources that only need to trigger a coalesced flush.
+   * A DependencySource may synchronously emit its current value on subscribe;
+   * that initial delivery belongs to the synchronous setup above, not a
+   * renderer frame, so it is deliberately ignored.
+   */
+  private subscribeForFlush(
+    slot: BindingSlot,
+    sources: readonly DependencySource<unknown>[],
+  ): Subscription[] {
+    return sources.map(source => {
+      let subscribing = true;
+      const subscription = source.subscribe(() => {
+        if (!this.destroyed && !subscribing) {
+          this.markSlotDirty(slot);
+        }
+      });
+      subscribing = false;
+      return subscription;
+    });
+  }
+
+  private unsubscribeSlot(slot: BindingSlot): void {
+    for (const subscription of this.subscriptions[slot] ?? []) {
+      subscription();
+    }
+    this.subscriptions[slot] = undefined;
+  }
+
+  private clearSlot(slot: BindingSlot): void {
+    this.writers[slot] = undefined;
+    this.equals[slot] = undefined;
+    this.readers[slot] = undefined;
+    this.invalidators[slot] = undefined;
+    this.rendered[slot] = undefined;
+    this.pending[slot] = undefined;
+    this.dirtyFlags[slot] = 0;
   }
 
   private flush(): void {
@@ -469,4 +469,3 @@ export function ɵsxStyleMap(
 ): void {
   table.bind(slot, source, writeStyleMap(target));
 }
-
