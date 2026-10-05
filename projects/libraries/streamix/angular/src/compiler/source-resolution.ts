@@ -10,7 +10,7 @@ export type SxDependencySourceResolver = (path: string) => boolean;
  *
  * Examples:
  * - `count` -> `count` for a standalone atom/readable.
- * - `model.count` -> `model.refs.count` for a value-first Scope member.
+ * - `model.count` -> `model.count` for an atom-first Scope member.
  */
 export type SxReactiveSourceResolver = (path: string) => string | undefined;
 
@@ -44,8 +44,7 @@ export function createReactiveSourcePathResolver(
 
 /**
  * Creates scope-member mappings from exact value paths discovered by an
- * upstream type checker. Nested members follow the recursive `refs` mirror:
- * `model.user.name` -> `model.refs.user.name`.
+ * upstream type checker. Scope paths already identify their atom source.
  */
 export function createScopeValuePathResolver(
   scopes: Readonly<Record<string, readonly string[]>>,
@@ -54,7 +53,7 @@ export function createScopeValuePathResolver(
 
   for (const [scopePath, members] of Object.entries(scopes)) {
     for (const member of members) {
-      mappings[`${scopePath}.${member}`] = `${scopePath}.refs.${member}`;
+      mappings[`${scopePath}.${member}`] = `${scopePath}.${member}`;
     }
   }
 

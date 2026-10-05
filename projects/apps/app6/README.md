@@ -25,5 +25,6 @@ the value-first `model` scope:
 readonly model = scope({ count: 0, /* derived values */ });
 ```
 
-The generated virtual component resolves `model.count` through
-`model.refs.count` without exposing refs in authored templates.
+Scope-backed template reads use the typed keyed API:
+`model.get('count')`. Reactive updates are registered with
+`model.subscribeTo('count', callback)`.

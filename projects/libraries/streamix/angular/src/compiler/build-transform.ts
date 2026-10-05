@@ -25,7 +25,7 @@ export interface SxBuildTransformResult {
  *
  * `options.resolveReactiveSource` should be backed by the component TypeScript
  * checker when source-transparent templates are enabled. It may map a value-first
- * Scope path such as `model.count` to `model.refs.count`.
+ * Scope path such as `model.count` to the atom at `model.count`.
  */
 export function transformAngularComponentTemplate(
   template: string,
