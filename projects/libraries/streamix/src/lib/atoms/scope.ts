@@ -38,6 +38,13 @@ const RESERVED_SCOPE_KEYS = new Set<PropertyKey>([
   "_rawState", "_ownedAtoms",
 ]);
 
+/**
+ * Built-in atoms every scope owns. A shorthand definition for one of them is
+ * dropped with a warning — the scope keeps its own atom — while a setup
+ * extension using the name is rejected outright.
+ */
+const RESERVED_ATOM_KEYS = new Set<PropertyKey>(["loading", "dirty"]);
+
 interface DynamicExpr<T = any, Self = any> {
   [DYNAMIC_EXPR]: true;
   fn: (self: Self, atoms?: any) => Atom<T> | T;
@@ -539,6 +546,13 @@ function materializeState(
   const rawState: Record<string | symbol, any> = {};
   for (const key of Reflect.ownKeys(input)) {
     const item = input[key];
+    if (RESERVED_ATOM_KEYS.has(key)) {
+      console.warn(
+        `[streamix] scope() ignores state key "${String(key)}": every scope owns a built-in ` +
+        `${String(key)} atom, and the definition cannot replace it.`,
+      );
+      continue;
+    }
     if (isExprMarkerOrDynamic(item)) {
       rawState[key] = item;
     } else if (isMethod(item)) {
@@ -599,12 +613,12 @@ function defineScopeStateProperty(
 
 function defineScopeExtensionProperties(scopeRef: Scope, extensions: Record<string | symbol, any>): void {
   for (const key of Reflect.ownKeys(extensions)) {
-    if (RESERVED_SCOPE_KEYS.has(key)) {
-      throw new Error(`Cannot define reserved scope property: ${String(key)}`);
-    }
-
     if (scopeRef._exports.has(key)) {
       throw new Error(`Cannot define scope extension over existing state key: ${String(key)}`);
+    }
+
+    if (RESERVED_ATOM_KEYS.has(key)) {
+      throw new Error(`Cannot define reserved scope property: ${String(key)}`);
     }
 
     if (Object.prototype.hasOwnProperty.call(scopeRef, key)) {
