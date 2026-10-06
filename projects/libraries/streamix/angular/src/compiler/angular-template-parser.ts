@@ -25,10 +25,9 @@ import {
   type SxReactiveSourceResolver,
 } from './source-resolution';
 import {
-  angularExpressionSpans,
-  componentPathsInExpression,
-} from './expression-spans';
-import { MARKER_ATTRIBUTE } from './structural-lowering';
+  MARKER_ATTRIBUTE,
+  angularOwnedReadError,
+} from './structural-lowering';
 
 export type { SxSourceSpan } from './binding-plan';
 
@@ -258,57 +257,11 @@ function walkStaticChildren(
       }
     }
 
-    if (!isInertText(node)) {
-      assertAngularOwnedRegion(node, state);
-    }
   }
 }
 
-/**
- * Angular evaluates the expressions inside control-flow blocks, `*ngIf`/
- * `*ngFor` templates, deferred blocks, directive inputs it binds itself, and
- * hybrid interpolations. The compiled view cannot keep those in sync without
- * change detection, so an atom read there is rejected instead of rendering a
- * value that never updates.
- */
-function assertAngularOwnedRegion(node: TmplAstNode, state: WalkState): void {
-  const text = state.template.slice(
-    spanStart(node.sourceSpan),
-    spanEnd(node.sourceSpan),
-  );
 
-  for (const span of angularExpressionSpans(text)) {
-    for (const path of componentPathsInExpression(span.text)) {
-      const source = state.resolveReactiveSource?.(path);
 
-      if (source) {
-        throw new Error(angularOwnedReadError(path));
-      }
-    }
-  }
-}
-
-/** Rejects an atom read from a template position Angular evaluates itself. */
-function angularOwnedReadError(path: string): string {
-  return (
-    `Streamix cannot bind ${JSON.stringify(path)} here: Angular evaluates this ` +
-    'template position itself, so the compiled view could render it once and ' +
-    'never update it. Move the read into a compiler-compilable @if/@for body, ' +
-    'or read the value into a plain component field and bind that.'
-  );
-}
-
-function spanStart(span: { readonly start: unknown }): number {
-  return typeof span.start === 'number'
-    ? span.start
-    : (span.start as { offset: number }).offset;
-}
-
-function spanEnd(span: { readonly end: unknown }): number {
-  return typeof span.end === 'number'
-    ? span.end
-    : (span.end as { offset: number }).offset;
-}
 
 
 /**

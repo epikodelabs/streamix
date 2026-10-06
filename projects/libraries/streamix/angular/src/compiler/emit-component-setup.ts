@@ -327,7 +327,9 @@ function blockBindingLines(
     `${pad}const blockTable = createBindingTable(${compiled.bindings.length});`,
     ...compiled.bindings.map(
       (binding, slot) =>
-        `${pad}ɵsxTextNode(blockTable, ${slot}, ${binding.node}, ctx.${binding.source});`,
+        // Block bodies build their own DOM, so the binding targets the text
+        // node directly instead of Angular's rendered interpolation node.
+        `${pad}ɵsxText(blockTable, ${slot}, ${binding.node}, ctx.${binding.source});`,
     ),
   ];
 }

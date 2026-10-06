@@ -93,11 +93,7 @@ export function compileSxBlockTemplate(
   };
 
   for (const node of parsed.nodes) {
-    const emitted = emitNode(node, state);
-
-    if (emitted) {
-      state.roots.push(emitted);
-    }
+    state.roots.push(...emitNode(node, state));
   }
 
   return {
@@ -112,21 +108,19 @@ export function compileSxBlockTemplate(
 function emitNode(
   node: TmplAstNode,
   state: EmitState,
-  parent?: string,
-): string | undefined {
+): readonly string[] {
   if (node instanceof TmplAstElement) {
-    return emitElement(node, state);
+    return [emitElement(node, state)];
   }
 
   if (node instanceof TmplAstText) {
-    return emitStaticText(node.value, state);
+    return [emitStaticText(node.value, state)];
   }
 
   if (node instanceof TmplAstBoundText) {
     return emitBoundText(
       sourceSlice(state.template, node.sourceSpan.start.offset, node.sourceSpan.end.offset),
       state,
-      parent,
     );
   }
 
@@ -160,9 +154,7 @@ function emitElement(
   }
 
   for (const child of element.children) {
-    const childVariable = emitNode(child, state, variable);
-
-    if (childVariable) {
+    for (const childVariable of emitNode(child, state)) {
       state.create.push(`${variable}.appendChild(${childVariable});`);
     }
   }
@@ -181,97 +173,68 @@ function emitStaticText(
   return variable;
 }
 
+/**
+ * One text node per interpolation part. Splitting lets a single text node mix
+ * element properties as well as text runs and static text:
+ *
+ * - a part that resolves to an atom becomes its own binding-table slot, so it
+ *   updates when the atom emits;
+ * - a part that is a loop-local (`item.name`, `$index`) is written by the
+ *   compiled update the collection runtime re-runs;
+ * - literal runs become static text nodes.
+ */
 function emitBoundText(
   raw: string,
   state: EmitState,
-  parent?: string,
-): string {
-  const variable = nextVariable(state, 'text');
+): readonly string[] {
   const parts = parseInterpolation(raw);
+  const variables: string[] = [];
 
-  state.create.push(
-    `const ${variable} = ${state.document}.createTextNode("");`,
-  );
-
-  if (state.resolveReactiveSource) {
-    const source = resolveReactiveParts(parts, state);
-
-    if (source) {
-      if (!parent) {
-        throw new Error(
-          'Reactive sx structural blocks require interpolations to live inside an element.',
-        );
+  for (const part of parts) {
+    if (part.kind === 'text') {
+      if (!part.value) {
+        continue;
       }
 
-      // `ɵsxTextNode` binds the element's own interpolation text node.
-      state.bindings.push({ node: parent, source });
-      state.bindingCount += 1;
-      return variable;
+      const variable = nextVariable(state, 'text');
+      state.create.push(
+        `const ${variable} = ${state.document}.createTextNode(${JSON.stringify(part.value)});`,
+      );
+      variables.push(variable);
+      continue;
     }
 
-    // Loop-local read: refreshed whenever the surrounding block re-renders,
-    // because the collection runtime calls the compiled update with the new
-    // item/index context.
-    if (!state.allowLocals) {
+    const variable = nextVariable(state, 'text');
+    state.create.push(
+      `const ${variable} = ${state.document}.createTextNode("");`,
+    );
+    variables.push(variable);
+
+    const source = state.resolveReactiveSource?.(part.value);
+
+    if (source && state.resolveReactiveSource) {
+      state.bindings.push({ node: variable, source });
+      state.bindingCount += 1;
+      continue;
+    }
+
+    if (state.resolveReactiveSource && !state.allowLocals) {
       throw new Error(
-        'Reactive sx structural blocks support exactly one source-backed ' +
-        'interpolation per text node.',
+        `Unsupported sx structural interpolation: ${JSON.stringify(part.value)}. ` +
+        'Only atom reads and loop-local values are supported in a compiled block body; ' +
+        'an expression that mixes both cannot be compiled.',
       );
     }
 
-    const localExpression = parts
-      .map(part =>
-        part.kind === 'text'
-          ? JSON.stringify(part.value)
-          : `ɵsxString(ɵsxReadLocal(context, ${JSON.stringify(part.value)}))`,
-      )
-      .join(' + ');
-
     state.updates.push(
-      `${variable}.data = ${localExpression || '""'};`,
+      `${variable}.data = ɵsxString(ɵsxReadLocal(context, ${JSON.stringify(part.value)}));`,
     );
     state.bindingCount += 1;
-    return variable;
   }
 
-  const expression = parts
-    .map(part =>
-      part.kind === 'text'
-        ? JSON.stringify(part.value)
-        : `ɵsxString(ɵsxReadLocal(context, ${JSON.stringify(part.value)}))`,
-    )
-    .join(' + ');
-
-  state.updates.push(
-    `${variable}.data = ${expression || '""'};`,
-  );
-
-  state.bindingCount += 1;
-  return variable;
+  return variables;
 }
 
-/**
- * Reactive mode requires every interpolation part to be a component path that
- * the build adapter proved is an atom; anything else would silently go stale
- * without change detection, so it fails compilation instead.
- */
-function resolveReactiveParts(
-  parts: readonly InterpolationPart[],
-  state: EmitState,
-): string | undefined {
-  const expressions = parts.filter(
-    (part): part is Extract<InterpolationPart, { kind: 'expression' }> =>
-      part.kind === 'expression',
-  );
-
-  if (expressions.length !== 1) {
-    throw new Error(
-      'Reactive sx structural blocks support at most one interpolation per text node.',
-    );
-  }
-
-  return state.resolveReactiveSource!(expressions[0].value);
-}
 
 function nextVariable(
   state: EmitState,

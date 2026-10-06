@@ -102,6 +102,14 @@ export function componentPathsInExpression(expression: string): readonly string[
     if (match.index == null || isInsideString(expression, match.index)) {
       continue;
     }
+
+    // `$index`, `$count`, `$implicit`, … are Angular template variables. The
+    // word boundary above starts the match after the `$`, so an unguarded read
+    // would look like a component field named `count`.
+    if (match.index > 0 && expression[match.index - 1] === '$') {
+      continue;
+    }
+
     paths.push(match[0]);
   }
 

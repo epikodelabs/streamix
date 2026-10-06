@@ -4,6 +4,7 @@ import {
 import type { ParseSxTemplateOptions } from './angular-template-parser';
 import type { SxBindingPlan } from './binding-plan';
 import {
+  angularOwnedReadError,
   lowerStructuralBlocks,
 } from './structural-lowering';
 import {
@@ -51,6 +52,10 @@ export function transformAngularComponentTemplate(
     templateUrl,
     options.resolveReactiveSource,
   );
+  if (lowering.rejected.length > 0) {
+    throw new Error(angularOwnedReadError(lowering.rejected[0]));
+  }
+
   const transformed = transformSxTemplate(
     lowering.template,
     templateUrl,

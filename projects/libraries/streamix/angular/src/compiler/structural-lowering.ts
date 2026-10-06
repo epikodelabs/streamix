@@ -3,6 +3,7 @@ import {
   TmplAstForLoopBlock,
   TmplAstIfBlock,
   TmplAstSwitchBlock,
+  TmplAstTemplate,
   parseTemplate,
   type AST,
   type TmplAstNode,
@@ -12,6 +13,10 @@ import {
   compileSxBlockTemplate,
   type SxCompiledBlockTemplate,
 } from './block-template-compiler';
+import {
+  angularExpressionSpans,
+  componentPathsInExpression,
+} from './expression-spans';
 import type { SxReactiveSourceResolver } from './source-resolution';
 import { extractComponentSourcePath } from './text-expression';
 
@@ -57,6 +62,21 @@ export interface SxStructuralLowering {
   readonly template: string;
   readonly blocks: readonly SxLoweredBlock[];
   readonly sourceFields: readonly string[];
+  /**
+   * Atom reads in template regions the compiler could not take over. Angular
+   * would render them once and never update them, so the build rejects them.
+   */
+  readonly rejected: readonly string[];
+}
+
+/** Rejects an atom read from a template position Angular evaluates itself. */
+export function angularOwnedReadError(path: string): string {
+  return (
+    `Streamix cannot bind ${JSON.stringify(path)} here: Angular evaluates this ` +
+    'template position itself, so the compiled view could render it once and ' +
+    'never update it. Move the read into a compiler-compilable @if/@for body, ' +
+    'or read the value into a plain component field and bind that.'
+  );
 }
 
 /** Static attribute identifying a lowered structural block marker. */
@@ -77,8 +97,11 @@ export function lowerStructuralBlocks(
   templateUrl: string,
   resolveReactiveSource?: SxReactiveSourceResolver,
 ): SxStructuralLowering {
-  if (!resolveReactiveSource || !/@(?:if|for)\b/.test(template)) {
-    return { template, blocks: [], sourceFields: [] };
+  if (
+    !resolveReactiveSource ||
+    !/(?:@(?:if|for|switch)\b|\*ng(?:If|For)\b)/.test(template)
+  ) {
+    return { template, blocks: [], sourceFields: [], rejected: [] };
   }
 
   let parsed;
@@ -88,22 +111,23 @@ export function lowerStructuralBlocks(
       preserveWhitespaces: true,
     });
   } catch {
-    return { template, blocks: [], sourceFields: [] };
+    return { template, blocks: [], sourceFields: [], rejected: [] };
   }
 
   if (parsed.errors?.length) {
-    return { template, blocks: [], sourceFields: [] };
+    return { template, blocks: [], sourceFields: [], rejected: [] };
   }
 
   const blocks = collectStaticBlocks(parsed.nodes);
 
   if (blocks.length === 0) {
-    return { template, blocks: [], sourceFields: [] };
+    return { template, blocks: [], sourceFields: [], rejected: [] };
   }
 
   const lowered: SxLoweredBlock[] = [];
   const edits: { start: number; end: number; replacement: string }[] = [];
   const sourceFields: string[] = [];
+  const owned = new Set<TmplAstNode>();
 
   for (const block of blocks) {
     const entry = block instanceof TmplAstIfBlock
@@ -120,6 +144,13 @@ export function lowerStructuralBlocks(
             resolveReactiveSource,
             lowered.length,
           )
+        : block instanceof TmplAstTemplate
+          ? tryLowerTemplateBlock(
+              block,
+              template,
+              resolveReactiveSource,
+              lowered.length,
+            )
         : tryLowerCollectionBlock(
             block,
             template,
@@ -140,19 +171,92 @@ export function lowerStructuralBlocks(
       // server rendering.
       replacement: `<span ${MARKER_ATTRIBUTE}="${entry.marker}"></span>`,
     });
+    owned.add(block);
     lowered.push(entry);
     sourceFields.push(...entry.fields);
   }
 
+  const rejected = collectRejectedReads(
+    template,
+    parsed.nodes,
+    owned,
+    resolveReactiveSource,
+  );
+
   if (lowered.length === 0) {
-    return { template, blocks: [], sourceFields: [] };
+    return { template, blocks: [], sourceFields: [], rejected };
   }
 
   return {
     template: applyEdits(template, edits),
     blocks: lowered,
     sourceFields: [...new Set(sourceFields)],
+    rejected,
   };
+}
+
+/**
+ * Atom reads inside dynamic regions the lowering pass left to Angular. Their
+ * source text is scanned with the same expression-span rules the compiler uses
+ * elsewhere, so static attributes and prose are never mistaken for reads.
+ */
+function collectRejectedReads(
+  template: string,
+  nodes: readonly TmplAstNode[],
+  owned: ReadonlySet<TmplAstNode>,
+  resolveReactiveSource: SxReactiveSourceResolver,
+): readonly string[] {
+  const rejected: string[] = [];
+  const seen = new Set<string>();
+
+  const visit = (list: readonly TmplAstNode[]): void => {
+    for (const node of list) {
+      if (node instanceof TmplAstElement) {
+        visit(node.children);
+        continue;
+      }
+
+      if (node instanceof TmplAstIfBlock ||
+          node instanceof TmplAstForLoopBlock ||
+          node instanceof TmplAstSwitchBlock ||
+          node instanceof TmplAstTemplate) {
+        if (!owned.has(node)) {
+          collectRegionReads(node, template, resolveReactiveSource, rejected, seen);
+        }
+        continue;
+      }
+
+      const children = (node as { children?: readonly TmplAstNode[] }).children;
+
+      if (children) {
+        visit(children);
+      }
+    }
+  };
+
+  visit(nodes);
+  return rejected;
+}
+
+function collectRegionReads(
+  node: TmplAstNode,
+  template: string,
+  resolveReactiveSource: SxReactiveSourceResolver,
+  rejected: string[],
+  seen: Set<string>,
+): void {
+  const text = template.slice(spanStart(node.sourceSpan), spanEnd(node.sourceSpan));
+
+  for (const span of angularExpressionSpans(text)) {
+    for (const path of componentPathsInExpression(span.text)) {
+      if (seen.has(path) || !resolveReactiveSource(path)) {
+        continue;
+      }
+
+      seen.add(path);
+      rejected.push(path);
+    }
+  }
 }
 
 function applyEdits(
@@ -172,15 +276,20 @@ function applyEdits(
   return transformed;
 }
 
+/** A lowerable block: block syntax or a `*ngIf`/`*ngFor` template. */
+type SxLowerableBlock =
+  | TmplAstIfBlock
+  | TmplAstForLoopBlock
+  | TmplAstSwitchBlock
+  | TmplAstTemplate;
+
 /**
- * Collects `@if`/`@for` blocks whose ancestry is static elements only. Blocks
- * nested in another block or in a dynamic region are skipped: their DOM
- * position is not a fixed host path, so the compiled block cannot address it.
+ * Collects blocks whose ancestry is static elements only. Blocks nested in
+ * another block or in a dynamic region are skipped: their DOM position is not a
+ * fixed host path, so the compiled block cannot address it.
  */
-function collectStaticBlocks(
-  nodes: readonly TmplAstNode[],
-): (TmplAstIfBlock | TmplAstForLoopBlock | TmplAstSwitchBlock)[] {
-  const blocks: (TmplAstIfBlock | TmplAstForLoopBlock | TmplAstSwitchBlock)[] = [];
+function collectStaticBlocks(nodes: readonly TmplAstNode[]): SxLowerableBlock[] {
+  const blocks: SxLowerableBlock[] = [];
 
   for (const node of nodes) {
     if (
@@ -192,12 +301,176 @@ function collectStaticBlocks(
       continue;
     }
 
+    if (node instanceof TmplAstTemplate) {
+      if (isLowerableTemplate(node)) {
+        blocks.push(node);
+      }
+      continue;
+    }
+
     if (node instanceof TmplAstElement) {
       blocks.push(...collectStaticBlocks(node.children));
     }
   }
 
   return blocks;
+}
+
+/**
+ * Only the simple structural forms are lowerable: a single element child, one
+ * bound input, and — for `*ngFor` — a single loop variable with no `as`
+ * aliases. Anything richer keeps Angular's own rendering.
+ *
+ * `*ngIf`/`*ngFor` desugar to `<ng-template [ngIf]>`/`[ngForOf]`, so the
+ * expression lives on a bound input rather than a template attribute.
+ */
+function isLowerableTemplate(node: TmplAstTemplate): boolean {
+  if (node.children.length !== 1 || !(node.children[0] instanceof TmplAstElement)) {
+    return false;
+  }
+
+  const names = node.templateAttrs.map(attribute => attribute.name);
+
+  if (names.length === 1 && names[0] === 'ngIf') {
+    return true;
+  }
+
+  return (
+    node.variables.length === 1 &&
+    names.includes('ngForOf') &&
+    names.every(name =>
+      name === 'ngFor' || name === 'ngForOf' || name === 'ngForTrackBy',
+    )
+  );
+}
+
+/**
+ * Expression text of a desugared structural attribute. Angular stores the
+ * parsed expression (`ASTWithSource`) on the template attribute, so the source
+ * text is read off the AST rather than the attribute value.
+ */
+function templateAttribute(
+  node: TmplAstTemplate,
+  name: string,
+): string | undefined {
+  const value = node.templateAttrs.find(
+    attribute => attribute.name === name,
+  )?.value;
+
+  if (typeof value === 'string') {
+    return value.trim() || undefined;
+  }
+
+  const source = (value as { source?: unknown } | undefined)?.source;
+
+  return typeof source === 'string' && source.trim() ? source.trim() : undefined;
+}
+
+/**
+ * `*ngIf` and `*ngFor` on a single element. The body is the element itself,
+ * compiled like the equivalent block-syntax body, so the classic directives
+ * are owned by the compiled view instead of Angular.
+ */
+function tryLowerTemplateBlock(
+  node: TmplAstTemplate,
+  template: string,
+  resolveReactiveSource: SxReactiveSourceResolver,
+  index: number,
+): SxLoweredConditionalBlock | SxLoweredCollectionBlock | undefined {
+  const child = node.children[0];
+  const bodyStart = spanStart(child.sourceSpan);
+  const bodyEnd = spanEnd(child.sourceSpan);
+  // The element's span still contains the structural attribute, and leaving it
+  // in would make the block compiler desugar it a second time.
+  const body = template
+    .slice(bodyStart, bodyEnd)
+    .replace(/\s+\*ng(?:If|For)\s*=\s*(?:"[^"]*"|'[^']*')/, '');
+
+  const condition = templateAttribute(node, 'ngIf');
+
+  if (condition !== undefined) {
+    const path = extractComponentSourcePath(condition);
+    const source = path ? resolveReactiveSource(path) ?? null : null;
+
+    if (!source) {
+      return undefined;
+    }
+
+    const compiled = compileBody(body, resolveReactiveSource, false);
+
+    if (!compiled) {
+      return undefined;
+    }
+
+    const field = rootComponentField(source);
+
+    return {
+      kind: 'conditional',
+      marker: String(index),
+      branches: [{ source, compiled }],
+      fields: field ? [field] : [],
+    };
+  }
+
+  const collection = templateAttribute(node, 'ngForOf');
+
+  if (collection === undefined) {
+    return undefined;
+  }
+
+  const item = node.variables[0]?.name;
+  const trackBy = templateAttribute(node, 'ngForTrackBy');
+
+  if (!item) {
+    return undefined;
+  }
+
+  const path = extractComponentSourcePath(collection);
+  const source = path ? resolveReactiveSource(path) ?? null : null;
+
+  if (!source) {
+    return undefined;
+  }
+
+  const compiled = compileBody(body, resolveReactiveSource, true);
+
+  if (!compiled) {
+    return undefined;
+  }
+
+  const field = rootComponentField(source);
+
+  return {
+    kind: 'collection',
+    marker: String(index),
+    source,
+    // `*ngFor` defaults to identity tracking; an explicit `trackBy: fn`
+    // refers to a component method the generated setup reaches through `ctx`.
+    trackBy: trackBy
+      ? `(_index, ${item}) => ctx.${trackBy}(_index, ${item})`
+      : `(_index, ${item}) => ${item}`,
+    item,
+    compiled,
+    fields: field ? [field] : [],
+  };
+}
+
+function compileBody(
+  body: string,
+  resolveReactiveSource: SxReactiveSourceResolver,
+  allowLocals: boolean,
+): SxCompiledBlockTemplate | undefined {
+  try {
+    const compiled = compileSxBlockTemplate(body, 'sx-block.html', {
+      documentExpression: 'doc',
+      resolveReactiveSource,
+      allowLocals,
+    });
+
+    return compiled.rootNodes.length > 0 ? compiled : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function tryLowerConditionalBlock(

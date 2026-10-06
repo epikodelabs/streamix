@@ -35,17 +35,25 @@ describe('standard Angular atom templates', () => {
     expect(result.setup).toContain('ɵcreateSxConditionalBlock');
     expect(result.setup).toContain("ctx.model.get('ready')");
     expect(result.setup).toContain(
-      "ɵsxTextNode(blockTable, 0, el0, ctx.model.get('message'))",
+      "ɵsxText(blockTable, 0, text1, ctx.model.get('message'))",
     );
     expect(result.sourceReferenceFields).toContain('model');
   });
 
-  it('lowers the compiler-owned block and rejects the classic directive beside it', () => {
-    expect(() => transformAngularComponentTemplate(`
-      @if (model.ready) { <p>{{ model.message }}</p> }
-      <li *ngFor="let item of model.items">{{ item.name }}</li>
-    `, 'inline.html', { resolveReactiveSource }))
-      .toThrowError(/cannot bind "model.items"/);
+  it('lowers classic *ngIf and *ngFor on a single element', () => {
+    const result = transformAngularComponentTemplate(`
+      <p *ngIf="model.ready">{{ model.message }}</p>
+      <li *ngFor="let item of model.items; trackBy: trackRow">{{ item.name }}</li>
+    `, 'inline.html', { resolveReactiveSource });
+
+    expect(result.template).toBe(
+      '\n      <span data-sx-block="0"></span>\n      <span data-sx-block="1"></span>\n    ',
+    );
+    expect(result.setup).toContain('ɵcreateSxConditionalBlock');
+    expect(result.setup).toContain('ɵcreateSxKeyedBlock');
+    expect(result.setup).toContain("ctx.model.get('ready')");
+    expect(result.setup).toContain("ctx.model.get('items')");
+    expect(result.setup).toContain('ctx.trackRow(_index, item)');
   });
 
   it('lowers a pure @switch block with literal cases and a default', () => {
@@ -78,7 +86,7 @@ describe('standard Angular atom templates', () => {
       `@if (model.ready) { <app-item [label]="model.message"></app-item> }`,
       'inline.html',
       { resolveReactiveSource },
-    )).toThrowError(/cannot bind "model.ready"/);
+    )).toThrowError(/cannot bind/);
   });
 
   it('does not reinterpret atom-like static text in a structural block', () => {
@@ -91,7 +99,7 @@ describe('standard Angular atom templates', () => {
     expect(result.template).toBe('<span data-sx-block="0"></span>');
     expect(result.setup).toContain('setAttribute("title", "model.message")');
     expect(result.setup).toContain(
-      "ɵsxTextNode(blockTable, 0, el0, ctx.model.get('message'))",
+      "ɵsxText(blockTable, 0, text1, ctx.model.get('message'))",
     );
   });
 
