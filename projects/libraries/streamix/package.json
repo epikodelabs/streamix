@@ -41,7 +41,8 @@
     "@angular/compiler": ">=20.0.0",
     "@angular/core": ">=20.0.0",
     "react": ">=18.0.0",
-    "vue": ">=3.4.0"
+    "vue": ">=3.4.0",
+    "typescript": ">=5.5.0"
   },
   "peerDependenciesMeta": {
     "@angular-devkit/architect": {
@@ -51,6 +52,9 @@
       "optional": true
     },
     "@angular/compiler": {
+      "optional": true
+    },
+    "typescript": {
       "optional": true
     }
   }

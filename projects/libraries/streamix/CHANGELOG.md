@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The component install is a TypeScript transform.** Installing the compiled
+  view no longer scans component text: the file is parsed and edited through
+  the AST, so generics, `abstract`, and `export default` classes install
+  correctly, an authored `ngAfterViewInit` is merged rather than duplicated,
+  and idempotence is decided by what the class declares — a comment that
+  merely mentions `ɵinstallSxCompiledView(` can no longer disable
+  installation. `typescript` is now declared as an optional peer of the
+  package; the builder already required it.
 - **Zone.js applications get told when scheduling is wrong.** When a global
   `Zone` exists and `provideSxZoneScheduling()` was never installed, the
   renderer scheduler warns once that every Streamix update is dragging an
