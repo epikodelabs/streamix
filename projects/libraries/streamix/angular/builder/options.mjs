@@ -58,3 +58,15 @@ export function virtualRootOf(sourceRoot) {
 export function sourceTwinOf(virtualPath) {
   return virtualPath.replace(/\.sx\.ts$/, '.ts');
 }
+
+/**
+ * Serializes generated template text as a backtick literal so the virtual
+ * component stays readable. Escapes cover exactly what template literals
+ * interpret: backslashes, backticks, and `${` interpolation starts.
+ */
+export function templateLiteral(text) {
+  return '`' + text
+    .replace(/\\/g, '\\\\')
+    .replace(/`/g, '\\`')
+    .replace(/\$\{/g, '\\${') + '`';
+}

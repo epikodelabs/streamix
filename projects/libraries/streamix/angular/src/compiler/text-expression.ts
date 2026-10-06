@@ -83,6 +83,22 @@ export function analyzeSxTextInterpolation(
     return undefined;
   }
 
+  // Scope exposes value-facing getters (for example `model.count`) and a
+  // public atom accessor. Bind to that atom without rewriting the authored
+  // Angular expression.
+  const transparentPath = extractComponentSourcePath(authoredExpression);
+  const transparentSource = transparentPath &&
+    resolveReactiveSource?.(transparentPath);
+  if (transparentSource && transparentSource.includes('.get(')) {
+    return {
+      expression: authoredExpression,
+      dependencies: [transparentSource],
+      directSource: transparentSource,
+      mode: 'direct',
+      sourceTransparent: false,
+    };
+  }
+
   const normalized = normalizeSourceTransparentExpression(
     authoredExpression,
     resolveReactiveSource,

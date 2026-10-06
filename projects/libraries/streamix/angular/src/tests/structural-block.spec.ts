@@ -5,11 +5,23 @@ import {
 import {
   ɵcreateSxKeyedBlock,
   ɵcreateSxValueBlock,
+  type SxBlockInstance,
 } from '../lib';
-import {
-  ɵcreateSxStaticBlock,
-  ɵupdateSxStaticBlock,
-} from '../lib/static-block';
+
+import { idescribe } from '../../../src/tests/env.spec';
+
+function elementBlock(tag: string, text: string): SxBlockInstance {
+  const element = document.createElement(tag);
+  element.textContent = text;
+
+  return {
+    first: element,
+    last: element,
+    destroy() {
+      element.remove();
+    },
+  };
+}
 
 idescribe('sx structural runtime', () => {
   it('creates and destroys a direct value block', () => {
@@ -24,13 +36,10 @@ idescribe('sx structural runtime', () => {
       source,
       {
         create(value) {
-          return ɵcreateSxStaticBlock(
-            '<span>{{ value }}</span>',
-            { value },
-          );
+          return elementBlock('span', value);
         },
         update(instance, value) {
-          ɵupdateSxStaticBlock(instance, { value });
+          (instance.first as HTMLElement).textContent = value;
         },
       },
     );
@@ -59,15 +68,10 @@ idescribe('sx structural runtime', () => {
       source,
       {
         create(item) {
-          return ɵcreateSxStaticBlock(
-            '<li>{{ name }}</li>',
-            { name: item.name },
-          );
+          return elementBlock('li', item.name);
         },
         update(instance, item) {
-          ɵupdateSxStaticBlock(instance, {
-            name: item.name,
-          });
+          (instance.first as HTMLElement).textContent = item.name;
         },
       },
       (_index, item) => item.id,
@@ -80,4 +84,3 @@ idescribe('sx structural runtime', () => {
     expect(host.querySelectorAll('li').length).toBe(0);
   });
 });
-import { idescribe } from '../../../src/tests/env.spec';

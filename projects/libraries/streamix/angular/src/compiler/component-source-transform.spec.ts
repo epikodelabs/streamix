@@ -3,69 +3,51 @@ import {
 } from './component-source-transform';
 
 describe('installSxLifecycleIntoComponentSource', () => {
-  it('injects generated imports and component lifecycle installation', () => {
+  it('inlines generated setup and component lifecycle installation', () => {
     const result = installSxLifecycleIntoComponentSource(
       `
 import { Component } from '@angular/core';
 
-@Component({
-  templateUrl: './counter.component.html',
-})
+@Component({ templateUrl: './counter.component.html' })
 export class CounterComponent {
   readonly count = count;
 }
       `.trim(),
       {
-        setupImportPath: './counter.component.ts.sx',
+        inlineSetup: 'function setupBindings() { return createBindingTable(0); }',
+        setupName: 'setupBindings',
         sourceReferenceFields: ['count'],
       },
     );
 
     expect(result.changed).toBeTrue();
-    expect(result.source).toContain(
-      "import { ɵinstallSxCompiledView, ɵinstallSxSourceReferences } from \"@epikodelabs/streamix/angular\";",
-    );
-    expect(result.source).toContain(
-      "import { ɵsetupSxBindings } from \"./counter.component.ts.sx\";",
-    );
-    expect(result.source).toContain(
-      'protected readonly ɵsx = ɵinstallSxCompiledView(',
-    );
-    expect(result.source).toContain(
-      'ɵinstallSxSourceReferences(',
-    );
-    expect(result.source).toContain(
-      '["count"]',
-    );
-    expect(result.source).toContain(
-      'sourceReferences: this.__sxRefs',
-    );
+    expect(result.source).toContain('createBindingTable');
+    expect(result.source).toContain('function setupBindings()');
+    expect(result.source).not.toContain('.sx.ts');
+    expect(result.source).toContain('protected readonly');
+    expect(result.source).toContain('sourceReferences: this.__sxRefs');
     expect(result.source.indexOf('readonly count = count;')).toBeLessThan(
       result.source.indexOf('public readonly __sxRefs'),
     );
   });
 
-  it('can install only structural source-reference support without a generated setup module', () => {
+  it('can install only structural source-reference support without setup code', () => {
     const result = installSxLifecycleIntoComponentSource(
       `export class HostComponent { source = first; }`,
-      {
-        sourceReferenceFields: ['source'],
-      },
+      { sourceReferenceFields: ['source'] },
     );
 
     expect(result.changed).toBeTrue();
-    expect(result.source).toContain(
-      "import { ɵinstallSxSourceReferences } from \"@epikodelabs/streamix/angular\";",
-    );
-    expect(result.source).not.toContain('ɵinstallSxCompiledView');
     expect(result.source).toContain('public readonly __sxRefs');
+    expect(result.source).not.toContain('createBindingTable');
   });
 
   it('emits the hybrid Angular invalidation opt-in only when requested', () => {
     const result = installSxLifecycleIntoComponentSource(
       `export class CounterComponent { count = source; }`,
       {
-        setupImportPath: './counter.component.ts.sx',
+        inlineSetup: 'function setupBindings() { return undefined; }',
+        setupName: 'setupBindings',
         sourceReferenceFields: ['count'],
         requiresAngularInvalidation: true,
       },
@@ -74,7 +56,6 @@ export class CounterComponent {
     expect(result.source).toContain('angularInvalidation: true');
   });
 
-
   it('rejects an authored member that collides with the generated template bridge', () => {
     expect(() =>
       installSxLifecycleIntoComponentSource(
@@ -82,9 +63,7 @@ export class CounterComponent {
   source = first;
   __sxRefs = 'authored';
 }`,
-        {
-          sourceReferenceFields: ['source'],
-        },
+        { sourceReferenceFields: ['source'] },
       ),
     ).toThrowError(/__sxRefs.*reserved/i);
   });
@@ -93,9 +72,7 @@ export class CounterComponent {
     expect(() =>
       installSxLifecycleIntoComponentSource(
         'const CounterComponent = class {};',
-        {
-          setupImportPath: './counter.component.sx',
-        },
+        { inlineSetup: 'function setupBindings() { return undefined; }' },
       ),
     ).toThrowError(/no conventional exported component class/i);
   });

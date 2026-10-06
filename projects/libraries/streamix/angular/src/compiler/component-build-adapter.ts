@@ -1,6 +1,5 @@
 import {
   emitLifecycleInitializer,
-  emitRuntimeImportHeader,
   emitSourceReferenceInitializer,
 } from './emit-component-module';
 import {
@@ -33,20 +32,19 @@ export interface SxComponentBuildInput {
   readonly reactiveSourcePaths?: Readonly<Record<string, string>>;
   /**
    * Scope value members grouped by Scope path. For example
-   * `{ model: ['count', 'user.name'] }` maps to
-   * `model.refs.count` and `model.refs.user.name`.
+   * `{ model: ['count', 'user.name'] }` maps to public atom lookups such as
+   * `model.get('count')` and `model.get('user.name')`.
    */
   readonly scopeValuePaths?: Readonly<Record<string, readonly string[]>>;
 }
 
-export interface SxGeneratedFile {
-  readonly path: string;
-  readonly contents: string;
-}
-
 export interface SxComponentBuildOutput {
   readonly transformedTemplate: string;
-  readonly generatedModule?: SxGeneratedFile;
+  /**
+   * Module-level setup function for the compiled bindings. It is inlined into
+   * the component module so the component never imports a generated file.
+   */
+  readonly setupCode?: string;
   readonly lifecycleInitializer?: string;
   readonly bindingCount: number;
   readonly sourceReferenceFields: readonly string[];
@@ -61,9 +59,9 @@ export interface SxComponentBuildOutput {
  *
  * 1. supply component/template discovery;
  * 2. write `transformedTemplate` back into the virtual compilation input;
- * 3. add `generatedModule`;
+ * 3. inline `setupCode` into the component module;
  * 4. insert `lifecycleInitializer` into the component class and imports for
- *    `ɵinstallSxCompiledView` plus the generated setup function.
+ *    `ɵinstallSxCompiledView` plus the setup runtime primitives.
  */
 export function compileSxComponent(
   input: SxComponentBuildInput,
@@ -102,16 +100,9 @@ export function compileSxComponent(
     };
   }
 
-  const generatedPath = `${input.componentPath}.sx.ts`;
-
   return {
     transformedTemplate: transformed.template,
-    generatedModule: {
-      path: generatedPath,
-      contents: emitComponentModuleFromSetup(
-        transformed.setup,
-      ),
-    },
+    setupCode: transformed.setup,
     lifecycleInitializer: emitLifecycleInitializer(
       'ɵsetupSxBindings',
       {
@@ -123,19 +114,4 @@ export function compileSxComponent(
     sourceReferenceFields: transformed.sourceReferenceFields,
     requiresAngularInvalidation: transformed.requiresAngularInvalidation,
   };
-}
-
-/**
- * Keeps the builder result based on the exact setup code already emitted by
- * the template transform. This avoids parsing the template twice.
- */
-function emitComponentModuleFromSetup(
-  setup: string,
-): string {
-  return [
-    emitRuntimeImportHeader(),
-    ``,
-    setup,
-    ``,
-  ].join('\n');
 }

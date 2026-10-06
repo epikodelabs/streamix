@@ -16,7 +16,7 @@ import {
 } from '@epikodelabs/streamix';
 import { on } from '@epikodelabs/streamix/dom';
 
-const RAINBOW_DURATION = 2200;
+const RAINBOW_DRAW_DURATION = 2200;
 
 interface AppState {
   count: number;
@@ -157,7 +157,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     this.animation = pipe(
       on('animationFrame'),
       scan((elapsed, delta) => elapsed + delta, 0),
-      map(elapsed => Math.min(elapsed / RAINBOW_DURATION, 1)),
+      map(elapsed => Math.min(elapsed / RAINBOW_DRAW_DURATION, 1)),
       tap(progress => {
         this.rainbowProgress = progress;
         this.drawRainbow(progress);

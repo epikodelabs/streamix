@@ -1,61 +1,37 @@
-import type {
-  ParsedSxTemplate,
-} from './angular-template-parser';
-import {
-  emitComponentSetup,
-} from './emit-component-setup';
 import { SX_SOURCE_REFERENCES_FIELD } from './generated-names';
-
-export interface SxComponentModuleOptions {
-  readonly runtimeImport?: string;
-  readonly setupName?: string;
-}
 
 const DEFAULT_RUNTIME_IMPORT = '@epikodelabs/streamix/angular';
 
 /**
- * Emits the runtime import header shared by every generated setup module.
+ * Runtime primitives referenced by emitted setup functions. Generated setup is
+ * inlined into the component module, so these symbols join the component's
+ * runtime import.
+ */
+export const SX_SETUP_RUNTIME_SYMBOLS = [
+  'createBindingTable',
+  'ɵsxAttribute',
+  'ɵsxClass',
+  'ɵsxClassMap',
+  'ɵsxInvalidate',
+  'ɵsxProperty',
+  'ɵsxStyle',
+  'ɵsxStyleMap',
+  'ɵsxText',
+  'ɵsxTextNode',
+  'ɵsxTextExpression',
+  'ɵsxTextExpressionNode',
+] as const;
+
+/**
+ * Emits the runtime import header shared by generated setup modules.
  */
 export function emitRuntimeImportHeader(
   runtimeImport: string = DEFAULT_RUNTIME_IMPORT,
 ): string {
   return [
     `import {`,
-    `  createBindingTable,`,
-    `  ɵsxAttribute,`,
-    `  ɵsxClass,`,
-    `  ɵsxClassMap,`,
-    `  ɵsxInvalidate,`,
-    `  ɵsxProperty,`,
-    `  ɵsxStyle,`,
-    `  ɵsxStyleMap,`,
-    `  ɵsxText,`,
-    `  ɵsxTextNode,`,
-    `  ɵsxTextExpression,`,
-    `  ɵsxTextExpressionNode,`,
+    ...SX_SETUP_RUNTIME_SYMBOLS.map(symbol => `  ${symbol},`),
     `} from ${JSON.stringify(runtimeImport)};`,
-  ].join('\n');
-}
-
-/**
- * Emits a complete generated module containing the direct binding setup.
- *
- * The setup module imports only the compiler/runtime primitives required by
- * generated code. The component source can import its setup function and call
- * `ɵinstallSxCompiledView(this, setup)`.
- */
-export function emitComponentModule(
-  parsed: ParsedSxTemplate,
-  options: SxComponentModuleOptions = {},
-): string {
-  const setupName =
-    options.setupName ?? 'ɵsetupSxBindings';
-
-  return [
-    emitRuntimeImportHeader(options.runtimeImport),
-    ``,
-    emitComponentSetup(parsed, setupName),
-    ``,
   ].join('\n');
 }
 

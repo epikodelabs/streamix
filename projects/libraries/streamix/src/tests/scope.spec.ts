@@ -45,7 +45,7 @@ describe('Scope System', () => {
       }
     });
 
-    it('should expose value properties and typed get/set helpers', () => {
+    it('should expose value properties plus atom get/set helpers', () => {
       const s = scope({
         count: 1,
         user: {
@@ -55,9 +55,9 @@ describe('Scope System', () => {
       });
 
       expect(s.count).toBe(1);
-      expect(s.get('count')).toBe(1);
+      expect(s.get('count').value).toBe(1);
       expect(s.user.name).toBe('Ada');
-      expect(s.user.get('name')).toBe('Ada');
+      expect(s.user.get('name').value).toBe('Ada');
       expect(s.user.length).toBe(4);
 
       s.set('count', 2);
@@ -240,7 +240,7 @@ describe('Scope System', () => {
       await delay();
 
       expect(s.createdAt).toBe(updatedAt);
-      expect(s.get('createdAt')).toBe(updatedAt);
+      expect(s.get('createdAt').value).toBe(updatedAt);
       s.dispose();
     });
   });
@@ -694,8 +694,8 @@ describe('Scope System', () => {
       expect(s.type).toBe('scope');
       expect(s.name).toBe('test');
       expect(s.count).toBe(0);
-      expect(s.get('name')).toBe('test');
-      expect(s.get('count')).toBe(0);
+      expect(s.get('name').value).toBe('test');
+      expect(s.get('count').value).toBe(0);
       s.dispose();
     });
 
@@ -708,8 +708,8 @@ describe('Scope System', () => {
       await delay();
       expect(s.name).toBe('updated');
       expect(s.count).toBe(5);
-      expect(s.get('name')).toBe('updated');
-      expect(s.get('count')).toBe(5);
+      expect(s.get('name').value).toBe('updated');
+      expect(s.get('count').value).toBe(5);
       s.dispose();
     });
 

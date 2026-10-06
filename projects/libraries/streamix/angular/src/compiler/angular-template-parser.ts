@@ -355,7 +355,11 @@ function visitElement(
 
     const binding = classifyNativeAngularBinding(publicName, nodeId, source);
 
-    if (transparentSource && (binding || isNativeAngularValueSink(publicName))) {
+    if (
+      transparentSource &&
+      !isScopeBackingSource(transparentSource) &&
+      (binding || isNativeAngularValueSink(publicName))
+    ) {
       // Source transparency still unwraps sanitizer-sensitive native sinks, but
       // those sinks remain Angular-owned so Angular performs sanitization.
       state.bindingEdits.push({
@@ -430,6 +434,10 @@ function visitElement(
       }
     }
   }
+}
+
+function isScopeBackingSource(source: string): boolean {
+  return source.includes('.get(');
 }
 
 /**

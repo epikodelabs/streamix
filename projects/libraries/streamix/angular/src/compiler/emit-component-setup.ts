@@ -31,11 +31,32 @@ export function emitComponentSetup(
   parsed: ParsedSxTemplate,
   functionName = 'ɵsetupSxBindings',
 ): string {
+  // Parameters are named for their use: generated setup may be inlined into
+  // the component module, where `noUnusedParameters` applies and there is no
+  // ts-nocheck escape hatch.
+  const usesHost = parsed.plan.bindings.some(
+    binding => binding.kind !== 'angular-invalidate',
+  );
+  const usesCtx = parsed.plan.bindings.some(
+    binding =>
+      binding.kind !== 'angular-invalidate' ||
+      (binding.dependencies?.length ?? 0) > 0,
+  );
+  const usesInvalidate = parsed.plan.bindings.some(
+    binding => binding.kind === 'angular-invalidate',
+  );
+
+  const parameters = [
+    `${usesHost ? 'host' : '_host'}: Element`,
+    `${usesCtx ? 'ctx' : '_ctx'}: any`,
+  ];
+  if (usesInvalidate) {
+    parameters.push('invalidate: () => void = () => {}');
+  }
+
   const lines: string[] = [
-    `export function ${functionName}(`,
-    `  host: Element,`,
-    `  ctx: any,`,
-    `  invalidate: () => void = () => {},`,
+    `function ${functionName}(`,
+    ...parameters.map(parameter => `  ${parameter},`),
     `) {`,
     `  const table = createBindingTable(${parsed.plan.size});`,
   ];
@@ -52,7 +73,7 @@ export function emitComponentSetup(
       }
 
       lines.push(
-        `  const ${entry.node} = ${elementPathExpression(path)} as Element;`,
+        `  const ${entry.node} = ${elementPathExpression(path)} as HTMLElement;`,
       );
     }
 

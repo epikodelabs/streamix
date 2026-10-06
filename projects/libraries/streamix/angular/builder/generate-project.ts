@@ -4,7 +4,7 @@ import ts from 'typescript';
 
 import { compileSxComponent } from '../src/compiler/component-build-adapter.ts';
 import { installSxLifecycleIntoComponentSource } from '../src/compiler/component-source-transform.ts';
-import { sourceTwinOf, virtualRootOf } from './options.mjs';
+import { templateLiteral, virtualRootOf } from './options.mjs';
 
 const root = resolve(import.meta.dirname, '../../../../..');
 const sourceRoot = process.argv[2] ?? 'projects/apps/app6/src';
@@ -134,7 +134,7 @@ for (const sourcePath of await listFiles(sourceDirectory, false)) {
     dependencySourcePaths: standaloneDependencySources(sourcePath),
     scopeValuePaths,
   });
-  if (!compiled.generatedModule && !compiled.lifecycleInitializer) {
+  if (!compiled.setupCode && !compiled.lifecycleInitializer) {
     if (scopeValuePaths) {
       console.warn(
         `[streamix] ${relativePath}: declares a scope but compiled no Streamix bindings; ` +
@@ -143,11 +143,8 @@ for (const sourcePath of await listFiles(sourceDirectory, false)) {
     }
     continue;
   }
-  const setupImportPath = compiled.generatedModule
-    ? `./${relativePath.split('/').at(-1)!.replace(/\.ts$/, '.sx')}`
-    : undefined;
   const lifecycle = installSxLifecycleIntoComponentSource(source, {
-    setupImportPath,
+    inlineSetup: compiled.setupCode,
     sourceReferenceFields: compiled.sourceReferenceFields,
     requiresAngularInvalidation: compiled.requiresAngularInvalidation,
   }).source;
@@ -156,22 +153,16 @@ for (const sourcePath of await listFiles(sourceDirectory, false)) {
   // sequences inside the template as replacement patterns.
   const virtual = lifecycle.replace(
     match[0],
-    () => `template: ${JSON.stringify(compiled.transformedTemplate)},\n  styles:`,
+    () => `template: ${templateLiteral(compiled.transformedTemplate)},\n  styles:`,
   );
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFileAtomic(outputPath, virtual);
-  if (compiled.generatedModule) {
-    await writeFileAtomic(
-      outputPath.replace(/\.ts$/, '.sx.ts'),
-      `// @ts-nocheck\n${compiled.generatedModule.contents}`,
-    );
-  }
 }
 
 /**
  * Deletes virtual entries whose source twin is gone: renamed or deleted
- * sources must not linger as stale compilation inputs. Generated `.sx.ts`
- * modules are kept while their base component still exists.
+ * sources must not linger as stale compilation inputs. Generated setup is
+ * now inlined into its component, so legacy `.sx.ts` sidecars are removed.
  */
 async function pruneStaleEntries(): Promise<void> {
   const sourceTwinPaths = new Set(
@@ -187,8 +178,10 @@ async function pruneStaleEntries(): Promise<void> {
         continue;
       }
       const virtualPath = relative(outputDirectory, path).replace(/\\/g, '/');
-      const baseTwin = sourceTwinOf(virtualPath);
-      if (!sourceTwinPaths.has(virtualPath) && !sourceTwinPaths.has(baseTwin)) {
+      if (
+        virtualPath.endsWith('.sx.ts') ||
+        !sourceTwinPaths.has(virtualPath)
+      ) {
         await rm(path, { force: true });
       }
     }

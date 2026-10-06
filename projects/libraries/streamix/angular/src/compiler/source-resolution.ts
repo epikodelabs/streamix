@@ -44,7 +44,7 @@ export function createReactiveSourcePathResolver(
 
 /**
  * Creates scope-member mappings from exact value paths discovered by an
- * upstream type checker. Scope paths already identify their atom source.
+ * upstream type checker. Each value maps to its public atom accessor.
  */
 export function createScopeValuePathResolver(
   scopes: Readonly<Record<string, readonly string[]>>,
@@ -53,7 +53,9 @@ export function createScopeValuePathResolver(
 
   for (const [scopePath, members] of Object.entries(scopes)) {
     for (const member of members) {
-      mappings[`${scopePath}.${member}`] = `${scopePath}.${member}`;
+      const property = member.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      mappings[`${scopePath}.${member}`] =
+        `${scopePath}.get('${property}')`;
     }
   }
 

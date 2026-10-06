@@ -91,11 +91,12 @@ function instrumentAngularControlFlow(
     template,
   );
   const replacements = new Map<string, string>();
+  const handledPaths = new Set<string>();
   const sources: string[] = [];
   const fields: string[] = [];
 
   const recordSource = (valuePath: string): void => {
-    if (replacements.has(valuePath)) {
+    if (handledPaths.has(valuePath)) {
       return;
     }
 
@@ -104,7 +105,10 @@ function instrumentAngularControlFlow(
       return;
     }
 
-    replacements.set(valuePath, `${source}.value`);
+    handledPaths.add(valuePath);
+    if (!source.includes('.get(')) {
+      replacements.set(valuePath, `${source}.value`);
+    }
     sources.push(source);
     const field = rootComponentField(source);
     if (field && !fields.includes(field)) {

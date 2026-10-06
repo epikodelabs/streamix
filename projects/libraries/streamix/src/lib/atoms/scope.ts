@@ -426,12 +426,10 @@ type WritableScopeValue<T extends Record<string, any>, K extends keyof T> =
   T[K] extends Writable<infer TValue> ? TValue : never;
 
 interface ScopeApi<T extends Record<string, any>> {
-  /** Returns the current value for a named scope atom. */
+  /** Returns the atom reference for a named scope member. */
   get<K extends keyof (T & ScopeReservedAtoms)>(
     key: K,
-  ): (T & ScopeReservedAtoms)[K] extends Scope<any>
-    ? (T & ScopeReservedAtoms)[K]
-    : AtomValueOf<(T & ScopeReservedAtoms)[K]>;
+  ): (T & ScopeReservedAtoms)[K];
   /** Pushes a value into a named writable scope atom. */
   set<K extends WritableScopeKey<T>>(
     key: K,
@@ -575,7 +573,8 @@ function defineScopeStateProperty(
 ): void {
   const descriptor: PropertyDescriptor = {
     get() {
-      return read(key);
+      const item = read(key);
+      return isAtomLike(item) ? item.value : item;
     },
     enumerable: true,
     configurable: true,
@@ -708,9 +707,7 @@ function createScopeInternal<T extends Record<string, any>>(
     Object.defineProperties(newScope, {
       get: {
         value: (key: string | symbol) => {
-          const item = getScopeItem(key);
-          if (isAtomLike(item)) return get(item);
-          return item;
+          return getScopeItem(key);
         },
         enumerable: false,
         configurable: true,

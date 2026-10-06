@@ -34,11 +34,11 @@ describe('compiler-linked structural atoms', () => {
       imports: [CommonModule],
       changeDetection: ChangeDetectionStrategy.OnPush,
       template: `
-        @if (model.get('ready')) {
-          <p class="message">{{ model.get('message') }}</p>
+        @if (model.get('ready').value) {
+          <p class="message">{{ model.get('message').value }}</p>
         }
-        <li class="item" *ngFor="let item of model.get('items')">{{ item }}</li>
-        <section [ngSwitch]="model.get('status')">
+        <li class="item" *ngFor="let item of model.get('items').value">{{ item }}</li>
+        <section [ngSwitch]="model.get('status').value">
           <span *ngSwitchCase="'ready'">ready</span>
           <span *ngSwitchDefault>waiting</span>
         </section>
@@ -56,10 +56,10 @@ describe('compiler-linked structural atoms', () => {
         ɵinstallSxCompiledView(this, (_host, context, invalidate) => {
           const table = createBindingTable(1);
           ɵsxInvalidate(table, 0, [
-            (context.model as any)._rawState.ready,
-            (context.model as any)._rawState.message,
-            (context.model as any)._rawState.items,
-            (context.model as any)._rawState.status,
+            context.model.get('ready'),
+            context.model.get('message'),
+            context.model.get('items'),
+            context.model.get('status'),
           ], invalidate ?? (() => {}));
           return table;
         }, { angularInvalidation: true });

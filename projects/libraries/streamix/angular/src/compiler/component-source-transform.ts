@@ -1,11 +1,16 @@
 import {
+  SX_SETUP_RUNTIME_SYMBOLS,
   emitLifecycleInitializer,
   emitSourceReferenceInitializer,
 } from './emit-component-module';
 import { SX_SOURCE_REFERENCES_FIELD } from './generated-names';
 
 export interface SxComponentSourceTransformOptions {
-  readonly setupImportPath?: string;
+  /**
+   * Generated setup function, inlined into the component module so the
+   * component never imports a generated file.
+   */
+  readonly inlineSetup?: string;
   readonly setupName?: string;
   readonly runtimeImport?: string;
   readonly sourceReferenceFields?: readonly string[];
@@ -34,7 +39,7 @@ export function installSxLifecycleIntoComponentSource(
   const runtimeImport =
     options.runtimeImport ?? '@epikodelabs/streamix/angular';
   const sourceReferences = options.sourceReferenceFields ?? [];
-  const hasSetup = !!options.setupImportPath;
+  const hasSetup = !!options.inlineSetup;
 
   if (!hasSetup && sourceReferences.length === 0) {
     return { source, changed: false };
@@ -43,7 +48,7 @@ export function installSxLifecycleIntoComponentSource(
   if (
     source.includes('ɵinstallSxCompiledView(') ||
     source.includes('ɵinstallSxSourceReferences(') ||
-    (hasSetup && source.includes(`import { ${setupName} }`))
+    (hasSetup && source.includes(`function ${setupName}(`))
   ) {
     return {
       source,
@@ -69,10 +74,10 @@ export function installSxLifecycleIntoComponentSource(
   }
 
   const imports = [
-    `import { ${runtimeSymbols.join(', ')} } from ${JSON.stringify(runtimeImport)};`,
-    ...(hasSetup
-      ? [`import { ${setupName} } from ${JSON.stringify(options.setupImportPath)};`]
-      : []),
+    `import { ${[
+      ...runtimeSymbols,
+      ...(hasSetup ? runtimeSymbolsForSetup(options.inlineSetup!) : []),
+    ].join(', ')} } from ${JSON.stringify(runtimeImport)};`,
     ``,
   ].join('\n');
 
@@ -117,14 +122,33 @@ export function installSxLifecycleIntoComponentSource(
     .map(line => `  ${line}`)
     .join('\n')}\n`;
 
+  const withInitializer =
+    imports +
+    source.slice(0, insertion) +
+    initializer +
+    source.slice(insertion);
+
   return {
-    source:
-      imports +
-      source.slice(0, insertion) +
-      initializer +
-      source.slice(insertion),
+    // The setup function is a hoisted declaration, so appending it after the
+    // class keeps the component self-contained without a generated import.
+    source: hasSetup
+      ? `${withInitializer}\n${options.inlineSetup}\n`
+      : withInitializer,
     changed: true,
   };
+}
+
+/** Includes only primitives referenced by this setup, preserving noUnusedLocals. */
+function runtimeSymbolsForSetup(setup: string): readonly string[] {
+  return SX_SETUP_RUNTIME_SYMBOLS.filter(symbol =>
+    new RegExp(
+      `(^|[^A-Za-z0-9_$])${escapeRegExp(symbol)}(?![A-Za-z0-9_$])`,
+    ).test(setup),
+  );
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function classBodyUsesGeneratedMember(

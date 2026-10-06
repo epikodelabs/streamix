@@ -13,13 +13,13 @@ describe('sx reactive source resolution', () => {
     expect(resolve('plain')).toBeUndefined();
   });
 
-  it('maps value-first Scope members to their keyed scope paths', () => {
+  it('maps value-first Scope members to their backing atoms', () => {
     const resolve = createScopeValuePathResolver({
       model: ['count', 'user.name'],
     });
 
-    expect(resolve('model.count')).toBe('model.count');
-    expect(resolve('model.user.name')).toBe('model.user.name');
+    expect(resolve('model.count')).toBe("model.get('count')");
+    expect(resolve('model.user.name')).toBe("model.get('user.name')");
     expect(resolve('model.user')).toBeUndefined();
   });
 
@@ -35,7 +35,7 @@ describe('sx reactive source resolution', () => {
     )!;
 
     expect(resolve('custom.value')).toBe('custom.backing');
-    expect(resolve('model.count')).toBe('model.count');
+    expect(resolve('model.count')).toBe("model.get('count')");
     expect(resolve('count')).toBe('count');
   });
 });

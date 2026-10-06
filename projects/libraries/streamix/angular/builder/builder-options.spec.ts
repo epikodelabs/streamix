@@ -3,6 +3,7 @@ import {
   resolveSourceRoot,
   shouldRegenerateOn,
   sourceTwinOf,
+  templateLiteral,
   virtualRootOf,
 } from './options.mjs';
 
@@ -49,5 +50,12 @@ describe('streamix builder options', () => {
   it('maps generated module entries to their source twin', () => {
     expect(sourceTwinOf('app/app.component.sx.ts')).toBe('app/app.component.ts');
     expect(sourceTwinOf('app/app.component.ts')).toBe('app/app.component.ts');
+  });
+
+  it('serializes generated templates as readable backtick literals', () => {
+    expect(templateLiteral('<p>{{ a }}</p>')).toBe('`<p>{{ a }}</p>`');
+    expect(templateLiteral('say `hi`')).toBe('`say \\`hi\\``');
+    expect(templateLiteral('cost: ${x}')).toBe('`cost: \\${x}`');
+    expect(templateLiteral('c:\\path')).toBe('`c:\\\\path`');
   });
 });
