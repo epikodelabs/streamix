@@ -1,7 +1,9 @@
 import {
+  TmplAstDeferredBlock,
   TmplAstElement,
   TmplAstForLoopBlock,
   TmplAstIfBlock,
+  TmplAstLetDeclaration,
   TmplAstSwitchBlock,
   TmplAstTemplate,
   parseTemplate,
@@ -69,15 +71,26 @@ export interface SxStructuralLowering {
   readonly rejected: readonly string[];
 }
 
-/** Rejects an atom read from a template position Angular evaluates itself. */
-export function angularOwnedReadError(path: string): string {
+/**
+ * Rejects an atom read from a template position Angular evaluates itself.
+ *
+ * `reason` names the specific obstacle when the position is not merely
+ * Angular-owned but mixes reactive reads with state the compiler cannot track.
+ */
+export function angularOwnedReadError(path: string, reason?: string): string {
   return (
     `Streamix cannot bind ${JSON.stringify(path)} here: Angular evaluates this ` +
     'template position itself, so the compiled view could render it once and ' +
-    'never update it. Move the read into a compiler-compilable @if/@for body, ' +
-    'or read the value into a plain component field and bind that.'
+    `never update it.${reason ? ` ${reason}` : ''} Make every read reactive — ` +
+    'bind an atom or a scope member — or read the value into a plain component ' +
+    'field and bind that instead.'
   );
 }
+
+/** Reason text for expressions that mix reactive reads with untracked state. */
+export const MIXED_STATE_REASON =
+  'This expression mixes reactive reads with component state or Angular-only ' +
+  'expression features (pipes, assignments, template literals).';
 
 /** Static attribute identifying a lowered structural block marker. */
 export const MARKER_ATTRIBUTE = 'data-sx-block';
@@ -99,7 +112,7 @@ export function lowerStructuralBlocks(
 ): SxStructuralLowering {
   if (
     !resolveReactiveSource ||
-    !/(?:@(?:if|for|switch)\b|\*ng(?:If|For)\b)/.test(template)
+    !/(?:@(?:if|for|switch|defer|let)\b|\*ng(?:If|For)\b)/.test(template)
   ) {
     return { template, blocks: [], sourceFields: [], rejected: [] };
   }
@@ -121,7 +134,19 @@ export function lowerStructuralBlocks(
   const blocks = collectStaticBlocks(parsed.nodes);
 
   if (blocks.length === 0) {
-    return { template, blocks: [], sourceFields: [], rejected: [] };
+    // Nothing to lower, but Angular-owned dynamic regions (`@defer`, `@let`)
+    // still have to be scanned for reactive reads that would go stale.
+    return {
+      template,
+      blocks: [],
+      sourceFields: [],
+      rejected: collectRejectedReads(
+        template,
+        parsed.nodes,
+        new Set<TmplAstNode>(),
+        resolveReactiveSource,
+      ),
+    };
   }
 
   const lowered: SxLoweredBlock[] = [];
@@ -219,10 +244,26 @@ function collectRejectedReads(
       if (node instanceof TmplAstIfBlock ||
           node instanceof TmplAstForLoopBlock ||
           node instanceof TmplAstSwitchBlock ||
-          node instanceof TmplAstTemplate) {
+          node instanceof TmplAstTemplate ||
+          node instanceof TmplAstDeferredBlock) {
         if (!owned.has(node)) {
           collectRegionReads(node, template, resolveReactiveSource, rejected, seen);
         }
+        continue;
+      }
+
+      // `@let x = <expression>;` is Angular-owned: the declaration is evaluated
+      // once per Angular render, so reactive reads there would never update.
+      if (node instanceof TmplAstLetDeclaration) {
+        collectReads(
+          template.slice(
+            spanStart(node.value.sourceSpan),
+            spanEnd(node.value.sourceSpan),
+          ),
+          resolveReactiveSource,
+          rejected,
+          seen,
+        );
         continue;
       }
 
@@ -248,14 +289,23 @@ function collectRegionReads(
   const text = template.slice(spanStart(node.sourceSpan), spanEnd(node.sourceSpan));
 
   for (const span of angularExpressionSpans(text)) {
-    for (const path of componentPathsInExpression(span.text)) {
-      if (seen.has(path) || !resolveReactiveSource(path)) {
-        continue;
-      }
+    collectReads(span.text, resolveReactiveSource, rejected, seen);
+  }
+}
 
-      seen.add(path);
-      rejected.push(path);
+function collectReads(
+  expression: string,
+  resolveReactiveSource: SxReactiveSourceResolver,
+  rejected: string[],
+  seen: Set<string>,
+): void {
+  for (const path of componentPathsInExpression(expression)) {
+    if (seen.has(path) || !resolveReactiveSource(path)) {
+      continue;
     }
+
+    seen.add(path);
+    rejected.push(path);
   }
 }
 

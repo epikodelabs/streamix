@@ -15,6 +15,7 @@ import {
   type SxSourceSpan,
 } from './binding-plan';
 import {
+  analyzeSxExpression,
   analyzeSxTextInterpolation,
   extractComponentSourcePath,
   extractDirectValueSource,
@@ -26,6 +27,7 @@ import {
 } from './source-resolution';
 import {
   MARKER_ATTRIBUTE,
+  MIXED_STATE_REASON,
   angularOwnedReadError,
 } from './structural-lowering';
 
@@ -340,8 +342,7 @@ function visitElement(
 
     // Native Angular bindings can be authored either as `<source>.value` or,
     // when the TypeScript-aware build adapter proves the path is a
-    // DependencySource, transparently as `<source>`. Compound native
-    // expressions remain Angular-owned.
+    // DependencySource, transparently as `<source>`.
     const explicitSource = extractDirectValueSource(expression);
     const transparentPath = !explicitSource
       ? extractComponentSourcePath(expression)
@@ -351,6 +352,23 @@ function visitElement(
     const source = explicitSource ?? transparentSource;
 
     if (!source) {
+      // An expression the compiler cannot prove: silent when it reads no
+      // Streamix value, a build error when it reads one and mixes it with
+      // state Angular evaluates on its own.
+      const analysis = analyzeSxExpression(
+        expression,
+        state.resolveReactiveSource,
+      );
+
+      if (analysis?.mode === 'unsupported') {
+        throw new Error(
+          angularOwnedReadError(
+            analysis.dependencies[0] ?? expression,
+            MIXED_STATE_REASON,
+          ),
+        );
+      }
+
       continue;
     }
 
@@ -395,6 +413,17 @@ function visitElement(
       );
 
       if (analysis) {
+        // An expression that mixes reactive reads with component state cannot
+        // be bound and cannot be left to Angular without going stale.
+        if (analysis.mode === 'unsupported') {
+          throw new Error(
+            angularOwnedReadError(
+              analysis.dependencies[0] ?? analysis.expression,
+              MIXED_STATE_REASON,
+            ),
+          );
+        }
+
         const span = {
           start: child.sourceSpan.start.offset,
           end: child.sourceSpan.end.offset,
@@ -415,7 +444,7 @@ function visitElement(
             span,
           });
           state.bindingSpans.push(span);
-        } else if (analysis.mode === 'expression') {
+        } else {
           state.bindings.push({
             kind: 'text-expression-node',
             node: nodeId,
@@ -425,8 +454,6 @@ function visitElement(
           });
           state.bindingSpans.push(span);
         }
-        // Hybrid expressions are rewritten to signal accessors above; Angular
-        // evaluates them and refreshes itself when an atom emits.
       }
     }
   }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Angular templates now fail the build instead of going stale.** A template
+  expression that reads a reactive source but mixes it with component state or
+  Angular-only expression features (pipes, assignments, template literals) used
+  to be left to Angular, which rendered it once and never updated it. Such
+  expressions are now rejected with a message naming the read and the fix.
+  Composite `@defer` triggers and bodies and root `@let` declarations are
+  scanned for the same reason, and scope-backed reads such as
+  `{{ model.count * 2 }}` are now recognized as reactive instead of silently
+  falling through.
 - **Removed** unreachable Angular compiler exports: the legacy structural-plan
   emitter (`emitStructuralBlock`, `emitStructuralModule`, `SxStructuralPlan`,
   `parseSxExpression`, `createSxStructuralPlanEntry`), `emitRuntimeImportHeader`,

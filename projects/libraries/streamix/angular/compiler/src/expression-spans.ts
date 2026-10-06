@@ -7,8 +7,9 @@ export interface SxExpressionSpan {
 /**
  * Returns Angular-evaluated expression contexts only: interpolation contents,
  * quoted property/directive/event binding values, and control-flow conditions
- * (including `@else if`). Static attribute values and prose are never
- * returned, so recorded paths cannot leak into non-expression text.
+ * (including `@else if` and `@defer` triggers). Static attribute values and
+ * prose are never returned, so recorded paths cannot leak into non-expression
+ * text.
  */
 export function angularExpressionSpans(template: string): SxExpressionSpan[] {
   const spans: SxExpressionSpan[] = [];
@@ -43,7 +44,7 @@ export function angularExpressionSpans(template: string): SxExpressionSpan[] {
     pushQuoted(match, 3);
   }
 
-  for (const match of template.matchAll(/@(?:else\s+)?(?:if|switch|for)\s*\(([\s\S]*?)\)/g)) {
+  for (const match of template.matchAll(/@(?:else\s+)?(?:if|switch|for|defer)\s*\(([\s\S]*?)\)/g)) {
     const openParen = match.index! + match[0].indexOf('(') + 1;
     push(openParen, match.index! + match[0].length - 1);
   }

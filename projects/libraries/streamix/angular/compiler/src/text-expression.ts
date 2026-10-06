@@ -3,7 +3,7 @@ import type { SxReactiveSourceResolver } from './source-resolution';
 export type SxTextExpressionMode =
   | 'direct'
   | 'expression'
-  | 'hybrid';
+  | 'unsupported';
 
 export interface SxTextExpressionAnalysis {
   /** Expression used by Angular after source-transparent normalization. */
@@ -31,6 +31,15 @@ const SIMPLE_VALUE_READ =
 const VALUE_READ_AT_START =
   /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.value\b/;
 
+/**
+ * Scope members read through their public accessor, e.g.
+ * `model.get('count').value`. The resolver emits this form for
+ * source-transparent scope reads, so the analyzer and the expression rewriter
+ * must recognize it as a read rather than as a call on component state.
+ */
+const SCOPE_VALUE_READ_AT_START =
+  /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\.get\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")\s*\))\.value\b/;
+
 const PATH_AT_START =
   /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/;
 
@@ -57,27 +66,31 @@ const ALLOWED_BARE_IDENTIFIERS = new Set([
 ]);
 
 /**
- * Recognizes a text interpolation that reads one or more Streamix values.
+ * Recognizes an Angular expression that reads one or more Streamix values.
  *
- * With a source resolver, source-transparent expressions such as `{{ count }}`
- * and `{{ count * 2 }}` are normalized to Angular-safe SSR fallbacks
- * (`count.value`, `count.value * 2`) before the usual dependency analysis.
+ * With a source resolver, source-transparent expressions such as `count` and
+ * `count * 2` are normalized to Angular-safe SSR fallbacks (`count.value`,
+ * `count.value * 2`) before the usual dependency analysis, so `dependencies`
+ * and `directSource` are already-resolved source expressions.
  *
  * Execution modes:
  *
- * - `direct`: exactly one source read; compiled as a normal direct text binding.
+ * - `direct`: exactly one source read; compiled as a normal direct binding.
  * - `expression`: every dynamic root is a Streamix read (plus safe
- *   literals/operators/globals); compiled to a direct multi-source text binding.
- * - `hybrid`: the expression mixes Streamix reads with ordinary Angular state
- *   or Angular-only expression features. Angular keeps the expression; the
- *   generated Streamix subscription only invalidates the owning Angular view.
+ *   literals/operators/globals); compiled to a direct multi-source binding.
+ * - `unsupported`: the expression reads Streamix values but uses Angular-only
+ *   features (pipes, assignments, template strings) or mixes them with
+ *   component state. Angular would evaluate it once and never update it, so
+ *   callers must refuse it instead of binding.
+ *
+ * Returns `undefined` when the expression reads no Streamix value at all; such
+ * expressions are ordinary Angular bindings.
  */
-export function analyzeSxTextInterpolation(
-  interpolationSource: string,
+export function analyzeSxExpression(
+  expressionSource: string,
   resolveReactiveSource?: SxReactiveSourceResolver,
 ): SxTextExpressionAnalysis | undefined {
-  const match = /^\s*\{\{([\s\S]*?)\}\}\s*$/.exec(interpolationSource);
-  const authoredExpression = match?.[1]?.trim();
+  const authoredExpression = expressionSource.trim();
 
   if (!authoredExpression) {
     return undefined;
@@ -136,9 +149,26 @@ export function analyzeSxTextInterpolation(
     dependencies,
     mode: isSupportedDirectExpression(expression, reads)
       ? 'expression'
-      : 'hybrid',
+      : 'unsupported',
     sourceTransparent: normalized.changed,
   };
+}
+
+/**
+ * Recognizes a text interpolation that reads one or more Streamix values.
+ */
+export function analyzeSxTextInterpolation(
+  interpolationSource: string,
+  resolveReactiveSource?: SxReactiveSourceResolver,
+): SxTextExpressionAnalysis | undefined {
+  const match = /^\s*\{\{([\s\S]*?)\}\}\s*$/.exec(interpolationSource);
+  const authoredExpression = match?.[1]?.trim();
+
+  if (!authoredExpression) {
+    return undefined;
+  }
+
+  return analyzeSxExpression(authoredExpression, resolveReactiveSource);
 }
 
 /** Extracts `<source>` from an exact `<source>.value` expression. */
@@ -307,7 +337,9 @@ function findDependencyReads(expression: string): DependencyRead[] {
     }
 
     if (isIdentifierStart(char) && !isPathContinuation(expression[index - 1])) {
-      const match = VALUE_READ_AT_START.exec(expression.slice(index));
+      const remaining = expression.slice(index);
+      const match = SCOPE_VALUE_READ_AT_START.exec(remaining) ??
+        VALUE_READ_AT_START.exec(remaining);
       if (match) {
         const text = match[0];
         const source = match[1];
