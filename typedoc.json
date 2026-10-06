@@ -1,12 +1,14 @@
 {
   "entryPoints": [
     "projects/libraries/streamix/src/public-api.ts",
-    "projects/libraries/streamix/angular/src/public-api.ts",
     "projects/libraries/streamix/aggregates/src/public-api.ts",
     "projects/libraries/streamix/dom/src/public-api.ts",
-    "projects/libraries/streamix/networking/src/public-api.ts"
-  ],
-  "tsconfig": "typedoc.tsconfig.json",
+    "projects/libraries/streamix/networking/src/public-api.ts",
+    "projects/libraries/streamix/angular/src/public-api.ts",
+    "projects/libraries/streamix/react/src/public-api.ts",
+    "projects/libraries/streamix/vue/src/public-api.ts"
+    ],
+  "tsconfig": "tsconfig.json",
   "out": "dist/api",
   "gitRemote": "origin",
   "gitRevision": "main",
