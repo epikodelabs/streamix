@@ -9,25 +9,17 @@
     "./projects/libraries/streamix/angular/builder/src"
   ],
   "testDirs": [
-    "./projects/libraries/streamix/aggregates/src/tests",
-    "./projects/libraries/streamix/dom/src/tests",
-    "./projects/libraries/streamix/networking/src/tests",
-    "./projects/libraries/streamix/src/tests",
-    "./projects/libraries/streamix/angular/src/tests",
-    "./projects/libraries/streamix/angular/compiler",
-    "./projects/libraries/streamix/angular/builder/src"
+    "./projects/libraries/streamix/angular/src/tests/ssr"
   ],
   "exclude": [
     "**/node_modules/**",
     "**/env.spec.ts",
-    "**/src/tests/_skipped/**",
-    "**/src/tests/ssr/**"
+    "**/src/tests/_skipped/**"
   ],
   "preserveOutputs": false,
-  "outDir": "dist/.vite-jasmine-build",
-  "browser": "chrome",
+  "outDir": "dist/.vite-jasmine-build-node",
+  "browser": "node",
   "headless": true,
-  "port": 8888,
   "viteBuildOptions": {
     "target": "es2022",
     "sourcemap": true,
@@ -35,10 +27,11 @@
     "preserveModules": false,
     "preserveModulesRoot": "."
   },
-  "viteConfig": {
-    "server": {
-      "open": false
-    }
+  "htmlOptions": {
+    "title": "Jasmine Test Runner (Node)",
+    "preludeModules": [
+      "@angular/compiler"
+    ]
   },
   "jasmineConfig": {
     "env": {
@@ -46,11 +39,5 @@
       "random": false,
       "timeout": 120000
     }
-  },
-  "htmlOptions": {
-    "title": "Jasmine Test Runner",
-    "preludeModules": [
-      "@angular/compiler"
-    ]
   }
 }

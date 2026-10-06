@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **SSR and hydration are covered by a harness.** `npm run test:node` renders a
+  fixture through `renderApplication` and asserts the server contract: lowered
+  blocks keep their marker element (empty), every direct binding renders
+  through its Angular fallback, and no event listener is attached. A browser
+  spec boots the client over that exact markup and asserts the takeover:
+  markers become anchors, block content renders, listeners fire exactly once,
+  and atom updates flow with no change detection. The server HTML is committed
+  as a fixture, regenerated with `STREAMIX_UPDATE_FIXTURES=1`.
+- **View mounting is idempotent, and markers only come back for a rebind.** A
+  platform that does not set `ngServerMode` (a plain server TestBed, for
+  example) could run both the server hook and the first client render, which
+  rendered every compiled block twice. Final teardown no longer restores block
+  markers either: only a rebind needs them, and mutating a dying view's DOM
+  upset Angular's own destroy pass.
 - **The component install is a TypeScript transform.** Installing the compiled
   view no longer scans component text: the file is parsed and edited through
   the AST, so generics, `abstract`, and `export default` classes install

@@ -205,7 +205,16 @@ export function emitComponentSetup(
     lines.push(`      table.destroy();`);
 
     for (const entry of structural.teardown) {
-      lines.push(`      ${entry.block}.destroy();`);
+      // Server rendering creates no block instances, so teardown is optional.
+      lines.push(`      ${entry.block}?.destroy();`);
+    }
+
+    lines.push(`    },`);
+    lines.push(`    ɵrestoreMarkers() {`);
+
+    for (const entry of structural.teardown) {
+      // Only a rebind restores the markers: the final teardown must leave
+      // Angular's own destroy pass untouched.
       lines.push(`      ɵsxRestoreBlockMarker(${entry.anchor}, ${entry.marker});`);
     }
 
@@ -257,8 +266,12 @@ function emitStructuralBlocks(
 
     lines.push(`  const ${anchor} = ɵsxBlockAnchor(${marker}, ${JSON.stringify(`sx:${index}`)}, server);`);
 
+    // Server rendering keeps the marker empty: the client's template declares
+    // an empty marker, so injecting block content inside it makes hydration
+    // mismatch and Angular re-render the whole subtree. The compiled view
+    // fills the marker right after hydration instead.
     if (block.kind === 'conditional') {
-      lines.push(`  const ${variable} = ɵcreateSxConditionalBlock(${anchor}, [`);
+      lines.push(`  const ${variable} = server ? undefined : ɵcreateSxConditionalBlock(${anchor}, [`);
 
       for (const branch of block.branches) {
         const condition = branch.condition
@@ -288,7 +301,7 @@ function emitStructuralBlocks(
       const compiled = block.compiled;
       const roots = compiled.rootNodes;
 
-      lines.push(`  const ${variable} = ɵcreateSxKeyedBlock(`);
+      lines.push(`  const ${variable} = server ? undefined : ɵcreateSxKeyedBlock(`);
       lines.push(`    ${anchor},`);
       lines.push(`    ${loweredValue(block.source)},`);
       lines.push(`    {`);

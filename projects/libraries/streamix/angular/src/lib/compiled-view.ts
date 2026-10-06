@@ -21,6 +21,13 @@ import type {
  */
 export interface SxTeardown {
   destroy(): void;
+  /**
+   * Puts the compiled blocks' marker elements back, so a rebind re-resolves
+   * the template's original element paths. Only a rebind needs this: during
+   * final teardown the view is going away, and mutating its DOM there can
+   * upset Angular's own destroy pass.
+   */
+  ɵrestoreMarkers?(): void;
 }
 
 export type SxCompiledViewSetup<T> = (
@@ -108,13 +115,19 @@ export function ɵinstallSxCompiledView<T extends object>(
     mounted = false;
 
     // Destroy first so old subscriptions and any queued renderer work are
-    // invalidated before the new source is read and subscribed.
+    // invalidated before the new source is read and subscribed. The markers
+    // come back before the remount re-resolves their element paths.
     previous?.destroy();
+    previous?.ɵrestoreMarkers?.();
     mount();
   };
 
   const start = (): void => {
-    if (destroyed) {
+    // Mounting twice would render every compiled block a second time: the
+    // server hook and the first client render can both reach this path when
+    // the platform does not set `ngServerMode` (a plain server TestBed, for
+    // example).
+    if (destroyed || mounted) {
       return;
     }
 
