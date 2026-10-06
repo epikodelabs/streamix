@@ -10,7 +10,9 @@
       "dom.iterable",
       "es2022"
     ],
-    "types": [],
+    "types": [
+      "node"
+    ],
     "paths": {
       "@epikodelabs/streamix/aggregates": [
         "./aggregates/src/lib/index.ts"
@@ -28,7 +30,7 @@
         "./angular/src/lib/index.ts"
       ],
       "@epikodelabs/streamix/angular/compiler": [
-        "./angular/src/compiler/public-api.ts"
+        "./angular/compiler/src/public-api.ts"
       ]
     }
   },

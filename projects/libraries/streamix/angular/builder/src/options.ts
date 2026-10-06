@@ -1,27 +1,47 @@
 // Pure helpers shared by the builder and its test suite. This module must
 // stay free of Node-only imports so the browser test suite can load it.
 
+/** Options understood by this builder. Everything else is forwarded. */
+export interface SxBuilderOptions {
+  readonly delegateTarget: string;
+  readonly sourceRoot?: string;
+  readonly [key: string]: unknown;
+}
+
 // Default keeps the in-repo app6 demo building; consuming workspaces pass
 // their own `sourceRoot` builder option.
 export const DEFAULT_SOURCE_ROOT = 'projects/apps/app6/src';
 
-export function resolveSourceRoot(options) {
-  return options?.sourceRoot || DEFAULT_SOURCE_ROOT;
+export function resolveSourceRoot(options?: Record<string, unknown>): string {
+  const sourceRoot = options?.['sourceRoot'];
+
+  return typeof sourceRoot === 'string' && sourceRoot
+    ? sourceRoot
+    : DEFAULT_SOURCE_ROOT;
 }
 
 /**
  * Drops this builder's own keys plus the empty placeholders the CLI's schema
  * validation materializes, so only real options reach the delegate target.
  */
-export function buildDelegateOptions(options) {
-  const delegateOptions = {};
+/**
+ * Accepts untyped values because the CLI materializes empty placeholders and
+ * callers may pass `undefined`; the result is narrowed for the delegate.
+ */
+export function buildDelegateOptions(
+  options?: Record<string, unknown>,
+): Record<string, unknown> {
+  const delegateOptions: Record<string, unknown> = {};
+
   for (const [key, value] of Object.entries(options ?? {})) {
     if (key === 'delegateTarget' || key === 'sourceRoot') {
       continue;
     }
+
     if (value === undefined || value === null) {
       continue;
     }
+
     if (
       Array.isArray(value)
         ? value.length === 0
@@ -29,8 +49,10 @@ export function buildDelegateOptions(options) {
     ) {
       continue;
     }
+
     delegateOptions[key] = value;
   }
+
   return delegateOptions;
 }
 
@@ -40,23 +62,22 @@ export function buildDelegateOptions(options) {
  * on platforms that do not report entry names, and recursive watchers
  * report entry paths relative to the watched root.
  */
-export function shouldRegenerateOn(filename, configuredFile) {
+export function shouldRegenerateOn(
+  filename: string | Buffer | null,
+  configuredFile: string,
+): boolean {
   if (filename === null || !configuredFile) {
     return true;
   }
+
   return String(filename).split(/[\\/]/).pop() === configuredFile;
 }
 
 /** Maps an application source root to its virtual project root. */
-export function virtualRootOf(sourceRoot) {
+export function virtualRootOf(sourceRoot: string): string {
   return `.angular/streamix/${sourceRoot
     .replace(/^projects\/apps\//, '')
     .replace(/\/src$/, '')}/src`;
-}
-
-/** Maps a virtual entry to the source entry it is generated from. */
-export function sourceTwinOf(virtualPath) {
-  return virtualPath.replace(/\.sx\.ts$/, '.ts');
 }
 
 /**
@@ -64,7 +85,7 @@ export function sourceTwinOf(virtualPath) {
  * component stays readable. Escapes cover exactly what template literals
  * interpret: backslashes, backticks, and `${` interpolation starts.
  */
-export function templateLiteral(text) {
+export function templateLiteral(text: string): string {
   return '`' + text
     .replace(/\\/g, '\\\\')
     .replace(/`/g, '\\`')

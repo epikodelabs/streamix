@@ -5,7 +5,8 @@
     "./projects/libraries/streamix/networking/src/lib",
     "./projects/libraries/streamix/src/lib",
     "./projects/libraries/streamix/angular/src/lib",
-    "./projects/libraries/streamix/angular/src/compiler"
+    "./projects/libraries/streamix/angular/compiler",
+    "./projects/libraries/streamix/angular/builder/src"
   ],
   "testDirs": [
     "./projects/libraries/streamix/aggregates/src/tests",
@@ -13,8 +14,8 @@
     "./projects/libraries/streamix/networking/src/tests",
     "./projects/libraries/streamix/src/tests",
     "./projects/libraries/streamix/angular/src/tests",
-    "./projects/libraries/streamix/angular/src/compiler",
-    "./projects/libraries/streamix/angular/builder"
+    "./projects/libraries/streamix/angular/compiler",
+    "./projects/libraries/streamix/angular/builder/src"
   ],
   "exclude": [
     "**/node_modules/**",

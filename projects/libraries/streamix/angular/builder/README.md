@@ -40,27 +40,30 @@ also holds the pure helpers covered by `builder-options.spec.ts`).
 The builder ships inside the `@epikodelabs/streamix` package as the `builder/`
 subpackage:
 
-- `scripts/build-builder.mjs` bundles `generate-project.ts` (with the compiler
-  it imports) into `dist/streamix/builder/generate-project.mjs` and copies
-  `application.mjs`, `options.mjs`, `builders.json`, `schema.json` and this
-  README next to it. It runs as the second step of `npm run build` /
-  `npm run build:packages`, after ng-packagr has produced the rest of the
-  package.
-- The subpackage carries its own `package.json` with the `builders` entry, and
-  the build adds `./builder/*` to the package `exports` map (ng-packagr cannot
-  know about it).
-- The workspace's own `angular.json` therefore references the same name a
-  consumer would: `"builder": "@epikodelabs/streamix/builder:application"`.
-  For a local build to resolve it, the build links `builder/` into the
-  installed `node_modules/@epikodelabs/streamix`.
+It is a secondary entry point of the library, built by ng-packagr alongside
+the runtime and the compiler:
+
+- Sources live in `angular/builder/src/`. `angular/builder/ng-package.json`
+  only marks the entry point, exactly like `angular/compiler/` does for the
+  compiler.
+- ng-packagr emits `dist/streamix/fesm2022/epikodelabs-streamix-angular-builder.mjs`
+  plus types, and copies `builders.json`, `schema.json`, this README and
+  `application.mjs` into `dist/streamix/angular/builder/`.
+- `application.mjs` is a one-line shim: architect requires the implementation
+  file to live inside the subpackage (it rejects paths that escape it), so the
+  shim re-exports the compiled entry from the package's `fesm2022` folder.
+- `scripts/finalize-dist.mjs` runs after the build. ng-packagr cannot know it
+  produced a builder, so that step adds the builder subpackage to the package
+  `exports` map, points the subpackage manifest at `./builders.json`, and links
+  the built package into `node_modules` so in-repo applications resolve it.
+- `angular.json` references the same name a consumer would:
+  `"builder": "@epikodelabs/streamix/angular/builder:application"`.
 
 Runtime dependencies are resolved from the consuming workspace, which has them
 through the Angular CLI: `@angular-devkit/architect`, `@angular/compiler` and
 `typescript`. They are declared as optional peers on the main package. Node
 `>=20.11` is required.
 
-The shipped generator runs as plain Node ESM — no `ts-node` registration. In
-this repository the builder still runs the TypeScript source through
-`ts-node`, which `application.mjs` detects by looking for the bundled
-`generate-project.mjs` next to itself.
+The builder runs the generator in process — no child process, no `ts-node`
+registration: the compiled entry imports `generateProject` directly.
 

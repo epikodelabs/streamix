@@ -2,10 +2,9 @@ import {
   buildDelegateOptions,
   resolveSourceRoot,
   shouldRegenerateOn,
-  sourceTwinOf,
   templateLiteral,
   virtualRootOf,
-} from './options.mjs';
+} from './options';
 
 describe('streamix builder options', () => {
   it('resolves the source root with the demo default', () => {
@@ -47,10 +46,6 @@ describe('streamix builder options', () => {
     expect(virtualRootOf('projects/apps/demo/src')).toBe('.angular/streamix/demo/src');
   });
 
-  it('maps generated module entries to their source twin', () => {
-    expect(sourceTwinOf('app/app.component.sx.ts')).toBe('app/app.component.ts');
-    expect(sourceTwinOf('app/app.component.ts')).toBe('app/app.component.ts');
-  });
 
   it('serializes generated templates as readable backtick literals', () => {
     expect(templateLiteral('<p>{{ a }}</p>')).toBe('`<p>{{ a }}</p>`');

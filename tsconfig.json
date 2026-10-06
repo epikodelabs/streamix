@@ -37,11 +37,14 @@
       "@epikodelabs/streamix/networking": [
         "./projects/libraries/streamix/networking/src/lib/index.ts"
       ],
-      "@epikodelabs/streamix/angular": [
-        "./projects/libraries/streamix/angular/src/lib/index.ts"
+      "@epikodelabs/streamix/angular/builder": [
+        "./projects/libraries/streamix/angular/builder/src/public-api.ts"
       ],
       "@epikodelabs/streamix/angular/compiler": [
-        "./projects/libraries/streamix/angular/src/compiler/public-api.ts"
+        "./projects/libraries/streamix/angular/compiler/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/angular": [
+        "./projects/libraries/streamix/angular/src/lib/index.ts"
       ],
       "@epikodelabs/streamix/react": [
         "./projects/libraries/streamix/react/src/lib/index.ts"
@@ -54,13 +57,13 @@
       ]
     },
     "types": [
-      "jasmine"
+      "jasmine",
+      "node"
     ]
   },
   "exclude": [
     "dist",
-    "node_modules",
-    "projects/libraries/streamix/angular/builder"
+    "node_modules"
   ],
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,

@@ -1,9 +1,0 @@
-{
-  "name": "@epikodelabs/streamix-angular-builder",
-  "private": true,
-  "type": "module",
-  "builders": "builders.json",
-  "engines": {
-    "node": ">=20.11"
-  }
-}
