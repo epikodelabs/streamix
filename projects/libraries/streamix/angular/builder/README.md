@@ -1,4 +1,4 @@
-# @epikodelabs/streamix-angular-builder
+# @epikodelabs/streamix/builder
 
 Angular architect builder that compiles an application's components through
 the Streamix virtual layer before delegating to the regular Angular
@@ -8,11 +8,12 @@ application build or dev server.
 
 `app6` in the workspace `angular.json` shows the wiring:
 
-1. `application.mjs` runs `generate-project.ts <sourceRoot>`, which copies the
-   source tree into `.angular/streamix/<app>/src`, compiles every component
-   with an inline `template` through the Streamix compiler, and writes the
-   transformed component plus a generated `*.sx.ts` setup module back into
-   the virtual tree.
+1. `application.mjs` runs the generator (`generate-project.ts` from source in
+   this repository, the bundled `generate-project.mjs` in the shipped
+   subpackage), which copies the source tree into
+   `.angular/streamix/<app>/src`, compiles every component with an inline
+   `template` through the Streamix compiler, and writes the transformed
+   component — with the compiled setup inlined — back into the virtual tree.
 2. The builder then schedules the `delegateTarget` (e.g. `app6:application`
    or `app6:dev-server`). The delegate's `fileReplacements` entry points
    `main.ts` at the virtual copy, so the whole application compiles from the
@@ -34,28 +35,32 @@ builder understands, plus empty placeholder values materialized by CLI
 schema validation, are dropped before forwarding (see `options.mjs`, which
 also holds the pure helpers covered by `builder-options.spec.ts`).
 
-## Runtime requirements
+## Distribution
 
-The package is consumed inside this workspace as a `file:` dependency (a
-symlink), so npm does **not** install its dependencies. It resolves, from
-the workspace root at runtime:
+The builder ships inside the `@epikodelabs/streamix` package as the `builder/`
+subpackage:
 
-- `@angular-devkit/architect` (builder host API)
-- `typescript` (the generator's TypeScript program)
-- `ts-node` (ESM registration for executing the TypeScript generator via
-  `--import` + `register("ts-node/esm/transpile-only")`)
+- `scripts/build-builder.mjs` bundles `generate-project.ts` (with the compiler
+  it imports) into `dist/streamix/builder/generate-project.mjs` and copies
+  `application.mjs`, `options.mjs`, `builders.json`, `schema.json` and this
+  README next to it. It runs as the second step of `npm run build` /
+  `npm run build:packages`, after ng-packagr has produced the rest of the
+  package.
+- The subpackage carries its own `package.json` with the `builders` entry, and
+  the build adds `./builder/*` to the package `exports` map (ng-packagr cannot
+  know about it).
+- The workspace's own `angular.json` therefore references the same name a
+  consumer would: `"builder": "@epikodelabs/streamix/builder:application"`.
+  For a local build to resolve it, the build links `builder/` into the
+  installed `node_modules/@epikodelabs/streamix`.
 
-Node `>=20.11` is required (`import.meta.dirname` in the generator).
+Runtime dependencies are resolved from the consuming workspace, which has them
+through the Angular CLI: `@angular-devkit/architect`, `@angular/compiler` and
+`typescript`. They are declared as optional peers on the main package. Node
+`>=20.11` is required.
 
-## Publishing checklist (when this becomes a real package)
+The shipped generator runs as plain Node ESM — no `ts-node` registration. In
+this repository the builder still runs the TypeScript source through
+`ts-node`, which `application.mjs` detects by looking for the bundled
+`generate-project.mjs` next to itself.
 
-This is currently an in-repo tool (`"private": true`). Before publishing:
-
-1. Remove `private` and add a `version`.
-2. Declare runtime dependencies (`@angular-devkit/architect`, `typescript`,
-   `ts-node`) or peer dependencies — they resolve from the workspace root
-   today only because of the `file:` symlink.
-3. Precompile `generate-project.ts` (and its `../src/compiler` imports) to a
-   bundled `.mjs` so consumers do not need `ts-node`, and drop the
-   `--import` registration from `application.mjs`.
-4. Reconsider the `projects/apps/app6/src` default for `sourceRoot`.

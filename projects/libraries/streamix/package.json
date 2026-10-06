@@ -20,6 +20,7 @@
     "fesm2022/",
     "types/",
     "angular/",
+    "builder/",
     "aggregates/",
     "dom/",
     "networking/",
@@ -36,12 +37,16 @@
   },
   "author": "Oleksii Shepel <oleksii.shepel@outlook.com>",
   "peerDependencies": {
+    "@angular-devkit/architect": ">=20.0.0",
     "@angular/compiler": ">=20.0.0",
     "@angular/core": ">=20.0.0",
     "react": ">=18.0.0",
     "vue": ">=3.4.0"
   },
   "peerDependenciesMeta": {
+    "@angular-devkit/architect": {
+      "optional": true
+    },
     "@angular/core": {
       "optional": true
     },

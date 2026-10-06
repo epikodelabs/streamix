@@ -1,6 +1,6 @@
 import { createBuilder } from '@angular-devkit/architect';
 import { spawn, spawnSync } from 'node:child_process';
-import { watch } from 'node:fs';
+import { existsSync, watch } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +9,18 @@ import { buildDelegateOptions, resolveSourceRoot, shouldRegenerateOn } from './o
 
 const REGENERATE_DEBOUNCE_MS = 50;
 
-const generator = fileURLToPath(new URL('./generate-project.ts', import.meta.url));
+// The published subpackage ships a precompiled generator; the in-repo tool
+// runs the TypeScript source through ts-node. Detecting the layout keeps one
+// application.mjs for both.
+const compiledGenerator = fileURLToPath(
+  new URL('./generate-project.mjs', import.meta.url),
+);
+const sourceGenerator = fileURLToPath(
+  new URL('./generate-project.ts', import.meta.url),
+);
+const generator = existsSync(compiledGenerator)
+  ? compiledGenerator
+  : sourceGenerator;
 
 // Registration form of the deprecated `--loader ts-node/esm/transpile-only`
 // flag: the same hooks, installed through register() so no Experimental
@@ -21,11 +32,11 @@ const TSNODE_IMPORT =
   'import { pathToFileURL } from "node:url"; ' +
   'register("ts-node/esm/transpile-only", pathToFileURL("./"));';
 
-const generatorArgs = (sourceRoot) => [
-  '--import',
-  TSNODE_IMPORT,
+const generatorArgs = (sourceRoot, workspaceRoot) => [
+  ...(generator === sourceGenerator ? ['--import', TSNODE_IMPORT] : []),
   generator,
   sourceRoot,
+  workspaceRoot,
 ];
 
 async function* delegateOutputs(run) {
@@ -70,7 +81,7 @@ function createRegenerator(context, sourceRoot) {
   let queued = false;
 
   const run = () => {
-    child = spawn(process.execPath, generatorArgs(sourceRoot), {
+    child = spawn(process.execPath, generatorArgs(sourceRoot, context.workspaceRoot), {
       cwd: context.workspaceRoot,
       stdio: 'inherit',
     });
@@ -195,10 +206,14 @@ export default createBuilder(async function* (options, context) {
 
   const sourceRoot = resolveSourceRoot(options);
 
-  const generated = spawnSync(process.execPath, generatorArgs(sourceRoot), {
-    cwd: context.workspaceRoot,
-    stdio: 'inherit',
-  });
+  const generated = spawnSync(
+    process.execPath,
+    generatorArgs(sourceRoot, context.workspaceRoot),
+    {
+      cwd: context.workspaceRoot,
+      stdio: 'inherit',
+    },
+  );
   if (generated.status !== 0) throw new Error(`Streamix compilation failed for ${sourceRoot}.`);
 
   const delegateOptions = buildDelegateOptions(options);

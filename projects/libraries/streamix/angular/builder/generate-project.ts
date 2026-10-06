@@ -6,8 +6,12 @@ import { compileSxComponent } from '../src/compiler/component-build-adapter.ts';
 import { installSxLifecycleIntoComponentSource } from '../src/compiler/component-source-transform.ts';
 import { templateLiteral, virtualRootOf } from './options.mjs';
 
-const root = resolve(import.meta.dirname, '../../../../..');
+// The workspace root is passed by the builder, which knows it from the
+// Architect context; the fallback keeps direct `node generate-project.ts`
+// runs working from the workspace root. Deriving it from this file's own
+// location would break once the generator is bundled into a package.
 const sourceRoot = process.argv[2] ?? 'projects/apps/app6/src';
+const root = process.argv[3] ?? process.cwd();
 const virtualRoot = virtualRootOf(sourceRoot);
 const sourceDirectory = resolve(root, sourceRoot);
 const outputDirectory = resolve(root, virtualRoot);

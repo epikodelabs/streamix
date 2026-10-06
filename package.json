@@ -4,8 +4,8 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
-    "build": "node scripts/build.mjs",
-    "build:packages": "node scripts/build.mjs",
+    "build": "node scripts/build.mjs && node scripts/build-builder.mjs",
+    "build:packages": "node scripts/build.mjs && node scripts/build-builder.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "testify --headless --browser chrome",
     "test:watch": "testify --browser chrome",
@@ -39,7 +39,6 @@
     "zone.js": "^0.16.2"
   },
   "devDependencies": {
-    "@epikodelabs/streamix-angular-builder": "file:projects/libraries/streamix/angular/builder",
     "@angular-eslint/eslint-plugin": "^22.1.0",
     "@angular-eslint/eslint-plugin-template": "^22.1.0",
     "@angular/build": "^22.1.0",
