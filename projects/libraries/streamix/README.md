@@ -161,6 +161,7 @@ Everything ships from one package. A few focused add-ons live alongside the core
 | `@epikodelabs/streamix/aggregates` | `average`, `min`/`max`, `sum`, and friends |
 | `@epikodelabs/streamix/dom` | DOM observers — `on('animationFrame')`, `mediaQuery`, `intersection`, … |
 | `@epikodelabs/streamix/networking` | HTTP client, WebSocket, JSONP |
+| `@epikodelabs/streamix/angular` | Angular runtime, compiler, and Architect builder for compiled direct-DOM templates |
 
 ---
 

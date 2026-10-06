@@ -9,8 +9,8 @@ application build or dev server.
 `app6` in the workspace `angular.json` shows the wiring:
 
 1. `application.mjs` runs the generator (`generate-project.ts` from source in
-   this repository, the bundled `generate-project.mjs` in the shipped
-   subpackage), which copies the source tree into
+   this repository, bundled into the subpackage's FESM in a release), which
+   copies the source tree into
    `.angular/streamix/<app>/src`, compiles every component with an inline
    `template` through the Streamix compiler, and writes the transformed
    component — with the compiled setup inlined — back into the virtual tree.

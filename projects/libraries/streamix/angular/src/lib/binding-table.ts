@@ -33,8 +33,8 @@ type BindingReader = () => unknown;
  *
  * A table owns N integer binding slots and one renderer-scheduler registration.
  * Source emissions only mark slots dirty. Direct bindings keep the latest
- * emitted value; expression slots reevaluate once per renderer flush; hybrid
- * slots coalesce Angular-view invalidation through the same table flush.
+ * emitted value, expression slots re-evaluate once per renderer flush, and
+ * listener slots hold a DOM listener plus its remover for teardown.
  */
 export class SxBindingTable {
   private readonly writers: Array<BindingWriter | undefined>;

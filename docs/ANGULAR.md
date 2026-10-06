@@ -6,16 +6,23 @@ This creates **intentional overlap** with parts of Angular. Instead of blending 
 
 ### ⚡ Short Verdict
 
-Streamix works great today as a regular TypeScript library inside an Angular workspace. You can import and use it in components and services without any build headaches.
+Streamix works as a regular TypeScript library inside an Angular workspace — and
+the subpackage ships a compiler plus an Architect builder that compile standard
+Angular templates (`@if`, `@for`, bindings, events, two-way) into direct-DOM
+updates driven by atoms. No signals and no `ChangeDetectorRef` are involved in
+those updates.
 
-However, it's **not** a first-class Angular-native integration. Because it overlaps with Angular's own solutions (Signals, DestroyRef, DI, etc.), you need clear boundaries.
+Because Streamix overlaps with Angular's own solutions (Signals, DestroyRef,
+DI, etc.), you still need clear boundaries: Streamix owns reactive state, and
+the compiled view owns the DOM it can prove.
 
 ### 🔄 Key Overlaps with Angular
 
 | Concern                  | Angular Solution              | Streamix Alternative          | Fit |
 |--------------------------|-------------------------------|-------------------------------|-----|
 | Reactive state           | Signals + RxJS                | Atoms, derived, flow          | Overlapping |
-| Lifecycle & cleanup      | DestroyRef, OnDestroy         | Scopes + auto-disposal        | Manual bridge needed |
+| Template updates         | Signals + change detection    | Compiled direct-DOM bindings  | Subpackage, opt-in |
+| Lifecycle & cleanup      | DestroyRef, OnDestroy         | Scopes + explicit disposal    | Manual bridge needed |
 | Async resources          | RxJS + switchMap              | flow() with auto-cancel       | Strong alternative |
 | Feature-scoped state     | Services + Signals            | Scopes                        | Excellent alternative |
 
@@ -50,41 +57,51 @@ export class TaskStore {
 }
 ```
 
-### Bridging into templates
+### Using scopes in templates
 
-There is no official Signal interop yet, so bridge atoms into signals yourself. `subscribeTo(key, callback)` gives you a direct subscription to any scope member, and `DestroyRef` ties scope disposal to the component lifecycle:
+The subpackage ships a compiler and a builder that compile standard Angular
+templates into direct-DOM updates — no signals, no `ChangeDetectorRef`. If
+your build runs the `@epikodelabs/streamix/angular/builder`, the same scope
+reads update the DOM directly:
 
 ```ts
-import { Component, DestroyRef, signal } from '@angular/core';
+import { Component, DestroyRef } from '@angular/core';
 import { method, scope } from '@epikodelabs/streamix';
 
 @Component({
   selector: 'task-panel',
   template: `
-    <button (click)="add()">Add ({{ tasks().length }})</button>
-    <ul><li *ngFor="let task of tasks()">{{ task.text }}</li></ul>
+    <button (click)="add()">Add ({{ model.tasks.length }})</button>
+    <ul>
+      @for (task of model.tasks; track task.text) {
+        <li>{{ task.text }}</li>
+      }
+    </ul>
   `,
 })
 export class TaskPanel {
-  private readonly store = scope({
+  readonly model = scope({
     tasks: [] as Array<{ text: string; done: boolean }>,
     add: method((self: any) => {
       self.tasks = [...self.tasks, { text: `Task ${self.tasks.length + 1}`, done: false }];
     }),
   });
 
-  readonly tasks = signal(this.store.tasks);
-
   constructor(destroyRef: DestroyRef) {
-    this.store.subscribeTo('tasks', tasks => this.tasks.set(tasks));
-    destroyRef.onDestroy(() => this.store.dispose());
+    destroyRef.onDestroy(() => this.model.dispose());
   }
 
-  add() { this.store.add(); }
+  add() { this.model.add(); }
 }
 ```
 
-The subscription lives as long as the scope, and the scope is disposed with the component — no leaked listeners.
+Without the builder, the same scope works as ordinary Angular state: read the
+values you need into component fields. See the
+[Angular subpackage README](../projects/libraries/streamix/angular/README.md)
+for the compiled surface (control flow, expressions, events, two-way bindings)
+and the build integration.
+
+The scope is disposed with the component — no leaked subscriptions.
 
 ### ✅ Current Compatibility
 
@@ -95,8 +112,9 @@ The subscription lives as long as the scope, and the scope is disposed with the 
 - Good tree-shaking (`sideEffects: false`)
 
 **What needs care:**
-- No automatic `DestroyRef` integration (call `scope.dispose()` yourself for now)
-- No official Signal interop yet — bridge atoms into signals manually
+- Scope disposal is explicit (call `scope.dispose()`, or wire it to `DestroyRef`)
+- The compiled path owns control-flow DOM; a reactive read the compiler cannot
+  prove is a build error rather than a silent fallback
 - Own networking layer (parallel to Angular's)
 
 ## 🌍 Ecosystem Packages

@@ -48,11 +48,13 @@ bindings the build adapter can classify:
 
 ### Scope values
 
-Streamix scopes stay value-first in component code:
+Streamix scopes stay value-first in component code. The value is a plain
+property read; the atom behind it comes from the scope's public accessor:
 
 ```ts
-model.count       // number
-model.refs.count  // Writable<number>
+model.count            // number (value)
+model.get('count')     // Atom<number>
+model.set('count', 2)  // write through the atom
 ```
 
 Templates stay value-first too:
@@ -71,13 +73,11 @@ Templates stay value-first too:
 <p>{{ model.count * model.price }}</p>
 ```
 
-The TypeScript-aware resolver maps those value paths to their reactive backing
-refs (`model.count` -> `model.refs.count`). The generated browser bindings
-subscribe to `refs`; the Angular SSR/hydration fallback reads `.value` from the
-ref internally. `refs` mirrors nested scope state recursively, so
-`model.user.name` can map to `model.refs.user.name`.
+The TypeScript-aware resolver maps those value paths to their atom accessors
+(`model.count` -> `model.get('count')`). The generated browser bindings
+subscribe to the atom; the Angular SSR fallback reads `.value` from it.
 
-### Structural statements
+### Control flow
 
 Use Angular's native control flow—there is no Streamix structural directive:
 
@@ -95,23 +95,67 @@ Use Angular's native control flow—there is no Streamix structural directive:
 }
 ```
 
-When the condition, iterable, or switch value is a compile-time-resolved atom
-or Scope member, the virtual compiler input reads its backing ref's `.value`
-and subscribes to the atom for local Angular view invalidation. Angular itself
-continues to create, destroy, and hydrate the structural DOM.
-
-Existing Angular structural directives are supported too when their reactive
-input is a direct atom or Scope value:
+When every read in the condition, iterable, or switch value is a
+compile-time-resolved atom or Scope member, the compiler takes the block over:
+Angular's template gets an empty marker element (`<span data-sx-block="0">`)
+and the compiled view renders the branches itself, straight to the DOM. The
+same applies to classic `*ngIf`/`*ngFor`. Expressions are compiled, not just
+paths:
 
 ```html
-<p *ngIf="model.ready">Ready</p>
-<li *ngFor="let item of model.items">{{ item.name }}</li>
-<section [ngSwitch]="model.status">...</section>
+@if (model.count > 3 && model.ready) { ... }
+@for (row of model.items.concat(model.extras); track row.id) { ... }
 ```
+
+Blocks nest, and `@let` works inside them:
+
+```html
+@for (row of model.items; track row.id) {
+  @let total = row.price * row.quantity;
+  <li>
+    @if (row.done) { <s>{{ total }}</s> } @else { <span>{{ total }}</span> }
+  </li>
+}
+```
+
+Anything the compiler cannot prove — a body containing a component, directive,
+or pipe, a condition that mixes atoms with ordinary component state, a
+non-literal `@case` — is either left entirely to Angular or rejected at build
+time with the read that could not be compiled. There is no partial handover.
+
+### Events and two-way bindings
+
+Native events compile to listeners the runtime owns:
+
+```html
+<button (click)="add($event)">Add</button>
+<button (click.stop.prevent)="save()">Save</button>
+<input (keyup.enter)="submit()">
+```
+
+Modifiers are reproduced: `.stop`, `.prevent`, `.self`, `.once`, `.capture`,
+and key filters such as `.enter`. The Angular binding is removed from the
+template in the same step, so a click runs exactly one handler. Component
+outputs, animations, `window:`/`document:` targets, unknown event or modifier
+names, and handlers that are not method calls stay Angular-owned untouched.
+
+Two-way bindings compile for writable atoms on native elements:
+
+```html
+<input [(value)]="model.name">
+<input [(checked)]="model.notifications">
+```
+
+The property binding owns the read direction and the listener writes the DOM
+value back through the atom (`scope.set` for Scope members) — no change
+detection in either direction. Only `value`, `checked`, `selectedIndex`, and
+`valueAsNumber` are writable this way; URL/HTML sinks, `attr.*`, `style.*`,
+derived scope members, and component elements are refused with a build error.
 
 ## Expressions
 
-Source-transparent interpolation extends to expressions:
+Source-transparent expressions are compiled wherever every read is a reactive
+source:
 
 ```html
 {{ count }}
@@ -124,15 +168,18 @@ For Streamix sources these are normalized internally to `.value` reads for the
 Angular SSR fallback and compiled to direct source/expression bindings in the
 browser.
 
-Hybrid expressions keep Angular semantics:
+An expression that mixes a reactive read with ordinary component state is a
+build error:
 
 ```html
-{{ count * multiplier }}
+{{ count * multiplier }}   <!-- count is an atom, multiplier is plain state -->
 ```
 
-If `count` is a Streamix source and `multiplier` is ordinary Angular state, the
-compiler subscribes to `count` and coalesces one local Angular view invalidation.
-Angular-owned changes to `multiplier` continue to behave normally.
+Angular would evaluate that once and never update it, so the compiler refuses
+it and names the read. Make every read reactive — scope members work — or
+compute the value into a plain field and bind that. The same rule covers
+`@defer` triggers and bodies and root-level `@let` declarations, which are all
+Angular-owned.
 
 ## SSR and hydration
 
@@ -150,19 +197,27 @@ becomes, for Angular server rendering/hydration:
 {{ count.value * 2 }}
 ```
 
-The generated browser setup still subscribes to `busy` and `count` themselves.
-After hydration, `ɵinstallSxCompiledView()` installs those direct subscriptions
-with `afterNextRender()`.
+Server rendering keeps the lowered block markers **empty** and renders every
+other binding through its Angular fallback. The client's template declares an
+empty marker, so injecting block content into it during server rendering makes
+hydration mismatch and Angular re-renders the subtree; the compiled view fills
+the marker right after mounting instead (`afterNextRender()` on the client,
+the generated `ngAfterViewInit()` under server rendering). Event listeners are
+never attached while rendering on the server.
 
-Interpolation updates Angular's existing `Text` node rather than replacing
-`element.textContent`, preserving hydration node identity.
+The browser setup subscribes to `busy` and `count` themselves, and
+interpolation updates Angular's existing `Text` node rather than replacing
+`element.textContent`, so the nodes hydration produced stay in place.
 
+`npm run test:node` renders a fixture through `renderApplication` and asserts
+this contract; `hydration.spec.ts` boots the client over the committed server
+HTML and asserts the takeover.
 
 ## Angular sanitization boundary
 
-Automatic direct lowering is intentionally conservative. The compiler does not
-take ownership of bindings whose values normally pass through Angular security
-sanitization, including URL/resource/HTML sinks such as:
+Automatic direct lowering is intentionally conservative. The compiler never
+takes ownership of a binding whose value normally passes through Angular
+security sanitization, including URL/resource/HTML sinks such as:
 
 ```html
 [href]="url"
@@ -172,18 +227,15 @@ sanitization, including URL/resource/HTML sinks such as:
 [style.background-image]="background"
 ```
 
-Those remain Angular-owned even when their expression is a Streamix source.
-For source-transparent syntax the fallback compiler still unwraps the source,
-for example `[href]="url"` becomes Angular-owned `[href]="url.value"`; it
-just does not install a direct DOM writer for that sink.
+A reactive read in one of those positions is a build error, because Angular
+would render it once and never update it. The explicit `.value` form stays
+Angular-owned (`[href]="url.value"`) so Angular's sanitizer runs on every
+value.
 
-Security-sensitive standard Angular bindings remain Angular-owned, preserving
-Angular's sanitizer.
-
-Source-transparent auto-lowering currently covers unambiguous safe DOM
-properties, classes, `aria-*`/`data-*` plus a small safe attribute set, and a
-conservative set of direct styles such as `opacity`, `width`, `height`,
-`display`, and `visibility`.
+Source-transparent auto-lowering covers unambiguous safe DOM properties,
+classes, `aria-*`/`data-*` plus a small safe attribute set, and a conservative
+set of direct styles such as `opacity`, `width`, `height`, `display`, and
+`visibility`.
 
 ## Change detection and zones
 
@@ -210,10 +262,12 @@ bootstrapApplication(AppComponent, {
 `provideSxZoneScheduling()` installs an environment initializer that resolves
 `NgZone` and configures the renderer once for that application. Without this
 provider, Streamix runtime paths never resolve `NgZone`, even if Zone.js is
-present on the page for another application or library.
+present on the page for another application or library. If a global `Zone`
+exists and the provider was never installed, the renderer warns once — every
+Streamix update would otherwise drag a global change-detection pass along.
 
 ```text
-pure Streamix binding
+compiled binding
   source emission
   -> integer slot dirty
   -> shared renderer frame
@@ -222,38 +276,21 @@ pure Streamix binding
 zone-backed Angular + provideSxZoneScheduling()
   shared renderer frame
   -> scheduled through NgZone.runOutsideAngular(...)
-
-hybrid binding
-  Streamix emission
-  -> shared renderer frame
-  -> one local Angular view invalidation
 ```
 
-## Structural `*sx`
+## Compiled block semantics
 
-`*sx` is the structural bridge for scalar values and keyed collections:
-
-```html
-<div *sx="user as user">
-  {{ user.name }}
-</div>
-
-<li *sx="let item of items; trackBy: trackItem; let i = index">
-  {{ i }} — {{ item.name }}
-</li>
-```
-
-Runtime semantics:
+A lowered `@if`/`@for`/`@switch` renders through the structural runtime:
 
 - initial rendering is synchronous;
 - emissions are frame-coalesced and the latest value wins;
-- replacing a source unsubscribes the previous source and cancels stale work;
-- `undefined` removes a scalar/collection view;
+- an expression over several sources re-evaluates at most once per frame;
 - keyed collection views are reused and moved rather than recreated;
-- collection context (`index`, `count`, `first`, `last`, `even`, `odd`) is updated on reuse;
+- collection context (`index`, `count`, `first`, `last`, `even`, `odd`) is
+  available as `item`/`$index`-style locals, including `@empty`;
+- nested blocks re-evaluate when the loop item that owns them changes;
 - duplicate keys are rejected before DOM mutation;
-- host destruction releases subscriptions;
-- only the embedded Angular view is refreshed, so an OnPush parent does not block updates.
+- teardown releases every subscription and removes every listener.
 
 ## Compiler/runtime model
 
@@ -280,22 +317,16 @@ this.count = anotherAtom;
 The generated `__sxRefs` bridge synchronously tears down the old Streamix setup
 and recreates it against the new source. No Angular signal,
 `ChangeDetectorRef`, template event, or Angular change-detection pass is used
-for that rebind. Pure compiled views do not resolve `ChangeDetectorRef`; only
-hybrid expressions that remain Angular-owned opt into local Angular
-invalidation.
+for that rebind — the runtime never resolves `ChangeDetectorRef` and never
+writes a signal.
 
-Simple structural `*sx` sources use the same field registry. The compiler adds
-a hidden `sourceRef: __sxRefs.<field>` microsyntax entry, and the directive
-rebinds directly when the component field identity changes. Authored templates
-remain `*sx="source as value"`; the extra input exists only in transformed
-compiler output.
+Generated setup uses static `Element.children` paths. There are no
+`querySelector()` calls in the compiled hot path; a lowered block is addressed
+through its marker element, which the browser replaces with a comment anchor.
 
-Generated setup uses static `Element.children` paths. There are no `data-sx`
-markers or `querySelector()` calls in the compiled hot path.
-
-Dynamic element topology in the same static region—Angular structural
-directives, built-in control-flow blocks, or content projection—is rejected by
-the static compiler and belongs to the structural compiler path instead.
+Dynamic element topology in the same static region — content projection, an
+Angular-owned structural directive that shifts element indices — is rejected by
+the static compiler rather than addressed by a path that would drift.
 
 ## Build integration
 
@@ -305,8 +336,14 @@ the static compiler and belongs to the structural compiler path instead.
 compileSxComponent(...)
 transformAngularComponentTemplate(...)
 installSxLifecycleIntoComponentSource(...)
-emitComponentModule(...)
+emitComponentSetup(...)
 ```
+
+`installSxLifecycleIntoComponentSource` is a TypeScript AST transform: it
+parses the component, merges an authored `ngAfterViewInit`, appends the
+generated members and the hoisted setup function, and prints the file. It
+requires `typescript` (declared as an optional peer) and is meant for the
+virtual build output, never for authored sources.
 
 Source-transparent syntax requires compile-time reactive-path metadata. A real
 builder should supply `resolveReactiveSource(path)` from its component
@@ -322,7 +359,7 @@ compileSxComponent({
 
     // Value-first Scope member:
     return componentTypeChecker.scopeRefPath(path);
-    // e.g. model.count -> model.refs.count
+    // e.g. model.count -> model.get('count')
   },
 });
 ```
@@ -341,22 +378,25 @@ compileSxComponent({
 ```
 
 For unusual model layouts, `reactiveSourcePaths` accepts an explicit value-path
-to source-path map. The legacy `isDependencySource` classifier remains accepted
-for standalone sources, but cannot express value-first Scope members.
+to source-path map. Two-way bindings use the same idea through
+`resolveReactiveWritable` / `writableSourcePaths` / `scopeWritablePaths`: only
+paths a write can reach (an atom with `set`/`next`) may resolve.
 
 This metadata is compile-time only. It is never emitted as a runtime source
 classifier.
 
-See `src/compiler/BUILD-INTEGRATION.md` for the build-tool contract.
+See the [builder README](./builder/README.md) for the build-tool contract.
 
-## App builder (`@epikodelabs/streamix-angular-builder`)
+## App builder (`@epikodelabs/streamix/angular/builder`)
 
-The `builder/` directory is a workspace-local Architect builder package,
-linked into `node_modules` via a `file:` dependency. It runs the Streamix
-generator (`builder/generate-app6.ts`, currently app6-specific) which writes
-the virtual component into `.angular/streamix/app6/` (generated output, not
-committed), then delegates the actual build or serve to the standard Angular
-targets.
+The builder ships as a secondary entry point of this package, compiled into
+`dist/streamix/fesm2022` alongside the runtime and the compiler, so an
+application references it as `@epikodelabs/streamix/angular/builder:application`
+in `angular.json`. It runs the generator in
+`angular/builder/src/generate-project.ts`, which compiles every component under
+the configured `sourceRoot` and writes the virtual results into
+`.angular/streamix/<app>/src/` (generated output, not committed), then delegates
+the actual build or serve to the standard Angular targets.
 
 The app6 wiring in `angular.json` (trimmed to the Streamix-relevant parts):
 
@@ -367,19 +407,25 @@ The app6 wiring in `angular.json` (trimmed to the Streamix-relevant parts):
     "options": {
       "fileReplacements": [
         {
-          "replace": "projects/apps/app6/src/app/app.component.ts",
-          "with": ".angular/streamix/app6/app.component.ts"
+          "replace": "projects/apps/app6/src/main.ts",
+          "with": ".angular/streamix/app6/src/main.ts"
         }
       ]
     }
   },
   "build": {
-    "builder": "@epikodelabs/streamix-angular-builder:application",
-    "options": { "delegateTarget": "app6:application" }
+    "builder": "@epikodelabs/streamix/angular/builder:application",
+    "options": {
+      "delegateTarget": "app6:application",
+      "sourceRoot": "projects/apps/app6/src"
+    }
   },
   "serve": {
-    "builder": "@epikodelabs/streamix-angular-builder:application",
-    "options": { "delegateTarget": "app6:dev-server" }
+    "builder": "@epikodelabs/streamix/angular/builder:application",
+    "options": {
+      "delegateTarget": "app6:dev-server",
+      "sourceRoot": "projects/apps/app6/src"
+    }
   },
   "dev-server": {
     "builder": "@angular/build:dev-server",
@@ -433,13 +479,12 @@ when it is itself torn down.
 
 ### Rebuild hook
 
-While the delegate runs, the wrapper watches the generator's source inputs
-(declared in `GENERATOR_INPUTS`, kept in sync with `generate-app6.ts`) and
-re-runs the generator when they change. Editing `app.component.ts` under
+While the delegate runs, the wrapper watches every file under `sourceRoot` and
+re-runs the generator when one changes. Editing `app.component.ts` under
 `ng serve` therefore flows through the full chain — regenerate the virtual
 component, the dev-server rebuilds on its own (the virtual file is in its
 module graph), HMR ships the update — with no restart. Regeneration runs
-asynchronously and is serialized per run; a mid-edit save that fails
+asynchronously and is coalesced per change set; a mid-edit save that fails
 compilation keeps the previously generated component serving and logs a
 warning, and the next successful save retries.
 

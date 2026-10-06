@@ -71,10 +71,11 @@ export interface SxCompiledViewOptions {
  * Replacing a compiler-selected plain source field is delivered through the
  * source-reference bridge and synchronously rebuilds the Streamix setup.
  *
- * Template positions Angular still evaluates (non-lowered control flow, hybrid
- * expressions, sanitizer sinks) read generated signal accessors, so they
- * refresh through Angular's scheduler. The runtime never resolves
- * `ChangeDetectorRef`.
+ * Template positions Angular still evaluates (nothing lowered, sanitizer
+ * sinks, plain component state) are rendered by Angular through the SSR
+ * fallbacks the compiler writes. Any reactive read in such a position is a
+ * build error, so there is nothing to refresh. The runtime never resolves
+ * `ChangeDetectorRef` and never writes an Angular signal.
  *
  * @internal
  */

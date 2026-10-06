@@ -110,6 +110,11 @@ The static site lands in `dist/.vitepress/dist/`.
 | `@epikodelabs/streamix/aggregates` | `projects/libraries/streamix/aggregates` | Aggregate operators |
 | `@epikodelabs/streamix/dom` | `projects/libraries/streamix/dom` | DOM observers |
 | `@epikodelabs/streamix/networking` | `projects/libraries/streamix/networking` | HTTP / WebSocket |
+| `@epikodelabs/streamix/angular` | `projects/libraries/streamix/angular` | Angular runtime — compiled direct-DOM bindings |
+| `@epikodelabs/streamix/angular/compiler` | `projects/libraries/streamix/angular/compiler` | Template compiler and component installer |
+| `@epikodelabs/streamix/angular/builder` | `projects/libraries/streamix/angular/builder` | Architect builder that runs the compiler during a build |
+| `@epikodelabs/streamix/react` | `projects/libraries/streamix/react` | React bindings |
+| `@epikodelabs/streamix/vue` | `projects/libraries/streamix/vue` | Vue bindings |
 
 ---
 
