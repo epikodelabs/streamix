@@ -7,11 +7,15 @@ import {
 import {
   adaptDependencySourceResolver,
   combineReactiveSourceResolvers,
+  combineReactiveWritableResolvers,
   createDependencySourcePathResolver,
   createReactiveSourcePathResolver,
   createScopeValuePathResolver,
+  createScopeWritableResolver,
+  createWritableSourcePathResolver,
   type SxDependencySourceResolver,
   type SxReactiveSourceResolver,
+  type SxReactiveWritableResolver,
 } from './source-resolution';
 
 export interface SxComponentBuildInput {
@@ -35,6 +39,18 @@ export interface SxComponentBuildInput {
    * `model.get('count')` and `model.get('user.name')`.
    */
   readonly scopeValuePaths?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * TypeScript-checker-backed writable resolver for two-way bindings. Only
+   * paths backed by a writable atom may resolve.
+   */
+  readonly resolveReactiveWritable?: SxReactiveWritableResolver;
+  /** Standalone writable atom property paths. */
+  readonly writableSourcePaths?: readonly string[];
+  /**
+   * Scope members that hold writable atoms, grouped by Scope path. Derived
+   * members must not appear: writing one throws at runtime.
+   */
+  readonly scopeWritablePaths?: Readonly<Record<string, readonly string[]>>;
 }
 
 export interface SxComponentBuildOutput {
@@ -78,10 +94,20 @@ export function compileSxComponent(
     adaptDependencySourceResolver(input.isDependencySource),
   );
 
+  const resolveReactiveWritable = combineReactiveWritableResolvers(
+    input.resolveReactiveWritable,
+    input.writableSourcePaths
+      ? createWritableSourcePathResolver(input.writableSourcePaths)
+      : undefined,
+    input.scopeWritablePaths
+      ? createScopeWritableResolver(input.scopeWritablePaths)
+      : undefined,
+  );
+
   const transformed = transformAngularComponentTemplate(
     input.template,
     input.templatePath ?? input.componentPath,
-    { resolveReactiveSource },
+    { resolveReactiveSource, resolveReactiveWritable },
   );
 
   // A component whose only compiled content is a control-flow block has no

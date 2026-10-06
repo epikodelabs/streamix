@@ -348,10 +348,10 @@ function emitStructuralBlocks(
  * method call with `$event` bound to the DOM event.
  */
 function eventHandler(entry: SxBindingPlanEntry): string {
-  return eventHandlerBody(
-    `ctx.${entry.source.replace(/\$event\b/g, 'event')}`,
-    entry.modifiers,
-  );
+  const call = entry.handler ??
+    `ctx.${entry.source.replace(/\$event\b/g, 'event')}`;
+
+  return eventHandlerBody(call, entry.modifiers);
 }
 
 /** The listener arrow for a handler call, with modifier guards up front. */

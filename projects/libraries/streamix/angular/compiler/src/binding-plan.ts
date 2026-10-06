@@ -35,6 +35,12 @@ export interface SxBindingPlanEntry {
   readonly dependencies?: readonly string[];
   /** Angular event modifiers (`stop`, `prevent`, `enter`, …) for event entries. */
   readonly modifiers?: readonly string[];
+  /**
+   * Prepared listener body for event entries the parser already rewrote
+   * (two-way write-back). Used verbatim; otherwise the entry's `source` call
+   * is prefixed with the component context.
+   */
+  readonly handler?: string;
   /** Present when the entry was extracted from a parsed template. */
   readonly span?: SxSourceSpan;
 }

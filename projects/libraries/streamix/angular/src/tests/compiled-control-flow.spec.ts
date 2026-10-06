@@ -16,6 +16,7 @@ import {
   ɵinstallSxCompiledView,
   ɵsxBlockAnchor,
   ɵsxListener,
+  ɵsxProperty,
   ɵsxReadLocal,
   ɵsxString,
   ɵsxTextNode,
@@ -407,6 +408,42 @@ class EventHostComponent {
   );
 }
 
+/**
+ * Mirrors the emitted shape for `<input [(value)]="name">`: a property
+ * binding for the read direction and an input listener writing back.
+ */
+@Component({
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '<input>',
+})
+class TwoWayHostComponent {
+  readonly name = atom('a');
+
+  readonly ɵsx = ɵinstallSxCompiledView(
+    this,
+    (host: Element, ctx: TwoWayHostComponent) => {
+      const table = createBindingTable(2);
+      const input = host.children[0] as HTMLInputElement;
+
+      ɵsxProperty(table, 0, input, 'value', ctx.name);
+      ɵsxListener(
+        table,
+        1,
+        input,
+        'input',
+        (event: any) => {
+          ctx.name.set(event.target.value);
+        },
+        undefined,
+        false,
+      );
+
+      return table;
+    },
+  );
+}
+
 idescribe('compiled control flow', () => {
   useAngularTestEnvironment();
 
@@ -542,6 +579,32 @@ idescribe('compiled control flow', () => {
     // Destroying the records removed their listeners.
     buttons[1].click();
     expect(component.selected).toEqual([2, 2, 1]);
+  });
+
+  it('round-trips a two-way binding without change detection', async () => {
+    const fixture = TestBed.createComponent(TwoWayHostComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const input = host.querySelector('input') as HTMLInputElement;
+    const component = fixture.componentInstance;
+
+    expect(input.value).toBe('a');
+
+    // Atom -> DOM.
+    component.name.set('b');
+    rendererScheduler.flushNow();
+
+    expect(input.value).toBe('b');
+
+    // DOM -> atom.
+    input.value = 'c';
+    input.dispatchEvent(new Event('input'));
+
+    expect(component.name.value).toBe('c');
+
+    fixture.destroy();
   });
 
   it('reorders, updates and empties a keyed collection with no change detection', async () => {

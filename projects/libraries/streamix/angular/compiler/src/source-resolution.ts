@@ -62,6 +62,84 @@ export function createScopeValuePathResolver(
   return createReactiveSourcePathResolver(mappings);
 }
 
+/**
+ * Compile-time mapping from a value-facing template path to the writable
+ * source behind it: the atom expression to read, and how to write it back for
+ * a two-way binding.
+ */
+export interface SxReactiveWritable {
+  /** Atom expression, for example `model.get('name')`. */
+  readonly source: string;
+  /** Statement text that stores `valueExpression` back into the source. */
+  write(valueExpression: string): string;
+}
+
+export type SxReactiveWritableResolver = (
+  path: string,
+) => SxReactiveWritable | undefined;
+
+/** Creates a resolver for standalone writable atom fields. */
+export function createWritableSourcePathResolver(
+  paths: Iterable<string>,
+): SxReactiveWritableResolver {
+  const sources = new Set(paths);
+
+  return path =>
+    sources.has(path)
+      ? {
+          source: path,
+          write: value => `ctx.${path}.set(${value})`,
+        }
+      : undefined;
+}
+
+/**
+ * Creates scope-member writable mappings. Only members that hold a writable
+ * atom may appear: writing a derived member throws at runtime.
+ */
+export function createScopeWritableResolver(
+  scopes: Readonly<Record<string, readonly string[]>>,
+): SxReactiveWritableResolver {
+  const mappings: Record<string, SxReactiveWritable> = {};
+
+  for (const [scopePath, members] of Object.entries(scopes)) {
+    for (const member of members) {
+      const property = member.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      mappings[`${scopePath}.${member}`] = {
+        source: `${scopePath}.get('${property}')`,
+        write: value => `ctx.${scopePath}.set('${property}', ${value})`,
+      };
+    }
+  }
+
+  return path => mappings[path];
+}
+
+/** Combines writable resolvers in priority order. */
+export function combineReactiveWritableResolvers(
+  ...resolvers: Array<SxReactiveWritableResolver | undefined>
+): SxReactiveWritableResolver | undefined {
+  const active = resolvers.filter(
+    (resolver): resolver is SxReactiveWritableResolver => !!resolver,
+  );
+
+  if (active.length === 0) {
+    return undefined;
+  }
+
+  return path => {
+    for (const resolver of active) {
+      const writable = resolver(path);
+
+      if (writable) {
+        return writable;
+      }
+    }
+
+    return undefined;
+  };
+}
+
 /** Combines resolvers in priority order. */
 export function combineReactiveSourceResolvers(
   ...resolvers: Array<SxReactiveSourceResolver | undefined>

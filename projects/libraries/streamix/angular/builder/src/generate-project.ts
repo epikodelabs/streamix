@@ -85,8 +85,67 @@ export async function generateProject({
    * `refs` only mirrors atom members, so deeper keys would resolve template
    * paths to reactive sources that do not exist.
    */
-  function scopeValuePathsFor(
+  /**
+   * Fields exposing both `value` and a write method, i.e. atoms a two-way
+   * binding can write back.
+   */
+  function standaloneWritableSources(sourcePath: string): string[] {
+    const file = program.getSourceFile(sourcePath);
+    if (!file) return [];
+    const fields: string[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name)) {
+        const type = checker.getTypeAtLocation(node.initializer ?? node.name);
+        if (
+          type.getProperty('value') &&
+          (type.getProperty('set') || type.getProperty('next'))
+        ) {
+          fields.push(node.name.text);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(file, visit);
+    return fields;
+  }
+
+  /**
+   * Scope members backed by a writable atom. Derived members — arrow
+   * functions, `method(...)`, `derivedExpr(...)` — are excluded: `scope.set`
+   * throws for them, so a two-way binding must not be compiled.
+   */
+  function scopeWritablePathsFor(
     sourcePath: string,
+  ): Record<string, readonly string[]> | undefined {
+    const scopes = scopeMembersFor(sourcePath, property => {
+      const initializer = property.initializer;
+
+      if (!initializer) return false;
+      if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
+        return false;
+      }
+
+      if (ts.isCallExpression(initializer)) {
+        const name = ts.isIdentifier(initializer.expression)
+          ? initializer.expression.text
+          : undefined;
+
+        return name !== 'method' && name !== 'derivedExpr' && name !== 'flowExpr';
+      }
+
+      return true;
+    });
+
+    return scopes;
+  }
+
+  /**
+   * Scope members declared in `scope({...})` initializers, optionally filtered
+   * per member.
+   */
+  function scopeMembersFor(
+    sourcePath: string,
+    accept: (property: ts.PropertyAssignment) => boolean = () => true,
   ): Record<string, readonly string[]> | undefined {
     const file = program.getSourceFile(sourcePath);
     if (!file) return undefined;
@@ -106,6 +165,7 @@ export async function generateProject({
         ) {
           const members = initializer.arguments[0].properties
             .filter(ts.isPropertyAssignment)
+            .filter(accept)
             .map(property =>
               ts.isIdentifier(property.name) ? property.name.text : undefined,
             )
@@ -120,6 +180,12 @@ export async function generateProject({
 
     ts.forEachChild(file, visit);
     return Object.keys(scopes).length > 0 ? scopes : undefined;
+  }
+
+  function scopeValuePathsFor(
+    sourcePath: string,
+  ): Record<string, readonly string[]> | undefined {
+    return scopeMembersFor(sourcePath);
   }
 
   /**
@@ -150,6 +216,8 @@ export async function generateProject({
       template: match[1],
       dependencySourcePaths: standaloneDependencySources(sourcePath),
       scopeValuePaths,
+      writableSourcePaths: standaloneWritableSources(sourcePath),
+      scopeWritablePaths: scopeWritablePathsFor(sourcePath),
     });
     if (!compiled.setupCode && !compiled.lifecycleInitializer) {
       if (scopeValuePaths) {

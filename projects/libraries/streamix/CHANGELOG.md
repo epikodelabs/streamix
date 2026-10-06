@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Two-way bindings compile for writable atoms.**
+  `[(value)]="count"` (and `checked`, `selectedIndex`, `valueAsNumber`) on a
+  native element lowers to a property binding plus a listener that stores the
+  DOM value back through the atom, so the round trip needs no change
+  detection. Scope members go through `scope.set`. Security-sensitive
+  properties (`[(innerHTML)]`, `attr.*`, `style.*`), derived members, and
+  component elements are refused with an actionable error, and a two-way
+  binding over plain Angular state is left untouched.
 - **Event bindings compile.** Native `(event)="handler(...)"` bindings are
   installed by the compiler and removed from Angular's template, so one click
   runs one handler. Modifiers are reproduced: `.stop`, `.prevent`, `.self`,

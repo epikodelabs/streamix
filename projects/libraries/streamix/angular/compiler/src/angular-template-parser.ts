@@ -26,6 +26,7 @@ import {
   adaptDependencySourceResolver,
   type SxDependencySourceResolver,
   type SxReactiveSourceResolver,
+  type SxReactiveWritableResolver,
 } from './source-resolution';
 import {
   MARKER_ATTRIBUTE,
@@ -43,6 +44,8 @@ export interface SxTemplateBinding {
   readonly dependencies?: readonly string[];
   /** Angular event modifiers (`stop`, `prevent`, `enter`, …). */
   readonly modifiers?: readonly string[];
+  /** Prepared listener body, used verbatim instead of prefixing `source`. */
+  readonly handler?: string;
   readonly span: SxSourceSpan;
 }
 
@@ -64,6 +67,11 @@ export interface ParseSxTemplateOptions {
    * adapter. Runtime duck typing is intentionally not used.
    */
   readonly resolveReactiveSource?: SxReactiveSourceResolver;
+  /**
+   * Compile-time writable classifier for two-way bindings. A path resolves
+   * only when it is backed by an atom the generated code can write.
+   */
+  readonly resolveReactiveWritable?: SxReactiveWritableResolver;
   /** @deprecated Prefer `resolveReactiveSource`. */
   readonly isDependencySource?: SxDependencySourceResolver;
 }
@@ -90,6 +98,7 @@ interface WalkState {
   readonly markers: Record<string, string>;
   readonly strict: boolean;
   readonly resolveReactiveSource?: SxReactiveSourceResolver;
+  readonly resolveReactiveWritable?: SxReactiveWritableResolver;
   nextNode: number;
 }
 
@@ -201,6 +210,7 @@ export function parseSxTemplate(
       resolveReactiveSource,
     ),
     resolveReactiveSource,
+    resolveReactiveWritable: options.resolveReactiveWritable,
     nextNode: 0,
   };
 
@@ -323,7 +333,27 @@ function visitElement(
 
   let hasExplicitTextBinding = false;
 
+  // Two-way sugar is lowered first: its input and output share one span, and
+  // both loops below must skip it once handled.
+  const twoWay = collectTwoWayBindings(element, nodeId, state);
+
+  for (const handled of twoWay.values()) {
+    state.bindingEdits.push({
+      ...handled.span,
+      replacement: `[${handled.property}]="${handled.readExpression}"`,
+    });
+
+    for (const binding of handled.bindings) {
+      state.bindings.push({ ...binding, span: handled.span });
+      state.bindingSpans.push(handled.span);
+    }
+  }
+
   for (const input of element.inputs) {
+    if (twoWay.has(spanKey(input.sourceSpan))) {
+      continue;
+    }
+
     const raw = sourceText(state.template, input.sourceSpan);
     const publicName = extractPublicBindingName(raw);
 
@@ -406,6 +436,12 @@ function visitElement(
       continue;
     }
 
+    if (publicName.startsWith('(')) {
+      // `[(prop)]` sugar the two-way pass did not lower: a reactive read here
+      // would render once and never update.
+      throw new Error(angularOwnedReadError(source, TWO_WAY_REASON));
+    }
+
     const binding = classifyNativeAngularBinding(publicName, nodeId, source);
 
     if (transparentSource) {
@@ -434,6 +470,10 @@ function visitElement(
   }
 
   for (const output of element.outputs) {
+    if (twoWay.has(spanKey(output.sourceSpan))) {
+      continue;
+    }
+
     const binding = classifyEventBinding(
       element,
       output,
@@ -705,6 +745,144 @@ const EXPRESSION_BINDING_KINDS: Partial<Record<SxBindingKind, SxBindingKind>> = 
   class: 'class-expression',
   style: 'style-expression',
 };
+
+/**
+ * Two-way properties the compiler writes back, with the event and the value
+ * expression that carry the DOM value. Everything else — URL/HTML sinks,
+ * `attr.*`, `style.*`, component elements — is refused: those must keep
+ * Angular's sanitizer in the write path.
+ */
+const TWO_WAY_NATIVE: Readonly<
+  Record<string, { event: string; value: string }>
+> = {
+  value: { event: 'input', value: 'event.target.value' },
+  checked: { event: 'change', value: 'event.target.checked' },
+  selectedIndex: { event: 'change', value: 'event.target.selectedIndex' },
+  valueAsNumber: { event: 'input', value: 'event.target.valueAsNumber' },
+};
+
+const TWO_WAY_REASON =
+  'Two-way binding is only supported for a writable atom or scope member ' +
+  'bound to a native `value`, `checked`, `selectedIndex`, or `valueAsNumber` ' +
+  'property.';
+
+interface SxTwoWayBinding {
+  readonly property: string;
+  readonly readExpression: string;
+  readonly span: SxSourceSpan;
+  readonly bindings: readonly Omit<SxTemplateBinding, 'span'>[];
+}
+
+/**
+ * Recognizes `[(property)]="source"` on a native element. Angular desugars the
+ * sugar into an input and a `propertyChange` output sharing one span; when the
+ * source resolves to a writable atom the pair compiles to a property binding
+ * plus a listener that writes the DOM value back.
+ */
+function collectTwoWayBindings(
+  element: TmplAstElement,
+  nodeId: string,
+  state: WalkState,
+): ReadonlyMap<string, SxTwoWayBinding> {
+  const handled = new Map<string, SxTwoWayBinding>();
+
+  if (element.name.includes('-')) {
+    return handled;
+  }
+
+  for (const output of element.outputs) {
+    if (output.phase != null || output.target != null) {
+      continue;
+    }
+
+    if (!output.name.endsWith('Change')) {
+      continue;
+    }
+
+    const property = output.name.slice(0, -'Change'.length);
+    const mapping = TWO_WAY_NATIVE[property];
+
+    if (!mapping) {
+      continue;
+    }
+
+    const input = element.inputs.find(
+      candidate =>
+        candidate.sourceSpan.start.offset === output.sourceSpan.start.offset &&
+        candidate.sourceSpan.end.offset === output.sourceSpan.end.offset,
+    );
+
+    if (!input) {
+      continue;
+    }
+
+    const expression = tryExtractBindingExpression(
+      sourceText(state.template, input.sourceSpan),
+    );
+
+    if (!expression) {
+      continue;
+    }
+
+    // Angular's sugar passes the bound expression through as the handler.
+    if (bindingHandlerSource(output.handler) !== expression) {
+      continue;
+    }
+
+    const writable = state.resolveReactiveWritable?.(expression);
+
+    if (!writable) {
+      // Plain Angular state round-trips through Angular correctly; a reactive
+      // read that cannot be written back would go stale.
+      const reactive = !!state.resolveReactiveSource?.(expression);
+
+      if (reactive) {
+        throw new Error(angularOwnedReadError(expression, TWO_WAY_REASON));
+      }
+
+      continue;
+    }
+
+    handled.set(spanKey(input.sourceSpan), {
+      property,
+      readExpression: `${writable.source}.value`,
+      span: {
+        start: input.sourceSpan.start.offset,
+        end: input.sourceSpan.end.offset,
+      },
+      bindings: [
+        {
+          kind: 'property',
+          node: nodeId,
+          source: writable.source,
+          name: property,
+        },
+        {
+          kind: 'event',
+          node: nodeId,
+          source: '',
+          name: mapping.event,
+          handler: writable.write(mapping.value),
+        },
+      ],
+    });
+  }
+
+  return handled;
+}
+
+function bindingHandlerSource(handler: unknown): string {
+  const source = (handler as { source?: unknown } | undefined)?.source;
+
+  return typeof source === 'string' ? source.trim() : '';
+}
+
+function spanKey(span: {
+  start: { offset: number };
+  end: { offset: number };
+}): string {
+  return `${span.start.offset}:${span.end.offset}`;
+}
 
 function classifyNativeAngularBinding(
   publicName: string,
