@@ -9,11 +9,11 @@ describe('compiled structural template diagnostics', () => {
     );
 
     expect(result.updateBody).toContain(
-      'ɵsxReadLocal(context, "user.profile.name")',
+      'ɵsxReadLocal(currentContext, "user.profile.name")',
     );
   });
 
-  it('rejects executable interpolation expressions', () => {
+  it('rejects executable interpolation expressions without a resolver', () => {
     expect(() =>
       compileSxBlockTemplate(
         '<span>{{ format(user) }}</span>',
@@ -21,11 +21,23 @@ describe('compiled structural template diagnostics', () => {
     ).toThrowError(/only local\/property reads/i);
   });
 
-  it('rejects structural control flow inside a direct block', () => {
+  it('compiles structural control flow inside a direct block', () => {
+    const result = compileSxBlockTemplate(
+      '@if (visible) { <span>Visible</span> }',
+      'sx-block.html',
+      { allowLocals: true },
+    );
+
+    expect(result.nested.length).toBe(1);
+    expect(result.nested[0].kind).toBe('conditional');
+    expect(result.createBody).toContain('createComment("sx")');
+  });
+
+  it('rejects an executable nested block source without a resolver', () => {
     expect(() =>
       compileSxBlockTemplate(
         '@if (visible) { <span>Visible</span> }',
       ),
-    ).toThrowError(/unsupported sx structural template node/i);
+    ).toThrowError(/unsupported sx block expression/i);
   });
 });

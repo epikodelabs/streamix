@@ -52,8 +52,16 @@ export function angularExpressionSpans(template: string): SxExpressionSpan[] {
   return spans;
 }
 
-export function componentPathsInExpression(expression: string): readonly string[] {
-  const paths: string[] = [];
+/** A dotted-path read found in an expression, with its source offsets. */
+export interface SxPathSpan {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+}
+
+/** Locates every dotted-path read in an expression, ignoring string content. */
+export function componentPathSpans(expression: string): readonly SxPathSpan[] {
+  const spans: SxPathSpan[] = [];
   const pattern = /\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\b/g;
 
   for (const match of expression.matchAll(pattern)) {
@@ -68,10 +76,47 @@ export function componentPathsInExpression(expression: string): readonly string[
       continue;
     }
 
-    paths.push(match[0]);
+    spans.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      text: match[0],
+    });
   }
 
-  return paths;
+  return spans;
+}
+
+export function componentPathsInExpression(expression: string): readonly string[] {
+  return componentPathSpans(expression).map(span => span.text);
+}
+
+/**
+ * Locates dotted-path reads including `$`-prefixed template variables
+ * (`$index`, `$count`). The rejection scanner deliberately ignores those, but
+ * the compiled-block rewriter must resolve them against the loop context.
+ */
+export function localPathSpans(expression: string): readonly SxPathSpan[] {
+  const spans: SxPathSpan[] = [];
+  const pattern = /\$?[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*/g;
+
+  for (const match of expression.matchAll(pattern)) {
+    const start = match.index ?? 0;
+
+    if (isInsideString(expression, start)) {
+      continue;
+    }
+
+    // Skip identifiers that are part of a longer token, such as the
+    // `sxReadLocal` inside an emitted `ɵsxReadLocal(...)` call.
+    const previous = start > 0 ? expression[start - 1] : '';
+    if (previous && /[A-Za-z0-9_$ɵ.]/.test(previous)) {
+      continue;
+    }
+
+    spans.push({ start, end: start + match[0].length, text: match[0] });
+  }
+
+  return spans;
 }
 
 function isInsideString(expression: string, offset: number): boolean {

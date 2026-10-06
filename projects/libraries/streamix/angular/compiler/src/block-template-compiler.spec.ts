@@ -18,7 +18,7 @@ describe('compileSxBlockTemplate', () => {
       'document.createTextNode("")',
     );
     expect(result.updateBody).toContain(
-      'ɵsxReadLocal(context, "hero.name")',
+      'ɵsxReadLocal(currentContext, "hero.name")',
     );
     expect(result.bindingCount).toBe(1);
   });

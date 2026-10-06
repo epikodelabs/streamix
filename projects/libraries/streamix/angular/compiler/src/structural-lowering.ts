@@ -504,9 +504,11 @@ function tryLowerTemplateBlock(
     source,
     // `*ngFor` defaults to identity tracking; an explicit `trackBy: fn`
     // refers to a component method the generated setup reaches through `ctx`.
+    // Parameters are annotated: the collection arrives through `ctx: any`, so
+    // inference would type the item as unknown.
     trackBy: trackBy
-      ? `(_index, ${item}) => ctx.${trackBy}(_index, ${item})`
-      : `(_index, ${item}) => ${item}`,
+      ? `(_index: any, ${item}: any) => ctx.${trackBy}(_index, ${item})`
+      : `(_index: any, ${item}: any) => ${item}`,
     item,
     compiled,
     fields: loweredValueFields(source),
@@ -838,15 +840,17 @@ function trackByFunction(
   }
 
   if (text === '$index') {
-    return '(_index) => _index';
+    return '(_index: any) => _index';
   }
 
   const itemPath = new RegExp(
     `^${item}(?:\\.[A-Za-z_$][\\w$]*)*$`,
   );
 
+  // Annotated: the collection arrives through `ctx: any`, so inference would
+  // type the item as unknown and reject the property read.
   return itemPath.test(text)
-    ? `(_index, ${item}) => ${text}`
+    ? `(_index: any, ${item}: any) => ${text}`
     : undefined;
 }
 

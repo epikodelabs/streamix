@@ -117,9 +117,9 @@ describe('standard Angular atom templates', () => {
     expect(result.template).toBe('<span data-sx-block="0"></span>');
     expect(result.setup).toContain('ɵcreateSxKeyedBlock');
     expect(result.setup).toContain("ctx.model.get('items')");
-    expect(result.setup).toContain('(_index, item) => item.id');
+    expect(result.setup).toContain('(_index: any, item: any) => item.id');
     expect(result.setup).toContain(
-      'ɵsxString(ɵsxReadLocal(context, "item.name"))',
+      'ɵsxString(ɵsxReadLocal(currentContext, "item.name"))',
     );
     expect(result.setup).toContain('instance.update({ item, index,');
   });
@@ -137,7 +137,7 @@ describe('standard Angular atom templates', () => {
     expect(result.setup).toContain('$count: count');
     expect(result.setup).toContain('$last: index === count - 1');
     expect(result.setup).toContain(
-      'ɵsxString(ɵsxReadLocal(context, "$count"))',
+      'ɵsxString(ɵsxReadLocal(currentContext, "$count"))',
     );
   });
 
@@ -265,5 +265,65 @@ describe('standard Angular atom templates', () => {
     expect(result.setup).toContain(
       "ɵsxTextExpression(blockTable, 0, text1, [ctx.model.get('total')], () => ctx.model.get('total').value * 2)",
     );
+  });
+
+  it('compiles a nested @if over a loop local inside @for', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (row of model.items; track row.id) { <li>@if (row.done) { <s>{{ row.name }}</s> }</li> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('doc.createComment("sx")');
+    expect(result.setup).toContain('ɵcreateSxConditionalBlock(anchor1, [');
+    expect(result.setup).toContain(
+      'read: () => ɵsxReadLocal(currentContext, "row.done")',
+    );
+    // The enclosing update re-evaluates the nested condition per item.
+    expect(result.setup).toMatch(/block\d+\.refresh\(\);/);
+  });
+
+  it('compiles a nested @if over reactive sources inside a conditional body', () => {
+    const result = transformAngularComponentTemplate(
+      `@if (model.ready) { @if (count > 3) { <p>big</p> } }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    // The outer block and the nested one both compile to the runtime.
+    expect(
+      result.setup.match(/ɵcreateSxConditionalBlock\(/g)?.length,
+    ).toBe(2);
+    expect(result.setup).toContain('sources: [ctx.count]');
+    expect(result.setup).toContain('read: () => ctx.count.value > 3');
+  });
+
+  it('inlines @let declarations into the expressions that read them', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (row of model.items; track row.id) { @let total = row.price * 2; <p>{{ total }}</p> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain(
+      'ɵsxString((ɵsxReadLocal(currentContext, "row.price") * 2))',
+    );
+  });
+
+  it('compiles a nested @for over a loop-local collection', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (group of model.items; track group.id) { <ul>@for (tag of group.tags; track tag) { <li>{{ tag }}</li> }</ul> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.setup).toContain('ɵcreateSxKeyedBlock(');
+    expect(result.setup).toContain(
+      'read: () => ɵsxReadLocal(currentContext, "group.tags")',
+    );
+    // The nested context extends the enclosing one, so outer locals stay visible.
+    expect(result.setup).toContain('let currentContext = { ...currentContext,');
   });
 });

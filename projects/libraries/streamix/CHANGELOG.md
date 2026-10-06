@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Control flow nests.** `@if`/`@switch`/`@for` (with `@empty`) inside a
+  compiled body now compile instead of forcing the whole outer block back onto
+  Angular, so `@for (row of rows) { @if (row.done) { … } }` renders as direct
+  DOM. A nested condition or collection may read the enclosing loop context
+  (`row.done`) or reactive sources; the enclosing update re-evaluates it
+  synchronously. `@let` inside a compiled body is inlined into the expressions
+  that read it, including reactive reads.
 - **Compound expressions now compile.** `@if (count > 3)`, `@else if`, `@switch`
   over expressions, `@for (row of items.concat(more))`, body interpolations like
   `{{ total * 2 }}`, and native bindings such as `[class.active]="count > 3"`

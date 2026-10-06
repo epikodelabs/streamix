@@ -1,3 +1,4 @@
+import { localPathSpans } from './expression-spans';
 import type { SxReactiveSourceResolver } from './source-resolution';
 
 export type SxTextExpressionMode =
@@ -186,6 +187,44 @@ export function extractComponentSourcePath(
   return /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(trimmed)
     ? trimmed
     : undefined;
+}
+
+/**
+ * Rewrites every dotted-path read of a loop-local expression to a context
+ * lookup, so `item.price * 2` compiles to
+ * `ɵsxReadLocal(context, "item.price") * 2`. Reads already prefixed with the
+ * component context (`ctx.…`) and safe globals are left alone.
+ */
+export function rewriteLocalReads(
+  expression: string,
+  contextName: string,
+): string {
+  const spans = localPathSpans(expression);
+
+  if (spans.length === 0) {
+    return expression;
+  }
+
+  let rewritten = '';
+  let cursor = 0;
+
+  for (const span of spans) {
+    if (span.start < cursor) {
+      continue;
+    }
+
+    const [root] = span.text.split('.');
+
+    if (root === contextName || root === 'ctx' || ALLOWED_BARE_IDENTIFIERS.has(root)) {
+      continue;
+    }
+
+    rewritten += expression.slice(cursor, span.start);
+    rewritten += `ɵsxReadLocal(${contextName}, ${JSON.stringify(span.text)})`;
+    cursor = span.end;
+  }
+
+  return rewritten + expression.slice(cursor);
 }
 
 /** Prefixes compiler-recognized Streamix reads with the component context. */

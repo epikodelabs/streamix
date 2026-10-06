@@ -257,6 +257,19 @@ export class SxConditionalBlock {
     this.current = -1;
   }
 
+  /**
+   * Re-evaluates the branch selection synchronously. Used by a nested block
+   * whose condition reads the enclosing loop context, which changes without
+   * any source emission.
+   */
+  refresh(): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    this.render();
+  }
+
   private ensureScheduled(generation: number): void {
     if (!this.scheduled) {
       this.scheduled = rendererScheduler.register(() => {
@@ -342,6 +355,8 @@ export class SxKeyedBlock<T> {
    * so an expression over several sources evaluates once per frame.
    */
   private pending?: SxValueOrExpression<Iterable<T> | undefined>;
+  /** The bound collection, kept for context-driven refreshes. */
+  private bound?: SxValueOrExpression<Iterable<T> | undefined>;
   private records: CollectionRecord<T>[] = [];
   private emptyInstance?: SxBlockInstance;
   private generation = 0;
@@ -360,6 +375,7 @@ export class SxKeyedBlock<T> {
     }
 
     this.unbind();
+    this.bound = source;
     this.render(toArray(readSxValue(source)));
 
     const generation = ++this.generation;
@@ -395,6 +411,18 @@ export class SxKeyedBlock<T> {
       this.emptyInstance.destroy();
       this.emptyInstance = undefined;
     }
+  }
+
+  /**
+   * Re-reads the collection and re-renders synchronously. Used by a nested
+   * block whose expression reads the enclosing loop context.
+   */
+  refresh(): void {
+    if (this.destroyed || this.bound === undefined) {
+      return;
+    }
+
+    this.render(toArray(readSxValue(this.bound)));
   }
 
   private removeRecords(): void {
@@ -512,6 +540,7 @@ export class SxKeyedBlock<T> {
     this.scheduled = undefined;
 
     this.pending = undefined;
+    this.bound = undefined;
   }
 }
 

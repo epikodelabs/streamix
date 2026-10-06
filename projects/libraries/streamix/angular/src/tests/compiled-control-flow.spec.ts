@@ -231,6 +231,101 @@ class ExpressionHostComponent {
   );
 }
 
+/**
+ * Mirrors the emitted shape for
+ * `@for (row of rows; track row.id) { <li>@if (row.done) { <s>{{ row.name }}</s> }</li> }`:
+ * a nested conditional whose condition reads the loop context, refreshed by
+ * the enclosing update with no change detection.
+ */
+@Component({
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '<ul><span data-sx-block="0"></span></ul>',
+})
+class NestedHostComponent {
+  readonly rows = atom<{ id: number; name: string; done: boolean }[]>([
+    { id: 1, name: 'A', done: false },
+    { id: 2, name: 'B', done: true },
+  ]);
+
+  readonly ɵsx = ɵinstallSxCompiledView(
+    this,
+    (host: Element, ctx: NestedHostComponent, server = false) => {
+      const table = createBindingTable(0);
+      const marker0 = host.children[0].children[0] as Element;
+      const anchor0 = ɵsxBlockAnchor(marker0, 'sx:0', server);
+      const locals = (row: unknown, index: number, count: number) => ({
+        row,
+        index,
+        $index: index,
+        count,
+        $count: count,
+      });
+
+      const block0 = ɵcreateSxKeyedBlock(
+        anchor0,
+        ctx.rows,
+        {
+          create(row, index, count) {
+            const doc = host.ownerDocument!;
+            let currentContext: Record<string, unknown> = locals(row, index, count);
+            const el0 = doc.createElement('li');
+            const anchor1 = doc.createComment('sx');
+            el0.appendChild(anchor1);
+            const tail = doc.createTextNode('');
+            el0.appendChild(tail);
+
+            const block1 = ɵcreateSxConditionalBlock(anchor1, [
+              {
+                source: {
+                  sources: [],
+                  read: () => ɵsxReadLocal(currentContext, 'row.done'),
+                },
+                factory: () => {
+                  const node = doc.createElement('s');
+                  node.textContent = String(ɵsxReadLocal(currentContext, 'row.name'));
+                  return { first: node, last: node, destroy() {} };
+                },
+              },
+              {
+                source: null,
+                factory: () => {
+                  const node = doc.createElement('em');
+                  node.textContent = 'pending';
+                  return { first: node, last: node, destroy() {} };
+                },
+              },
+            ]);
+
+            // The nested anchor and tail live inside the item element, so the
+            // instance range is just that element.
+            return ɵcreateSxCompiledBlock(
+              el0,
+              el0,
+              (context) => {
+                currentContext = context;
+                block1.refresh();
+              },
+              currentContext,
+            );
+          },
+          update(instance, row, index, count) {
+            instance.update(locals(row, index, count));
+          },
+        },
+        (_index, row) => row.id,
+      );
+
+      return {
+        destroy() {
+          table.destroy();
+          block0.destroy();
+        },
+      };
+    },
+  );
+}
+
 idescribe('compiled control flow', () => {
   useAngularTestEnvironment();
 
@@ -289,6 +384,52 @@ idescribe('compiled control flow', () => {
     expect(host.querySelector('strong')).toBeNull();
 
     fixture.destroy();
+  });
+
+  it('refreshes a nested @if when its loop item changes, with no change detection', async () => {
+    const errors = spyOn(console, 'error');
+    const fixture = TestBed.createComponent(NestedHostComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const component = fixture.componentInstance;
+
+    expect(host.querySelectorAll('li').length).toBe(2);
+    expect(host.querySelector('li s')?.textContent).toBe('B');
+    expect(host.querySelectorAll('em').length).toBe(1);
+
+    // A reused record whose item changed re-evaluates the nested condition.
+    component.rows.next([
+      { id: 1, name: 'A2', done: true },
+      { id: 2, name: 'B', done: false },
+    ]);
+    rendererScheduler.flushNow();
+
+    const items = Array.from(host.querySelectorAll('li'));
+    expect(items[0].querySelector('s')?.textContent).toBe('A2');
+    expect(items[1].querySelector('em')?.textContent).toBe('pending');
+
+    // Reordering keeps each nested state with its keyed record.
+    component.rows.next([
+      { id: 2, name: 'B', done: false },
+      { id: 1, name: 'A2', done: true },
+    ]);
+    rendererScheduler.flushNow();
+
+    const reordered = Array.from(host.querySelectorAll('li'));
+    expect(reordered[0].querySelector('em')?.textContent).toBe('pending');
+    expect(reordered[1].querySelector('s')?.textContent).toBe('A2');
+
+    // Emptying the collection destroys every nested block with its item.
+    component.rows.next([]);
+    rendererScheduler.flushNow();
+
+    expect(host.querySelectorAll('li').length).toBe(0);
+    expect(host.querySelector('em')).toBeNull();
+
+    fixture.destroy();
+    expect(errors).not.toHaveBeenCalled();
   });
 
   it('reorders, updates and empties a keyed collection with no change detection', async () => {
