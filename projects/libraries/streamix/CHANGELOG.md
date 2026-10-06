@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Zone.js applications get told when scheduling is wrong.** When a global
+  `Zone` exists and `provideSxZoneScheduling()` was never installed, the
+  renderer scheduler warns once that every Streamix update is dragging an
+  Angular change-detection pass along. Nothing is patched implicitly.
+- **Sanitizer boundaries are pinned by tests.** URL/resource/HTML sinks
+  (`[href]`, `[src]`, `[innerHTML]`, `[srcdoc]`, `[attr.href]`, URL-bearing
+  styles) are covered by specs asserting the compiler refuses the reactive
+  read and leaves the explicit `.value` form to Angular's sanitizer, while the
+  allow-listed attribute/property/style bindings still lower.
 - **Two-way bindings compile for writable atoms.**
   `[(value)]="count"` (and `checked`, `selectedIndex`, `valueAsNumber`) on a
   native element lowers to a property binding plus a listener that stores the

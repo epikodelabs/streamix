@@ -33,13 +33,19 @@ export function createOutsideAngularRenderScheduler(
   boundary: OutsideAngularBoundary,
   delegate: RenderScheduler = animationFrameRenderScheduler,
 ): RenderScheduler {
-  return {
+  const scheduler: RenderScheduler = {
     schedule(callback: () => void): CancelRender {
       return boundary.runOutsideAngular(() =>
         delegate.schedule(() => boundary.runOutsideAngular(callback)),
       );
     },
   };
+
+  // Marks the execution boundary so the scheduler can tell an opted-in zone
+  // application from one that forgot `provideSxZoneScheduling()`.
+  Object.defineProperty(scheduler, 'ɵsxOutsideAngular', { value: true });
+
+  return scheduler;
 }
 
 export interface ScheduledBinding {
@@ -58,6 +64,7 @@ export class RendererScheduler {
 
   private cancelFrame?: CancelRender;
   private flushing = false;
+  private zoneWarned = false;
 
   constructor(
     private scheduler: RenderScheduler =
@@ -135,6 +142,36 @@ export class RendererScheduler {
     return count;
   }
 
+  /**
+   * A Zone.js application that never installed `provideSxZoneScheduling()`
+   * runs every frame callback inside Angular's zone, so each Streamix update
+   * drags a global change-detection pass along. Detect the situation once and
+   * say so; nothing is patched implicitly.
+   */
+  private warnAboutZoneScheduling(): void {
+    if (this.zoneWarned) {
+      return;
+    }
+
+    const zone = (globalThis as { Zone?: unknown }).Zone;
+    const outsideAngular =
+      (this.scheduler as { ɵsxOutsideAngular?: boolean }).ɵsxOutsideAngular ===
+      true;
+
+    if (zone === undefined || outsideAngular) {
+      return;
+    }
+
+    this.zoneWarned = true;
+
+    console.warn(
+      '[streamix] Renderer updates are scheduled inside Zone.js without ' +
+      'provideSxZoneScheduling(), so every Streamix update triggers an ' +
+      'Angular change-detection pass. Add provideSxZoneScheduling() to the ' +
+      'application providers to keep compiled updates outside the zone.',
+    );
+  }
+
   private markDirty(
     id: number,
     generation: number,
@@ -149,6 +186,8 @@ export class RendererScheduler {
     this.dirtyFlags[id] = true;
     this.dirtyIds.push(id);
     this.dirtyGenerations.push(generation);
+
+    this.warnAboutZoneScheduling();
 
     if (!this.cancelFrame && !this.flushing) {
       this.cancelFrame = this.scheduler.schedule(() => {

@@ -85,4 +85,60 @@ describe('outside-Angular renderer scheduling', () => {
     second.flush();
     expect(flushes).toBe(1);
   });
+
+  describe('Zone.js diagnostics', () => {
+    const globalWithZone = globalThis as { Zone?: unknown };
+    const originalZone = globalWithZone.Zone;
+
+    afterEach(() => {
+      if (originalZone === undefined) {
+        delete globalWithZone.Zone;
+      } else {
+        globalWithZone.Zone = originalZone;
+      }
+    });
+
+    it('warns once when a zone application schedules without opting in', () => {
+      globalWithZone.Zone = { current: {} };
+      const warn = spyOn(console, 'warn');
+      const renderer = new RendererScheduler(new ManualScheduler());
+
+      const binding = renderer.register(() => {});
+      binding.markDirty();
+      binding.markDirty();
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.calls.mostRecent().args[0]).toContain(
+        'provideSxZoneScheduling()',
+      );
+    });
+
+    it('does not warn once outside-zone scheduling is installed', () => {
+      globalWithZone.Zone = { current: {} };
+      const warn = spyOn(console, 'warn');
+      const renderer = new RendererScheduler(new ManualScheduler());
+
+      renderer.setScheduler(
+        createOutsideAngularRenderScheduler({
+          runOutsideAngular: callback => callback(),
+        }),
+      );
+
+      const binding = renderer.register(() => {});
+      binding.markDirty();
+
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('does not warn without a global Zone', () => {
+      delete globalWithZone.Zone;
+      const warn = spyOn(console, 'warn');
+      const renderer = new RendererScheduler(new ManualScheduler());
+
+      const binding = renderer.register(() => {});
+      binding.markDirty();
+
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
 });
