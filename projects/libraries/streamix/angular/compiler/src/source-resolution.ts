@@ -84,8 +84,3 @@ export function combineReactiveSourceResolvers(
     return undefined;
   };
 }
-
-/** Returns true when `expression` is a plain component property path. */
-export function isComponentPathExpression(expression: string): boolean {
-  return /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(expression.trim());
-}

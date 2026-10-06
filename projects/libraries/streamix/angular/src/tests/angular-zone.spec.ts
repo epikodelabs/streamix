@@ -10,7 +10,6 @@ import {
 
 import {
   provideSxZoneScheduling,
-  ɵinstallSxAngularZone,
 } from '../lib/angular-zone';
 import {
   animationFrameRenderScheduler,
@@ -44,7 +43,9 @@ idescribe('sx Angular zone integration', () => {
 
     try {
       runInInjectionContext(injector, () => {
-        expect(() => ɵinstallSxAngularZone()).not.toThrow();
+        const binding = rendererScheduler.register(() => {});
+        binding.markDirty();
+        binding.destroy();
       });
       expect(ngZoneFactoryCalls).toBe(0);
     } finally {

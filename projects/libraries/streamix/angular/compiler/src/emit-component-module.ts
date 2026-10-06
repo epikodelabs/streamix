@@ -1,7 +1,5 @@
 import { SX_SOURCE_REFERENCES_FIELD } from './generated-names';
 
-const DEFAULT_RUNTIME_IMPORT = '@epikodelabs/streamix/angular';
-
 /**
  * Runtime primitives referenced by emitted setup functions. Generated setup is
  * inlined into the component module, so these symbols join the component's
@@ -27,19 +25,6 @@ export const SX_SETUP_RUNTIME_SYMBOLS = [
   'ɵsxTextExpression',
   'ɵsxTextExpressionNode',
 ] as const;
-
-/**
- * Emits the runtime import header shared by generated setup modules.
- */
-export function emitRuntimeImportHeader(
-  runtimeImport: string = DEFAULT_RUNTIME_IMPORT,
-): string {
-  return [
-    `import {`,
-    ...SX_SETUP_RUNTIME_SYMBOLS.map(symbol => `  ${symbol},`),
-    `} from ${JSON.stringify(runtimeImport)};`,
-  ].join('\n');
-}
 
 /**
  * Generated component-field initializer.

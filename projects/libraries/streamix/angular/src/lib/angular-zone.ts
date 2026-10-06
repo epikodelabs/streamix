@@ -41,11 +41,3 @@ export function ɵconfigureSxAngularZone(zone: NgZone): void {
     createOutsideAngularRenderScheduler(zone),
   );
 }
-
-/**
- * Legacy internal hook retained so previously generated/runtime code remains
- * source-compatible. Zone installation is now provider-driven and this hook is
- * intentionally inert: zoneless applications never resolve NgZone implicitly.
- * @internal
- */
-export function ɵinstallSxAngularZone(): void {}

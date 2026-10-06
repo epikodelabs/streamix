@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Removed** unreachable Angular compiler exports: the legacy structural-plan
+  emitter (`emitStructuralBlock`, `emitStructuralModule`, `SxStructuralPlan`,
+  `parseSxExpression`, `createSxStructuralPlanEntry`), `emitRuntimeImportHeader`,
+  and `isComponentPathExpression`. The `*sx` microsyntax they served is a
+  compile error and has been replaced by standard Angular control flow.
+- **Removed** the inert `ɵinstallSxAngularZone` no-op and the unused
+  `static-block.ts` runtime module. Zone scheduling stays provider-driven
+  through `provideSxZoneScheduling()`.
+
 ## 3.0.3 - 2026-09-28
 
 - Atom subscription replay: Subscribing to an initialized Atom now immediately replays its current value.

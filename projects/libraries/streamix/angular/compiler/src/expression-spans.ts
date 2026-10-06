@@ -51,49 +51,6 @@ export function angularExpressionSpans(template: string): SxExpressionSpan[] {
   return spans;
 }
 
-/**
- * Applies recorded path replacements inside expression spans only, in one
- * longest-first pass. Longest-first keeps a longer recorded path
- * (`state.items`) from being clobbered by a recorded prefix (`state`), and
- * the span restriction keeps static attributes, prose, and string literals
- * inside expressions untouched.
- */
-export function rewriteExpressionSpans(
-  template: string,
-  spans: readonly SxExpressionSpan[],
-  replacements: ReadonlyMap<string, string>,
-): string {
-  const paths = [...replacements.keys()].sort((a, b) => b.length - a.length);
-  const pattern = new RegExp(
-    `(?<![\\w$.])(?:${paths.map(escapeRegExp).join('|')})(?![\\w$])`,
-    'g',
-  );
-  const rewrite = (text: string): string =>
-    text.replace(pattern, (match, offset: number) =>
-      isInsideString(text, offset) ? match : replacements.get(match)!,
-    );
-
-  const ordered = [...spans].sort((a, b) => a.start - b.start);
-  let result = '';
-  let cursor = 0;
-
-  for (const span of ordered) {
-    if (span.start < cursor) {
-      // Nested span; the enclosing rewrite already covered its text.
-      continue;
-    }
-
-    result += template.slice(cursor, span.start) + rewrite(span.text);
-    cursor = span.end;
-  }
-
-  return result + template.slice(cursor);
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 export function componentPathsInExpression(expression: string): readonly string[] {
   const paths: string[] = [];
   const pattern = /\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\b/g;
@@ -116,7 +73,7 @@ export function componentPathsInExpression(expression: string): readonly string[
   return paths;
 }
 
-export function isInsideString(expression: string, offset: number): boolean {
+function isInsideString(expression: string, offset: number): boolean {
   let quote: string | undefined;
   let escaped = false;
   for (let index = 0; index < offset; index += 1) {
