@@ -167,6 +167,70 @@ class CollectionHostComponent {
   );
 }
 
+/**
+ * Mirrors the emitted shape for a lowered `@if (count > limit) { <strong>over</strong> }
+ *  @else { <em>under</em> }` block: one compiled expression over two atoms.
+ */
+@Component({
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '<div class="slot"><span data-sx-block="0"></span></div>',
+})
+class ExpressionHostComponent {
+  readonly count = atom(0);
+  readonly limit = atom(5);
+
+  readonly ɵsx = ɵinstallSxCompiledView(
+    this,
+    (host: Element, ctx: ExpressionHostComponent, server = false) => {
+      const table = createBindingTable(0);
+      const marker0 = host.children[0].children[0] as Element;
+      const anchor0 = ɵsxBlockAnchor(marker0, 'sx:0', server);
+
+      const block0 = ɵcreateSxConditionalBlock(anchor0, [
+        {
+          source: {
+            sources: [ctx.count, ctx.limit],
+            read: () => ctx.count.value > ctx.limit.value,
+          },
+          factory: () => {
+            const doc = host.ownerDocument!;
+            const el0 = doc.createElement('strong');
+            el0.appendChild(doc.createTextNode('over'));
+
+            return {
+              first: el0,
+              last: el0,
+              destroy() {},
+            };
+          },
+        },
+        {
+          source: null,
+          factory: () => {
+            const doc = host.ownerDocument!;
+            const el1 = doc.createElement('em');
+            el1.appendChild(doc.createTextNode('under'));
+
+            return {
+              first: el1,
+              last: el1,
+              destroy() {},
+            };
+          },
+        },
+      ]);
+
+      return {
+        destroy() {
+          table.destroy();
+          block0.destroy();
+        },
+      };
+    },
+  );
+}
+
 idescribe('compiled control flow', () => {
   useAngularTestEnvironment();
 
@@ -197,6 +261,32 @@ idescribe('compiled control flow', () => {
 
     expect(host.querySelector('strong')).toBeNull();
     expect(host.querySelector('em')?.textContent).toBe('off');
+
+    fixture.destroy();
+  });
+
+  it('swaps an expression branch when either source emits, with no change detection', async () => {
+    const fixture = TestBed.createComponent(ExpressionHostComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const component = fixture.componentInstance;
+
+    expect(host.querySelector('em')?.textContent).toBe('under');
+
+    component.count.next(9);
+    rendererScheduler.flushNow();
+
+    expect(host.querySelector('strong')?.textContent).toBe('over');
+    expect(host.querySelector('em')).toBeNull();
+
+    // The second source decides the branch again.
+    component.limit.next(20);
+    rendererScheduler.flushNow();
+
+    expect(host.querySelector('em')?.textContent).toBe('under');
+    expect(host.querySelector('strong')).toBeNull();
 
     fixture.destroy();
   });

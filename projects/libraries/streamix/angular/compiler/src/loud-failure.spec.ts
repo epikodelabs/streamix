@@ -54,9 +54,23 @@ describe('reactive reads the compiler cannot own', () => {
     expect(result.setup).not.toContain('ɵsxProperty');
   });
 
-  it('rejects a compound @if condition through the lowering scan', () => {
-    expect(() => transformAngularComponentTemplate(
+  it('compiles a compound @if condition whose reads are all reactive', () => {
+    const result = transformAngularComponentTemplate(
       '@if (count > 3 && count < 10) { <p>a</p> }',
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('sources: [ctx.count]');
+    expect(result.setup).toContain(
+      'read: () => ctx.count.value > 3 && ctx.count.value < 10',
+    );
+  });
+
+  it('rejects a compound @if condition that reads untracked state', () => {
+    expect(() => transformAngularComponentTemplate(
+      '@if (count > threshold) { <p>a</p> }',
       'inline.html',
       { resolveReactiveSource },
     )).toThrowError(/cannot bind "count"/);

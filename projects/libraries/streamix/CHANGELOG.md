@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Compound expressions now compile.** `@if (count > 3)`, `@else if`, `@switch`
+  over expressions, `@for (row of items.concat(more))`, body interpolations like
+  `{{ total * 2 }}`, and native bindings such as `[class.active]="count > 3"`
+  are all lowered to direct DOM when every read is a reactive source — including
+  scope accessor reads (`model.get('total').value`). The block runtime accepts a
+  `{ sources, read }` expression that re-evaluates once per renderer flush, so
+  multi-source conditions and collections update with no change detection.
 - **Angular templates now fail the build instead of going stale.** A template
   expression that reads a reactive source but mixes it with component state or
   Angular-only expression features (pipes, assignments, template literals) used

@@ -154,12 +154,43 @@ export class SxValueBlock<T> {
 
 export type SxBlockFactory = () => SxBlockInstance;
 
+/**
+ * A reactive expression compiled from a template: the sources it reads and a
+ * function that evaluates it. Mirrors the binding table's expression contract —
+ * evaluated once at setup and at most once per renderer flush.
+ */
+export interface SxExpression<T> {
+  readonly sources: readonly DependencySource<unknown>[];
+  readonly read: () => T;
+}
+
+export type SxValueOrExpression<T> = DependencySource<T> | SxExpression<T>;
+
+function isSxExpression<T>(
+  value: SxValueOrExpression<T>,
+): value is SxExpression<T> {
+  return typeof (value as SxExpression<T>).read === 'function' &&
+    Array.isArray((value as SxExpression<T>).sources);
+}
+
+function readSxValue<T>(value: SxValueOrExpression<T>): T {
+  return isSxExpression(value) ? value.read() : value.value;
+}
+
+function sourcesOf<T>(
+  value: SxValueOrExpression<T>,
+): readonly DependencySource<unknown>[] {
+  return isSxExpression(value)
+    ? value.sources
+    : [value as DependencySource<unknown>];
+}
+
 export interface SxConditionalBranch {
   /**
    * Reactive condition for this branch. `null` marks the `@else`/`@default`
    * branch, which renders when no preceding branch matched.
    */
-  readonly source: DependencySource<unknown> | null;
+  readonly source: SxValueOrExpression<unknown> | null;
   /**
    * When present, the branch matches only if the source equals this literal
    * (`@switch` case semantics) instead of testing truthiness.
@@ -203,11 +234,13 @@ export class SxConditionalBlock {
         continue;
       }
 
-      this.unsubscribes.push(branch.source.subscribe(() => {
-        if (generation !== this.generation || subscribing) return;
+      for (const source of sourcesOf(branch.source)) {
+        this.unsubscribes.push(source.subscribe(() => {
+          if (generation !== this.generation || subscribing) return;
 
-        this.ensureScheduled(generation);
-      }));
+          this.ensureScheduled(generation);
+        }));
+      }
     }
 
     subscribing = false;
@@ -246,7 +279,7 @@ export class SxConditionalBlock {
         return index;
       }
 
-      const value = branch.source.value;
+      const value = readSxValue(branch.source);
 
       if (
         branch.match === undefined
@@ -302,9 +335,13 @@ export class SxConditionalBlock {
 }
 
 export class SxKeyedBlock<T> {
-  private unsubscribe?: Subscription;
+  private unsubscribes: Subscription[] = [];
   private scheduled?: ScheduledBinding;
-  private pending?: readonly T[];
+  /**
+   * The collection to read at the next flush. The value itself is read then,
+   * so an expression over several sources evaluates once per frame.
+   */
+  private pending?: SxValueOrExpression<Iterable<T> | undefined>;
   private records: CollectionRecord<T>[] = [];
   private emptyInstance?: SxBlockInstance;
   private generation = 0;
@@ -317,23 +354,25 @@ export class SxKeyedBlock<T> {
     private readonly emptyFactory?: SxBlockFactory,
   ) {}
 
-  bind(source: DependencySource<Iterable<T> | undefined>): void {
+  bind(source: SxValueOrExpression<Iterable<T> | undefined>): void {
     if (this.destroyed) {
       throw new Error('Cannot bind a destroyed sx keyed block.');
     }
 
     this.unbind();
-    this.render(toArray(source.value));
+    this.render(toArray(readSxValue(source)));
 
     const generation = ++this.generation;
 
     let subscribing = true;
-    this.unsubscribe = source.subscribe(value => {
-      if (generation !== this.generation || subscribing) return;
+    for (const dependency of sourcesOf(source)) {
+      this.unsubscribes.push(dependency.subscribe(() => {
+        if (generation !== this.generation || subscribing) return;
 
-      this.pending = toArray(value);
-      this.ensureScheduled(generation);
-    });
+        this.pending = source;
+        this.ensureScheduled(generation);
+      }));
+    }
     subscribing = false;
   }
 
@@ -377,9 +416,14 @@ export class SxKeyedBlock<T> {
           return;
         }
 
-        const items = this.pending ?? [];
+        const pending = this.pending;
         this.pending = undefined;
-        this.render(items);
+
+        if (pending === undefined) {
+          return;
+        }
+
+        this.render(toArray(readSxValue(pending)));
       });
     }
 
@@ -459,8 +503,10 @@ export class SxKeyedBlock<T> {
   private unbind(): void {
     this.generation += 1;
 
-    this.unsubscribe?.();
-    this.unsubscribe = undefined;
+    for (const unsubscribe of this.unsubscribes) {
+      unsubscribe();
+    }
+    this.unsubscribes = [];
 
     this.scheduled?.destroy();
     this.scheduled = undefined;
@@ -530,7 +576,7 @@ export function ɵsxRestoreBlockMarker(anchor: Node, marker: Element): void {
 
 export function ɵcreateSxKeyedBlock<T>(
   anchor: Node,
-  source: DependencySource<Iterable<T> | undefined>,
+  source: SxValueOrExpression<Iterable<T> | undefined>,
   factory: SxCollectionBlockFactory<T>,
   trackBy: SxTrackBy<T> = (_index, item) => item,
   emptyFactory?: SxBlockFactory,

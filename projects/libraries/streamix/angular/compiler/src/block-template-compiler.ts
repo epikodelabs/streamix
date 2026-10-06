@@ -7,10 +7,13 @@ import {
 } from '@angular/compiler';
 
 import type { SxReactiveSourceResolver } from './source-resolution';
+import { analyzeSxExpression } from './text-expression';
 
 export interface SxCompiledBlockBinding {
   readonly node: string;
   readonly source: string;
+  /** Present when the interpolation is a compiled compound expression. */
+  readonly dependencies?: readonly string[];
 }
 
 export interface SxCompiledBlockTemplate {
@@ -218,11 +221,40 @@ function emitBoundText(
       continue;
     }
 
-    if (state.resolveReactiveSource && !state.allowLocals) {
+    // A compound expression whose reads are all reactive sources compiles to
+    // a multi-source binding-table slot. Angular-only features and reads of
+    // loop locals mixed with sources stay unsupported.
+    if (state.resolveReactiveSource) {
+      const analysis = analyzeSxExpression(
+        part.value,
+        state.resolveReactiveSource,
+      );
+
+      if (analysis?.mode === 'expression') {
+        state.bindings.push({
+          node: variable,
+          source: analysis.expression,
+          dependencies: analysis.dependencies,
+        });
+        state.bindingCount += 1;
+        continue;
+      }
+
+      if (analysis?.mode === 'unsupported' || !state.allowLocals) {
+        throw new Error(
+          `Unsupported sx structural interpolation: ${JSON.stringify(part.value)}. ` +
+          'Only atom reads and loop-local values are supported in a compiled block body; ' +
+          'an expression that mixes both cannot be compiled.',
+        );
+      }
+    }
+
+    // Anything left is a loop-local read, resolved against the collection
+    // context at update time. Only plain property paths can be resolved.
+    if (!LOCAL_READ.test(part.value)) {
       throw new Error(
         `Unsupported sx structural interpolation: ${JSON.stringify(part.value)}. ` +
-        'Only atom reads and loop-local values are supported in a compiled block body; ' +
-        'an expression that mixes both cannot be compiled.',
+        'Only local/property reads are supported in the direct block compiler.',
       );
     }
 
@@ -234,6 +266,9 @@ function emitBoundText(
 
   return variables;
 }
+
+/** A `item.name` / `$index` style read of the collection context. */
+const LOCAL_READ = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
 
 
 function nextVariable(
@@ -271,18 +306,9 @@ function parseInterpolation(
       });
     }
 
-    const expression = match[1].trim();
-
-    if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(expression)) {
-      throw new Error(
-        `Unsupported sx structural interpolation: ${JSON.stringify(expression)}. ` +
-        'Only local/property reads are supported in the direct block compiler.',
-      );
-    }
-
     parts.push({
       kind: 'expression',
-      value: expression,
+      value: match[1].trim(),
     });
 
     cursor = match.index + match[0].length;

@@ -4,10 +4,14 @@ export type SxBindingKind =
   | 'text-expression'
   | 'text-expression-node'
   | 'property'
+  | 'property-expression'
   | 'attribute'
+  | 'attribute-expression'
   | 'class'
+  | 'class-expression'
   | 'class-map'
   | 'style'
+  | 'style-expression'
   | 'style-map';
 
 /** Offsets of an sx attribute or compiler-recognized Angular binding. */

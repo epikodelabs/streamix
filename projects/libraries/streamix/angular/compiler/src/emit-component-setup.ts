@@ -10,6 +10,7 @@ import {
 } from './codegen';
 import type {
   SxLoweredBlock,
+  SxLoweredValue,
 } from './structural-lowering';
 import {
   rewriteSxTextExpression,
@@ -21,6 +22,21 @@ function source(entrySource: string): string {
 
 function sources(dependencies: readonly string[] | undefined): string {
   return `[${(dependencies ?? []).map(source).join(', ')}]`;
+}
+
+/**
+ * Emits a lowered reactive value: a direct source object, or an expression
+ * object carrying its sources and a reader evaluated once per flush.
+ */
+function loweredValue(value: SxLoweredValue): string {
+  if (value.kind === 'source') {
+    return source(value.source);
+  }
+
+  return (
+    `{ sources: ${sources(value.dependencies)}, ` +
+    `read: () => ${rewriteSxTextExpression(value.expression)} }`
+  );
 }
 
 function elementPathExpression(path: SxElementPath): string {
@@ -109,14 +125,29 @@ export function emitComponentSetup(
           `  ɵsxProperty(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${source(entry.source)});`,
         );
         break;
+      case 'property-expression':
+        lines.push(
+          `  ɵsxPropertyExpression(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+        );
+        break;
       case 'attribute':
         lines.push(
           `  ɵsxAttribute(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${source(entry.source)});`,
         );
         break;
+      case 'attribute-expression':
+        lines.push(
+          `  ɵsxAttributeExpression(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+        );
+        break;
       case 'class':
         lines.push(
           `  ɵsxClass(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${source(entry.source)});`,
+        );
+        break;
+      case 'class-expression':
+        lines.push(
+          `  ɵsxClassExpression(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
         );
         break;
       case 'class-map':
@@ -127,6 +158,11 @@ export function emitComponentSetup(
       case 'style':
         lines.push(
           `  ɵsxStyle(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${source(entry.source)});`,
+        );
+        break;
+      case 'style-expression':
+        lines.push(
+          `  ɵsxStyleExpression(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
         );
         break;
       case 'style-map':
@@ -202,11 +238,13 @@ function emitStructuralBlocks(
       lines.push(`  const ${variable} = ɵcreateSxConditionalBlock(${anchor}, [`);
 
       for (const branch of block.branches) {
-        const source = branch.source ? `ctx.${branch.source}` : 'null';
+        const condition = branch.condition
+          ? loweredValue(branch.condition)
+          : 'null';
         const roots = branch.compiled.rootNodes;
 
         lines.push(`    {`);
-        lines.push(`      source: ${source},`);
+        lines.push(`      source: ${condition},`);
 
         if (branch.match !== undefined) {
           lines.push(`      match: ${branch.match},`);
@@ -237,7 +275,7 @@ function emitStructuralBlocks(
 
       lines.push(`  const ${variable} = ɵcreateSxKeyedBlock(`);
       lines.push(`    ${anchor},`);
-      lines.push(`    ctx.${block.source},`);
+      lines.push(`    ${loweredValue(block.source)},`);
       lines.push(`    {`);
       const contextObject = [
         block.item,
@@ -329,7 +367,9 @@ function blockBindingLines(
       (binding, slot) =>
         // Block bodies build their own DOM, so the binding targets the text
         // node directly instead of Angular's rendered interpolation node.
-        `${pad}ɵsxText(blockTable, ${slot}, ${binding.node}, ctx.${binding.source});`,
+        binding.dependencies
+          ? `${pad}ɵsxTextExpression(blockTable, ${slot}, ${binding.node}, ${sources(binding.dependencies)}, () => ${rewriteSxTextExpression(binding.source)});`
+          : `${pad}ɵsxText(blockTable, ${slot}, ${binding.node}, ctx.${binding.source});`,
     ),
   ];
 }

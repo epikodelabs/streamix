@@ -64,6 +64,10 @@ interface AppState {
       </section>
 
       <p class="message">{{ model.message }}</p>
+
+      @if (model.count > 0 && model.count % 5 !== 0) {
+        <p class="hint">{{ 5 - model.count % 5 }} more to unlock the rainbow</p>
+      }
     </main>
 
     <div class="celebration-slot" aria-live="polite">
@@ -79,7 +83,7 @@ interface AppState {
     .tiny-title { color:#6b74a7; font-weight:700; letter-spacing:.12em; text-transform:uppercase; font-size:.75rem; } h1 { font-size:clamp(2rem, 8vw, 3.5rem); margin:.2em 0; } p { color:#586683; }
     .number-box { display:grid; place-items:center; margin:25px auto 18px; width:165px; height:165px; border-radius:50%; background:white; border:8px solid #d9e8ff; box-shadow:0 8px 22px #7597c638; } .number-box.active { border-color:#9f75ff; transform:rotate(4deg) scale(1.05); } .number { display:block; font-size:4rem; font-weight:900; line-height:1; color:#6041c7; }
     button { border:0; border-radius:999px; padding:13px 23px; font-size:1rem; font-weight:800; cursor:pointer; background:#6041c7; color:white; box-shadow:0 5px 0 #44279b; } button:active { transform:translateY(4px); box-shadow:0 1px 0 #44279b; } .reset { background:transparent; color:#586683; box-shadow:none; margin-left:8px; font-weight:600; }
-    .rainbow { display:grid; gap:9px; margin:35px 0 18px; } .rainbow i { display:block; height:18px; min-width:8px; border-radius:999px; transition:width .16s ease; } .red { background:#ff6b6b; } .orange { background:#ff9f43; } .yellow { background:#feca57; } .green { background:#43c59e; } .blue { background:#4d96ff; } .message { font-size:1.08rem; font-weight:700; min-height:1.5em; }
+    .rainbow { display:grid; gap:9px; margin:35px 0 18px; } .rainbow i { display:block; height:18px; min-width:8px; border-radius:999px; transition:width .16s ease; } .red { background:#ff6b6b; } .orange { background:#ff9f43; } .yellow { background:#feca57; } .green { background:#43c59e; } .blue { background:#4d96ff; } .message { font-size:1.08rem; font-weight:700; min-height:1.5em; } .hint { font-size:.95rem; color:#6b74a7; font-weight:600; min-height:1.4em; margin-top:-.4em; }
     .celebration-slot { position:fixed; left:50%; bottom:22px; z-index:2; transform:translateX(-50%); pointer-events:none; } .celebration { display:block; padding:10px 16px; border-radius:999px; background:rgba(255,255,255,.88); color:#6041c7; box-shadow:0 8px 24px #4b3b7a2b; backdrop-filter:blur(8px); white-space:nowrap; }
   `],
 })

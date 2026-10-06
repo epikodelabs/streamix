@@ -20,11 +20,25 @@ import {
   componentPathsInExpression,
 } from './expression-spans';
 import type { SxReactiveSourceResolver } from './source-resolution';
-import { extractComponentSourcePath } from './text-expression';
+import { analyzeSxExpression } from './text-expression';
+
+/**
+ * A compiled reactive value: either one direct source or an expression over
+ * several sources, normalized for the emitter.
+ */
+export type SxLoweredValue =
+  | { readonly kind: 'source'; readonly source: string }
+  | {
+      readonly kind: 'expression';
+      readonly expression: string;
+      readonly dependencies: readonly string[];
+    };
 
 export interface SxLoweredBranch {
-  /** Resolved reactive source expression, or `null` for `@else`/`@default`. */
-  readonly source: string | null;
+  /**
+   * Resolved reactive condition, or `null` for `@else`/`@default`.
+   */
+  readonly condition: SxLoweredValue | null;
   /**
    * Literal the source must equal for this branch to render. Present for
    * `@switch` cases; absent for `@if` (truthiness) and `@else`/`@default`.
@@ -45,8 +59,8 @@ export interface SxLoweredConditionalBlock {
 export interface SxLoweredCollectionBlock {
   readonly kind: 'collection';
   readonly marker: string;
-  /** Resolved reactive source for the iterated collection. */
-  readonly source: string;
+  /** Resolved reactive value for the iterated collection. */
+  readonly source: SxLoweredValue;
   /** Emitted trackBy function text. */
   readonly trackBy: string;
   /** Loop variable name used by the body. */
@@ -439,8 +453,7 @@ function tryLowerTemplateBlock(
   const condition = templateAttribute(node, 'ngIf');
 
   if (condition !== undefined) {
-    const path = extractComponentSourcePath(condition);
-    const source = path ? resolveReactiveSource(path) ?? null : null;
+    const source = lowerReactiveValue(condition, resolveReactiveSource);
 
     if (!source) {
       return undefined;
@@ -452,13 +465,11 @@ function tryLowerTemplateBlock(
       return undefined;
     }
 
-    const field = rootComponentField(source);
-
     return {
       kind: 'conditional',
       marker: String(index),
-      branches: [{ source, compiled }],
-      fields: field ? [field] : [],
+      branches: [{ condition: source, compiled }],
+      fields: loweredValueFields(source),
     };
   }
 
@@ -475,8 +486,7 @@ function tryLowerTemplateBlock(
     return undefined;
   }
 
-  const path = extractComponentSourcePath(collection);
-  const source = path ? resolveReactiveSource(path) ?? null : null;
+  const source = lowerReactiveValue(collection, resolveReactiveSource);
 
   if (!source) {
     return undefined;
@@ -487,8 +497,6 @@ function tryLowerTemplateBlock(
   if (!compiled) {
     return undefined;
   }
-
-  const field = rootComponentField(source);
 
   return {
     kind: 'collection',
@@ -501,8 +509,64 @@ function tryLowerTemplateBlock(
       : `(_index, ${item}) => ${item}`,
     item,
     compiled,
-    fields: field ? [field] : [],
+    fields: loweredValueFields(source),
   };
+}
+
+/**
+ * Compiles an Angular expression into a lowered reactive value.
+ *
+ * Returns `undefined` when the expression reads nothing reactive, `null` when
+ * it reads reactive sources the compiler cannot compile (the block then stays
+ * Angular-owned and the rejection pass reports the read), and the value
+ * otherwise.
+ */
+function lowerReactiveValue(
+  expression: string | undefined,
+  resolveReactiveSource: SxReactiveSourceResolver,
+): SxLoweredValue | null | undefined {
+  if (!expression) {
+    return undefined;
+  }
+
+  const analysis = analyzeSxExpression(expression, resolveReactiveSource);
+
+  if (!analysis) {
+    return undefined;
+  }
+
+  if (analysis.mode === 'direct' && analysis.directSource) {
+    return { kind: 'source', source: analysis.directSource };
+  }
+
+  if (analysis.mode === 'expression') {
+    return {
+      kind: 'expression',
+      expression: analysis.expression,
+      dependencies: analysis.dependencies,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Root component fields a lowered value reads, for the source-reference
+ * bridge that rebinds the setup when a field is replaced.
+ */
+function loweredValueFields(value: SxLoweredValue): string[] {
+  const sources = value.kind === 'source' ? [value.source] : value.dependencies;
+  const fields: string[] = [];
+
+  for (const source of sources) {
+    const field = rootComponentField(source);
+
+    if (field) {
+      fields.push(field);
+    }
+  }
+
+  return fields;
 }
 
 function compileBody(
@@ -537,24 +601,18 @@ function tryLowerConditionalBlock(
   const fields: string[] = [];
 
   for (const branch of block.branches) {
-    let source: string | null = null;
+    let source: SxLoweredValue | null = null;
 
     if (branch.expression) {
       const condition = expressionSource(branch.expression, template);
-      const path = condition
-        ? extractComponentSourcePath(condition)
-        : undefined;
-      source = path ? resolveReactiveSource(path) ?? null : null;
+      const lowered = lowerReactiveValue(condition, resolveReactiveSource);
 
-      if (!source) {
+      if (!lowered) {
         return undefined;
       }
 
-      const field = rootComponentField(source);
-
-      if (field) {
-        fields.push(field);
-      }
+      source = lowered;
+      fields.push(...loweredValueFields(lowered));
     }
 
     const body = bodySourceOf(branch.children, template);
@@ -578,7 +636,7 @@ function tryLowerConditionalBlock(
       return undefined;
     }
 
-    branches.push({ source, compiled });
+    branches.push({ condition: source, compiled });
   }
 
   return {
@@ -602,8 +660,7 @@ function tryLowerSwitchBlock(
   index: number,
 ): SxLoweredConditionalBlock | undefined {
   const expression = expressionSource(block.expression, template);
-  const path = expression ? extractComponentSourcePath(expression) : undefined;
-  const source = path ? resolveReactiveSource(path) ?? null : null;
+  const source = lowerReactiveValue(expression, resolveReactiveSource);
 
   if (!source || block.groups.length === 0) {
     return undefined;
@@ -611,7 +668,7 @@ function tryLowerSwitchBlock(
 
   const cases: SxLoweredBranch[] = [];
   const defaults: SxLoweredBranch[] = [];
-  const fields: string[] = [];
+  const fields: string[] = loweredValueFields(source);
 
   for (const group of block.groups) {
     const body = bodySourceOf(group.children, template);
@@ -639,7 +696,7 @@ function tryLowerSwitchBlock(
       const caseExpression = caseNode.expression;
 
       if (!caseExpression) {
-        defaults.push({ source: null, compiled });
+        defaults.push({ condition: null, compiled });
         continue;
       }
 
@@ -649,14 +706,8 @@ function tryLowerSwitchBlock(
         return undefined;
       }
 
-      cases.push({ source, match, compiled });
+      cases.push({ condition: source, match, compiled });
     }
-  }
-
-  const field = rootComponentField(source);
-
-  if (field) {
-    fields.push(field);
   }
 
   return {
@@ -699,8 +750,7 @@ function tryLowerCollectionBlock(
 ): SxLoweredCollectionBlock | undefined {
   const expression = expressionSource(block.expression, template);
   const item = block.item.name;
-  const path = expression ? extractComponentSourcePath(expression) : undefined;
-  const source = path ? resolveReactiveSource(path) ?? null : null;
+  const source = lowerReactiveValue(expression, resolveReactiveSource);
 
   if (!source) {
     return undefined;
@@ -767,7 +817,7 @@ function tryLowerCollectionBlock(
     item,
     compiled,
     empty,
-    fields: [...new Set([rootComponentField(source)].filter(isField))],
+    fields: [...new Set(loweredValueFields(source))],
   };
 }
 
@@ -798,10 +848,6 @@ function trackByFunction(
   return itemPath.test(text)
     ? `(_index, ${item}) => ${text}`
     : undefined;
-}
-
-function isField(value: string | undefined): value is string {
-  return !!value;
 }
 
 function expressionSource(

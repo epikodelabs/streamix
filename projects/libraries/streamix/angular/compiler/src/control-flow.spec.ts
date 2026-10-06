@@ -5,10 +5,14 @@ import {
 describe('standard Angular atom templates', () => {
   const resolveReactiveSource = (path: string) => ({
     count: 'count',
+    total: 'total',
+    items: 'items',
+    more: 'more',
     'model.ready': "model.get('ready')",
     'model.message': "model.get('message')",
     'model.items': "model.get('items')",
     'model.status': "model.get('status')",
+    'model.total': "model.get('total')",
   } as Record<string, string>)[path];
 
   it('compiles standard static Angular bindings', () => {
@@ -160,5 +164,106 @@ describe('standard Angular atom templates', () => {
     expect(() => transformAngularComponentTemplate(
       '<span *sx="count as value">{{ value }}</span>',
     )).toThrowError(/legacy Streamix structural directive/i);
+  });
+
+  it('compiles a compound @if condition over one source', () => {
+    const result = transformAngularComponentTemplate(
+      `@if (count > 3) { <p>big</p> } @else { <p>small</p> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('source: { sources: [ctx.count]');
+    expect(result.setup).toContain('read: () => ctx.count.value > 3');
+    expect(result.setup).toContain('source: null');
+  });
+
+  it('compiles an @else if chain over several sources', () => {
+    const result = transformAngularComponentTemplate(
+      `@if (count > total) { <p>a</p> } @else if (count + total > 10) { <p>b</p> } @else { <p>c</p> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.setup).toContain('source: { sources: [ctx.count, ctx.total]');
+    expect(result.setup).toContain(
+      'read: () => ctx.count.value + ctx.total.value > 10',
+    );
+  });
+
+  it('compiles a @switch over an expression with literal cases', () => {
+    const result = transformAngularComponentTemplate(
+      `@switch (count + total) { @case (5) { <p>five</p> } @default { <p>other</p> } }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.setup).toContain('sources: [ctx.count, ctx.total]');
+    expect(result.setup).toContain('match: 5');
+  });
+
+  it('compiles a @for collection expression over several sources', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (row of items.concat(more); track row.id) { <li>{{ row.name }}</li> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('sources: [ctx.items, ctx.more]');
+    expect(result.setup).toContain(
+      'read: () => ctx.items.value.concat(ctx.more.value)',
+    );
+  });
+
+  it('compiles a compound native class binding', () => {
+    const result = transformAngularComponentTemplate(
+      '<span [class.active]="count > 3"></span>',
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toContain('[class.active]="count.value > 3"');
+    expect(result.setup).toContain(
+      'ɵsxClassExpression(table, 0, node0, "active", [ctx.count], () => ctx.count.value > 3)',
+    );
+  });
+
+  it('compiles a compound native attribute binding', () => {
+    const result = transformAngularComponentTemplate(
+      '<span [attr.aria-label]="count + total"></span>',
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toContain(
+      '[attr.aria-label]="count.value + total.value"',
+    );
+    expect(result.setup).toContain('ɵsxAttributeExpression');
+  });
+
+  it('compiles a compound scope expression through the accessor form', () => {
+    const result = transformAngularComponentTemplate(
+      '<span>{{ model.total * 2 }}</span>',
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.setup).toContain(
+      'ɵsxTextExpressionNode(table, 0, node0, [ctx.model.get(\'total\')], () => ctx.model.get(\'total\').value * 2)',
+    );
+  });
+
+  it('compiles a compound expression inside a block body', () => {
+    const result = transformAngularComponentTemplate(
+      `@if (model.ready) { <p>{{ model.total * 2 }}</p> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.setup).toContain(
+      "ɵsxTextExpression(blockTable, 0, text1, [ctx.model.get('total')], () => ctx.model.get('total').value * 2)",
+    );
   });
 });

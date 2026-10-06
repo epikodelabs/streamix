@@ -353,14 +353,19 @@ function visitElement(
 
     if (!source) {
       // An expression the compiler cannot prove: silent when it reads no
-      // Streamix value, a build error when it reads one and mixes it with
-      // state Angular evaluates on its own.
+      // Streamix value, compiled when every read is reactive, and a build
+      // error when it mixes reactive reads with state Angular evaluates on
+      // its own.
       const analysis = analyzeSxExpression(
         expression,
         state.resolveReactiveSource,
       );
 
-      if (analysis?.mode === 'unsupported') {
+      if (!analysis) {
+        continue;
+      }
+
+      if (analysis.mode === 'unsupported') {
         throw new Error(
           angularOwnedReadError(
             analysis.dependencies[0] ?? expression,
@@ -369,6 +374,31 @@ function visitElement(
         );
       }
 
+      const expressionBinding = classifyExpressionBinding(
+        publicName,
+        nodeId,
+        expression,
+        state.resolveReactiveSource,
+      );
+
+      if (!expressionBinding) {
+        throw new Error(
+          angularOwnedReadError(analysis.dependencies[0] ?? expression),
+        );
+      }
+
+      // Angular renders the SSR/hydration value from the same expression;
+      // the compiled binding owns the DOM once installed.
+      state.bindingEdits.push({
+        ...span,
+        replacement: angularFallbackForExpression(
+          publicName,
+          analysis.expression,
+        ),
+      });
+
+      state.bindings.push({ ...expressionBinding, span });
+      state.bindingSpans.push(span);
       continue;
     }
 
@@ -516,8 +546,14 @@ function containsCompiledBinding(
         );
 
         if (
-          source &&
-          classifyNativeAngularBinding(publicName, 'node', source)
+          source
+            ? classifyNativeAngularBinding(publicName, 'node', source)
+            : classifyExpressionBinding(
+                publicName,
+                'node',
+                expression,
+                resolveReactiveSource,
+              )
         ) {
           return true;
         }
@@ -579,6 +615,18 @@ function angularFallbackForNativeBinding(
   return `[${publicName}]=\"${source}.value\"`;
 }
 
+/**
+ * SSR fallback for a compiled expression binding. The normalized expression
+ * already reads `value` from every reactive source, so Angular renders the
+ * server value and hydration agrees with the compiled DOM.
+ */
+function angularFallbackForExpression(
+  publicName: string,
+  expression: string,
+): string {
+  return `[${publicName}]=\"${expression}\"`;
+}
+
 
 
 /**
@@ -587,6 +635,43 @@ function angularFallbackForNativeBinding(
  * Unit-qualified styles (`[style.width.px]`) intentionally remain Angular-owned
  * because direct `sx.style.*` currently writes the provided value verbatim.
  */
+function classifyExpressionBinding(
+  publicName: string,
+  node: string,
+  expression: string,
+  resolveReactiveSource?: SxReactiveSourceResolver,
+): Omit<SxTemplateBinding, 'span'> | undefined {
+  const analysis = analyzeSxExpression(expression, resolveReactiveSource);
+
+  if (!analysis || analysis.mode !== 'expression') {
+    return undefined;
+  }
+
+  const base = classifyNativeAngularBinding(
+    publicName,
+    node,
+    analysis.expression,
+  );
+
+  if (!base) {
+    return undefined;
+  }
+
+  return {
+    ...base,
+    kind: EXPRESSION_BINDING_KINDS[base.kind] ?? base.kind,
+    dependencies: analysis.dependencies,
+  };
+}
+
+/** Expression forms of the native binding kinds. */
+const EXPRESSION_BINDING_KINDS: Partial<Record<SxBindingKind, SxBindingKind>> = {
+  property: 'property-expression',
+  attribute: 'attribute-expression',
+  class: 'class-expression',
+  style: 'style-expression',
+};
+
 function classifyNativeAngularBinding(
   publicName: string,
   node: string,

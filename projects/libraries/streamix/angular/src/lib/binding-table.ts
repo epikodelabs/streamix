@@ -368,6 +368,18 @@ export function ɵsxProperty<T>(
   table.bind(slot, source, writeProperty(target, property));
 }
 
+/** Compiler instruction: reactive expression bound to a DOM property. @internal */
+export function ɵsxPropertyExpression<T>(
+  table: SxBindingTable,
+  slot: BindingSlot,
+  target: object,
+  property: string,
+  sources: readonly DependencySource<unknown>[],
+  read: () => T,
+): void {
+  table.bindExpression(slot, sources, read, writeProperty(target, property));
+}
+
 /** Compiler instruction: direct attribute binding. @internal */
 export function ɵsxAttribute(
   table: SxBindingTable,
@@ -379,6 +391,23 @@ export function ɵsxAttribute(
   table.bind(slot, source, writeAttribute(target, attribute));
 }
 
+/** Compiler instruction: reactive expression bound to an attribute. @internal */
+export function ɵsxAttributeExpression(
+  table: SxBindingTable,
+  slot: BindingSlot,
+  target: Element,
+  attribute: string,
+  sources: readonly DependencySource<unknown>[],
+  read: () => unknown,
+): void {
+  table.bindExpression(
+    slot,
+    sources,
+    read,
+    writeAttribute(target, attribute),
+  );
+}
+
 /** Compiler instruction: direct class binding. @internal */
 export function ɵsxClass(
   table: SxBindingTable,
@@ -388,6 +417,24 @@ export function ɵsxClass(
   source: DependencySource<unknown>,
 ): void {
   table.bind(slot, source, writeClass(target, className), equalClass);
+}
+
+/** Compiler instruction: reactive expression bound to a class. @internal */
+export function ɵsxClassExpression(
+  table: SxBindingTable,
+  slot: BindingSlot,
+  target: Element,
+  className: string,
+  sources: readonly DependencySource<unknown>[],
+  read: () => unknown,
+): void {
+  table.bindExpression(
+    slot,
+    sources,
+    read,
+    writeClass(target, className),
+    equalClass,
+  );
 }
 
 /** Compiler instruction: direct reactive class-map binding. @internal */
@@ -409,6 +456,23 @@ export function ɵsxStyle(
   source: DependencySource<unknown>,
 ): void {
   table.bind(slot, source, writeStyle(target, property));
+}
+
+/** Compiler instruction: reactive expression bound to a style property. @internal */
+export function ɵsxStyleExpression(
+  table: SxBindingTable,
+  slot: BindingSlot,
+  target: HTMLElement,
+  property: string,
+  sources: readonly DependencySource<unknown>[],
+  read: () => unknown,
+): void {
+  table.bindExpression(
+    slot,
+    sources,
+    read,
+    writeStyle(target, property),
+  );
 }
 
 /** Compiler instruction: direct reactive style-map binding. @internal */
