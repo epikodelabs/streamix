@@ -146,7 +146,6 @@ for (const sourcePath of await listFiles(sourceDirectory, false)) {
   const lifecycle = installSxLifecycleIntoComponentSource(source, {
     inlineSetup: compiled.setupCode,
     sourceReferenceFields: compiled.sourceReferenceFields,
-    requiresAngularInvalidation: compiled.requiresAngularInvalidation,
   }).source;
   const outputPath = resolve(outputDirectory, relativePath);
   // Function replacer: a plain string replacement would interpret `$`

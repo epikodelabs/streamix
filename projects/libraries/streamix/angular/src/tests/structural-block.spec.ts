@@ -3,10 +3,14 @@ import {
 } from '@epikodelabs/streamix';
 
 import {
+  ɵcreateSxConditionalBlock,
   ɵcreateSxKeyedBlock,
   ɵcreateSxValueBlock,
   type SxBlockInstance,
 } from '../lib';
+import {
+  rendererScheduler,
+} from '../lib/render-scheduler';
 
 import { idescribe } from '../../../src/tests/env.spec';
 
@@ -45,6 +49,33 @@ idescribe('sx structural runtime', () => {
     );
 
     expect(host.textContent).toBe('one');
+
+    block.destroy();
+
+    expect(host.textContent).toBe('');
+  });
+
+  it('selects and swaps conditional branches without Angular views', () => {
+    const host = document.createElement('div');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+
+    const ready = atom(false);
+
+    const block = ɵcreateSxConditionalBlock(anchor, [
+      { source: ready, factory: () => elementBlock('strong', 'ready') },
+      { source: null, factory: () => elementBlock('em', 'waiting') },
+    ]);
+
+    expect(host.textContent).toBe('waiting');
+
+    ready.next(true);
+    rendererScheduler.flushNow();
+    expect(host.textContent).toBe('ready');
+
+    ready.next(false);
+    rendererScheduler.flushNow();
+    expect(host.textContent).toBe('waiting');
 
     block.destroy();
 

@@ -27,7 +27,6 @@ export type BindingSlot = number;
 type BindingWriter = (value: unknown) => void;
 type BindingEquals = (previous: unknown, next: unknown) => boolean;
 type BindingReader = () => unknown;
-type BindingInvalidator = () => void;
 
 /**
  * Preallocated binding table used by compiler-generated Streamix Angular views.
@@ -41,7 +40,6 @@ export class SxBindingTable {
   private readonly writers: Array<BindingWriter | undefined>;
   private readonly equals: Array<BindingEquals | undefined>;
   private readonly readers: Array<BindingReader | undefined>;
-  private readonly invalidators: Array<BindingInvalidator | undefined>;
   private readonly rendered: unknown[];
   private readonly pending: unknown[];
   private readonly subscriptions: Array<Subscription[] | undefined>;
@@ -62,7 +60,6 @@ export class SxBindingTable {
     this.writers = new Array(size);
     this.equals = new Array(size);
     this.readers = new Array(size);
-    this.invalidators = new Array(size);
     this.rendered = new Array(size);
     this.pending = new Array(size);
     this.subscriptions = new Array(size);
@@ -131,25 +128,6 @@ export class SxBindingTable {
 
     write(initial);
 
-    this.subscriptions[slot] = this.subscribeForFlush(slot, sources);
-  }
-
-  /**
-   * Installs Streamix-driven invalidation for an Angular-owned expression.
-   *
-   * The invalidator is not called initially because Angular performs the
-   * initial template render. During a flush, identical invalidator callbacks
-   * are invoked only once even if several hybrid bindings became dirty.
-   */
-  bindInvalidation(
-    slot: BindingSlot,
-    sources: readonly DependencySource<unknown>[],
-    invalidate: () => void,
-  ): void {
-    this.assertLiveSlot(slot);
-    this.unbind(slot);
-
-    this.invalidators[slot] = invalidate;
     this.subscriptions[slot] = this.subscribeForFlush(slot, sources);
   }
 
@@ -240,7 +218,6 @@ export class SxBindingTable {
     this.writers[slot] = undefined;
     this.equals[slot] = undefined;
     this.readers[slot] = undefined;
-    this.invalidators[slot] = undefined;
     this.rendered[slot] = undefined;
     this.pending[slot] = undefined;
     this.dirtyFlags[slot] = 0;
@@ -251,18 +228,11 @@ export class SxBindingTable {
       return;
     }
 
-    const invalidators = new Set<BindingInvalidator>();
     let index = 0;
 
     while (index < this.dirtySlots.length) {
       const slot = this.dirtySlots[index++];
       this.dirtyFlags[slot] = 0;
-
-      const invalidator = this.invalidators[slot];
-      if (invalidator) {
-        invalidators.add(invalidator);
-        continue;
-      }
 
       const write = this.writers[slot];
       if (!write) {
@@ -291,18 +261,9 @@ export class SxBindingTable {
       }
     }
 
-    // Clear before running Angular invalidation: detectChanges() can itself
-    // cause Streamix emissions, which must enqueue fresh work rather than be
-    // erased by this flush.
+    // Clear before running writers: a write can itself cause Streamix
+    // emissions, which must enqueue fresh work rather than be erased here.
     this.dirtySlots.length = 0;
-
-    for (const invalidate of invalidators) {
-      try {
-        invalidate();
-      } catch (error) {
-        console.error('sx Angular view invalidation failed.', error);
-      }
-    }
   }
 
   private assertSlot(slot: BindingSlot): void {
@@ -394,16 +355,6 @@ export function ɵsxTextExpressionNode(
     writeText(boundTextNode(target)),
     equalText,
   );
-}
-
-/** Compiler instruction: Angular-owned hybrid-expression invalidation. @internal */
-export function ɵsxInvalidate(
-  table: SxBindingTable,
-  slot: BindingSlot,
-  sources: readonly DependencySource<unknown>[],
-  invalidate: () => void,
-): void {
-  table.bindInvalidation(slot, sources, invalidate);
 }
 
 /** Compiler instruction: direct DOM-property binding. @internal */

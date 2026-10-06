@@ -3,7 +3,6 @@ export type SxBindingKind =
   | 'text-node'
   | 'text-expression'
   | 'text-expression-node'
-  | 'angular-invalidate'
   | 'property'
   | 'attribute'
   | 'class'

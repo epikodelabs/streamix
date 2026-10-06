@@ -9,10 +9,16 @@ const DEFAULT_RUNTIME_IMPORT = '@epikodelabs/streamix/angular';
  */
 export const SX_SETUP_RUNTIME_SYMBOLS = [
   'createBindingTable',
+  'ɵcreateSxConditionalBlock',
+  'ɵcreateSxCompiledBlock',
+  'ɵcreateSxKeyedBlock',
+  'ɵsxBlockAnchor',
+  'ɵsxReadLocal',
+  'ɵsxRestoreBlockMarker',
+  'ɵsxString',
   'ɵsxAttribute',
   'ɵsxClass',
   'ɵsxClassMap',
-  'ɵsxInvalidate',
   'ɵsxProperty',
   'ɵsxStyle',
   'ɵsxStyleMap',
@@ -50,7 +56,6 @@ export function emitRuntimeImportHeader(
  */
 export interface SxLifecycleInitializerOptions {
   readonly sourceReferences?: readonly string[];
-  readonly angularInvalidation?: boolean;
 }
 
 /**
@@ -71,15 +76,31 @@ export function emitSourceReferenceInitializer(
   ].join('\n');
 }
 
+/**
+ * Generated fields that do not depend on the compiled setup. Only the source
+ * reference bridge exists today; it is emitted on its own when a component
+ * needs no binding table.
+ */
+export function emitComponentFieldInitializers(options: {
+  readonly sourceReferences?: readonly string[];
+}): string {
+  const sourceReferences = options.sourceReferences ?? [];
+
+  return sourceReferences.length > 0
+    ? emitSourceReferenceInitializer(sourceReferences)
+    : '';
+}
+
 export function emitLifecycleInitializer(
   setupName = 'ɵsetupSxBindings',
   options: SxLifecycleInitializerOptions = {},
 ): string {
   const sourceReferences = options.sourceReferences ?? [];
   const lines: string[] = [];
+  const fields = emitComponentFieldInitializers(options);
 
-  if (sourceReferences.length > 0) {
-    lines.push(emitSourceReferenceInitializer(sourceReferences));
+  if (fields) {
+    lines.push(fields);
     lines.push('');
   }
 
@@ -89,21 +110,9 @@ export function emitLifecycleInitializer(
     `  ${setupName},`,
   );
 
-  const needsOptions =
-    sourceReferences.length > 0 ||
-    options.angularInvalidation === true;
-
-  if (needsOptions) {
+  if (sourceReferences.length > 0) {
     lines.push(`  {`);
-
-    if (sourceReferences.length > 0) {
-      lines.push(`    sourceReferences: this.${SX_SOURCE_REFERENCES_FIELD},`);
-    }
-
-    if (options.angularInvalidation) {
-      lines.push(`    angularInvalidation: true,`);
-    }
-
+    lines.push(`    sourceReferences: this.${SX_SOURCE_REFERENCES_FIELD},`);
     lines.push(`  },`);
   }
 

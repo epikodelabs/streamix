@@ -20,11 +20,15 @@ export interface SxValueBlockFactory<T> {
 }
 
 export interface SxCollectionBlockFactory<T> {
-  create(item: T, index: number): SxBlockInstance;
+  /** `count` is the current collection length, for `$count`-style context. */
+  create(item: T, index: number, count: number): SxBlockInstance;
   update?(
-    instance: SxBlockInstance,
+    instance: SxBlockInstance & {
+      update(context: Record<string, unknown>): void;
+    },
     item: T,
     index: number,
+    count: number,
   ): void;
 }
 
@@ -51,7 +55,7 @@ export class SxValueBlock<T> {
   private destroyed = false;
 
   constructor(
-    private readonly anchor: Comment,
+    private readonly anchor: Node,
     private readonly factory: SxValueBlockFactory<T>,
   ) {}
 
@@ -148,18 +152,169 @@ export class SxValueBlock<T> {
   }
 }
 
+export type SxBlockFactory = () => SxBlockInstance;
+
+export interface SxConditionalBranch {
+  /**
+   * Reactive condition for this branch. `null` marks the `@else`/`@default`
+   * branch, which renders when no preceding branch matched.
+   */
+  readonly source: DependencySource<unknown> | null;
+  /**
+   * When present, the branch matches only if the source equals this literal
+   * (`@switch` case semantics) instead of testing truthiness.
+   */
+  readonly match?: unknown;
+  readonly factory: SxBlockFactory;
+}
+
+/**
+ * Renders the first branch whose condition is truthy as direct DOM.
+ *
+ * There is no Angular view and no change detection involved: a source emission
+ * schedules one frame, the winning branch is re-selected, and the rendered
+ * branch is swapped in place.
+ */
+export class SxConditionalBlock {
+  private unsubscribes: Subscription[] = [];
+  private scheduled?: ScheduledBinding;
+  private instance?: SxBlockInstance;
+  private current = -1;
+  private generation = 0;
+  private destroyed = false;
+
+  constructor(
+    private readonly anchor: Node,
+    private readonly branches: readonly SxConditionalBranch[],
+  ) {}
+
+  bind(): void {
+    if (this.destroyed) {
+      throw new Error('Cannot bind a destroyed sx conditional block.');
+    }
+
+    this.unbind();
+
+    const generation = ++this.generation;
+    let subscribing = true;
+
+    for (const branch of this.branches) {
+      if (!branch.source) {
+        continue;
+      }
+
+      this.unsubscribes.push(branch.source.subscribe(() => {
+        if (generation !== this.generation || subscribing) return;
+
+        this.ensureScheduled(generation);
+      }));
+    }
+
+    subscribing = false;
+    this.render();
+  }
+
+  destroy(): void {
+    if (this.destroyed) return;
+
+    this.destroyed = true;
+    this.generation += 1;
+    this.unbind();
+    this.removeInstance();
+    this.current = -1;
+  }
+
+  private ensureScheduled(generation: number): void {
+    if (!this.scheduled) {
+      this.scheduled = rendererScheduler.register(() => {
+        if (this.destroyed || generation !== this.generation) {
+          return;
+        }
+
+        this.render();
+      });
+    }
+
+    this.scheduled.markDirty();
+  }
+
+  private selectIndex(): number {
+    for (let index = 0; index < this.branches.length; index += 1) {
+      const branch = this.branches[index];
+
+      if (branch.source === null) {
+        return index;
+      }
+
+      const value = branch.source.value;
+
+      if (
+        branch.match === undefined
+          ? value
+          : value === branch.match
+      ) {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  private render(): void {
+    if (this.destroyed) return;
+
+    const index = this.selectIndex();
+
+    if (index === this.current) {
+      return;
+    }
+
+    this.removeInstance();
+    this.current = index;
+
+    if (index < 0) {
+      return;
+    }
+
+    this.instance = this.branches[index].factory();
+    moveInstanceAfter(this.anchor, this.instance);
+  }
+
+  private removeInstance(): void {
+    if (!this.instance) return;
+
+    removeInstance(this.instance);
+    this.instance.destroy();
+    this.instance = undefined;
+  }
+
+  private unbind(): void {
+    this.generation += 1;
+
+    for (const unsubscribe of this.unsubscribes) {
+      unsubscribe();
+    }
+    this.unsubscribes = [];
+
+    this.scheduled?.destroy();
+    this.scheduled = undefined;
+  }
+}
+
 export class SxKeyedBlock<T> {
   private unsubscribe?: Subscription;
   private scheduled?: ScheduledBinding;
   private pending?: readonly T[];
   private records: CollectionRecord<T>[] = [];
+  private emptyInstance?: SxBlockInstance;
   private generation = 0;
   private destroyed = false;
 
   constructor(
-    private readonly anchor: Comment,
+    private readonly anchor: Node,
     private readonly factory: SxCollectionBlockFactory<T>,
     private readonly trackBy: SxTrackBy<T>,
+    private readonly emptyFactory?: SxBlockFactory,
   ) {}
 
   bind(source: DependencySource<Iterable<T> | undefined>): void {
@@ -195,6 +350,21 @@ export class SxKeyedBlock<T> {
     }
 
     this.records = [];
+
+    if (this.emptyInstance) {
+      removeInstance(this.emptyInstance);
+      this.emptyInstance.destroy();
+      this.emptyInstance = undefined;
+    }
+  }
+
+  private removeRecords(): void {
+    for (const record of this.records) {
+      removeInstance(record.instance);
+      record.instance.destroy();
+    }
+
+    this.records = [];
   }
 
   private ensureScheduled(generation: number): void {
@@ -221,6 +391,23 @@ export class SxKeyedBlock<T> {
 
     assertUniqueKeys(items, this.trackBy);
 
+    if (items.length === 0 && this.emptyFactory) {
+      this.removeRecords();
+
+      if (!this.emptyInstance) {
+        this.emptyInstance = this.emptyFactory();
+        moveInstanceAfter(this.anchor, this.emptyInstance);
+      }
+
+      return;
+    }
+
+    if (this.emptyInstance) {
+      removeInstance(this.emptyInstance);
+      this.emptyInstance.destroy();
+      this.emptyInstance = undefined;
+    }
+
     const available = new Map<unknown, CollectionRecord<T>>();
 
     for (const record of this.records) {
@@ -239,15 +426,20 @@ export class SxKeyedBlock<T> {
         available.delete(key);
         record.item = item;
         this.factory.update?.(
-          record.instance,
+          // Compiler-generated factories always create an updatable instance;
+          // the base interface only guarantees the block range contract.
+          record.instance as SxBlockInstance & {
+            update(context: Record<string, unknown>): void;
+          },
           item,
           index,
+          items.length,
         );
       } else {
         record = {
           key,
           item,
-          instance: this.factory.create(item, index),
+          instance: this.factory.create(item, index, items.length),
         };
       }
 
@@ -278,7 +470,7 @@ export class SxKeyedBlock<T> {
 }
 
 export function ɵcreateSxValueBlock<T>(
-  anchor: Comment,
+  anchor: Node,
   source: DependencySource<T | undefined>,
   factory: SxValueBlockFactory<T>,
 ): SxValueBlock<T> {
@@ -287,16 +479,67 @@ export function ɵcreateSxValueBlock<T>(
   return block;
 }
 
+export function ɵcreateSxConditionalBlock(
+  anchor: Node,
+  branches: readonly SxConditionalBranch[],
+): SxConditionalBlock {
+  const block = new SxConditionalBlock(anchor, branches);
+  block.bind();
+  return block;
+}
+
+/**
+ * Resolves the anchor for a lowered structural block.
+ *
+ * During server rendering the marker element is kept and the block renders
+ * inside it, so the server HTML still contains the block content and client
+ * hydration finds the template's element in place. In the browser the marker is
+ * replaced by a comment anchor, which keeps CSS selectors such as
+ * `ul > li`/`:first-child` intact.
+ *
+ * @internal
+ */
+export function ɵsxBlockAnchor(
+  marker: Element,
+  label: string,
+  server = false,
+): Node {
+  if (server) {
+    return marker;
+  }
+
+  const anchor = marker.ownerDocument!.createComment(label);
+  marker.parentNode!.replaceChild(anchor, marker);
+  return anchor;
+}
+
+/**
+ * Puts the marker element back when a compiled view is torn down, so a rebind
+ * re-resolves the template's original element paths. Replacing the marker with
+ * an anchor shifts the element indices of every later sibling.
+ *
+ * @internal
+ */
+export function ɵsxRestoreBlockMarker(anchor: Node, marker: Element): void {
+  if (anchor === marker || !anchor.parentNode) {
+    return;
+  }
+
+  anchor.parentNode.replaceChild(marker, anchor);
+}
+
 export function ɵcreateSxKeyedBlock<T>(
-  anchor: Comment,
+  anchor: Node,
   source: DependencySource<Iterable<T> | undefined>,
   factory: SxCollectionBlockFactory<T>,
   trackBy: SxTrackBy<T> = (_index, item) => item,
+  emptyFactory?: SxBlockFactory,
 ): SxKeyedBlock<T> {
   const block = new SxKeyedBlock(
     anchor,
     factory,
     trackBy,
+    emptyFactory,
   );
   block.bind(source);
   return block;

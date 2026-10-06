@@ -42,20 +42,6 @@ export class CounterComponent {
     expect(result.source).not.toContain('createBindingTable');
   });
 
-  it('emits the hybrid Angular invalidation opt-in only when requested', () => {
-    const result = installSxLifecycleIntoComponentSource(
-      `export class CounterComponent { count = source; }`,
-      {
-        inlineSetup: 'function setupBindings() { return undefined; }',
-        setupName: 'setupBindings',
-        sourceReferenceFields: ['count'],
-        requiresAngularInvalidation: true,
-      },
-    );
-
-    expect(result.source).toContain('angularInvalidation: true');
-  });
-
   it('rejects an authored member that collides with the generated template bridge', () => {
     expect(() =>
       installSxLifecycleIntoComponentSource(

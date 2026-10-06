@@ -184,6 +184,7 @@ export function rewriteSxTextExpression(
 function normalizeSourceTransparentExpression(
   expression: string,
   resolveReactiveSource?: SxReactiveSourceResolver,
+  formatRead: (source: string) => string = source => `${source}.value`,
 ): { expression: string; changed: boolean } {
   if (!resolveReactiveSource) {
     return { expression, changed: false };
@@ -233,7 +234,7 @@ function normalizeSourceTransparentExpression(
           replacements.push({
             start: index,
             end: index + resolved.valuePath.length,
-            text: `${resolved.sourcePath}.value`,
+            text: formatRead(resolved.sourcePath),
           });
           index += resolved.valuePath.length;
           continue;

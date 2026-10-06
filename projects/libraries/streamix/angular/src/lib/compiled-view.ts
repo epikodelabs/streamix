@@ -1,7 +1,7 @@
 import {
-  ChangeDetectorRef,
   DestroyRef,
   ElementRef,
+  PLATFORM_ID,
   afterNextRender,
   inject,
 } from '@angular/core';
@@ -26,8 +26,22 @@ export interface SxTeardown {
 export type SxCompiledViewSetup<T> = (
   host: Element,
   context: T,
-  invalidate?: () => void,
+  server?: boolean,
 ) => SxTeardown;
+
+/**
+ * Handle returned by {@link ɵinstallSxCompiledView}.
+ *
+ * @internal
+ */
+export interface SxCompiledViewHandle {
+  /**
+   * Mounts the compiled view during server rendering, where
+   * `afterNextRender` is a no-op. The generated component calls this from
+   * `ngAfterViewInit`; it does nothing in the browser.
+   */
+  ɵafterViewInit(): void;
+}
 
 /**
  * Compiler-owned runtime options for a compiled Streamix view.
@@ -37,15 +51,10 @@ export type SxCompiledViewSetup<T> = (
  * synchronously tears down and recreates the Streamix setup without asking
  * Angular to run change detection.
  *
- * `angularInvalidation` is emitted only for hybrid expressions that remain
- * Angular-owned. Pure Streamix views therefore do not resolve
- * `ChangeDetectorRef` at all.
- *
  * @internal
  */
 export interface SxCompiledViewOptions {
   readonly sourceReferences?: SxSourceReferenceMap;
-  readonly angularInvalidation?: boolean;
 }
 
 /**
@@ -55,9 +64,10 @@ export interface SxCompiledViewOptions {
  * Replacing a compiler-selected plain source field is delivered through the
  * source-reference bridge and synchronously rebuilds the Streamix setup.
  *
- * Hybrid expressions (for example `{{ count.value * multiplier }}`) keep their
- * Angular expression semantics. Only those generated views opt into local
- * Angular invalidation and therefore resolve `ChangeDetectorRef`.
+ * Template positions Angular still evaluates (non-lowered control flow, hybrid
+ * expressions, sanitizer sinks) read generated signal accessors, so they
+ * refresh through Angular's scheduler. The runtime never resolves
+ * `ChangeDetectorRef`.
  *
  * @internal
  */
@@ -65,21 +75,15 @@ export function ɵinstallSxCompiledView<T extends object>(
   context: T,
   setup: SxCompiledViewSetup<T>,
   options: SxCompiledViewOptions = {},
-): void {
+): SxCompiledViewHandle {
   const host = inject<ElementRef<Element>>(ElementRef).nativeElement;
   const destroyRef = inject(DestroyRef);
-  const changeDetectorRef = options.angularInvalidation
-    ? inject(ChangeDetectorRef)
-    : undefined;
+  const server = inject(PLATFORM_ID) === 'server';
 
   let teardown: SxTeardown | undefined;
   let referenceSubscriptions: Subscription[] = [];
   let mounted = false;
   let destroyed = false;
-
-  const invalidate = changeDetectorRef
-    ? () => changeDetectorRef.detectChanges()
-    : () => {};
 
   const mount = (): void => {
     if (destroyed) {
@@ -89,7 +93,7 @@ export function ɵinstallSxCompiledView<T extends object>(
     teardown = setup(
       host,
       context,
-      invalidate,
+      server,
     );
     mounted = true;
   };
@@ -109,7 +113,7 @@ export function ɵinstallSxCompiledView<T extends object>(
     mount();
   };
 
-  afterNextRender(() => {
+  const start = (): void => {
     if (destroyed) {
       return;
     }
@@ -119,6 +123,10 @@ export function ɵinstallSxCompiledView<T extends object>(
     ).map(reference => reference.subscribe(rebind));
 
     mount();
+  };
+
+  afterNextRender(() => {
+    start();
   });
 
   destroyRef.onDestroy(() => {
@@ -133,4 +141,12 @@ export function ɵinstallSxCompiledView<T extends object>(
     teardown = undefined;
     mounted = false;
   });
+
+  return {
+    ɵafterViewInit(): void {
+      if (server) {
+        start();
+      }
+    },
+  };
 }

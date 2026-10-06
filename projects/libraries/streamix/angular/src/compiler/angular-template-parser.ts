@@ -24,6 +24,11 @@ import {
   type SxDependencySourceResolver,
   type SxReactiveSourceResolver,
 } from './source-resolution';
+import {
+  angularExpressionSpans,
+  componentPathsInExpression,
+} from './expression-spans';
+import { MARKER_ATTRIBUTE } from './structural-lowering';
 
 export type { SxSourceSpan } from './binding-plan';
 
@@ -56,8 +61,6 @@ export interface ParseSxTemplateOptions {
   readonly resolveReactiveSource?: SxReactiveSourceResolver;
   /** @deprecated Prefer `resolveReactiveSource`. */
   readonly isDependencySource?: SxDependencySourceResolver;
-  /** Reactive sources used by compiler-rewritten Angular control flow. */
-  readonly angularInvalidationSources?: readonly string[];
 }
 
 export interface ParsedSxTemplate {
@@ -68,6 +71,8 @@ export interface ParsedSxTemplate {
   readonly bindingEdits: readonly SxTemplateEdit[];
   readonly nodes: readonly string[];
   readonly nodePaths: Readonly<Record<string, SxElementPath>>;
+  /** Lowered structural marker id (its `data-sx-block` value) to node id. */
+  readonly markers: Readonly<Record<string, string>>;
 }
 
 interface WalkState {
@@ -77,6 +82,7 @@ interface WalkState {
   readonly bindingEdits: SxTemplateEdit[];
   readonly nodes: string[];
   readonly nodePaths: Record<string, number[]>;
+  readonly markers: Record<string, string>;
   readonly strict: boolean;
   readonly resolveReactiveSource?: SxReactiveSourceResolver;
   nextNode: number;
@@ -138,15 +144,6 @@ const SAFE_AUTO_STYLES = new Set([
   'width',
 ]);
 
-const SECURITY_SENSITIVE_PROPERTIES = new Set([
-  'action',
-  'formAction',
-  'href',
-  'innerHTML',
-  'outerHTML',
-  'src',
-  'srcdoc',
-]);
 
 const DYNAMIC_TOPOLOGY_ERROR =
   'Direct sx bindings require a static element topology: Angular ' +
@@ -192,6 +189,7 @@ export function parseSxTemplate(
     bindingEdits: [],
     nodes: [],
     nodePaths: {},
+    markers: {},
     strict: containsCompiledBinding(
       parsed.nodes,
       template,
@@ -203,22 +201,13 @@ export function parseSxTemplate(
 
   walkStaticChildren(parsed.nodes, state, []);
 
-  for (const source of new Set(options.angularInvalidationSources ?? [])) {
-    state.bindings.push({
-      kind: 'angular-invalidate',
-      node: '',
-      source,
-      dependencies: [source],
-      span: { start: 0, end: 0 },
-    });
-  }
-
   return {
     plan: createBindingPlan(state.bindings),
     bindingSpans: state.bindingSpans,
     bindingEdits: state.bindingEdits,
     nodes: state.nodes,
     nodePaths: state.nodePaths,
+    markers: state.markers,
   };
 }
 
@@ -268,8 +257,59 @@ function walkStaticChildren(
         throw new Error(DYNAMIC_TOPOLOGY_ERROR);
       }
     }
+
+    if (!isInertText(node)) {
+      assertAngularOwnedRegion(node, state);
+    }
   }
 }
+
+/**
+ * Angular evaluates the expressions inside control-flow blocks, `*ngIf`/
+ * `*ngFor` templates, deferred blocks, directive inputs it binds itself, and
+ * hybrid interpolations. The compiled view cannot keep those in sync without
+ * change detection, so an atom read there is rejected instead of rendering a
+ * value that never updates.
+ */
+function assertAngularOwnedRegion(node: TmplAstNode, state: WalkState): void {
+  const text = state.template.slice(
+    spanStart(node.sourceSpan),
+    spanEnd(node.sourceSpan),
+  );
+
+  for (const span of angularExpressionSpans(text)) {
+    for (const path of componentPathsInExpression(span.text)) {
+      const source = state.resolveReactiveSource?.(path);
+
+      if (source) {
+        throw new Error(angularOwnedReadError(path));
+      }
+    }
+  }
+}
+
+/** Rejects an atom read from a template position Angular evaluates itself. */
+function angularOwnedReadError(path: string): string {
+  return (
+    `Streamix cannot bind ${JSON.stringify(path)} here: Angular evaluates this ` +
+    'template position itself, so the compiled view could render it once and ' +
+    'never update it. Move the read into a compiler-compilable @if/@for body, ' +
+    'or read the value into a plain component field and bind that.'
+  );
+}
+
+function spanStart(span: { readonly start: unknown }): number {
+  return typeof span.start === 'number'
+    ? span.start
+    : (span.start as { offset: number }).offset;
+}
+
+function spanEnd(span: { readonly end: unknown }): number {
+  return typeof span.end === 'number'
+    ? span.end
+    : (span.end as { offset: number }).offset;
+}
+
 
 /**
  * Nodes whose rendered content joins the sibling element sequence at runtime,
@@ -314,6 +354,14 @@ function visitElement(
   state.nodes.push(nodeId);
   state.nodePaths[nodeId] = [...path];
 
+  const marker = element.attributes.find(
+    attribute => attribute.name === MARKER_ATTRIBUTE,
+  );
+
+  if (marker) {
+    state.markers[marker.value] = nodeId;
+  }
+
   let hasExplicitTextBinding = false;
 
   for (const input of element.inputs) {
@@ -355,17 +403,21 @@ function visitElement(
 
     const binding = classifyNativeAngularBinding(publicName, nodeId, source);
 
-    if (
-      transparentSource &&
-      !isScopeBackingSource(transparentSource) &&
-      (binding || isNativeAngularValueSink(publicName))
-    ) {
-      // Source transparency still unwraps sanitizer-sensitive native sinks, but
-      // those sinks remain Angular-owned so Angular performs sanitization.
-      state.bindingEdits.push({
-        ...span,
-        replacement: angularFallbackForNativeBinding(publicName, source),
-      });
+    if (transparentSource) {
+      if (binding) {
+        if (!isScopeBackingSource(transparentSource)) {
+          // The direct binding owns the DOM; Angular's fallback read only has
+          // to render the correct server/hydration value.
+          state.bindingEdits.push({
+            ...span,
+            replacement: angularFallbackForNativeBinding(publicName, source),
+          });
+        }
+      } else {
+        // Angular evaluates this input itself: a directive/component input
+        // (`ngSwitch`, `[item]`, …) or a sanitizer-sensitive sink.
+        throw new Error(angularOwnedReadError(transparentPath!));
+      }
     }
 
     if (!binding) {
@@ -419,18 +471,9 @@ function visitElement(
             span,
           });
           state.bindingSpans.push(span);
-        } else {
-          // Hybrid expression: Angular keeps and evaluates the interpolation;
-          // Streamix only subscribes to `.value` dependencies and invalidates
-          // this component view when any of them emit.
-          state.bindings.push({
-            kind: 'angular-invalidate',
-            node: nodeId,
-            source: analysis.expression,
-            dependencies: analysis.dependencies,
-            span,
-          });
         }
+        // Hybrid expressions are rewritten to signal accessors above; Angular
+        // evaluates them and refreshes itself when an atom emits.
       }
     }
   }
@@ -556,22 +599,7 @@ function angularFallbackForNativeBinding(
   return `[${publicName}]=\"${source}.value\"`;
 }
 
-function isNativeAngularValueSink(publicName: string): boolean {
-  if (publicName.startsWith('attr.')) {
-    return !!publicName.slice('attr.'.length);
-  }
 
-  if (publicName.startsWith('class.')) {
-    return !!publicName.slice('class.'.length);
-  }
-
-  if (publicName.startsWith('style.')) {
-    return !!publicName.slice('style.'.length);
-  }
-
-  return !!SAFE_DOM_PROPERTIES[publicName] ||
-    SECURITY_SENSITIVE_PROPERTIES.has(publicName);
-}
 
 /**
  * Maps simple Angular native binding syntax to the equivalent direct sx kind.

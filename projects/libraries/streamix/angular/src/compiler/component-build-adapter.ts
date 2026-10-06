@@ -1,6 +1,5 @@
 import {
   emitLifecycleInitializer,
-  emitSourceReferenceInitializer,
 } from './emit-component-module';
 import {
   transformAngularComponentTemplate,
@@ -48,7 +47,6 @@ export interface SxComponentBuildOutput {
   readonly lifecycleInitializer?: string;
   readonly bindingCount: number;
   readonly sourceReferenceFields: readonly string[];
-  readonly requiresAngularInvalidation: boolean;
 }
 
 /**
@@ -86,17 +84,18 @@ export function compileSxComponent(
     { resolveReactiveSource },
   );
 
-  if (transformed.bindingCount === 0) {
+  // A component whose only compiled content is a control-flow block has no
+  // binding-table slots but still needs the compiled view installed.
+  if (
+    transformed.bindingCount === 0 &&
+    transformed.structuralBlockCount === 0
+  ) {
     return {
       // A source-transparent sanitizer-sensitive binding may require only an
-      // Angular `.value` fallback edit and no direct browser binding. A
+      // Angular `.value` fallback edit and no direct browser binding.
       transformedTemplate: transformed.template,
-      lifecycleInitializer: transformed.sourceReferenceFields.length > 0
-        ? emitSourceReferenceInitializer(transformed.sourceReferenceFields)
-        : undefined,
       bindingCount: 0,
       sourceReferenceFields: transformed.sourceReferenceFields,
-      requiresAngularInvalidation: false,
     };
   }
 
@@ -107,11 +106,9 @@ export function compileSxComponent(
       'ɵsetupSxBindings',
       {
         sourceReferences: transformed.sourceReferenceFields,
-        angularInvalidation: transformed.requiresAngularInvalidation,
-      },
+        },
     ),
     bindingCount: transformed.bindingCount,
     sourceReferenceFields: transformed.sourceReferenceFields,
-    requiresAngularInvalidation: transformed.requiresAngularInvalidation,
   };
 }

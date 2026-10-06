@@ -1,7 +1,7 @@
 import {
   SX_SETUP_RUNTIME_SYMBOLS,
+  emitComponentFieldInitializers,
   emitLifecycleInitializer,
-  emitSourceReferenceInitializer,
 } from './emit-component-module';
 import { SX_SOURCE_REFERENCES_FIELD } from './generated-names';
 
@@ -14,7 +14,6 @@ export interface SxComponentSourceTransformOptions {
   readonly setupName?: string;
   readonly runtimeImport?: string;
   readonly sourceReferenceFields?: readonly string[];
-  readonly requiresAngularInvalidation?: boolean;
 }
 
 export interface SxComponentSourceTransformResult {
@@ -105,15 +104,23 @@ export function installSxLifecycleIntoComponentSource(
     );
   }
 
+  // Server rendering mounts the compiled view from `ngAfterViewInit`, because
+  // `afterNextRender` is a no-op under `ngServerMode`. An authored lifecycle
+  // method is preserved by inserting the mount call into its body.
+  const authoredHook = hasSetup
+    ? findMethodBodyOpenBrace(source, openBrace, insertion, 'ngAfterViewInit')
+    : -1;
+
   const generated = hasSetup
     ? emitLifecycleInitializer(
         setupName,
         {
           sourceReferences,
-          angularInvalidation: options.requiresAngularInvalidation,
         },
-      )
-    : emitSourceReferenceInitializer(sourceReferences);
+      ) + (authoredHook < 0
+        ? '\n\nngAfterViewInit(): void {\n  this.ɵsx.ɵafterViewInit();\n}'
+        : '')
+    : emitComponentFieldInitializers({ sourceReferences });
 
   // Generated fields go at the end of the class so authored instance fields
   // already exist when the source-reference bridge installs its accessors.
@@ -122,11 +129,23 @@ export function installSxLifecycleIntoComponentSource(
     .map(line => `  ${line}`)
     .join('\n')}\n`;
 
+  let result = source;
+  let shift = 0;
+
+  if (authoredHook >= 0) {
+    const mountCall = '\n    this.ɵsx.ɵafterViewInit();';
+    result =
+      source.slice(0, authoredHook + 1) +
+      mountCall +
+      source.slice(authoredHook + 1);
+    shift = mountCall.length;
+  }
+
   const withInitializer =
     imports +
-    source.slice(0, insertion) +
+    result.slice(0, insertion + shift) +
     initializer +
-    source.slice(insertion);
+    result.slice(insertion + shift);
 
   return {
     // The setup function is a hoisted declaration, so appending it after the
@@ -236,6 +255,37 @@ function classBodyUsesGeneratedMember(
   }
 
   return false;
+}
+
+/**
+ * Finds the `{` that opens the body of the named class method, or `-1` when the
+ * class does not declare it. The conservative shape check (`name` followed by a
+ * parameter list) keeps a build from silently patching the wrong location; an
+ * unrecognized shape fails loudly with a duplicate-method error instead.
+ */
+function findMethodBodyOpenBrace(
+  source: string,
+  openBrace: number,
+  closeBrace: number,
+  name: string,
+): number {
+  const index = source.indexOf(name, openBrace);
+
+  if (index < 0 || index >= closeBrace) {
+    return -1;
+  }
+
+  const brace = source.indexOf('{', index + name.length);
+
+  if (brace < 0 || brace >= closeBrace) {
+    return -1;
+  }
+
+  const signature = source
+    .slice(index + name.length, brace)
+    .trimStart();
+
+  return signature.startsWith('(') ? brace : -1;
 }
 
 function findMatchingClassBrace(
