@@ -7,7 +7,13 @@ import eslintPluginImport from 'eslint-plugin-import';
 import unusedImportsPlugin from 'eslint-plugin-unused-imports';
 
 export default defineConfig([
-  globalIgnores(['**/coverage/**', '**/dist/**', '**/docs/**', '**/node_modules/**']),
+  globalIgnores([
+    '**/.angular/**',
+    '**/coverage/**',
+    '**/dist/**',
+    '**/docs/**',
+    '**/node_modules/**',
+  ]),
   {
     files: ['**/*.ts', '**/*.tsx'],
     languageOptions: {
