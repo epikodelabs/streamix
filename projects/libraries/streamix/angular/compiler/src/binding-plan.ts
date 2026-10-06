@@ -12,7 +12,8 @@ export type SxBindingKind =
   | 'class-map'
   | 'style'
   | 'style-expression'
-  | 'style-map';
+  | 'style-map'
+  | 'event';
 
 /** Offsets of an sx attribute or compiler-recognized Angular binding. */
 export interface SxSourceSpan {
@@ -32,6 +33,8 @@ export interface SxBindingPlanEntry {
   readonly name?: string;
   /** DependencySource paths referenced by an expression/invalidation entry. */
   readonly dependencies?: readonly string[];
+  /** Angular event modifiers (`stop`, `prevent`, `enter`, …) for event entries. */
+  readonly modifiers?: readonly string[];
   /** Present when the entry was extracted from a parsed template. */
   readonly span?: SxSourceSpan;
 }

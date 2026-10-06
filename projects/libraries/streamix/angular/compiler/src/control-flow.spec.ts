@@ -312,6 +312,31 @@ describe('standard Angular atom templates', () => {
     );
   });
 
+  it('compiles an event binding inside a collection body over a loop local', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (row of model.items; track row.id) { <li><button (click)="select(row.id)">Pick</button></li> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toContain(
+      '<span data-sx-block="0"></span>',
+    );
+    expect(result.setup).toContain(
+      'ɵsxListener(blockTable, 0, el1, "click", () => { ctx.select(ɵsxReadLocal(currentContext, "row.id")); }, undefined, server);',
+    );
+  });
+
+  it('compiles an event binding inside a collection body over a source', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (row of model.items; track row.id) { <li><button (click)="select(count)">Pick</button></li> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.setup).toContain('ctx.select(ctx.count.value)');
+  });
+
   it('compiles a nested @for over a loop-local collection', () => {
     const result = transformAngularComponentTemplate(
       `@for (group of model.items; track group.id) { <ul>@for (tag of group.tags; track tag) { <li>{{ tag }}</li> }</ul> }`,

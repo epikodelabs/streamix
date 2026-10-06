@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Event bindings compile.** Native `(event)="handler(...)"` bindings are
+  installed by the compiler and removed from Angular's template, so one click
+  runs one handler. Modifiers are reproduced: `.stop`, `.prevent`, `.self`,
+  `.once`, `.capture` and key filters such as `(keyup.enter)`. Inside a
+  compiled body a handler may read the loop context, so
+  `@for (row of rows) { <button (click)="select(row.id)"> }` selects the row
+  that was clicked. Component outputs, animations, `window:`/`document:`
+  targets, unknown events or modifiers, and non-call handlers stay
+  Angular-owned untouched.
 - **Control flow nests.** `@if`/`@switch`/`@for` (with `@empty`) inside a
   compiled body now compile instead of forcing the whole outer block back onto
   Angular, so `@for (row of rows) { @if (row.done) { … } }` renders as direct

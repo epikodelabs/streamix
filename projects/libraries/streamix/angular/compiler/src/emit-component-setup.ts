@@ -2,6 +2,7 @@ import type {
   ParsedSxTemplate,
   SxElementPath,
 } from './angular-template-parser';
+import type { SxBindingPlanEntry } from './binding-plan';
 import type {
   SxCompiledBlockBody,
   SxCompiledNestedBlock,
@@ -10,6 +11,7 @@ import type {
 import {
   indent,
 } from './codegen';
+import { KEY_MODIFIER_KEYS } from './event-binding';
 import type {
   SxLoweredBlock,
   SxLoweredValue,
@@ -73,6 +75,9 @@ export function emitComponentSetup(
   // the component module, where `noUnusedParameters` applies and there is no
   // ts-nocheck escape hatch.
   const hasBlocks = blocks.length > 0;
+  const hasListeners = parsed.plan.bindings.some(
+    entry => entry.kind === 'event',
+  );
   const usesHost = hasBlocks || parsed.plan.bindings.length > 0;
   // Structural blocks read their sources and factories from `ctx` too.
   const usesCtx = hasBlocks || parsed.plan.bindings.length > 0;
@@ -82,9 +87,10 @@ export function emitComponentSetup(
     `${usesCtx ? 'ctx' : '_ctx'}: any`,
   ];
 
-  if (hasBlocks) {
+  if (hasBlocks || hasListeners) {
     // The runtime reports whether this setup is running during server
-    // rendering, where block markers must stay in place for hydration.
+    // rendering, where block markers must stay in place for hydration and
+    // event listeners must not be attached.
     parameters.push('server = false');
   }
 
@@ -180,6 +186,11 @@ export function emitComponentSetup(
       case 'style-map':
         lines.push(
           `  ɵsxStyleMap(table, ${entry.slot}, ${entry.node}, ${source(entry.source)});`,
+        );
+        break;
+      case 'event':
+        lines.push(
+          `  ɵsxListener(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${eventHandler(entry)}, ${eventOptions(entry)}, server);`,
         );
         break;
     }
@@ -333,6 +344,71 @@ function emitStructuralBlocks(
 }
 
 /**
+ * The listener body for one event binding: modifier guards, then the authored
+ * method call with `$event` bound to the DOM event.
+ */
+function eventHandler(entry: SxBindingPlanEntry): string {
+  return eventHandlerBody(
+    `ctx.${entry.source.replace(/\$event\b/g, 'event')}`,
+    entry.modifiers,
+  );
+}
+
+/** The listener arrow for a handler call, with modifier guards up front. */
+function eventHandlerBody(
+  call: string,
+  modifiers: readonly string[] | undefined,
+): string {
+  const guards: string[] = [];
+
+  if (modifiers?.includes('self')) {
+    guards.push(
+      'if (event.target !== event.currentTarget) return;',
+    );
+  }
+
+  if (modifiers?.includes('prevent')) {
+    guards.push('event.preventDefault();');
+  }
+
+  if (modifiers?.includes('stop')) {
+    guards.push('event.stopPropagation();');
+  }
+
+  for (const modifier of modifiers ?? []) {
+    const key = KEY_MODIFIER_KEYS[modifier];
+
+    if (key) {
+      guards.push(`if (event.key !== ${JSON.stringify(key)}) return;`);
+    }
+  }
+
+  // The parameter is omitted when nothing reads it: generated components are
+  // compiled with `noUnusedParameters`.
+  const parameter = guards.length > 0 || /(^|[^\w$])event\b/.test(call)
+    ? '(event)'
+    : '()';
+
+  return `${parameter} => { ${guards.join(' ')}${guards.length > 0 ? ' ' : ''}${call}; }`;
+}
+
+/** `addEventListener` options implied by the binding's modifiers. */
+function eventOptions(entry: SxBindingPlanEntry): string {
+  const modifiers = entry.modifiers ?? [];
+  const options: string[] = [];
+
+  if (modifiers.includes('once')) {
+    options.push('once: true');
+  }
+
+  if (modifiers.includes('capture')) {
+    options.push('capture: true');
+  }
+
+  return options.length > 0 ? `{ ${options.join(', ')} }` : 'undefined';
+}
+
+/**
  * Emits the per-block binding table. Each generated factory is its own
  * function scope, so the table variable is always named `blockTable`.
  */
@@ -348,14 +424,20 @@ function blockBindingLines(
 
   return [
     `${pad}const blockTable = createBindingTable(${compiled.bindings.length});`,
-    ...compiled.bindings.map(
-      (binding, slot) =>
-        // Block bodies build their own DOM, so the binding targets the text
-        // node directly instead of Angular's rendered interpolation node.
-        binding.dependencies
-          ? `${pad}ɵsxTextExpression(blockTable, ${slot}, ${binding.node}, ${sources(binding.dependencies)}, () => ${rewriteSxTextExpression(binding.source)});`
-          : `${pad}ɵsxText(blockTable, ${slot}, ${binding.node}, ctx.${binding.source});`,
-    ),
+    ...compiled.bindings.map((binding, slot) => {
+      if (binding.kind === 'event') {
+        return (
+          `${pad}ɵsxListener(blockTable, ${slot}, ${binding.node}, ${JSON.stringify(binding.name)}, ` +
+          `${eventHandlerBody(binding.handler, binding.modifiers)}, undefined, server);`
+        );
+      }
+
+      // Block bodies build their own DOM, so the binding targets the text
+      // node directly instead of Angular's rendered interpolation node.
+      return binding.dependencies
+        ? `${pad}ɵsxTextExpression(blockTable, ${slot}, ${binding.node}, ${sources(binding.dependencies)}, () => ${rewriteSxTextExpression(binding.source)});`
+        : `${pad}ɵsxText(blockTable, ${slot}, ${binding.node}, ctx.${binding.source});`;
+    }),
   ];
 }
 

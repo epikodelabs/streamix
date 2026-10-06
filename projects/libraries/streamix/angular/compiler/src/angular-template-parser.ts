@@ -5,6 +5,7 @@ import {
   TmplAstText,
   parseTemplate,
   type ParseSourceSpan,
+  type TmplAstBoundEvent,
   type TmplAstNode,
 } from '@angular/compiler';
 
@@ -14,6 +15,7 @@ import {
   type SxBindingPlan,
   type SxSourceSpan,
 } from './binding-plan';
+import { parseNativeEventBinding } from './event-binding';
 import {
   analyzeSxExpression,
   analyzeSxTextInterpolation,
@@ -39,6 +41,8 @@ export interface SxTemplateBinding {
   readonly source: string;
   readonly name?: string;
   readonly dependencies?: readonly string[];
+  /** Angular event modifiers (`stop`, `prevent`, `enter`, …). */
+  readonly modifiers?: readonly string[];
   readonly span: SxSourceSpan;
 }
 
@@ -429,6 +433,30 @@ function visitElement(
     state.bindingSpans.push(span);
   }
 
+  for (const output of element.outputs) {
+    const binding = classifyEventBinding(
+      element,
+      output,
+      nodeId,
+      state.template,
+    );
+
+    if (!binding) {
+      continue;
+    }
+
+    const span = {
+      start: output.sourceSpan.start.offset,
+      end: output.sourceSpan.end.offset,
+    };
+
+    // The compiled listener replaces Angular's binding entirely: leaving both
+    // in place would run the handler twice.
+    state.bindingEdits.push({ ...span, replacement: '' });
+    state.bindings.push({ ...binding, span });
+    state.bindingSpans.push(span);
+  }
+
   // Automatic text lowering is limited to a sole interpolation. The generated
   // direct binding updates Angular's existing Text node, preserving hydration
   // identity. Mixed text/child-node content stays Angular-owned.
@@ -519,6 +547,12 @@ function containsCompiledBinding(
 
   if (node instanceof TmplAstElement) {
     let hasExplicitTextBinding = false;
+
+    for (const output of node.outputs) {
+      if (classifyEventBinding(node, output, 'node', template)) {
+        return true;
+      }
+    }
 
     for (const input of node.inputs) {
       const raw = sourceText(template, input.sourceSpan);
@@ -723,6 +757,40 @@ function classifyNativeAngularBinding(
   return property
     ? { kind: 'property', node, source, name: property }
     : undefined;
+}
+
+/**
+ * A `(event)="handler(...)"` binding the compiler installs directly.
+ *
+ * The handler must be a method call with literal arguments: it runs
+ * imperatively at dispatch time, so a handler that reads Streamix state reads
+ * the current value rather than needing a binding.
+ */
+export function classifyEventBinding(
+  element: TmplAstElement,
+  output: TmplAstBoundEvent,
+  nodeId: string,
+  template: string,
+): Omit<SxTemplateBinding, 'span'> | undefined {
+  const parsed = parseNativeEventBinding(
+    element.name,
+    output.name,
+    output.phase,
+    output.target,
+    sourceText(template, output.handlerSpan),
+  );
+
+  if (!parsed) {
+    return undefined;
+  }
+
+  return {
+    kind: 'event',
+    node: nodeId,
+    source: `${parsed.method}(${parsed.argumentText})`,
+    name: parsed.type,
+    modifiers: parsed.modifiers.length > 0 ? parsed.modifiers : undefined,
+  };
 }
 
 function isAngularDynamicNode(node: object): boolean {

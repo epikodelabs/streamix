@@ -5,6 +5,7 @@ import {
   ɵsxAttribute,
   ɵsxClass,
   ɵsxClassMap,
+  ɵsxListener,
   ɵsxProperty,
   ɵsxStyle,
   ɵsxStyleMap,
@@ -227,6 +228,72 @@ idescribe('SxBindingTable', () => {
     expect(div.style.opacity).toBe('');
 
     table.destroy();
+  });
+
+  it('installs listeners and removes them on destroy and unbind', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const table = createBindingTable(2, scheduler);
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    let clicks = 0;
+
+    ɵsxListener(table, 0, button, 'click', () => {
+      clicks += 1;
+    });
+    ɵsxListener(table, 1, button, 'click', () => {
+      clicks += 1;
+    });
+
+    button.click();
+    expect(clicks).toBe(2);
+
+    // Re-binding a slot replaces its listener without doubling it.
+    ɵsxListener(table, 1, button, 'click', () => {
+      clicks += 1;
+    });
+    button.click();
+    expect(clicks).toBe(4);
+
+    table.unbind(0);
+    button.click();
+    expect(clicks).toBe(5);
+
+    table.destroy();
+
+    // Destroying twice must not throw or remove anything twice.
+    table.destroy();
+    button.click();
+    expect(clicks).toBe(5);
+
+    button.remove();
+  });
+
+  it('attaches no listeners while server rendering', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const table = createBindingTable(1, scheduler);
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    let clicks = 0;
+
+    ɵsxListener(
+      table,
+      0,
+      button,
+      'click',
+      () => {
+        clicks += 1;
+      },
+      undefined,
+      true,
+    );
+
+    button.click();
+    expect(clicks).toBe(0);
+
+    table.destroy();
+    button.remove();
   });
 });
 import { idescribe } from '../../../src/tests/env.spec';

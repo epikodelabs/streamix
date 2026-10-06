@@ -19,6 +19,7 @@ export const SX_SETUP_RUNTIME_SYMBOLS = [
   'ɵsxClass',
   'ɵsxClassExpression',
   'ɵsxClassMap',
+  'ɵsxListener',
   'ɵsxProperty',
   'ɵsxPropertyExpression',
   'ɵsxStyle',

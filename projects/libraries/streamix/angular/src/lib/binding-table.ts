@@ -43,6 +43,8 @@ export class SxBindingTable {
   private readonly rendered: unknown[];
   private readonly pending: unknown[];
   private readonly subscriptions: Array<Subscription[] | undefined>;
+  /** Listener removers, cleared on unbind so teardown needs no extra plumbing. */
+  private readonly teardowns: Array<(() => void) | undefined>;
   private readonly dirtyFlags: Uint8Array;
   private readonly dirtySlots: number[] = [];
 
@@ -63,6 +65,7 @@ export class SxBindingTable {
     this.rendered = new Array(size);
     this.pending = new Array(size);
     this.subscriptions = new Array(size);
+    this.teardowns = new Array(size);
     this.dirtyFlags = new Uint8Array(size);
   }
 
@@ -129,6 +132,28 @@ export class SxBindingTable {
     write(initial);
 
     this.subscriptions[slot] = this.subscribeForFlush(slot, sources);
+  }
+
+  /**
+   * Installs a compiler-generated event listener into an integer slot.
+   *
+   * The listener writes nothing, so the slot never flushes; it exists so
+   * `unbind`/`destroy` remove listeners through the same teardown path as
+   * source subscriptions.
+   */
+  bindListener(
+    slot: BindingSlot,
+    target: EventTarget,
+    type: string,
+    handler: (event: any) => void,
+    options?: AddEventListenerOptions,
+  ): void {
+    this.assertLiveSlot(slot);
+    this.unbind(slot);
+
+    target.addEventListener(type, handler, options);
+    this.teardowns[slot] = () =>
+      target.removeEventListener(type, handler, options);
   }
 
   /** Removes one slot binding without destroying the table. */
@@ -215,6 +240,8 @@ export class SxBindingTable {
   }
 
   private clearSlot(slot: BindingSlot): void {
+    this.teardowns[slot]?.();
+    this.teardowns[slot] = undefined;
     this.writers[slot] = undefined;
     this.equals[slot] = undefined;
     this.readers[slot] = undefined;
@@ -473,6 +500,29 @@ export function ɵsxStyleExpression(
     read,
     writeStyle(target, property),
   );
+}
+
+/**
+ * Compiler instruction: direct event listener.
+ *
+ * Server rendering attaches nothing: the markup is identical without it, and
+ * hydration mounts the client view that installs the listeners.
+ * @internal
+ */
+export function ɵsxListener(
+  table: SxBindingTable,
+  slot: BindingSlot,
+  target: EventTarget,
+  type: string,
+  handler: (event: any) => void,
+  options?: AddEventListenerOptions,
+  server = false,
+): void {
+  if (server) {
+    return;
+  }
+
+  table.bindListener(slot, target, type, handler, options);
 }
 
 /** Compiler instruction: direct reactive style-map binding. @internal */

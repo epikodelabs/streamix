@@ -15,6 +15,7 @@ import {
   ɵcreateSxKeyedBlock,
   ɵinstallSxCompiledView,
   ɵsxBlockAnchor,
+  ɵsxListener,
   ɵsxReadLocal,
   ɵsxString,
   ɵsxTextNode,
@@ -326,6 +327,86 @@ class NestedHostComponent {
   );
 }
 
+/**
+ * Mirrors the emitted shape for
+ * `@for (row of rows; track row.id) { <li><button (click)="select(row.id)">{{ row.id }}</button></li> }`:
+ * one listener per item whose argument reads that item's loop context.
+ */
+@Component({
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '<ul><span data-sx-block="0"></span></ul>',
+})
+class EventHostComponent {
+  readonly rows = atom<{ id: number }[]>([{ id: 1 }, { id: 2 }]);
+  readonly selected: number[] = [];
+
+  select(id: number): void {
+    this.selected.push(id);
+  }
+
+  readonly ɵsx = ɵinstallSxCompiledView(
+    this,
+    (host: Element, ctx: EventHostComponent, server = false) => {
+      const anchor0 = ɵsxBlockAnchor(
+        host.children[0].children[0] as Element,
+        'sx:0',
+        server,
+      );
+
+      const block0 = ɵcreateSxKeyedBlock(
+        anchor0,
+        ctx.rows,
+        {
+          create(row, index) {
+            const doc = host.ownerDocument!;
+            let currentContext: Record<string, unknown> = { row, index };
+            const el0 = doc.createElement('li');
+            const el1 = doc.createElement('button');
+            el1.textContent = String(row.id);
+            el0.appendChild(el1);
+
+            const table = createBindingTable(1);
+            ɵsxListener(
+              table,
+              0,
+              el1,
+              'click',
+              () => {
+                ctx.select(ɵsxReadLocal(currentContext, 'row.id') as number);
+              },
+              undefined,
+              server,
+            );
+
+            return ɵcreateSxCompiledBlock(
+              el0,
+              el0,
+              (context) => {
+                currentContext = context;
+              },
+              currentContext,
+              () => {
+                table.destroy();
+              },
+            );
+          },
+          update(instance, row, index) {
+            instance.update({ row, index });
+          },
+        },
+        (_index, row) => row.id,
+      );
+
+      return {
+        destroy() {
+          block0.destroy();
+        },
+      };
+    },
+  );
+}
+
 idescribe('compiled control flow', () => {
   useAngularTestEnvironment();
 
@@ -430,6 +511,37 @@ idescribe('compiled control flow', () => {
 
     fixture.destroy();
     expect(errors).not.toHaveBeenCalled();
+  });
+
+  it('runs per-item listeners with the current loop context', async () => {
+    const fixture = TestBed.createComponent(EventHostComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const component = fixture.componentInstance;
+    const buttons = Array.from(host.querySelectorAll('button'));
+
+    buttons[1].click();
+    expect(component.selected).toEqual([2]);
+
+    // A reused record reports the item it now holds, not the one it was
+    // created with.
+    component.rows.next([{ id: 2 }, { id: 1 }]);
+    rendererScheduler.flushNow();
+
+    const reordered = Array.from(host.querySelectorAll('button'));
+    reordered[0].click();
+    expect(component.selected).toEqual([2, 2]);
+
+    reordered[1].click();
+    expect(component.selected).toEqual([2, 2, 1]);
+
+    fixture.destroy();
+
+    // Destroying the records removed their listeners.
+    buttons[1].click();
+    expect(component.selected).toEqual([2, 2, 1]);
   });
 
   it('reorders, updates and empties a keyed collection with no change detection', async () => {

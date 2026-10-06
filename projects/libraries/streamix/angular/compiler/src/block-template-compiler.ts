@@ -7,8 +7,14 @@ import {
   TmplAstSwitchBlock,
   TmplAstText,
   parseTemplate,
+  type TmplAstBoundEvent,
   type TmplAstNode,
 } from '@angular/compiler';
+
+import {
+  isLiteralArgument,
+  parseNativeEventBinding,
+} from './event-binding';
 
 import type { SxReactiveSourceResolver } from './source-resolution';
 import {
@@ -16,12 +22,23 @@ import {
   rewriteLocalReads,
 } from './text-expression';
 
-export interface SxCompiledBlockBinding {
-  readonly node: string;
-  readonly source: string;
-  /** Present when the interpolation is a compiled compound expression. */
-  readonly dependencies?: readonly string[];
-}
+export type SxCompiledBlockBinding =
+  | {
+      readonly kind: 'text';
+      readonly node: string;
+      readonly source: string;
+      /** Present when the interpolation is a compiled compound expression. */
+      readonly dependencies?: readonly string[];
+    }
+  | {
+      readonly kind: 'event';
+      readonly node: string;
+      /** DOM event type. */
+      readonly name: string;
+      /** Rewritten handler call, already prefixed with the component context. */
+      readonly handler: string;
+      readonly modifiers?: readonly string[];
+    };
 
 /**
  * A compiled reactive value used by a condition or collection: a direct
@@ -281,6 +298,70 @@ function emitLet(
 
 /** A `item.name` / `$index` style read of the collection context. */
 const LOCAL_READ = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
+
+/**
+ * An `(event)="handler(...)"` inside a compiled body. Arguments may read the
+ * loop context or a reactive source; the dispatch-time call is rewritten
+ * accordingly, so `(click)="select(row.id)"` selects the clicked row.
+ */
+function compileBlockEvent(
+  element: TmplAstElement,
+  output: TmplAstBoundEvent,
+  variable: string,
+  state: EmitState,
+): SxCompiledBlockBinding {
+  const parsed = parseNativeEventBinding(
+    element.name,
+    output.name,
+    output.phase,
+    output.target,
+    expressionSourceOf(output.handler, state.template),
+    { allowValueArguments: true },
+  );
+
+  if (!parsed) {
+    throw new Error(
+      `Unsupported event binding on <${element.name}> inside a compiled block. ` +
+      'Only native DOM events with a method-call handler are compiled.',
+    );
+  }
+
+  return {
+    kind: 'event',
+    node: variable,
+    name: parsed.type,
+    handler: `ctx.${parsed.method}(${rewriteEventArguments(parsed.argumentText, state)})`,
+    modifiers: parsed.modifiers.length > 0 ? parsed.modifiers : undefined,
+  };
+}
+
+function rewriteEventArguments(argumentText: string, state: EmitState): string {
+  return argumentText
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)
+    .map(part => {
+      if (part === '$event') {
+        return 'event';
+      }
+
+      if (isLiteralArgument(part) && part !== '$event') {
+        return part;
+      }
+
+      const source = state.resolveReactiveSource?.(part);
+
+      if (source) {
+        return `ctx.${source}.value`;
+      }
+
+      return rewriteLocalReads(
+        substituteLets(part, state),
+        'currentContext',
+      );
+    })
+    .join(', ');
+}
 
 /** Substitutes `@let` names so inlined expressions keep their meaning. */
 function substituteLets(
@@ -560,10 +641,10 @@ function emitElement(
   element: TmplAstElement,
   state: EmitState,
 ): string {
-  if (element.inputs.length > 0 || element.outputs.length > 0) {
+  if (element.inputs.length > 0) {
     throw new Error(
-      `Bindings/events inside compiled sx structural element <${element.name}> are not yet supported. ` +
-      'Use simple text interpolation in this compiler stage.',
+      `Property bindings inside compiled sx structural element <${element.name}> are not yet supported. ` +
+      'Use @if/@for conditions or simple interpolation in this compiler stage.',
     );
   }
 
@@ -571,6 +652,12 @@ function emitElement(
   state.create.push(
     `const ${variable} = ${state.document}.createElement(${JSON.stringify(element.name)});`,
   );
+
+  for (const output of element.outputs) {
+    state.bindings.push(
+      compileBlockEvent(element, output, variable, state),
+    );
+  }
 
   for (const attribute of element.attributes) {
     state.create.push(
@@ -639,7 +726,7 @@ function emitBoundText(
     const source = state.resolveReactiveSource?.(expression);
 
     if (source && state.resolveReactiveSource) {
-      state.bindings.push({ node: variable, source });
+      state.bindings.push({ kind: 'text', node: variable, source });
       state.bindingCount += 1;
       continue;
     }
@@ -655,6 +742,7 @@ function emitBoundText(
 
       if (analysis?.mode === 'expression') {
         state.bindings.push({
+          kind: 'text',
           node: variable,
           source: analysis.expression,
           dependencies: analysis.dependencies,
