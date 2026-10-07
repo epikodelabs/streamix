@@ -209,9 +209,20 @@ The browser setup subscribes to `busy` and `count` themselves, and
 interpolation updates Angular's existing `Text` node rather than replacing
 `element.textContent`, so the nodes hydration produced stay in place.
 
+For DOM reuse to engage, the server half of the application must register
+server rendering — that is what serializes the `ng-state` script the client
+reads:
+
+```ts
+bootstrapApplication(AppComponent, {
+  providers: [provideClientHydration(), provideServerRendering()],
+});
+```
+
 `npm run test:node` renders a fixture through `renderApplication` and asserts
 this contract; `hydration.spec.ts` boots the client over the committed server
-HTML and asserts the takeover.
+document and asserts both halves — Angular reuses the server's nodes, and the
+compiled view then takes the markers over.
 
 ## Angular sanitization boundary
 

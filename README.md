@@ -138,6 +138,7 @@ Some former companion modules now live as separate packages, compatible with str
 | `npm run typecheck` | Type-check the workspace with `tsc --noEmit` |
 | `npm run lint` | Lint with ESLint (`lint:fix` to auto-fix) |
 | `npm test` | Run the testify test suite |
+| `npm run test:node` | Run the server-rendering (SSR) suite in Node |
 | `npm run jasmine` | Run tests headlessly in Chrome |
 | `npm run pack:check` | Dry-run `npm pack` against the built package |
 | `npm run docs:build` | Full docs pipeline (prepare → generate → build) |
