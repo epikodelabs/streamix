@@ -25,6 +25,48 @@ const BENCHMARKS_ROOT = fileURLToPath(
   ),
 );
 const BROWSER_TIMEOUT_MS = 180_000;
+const WORKLOAD_PARAMS = new Set([
+  'samples',
+  'warmup',
+  'scalar',
+  'coalesced',
+  'rows',
+  'reorders',
+]);
+
+/** Turns `--samples=25` / `--samples 25` into the page's query string. */
+function workloadQuery(argv) {
+  const params = new URLSearchParams();
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+
+    if (!argument.startsWith('--')) {
+      throw new Error(`Unexpected argument "${argument}".`);
+    }
+
+    const [name, inlineValue] = argument.slice(2).split('=');
+
+    if (!WORKLOAD_PARAMS.has(name)) {
+      throw new Error(
+        `Unknown option "--${name}". Valid: ` +
+          `${[...WORKLOAD_PARAMS].map(param => `--${param}`).join(', ')}.`,
+      );
+    }
+
+    const value = inlineValue ?? argv[(index += 1)];
+
+    if (value === undefined || !/^\d+$/.test(value)) {
+      throw new Error(`"--${name}" needs a whole number.`);
+    }
+
+    params.set(name, value);
+  }
+
+  const query = params.toString();
+
+  return query ? `?${query}` : '';
+}
 
 function resolveBrowser() {
   const fromEnvironment =
@@ -176,6 +218,7 @@ function printTable(run) {
 }
 
 async function main() {
+  const query = workloadQuery(process.argv.slice(2));
   const browserPath = resolveBrowser();
   const server = await createServer({
     root: BENCHMARKS_ROOT,
@@ -194,9 +237,10 @@ async function main() {
     }
 
     console.log(`Driving ${browserPath}`);
-    console.log(`Serving ${BENCHMARKS_ROOT}\n`);
+    console.log(`Serving ${BENCHMARKS_ROOT}`);
+    console.log(`Workload ${query || '(defaults)'}\n`);
 
-    const dom = await runBrowser(browserPath, `http://localhost:${port}/`);
+    const dom = await runBrowser(browserPath, `http://localhost:${port}/${query}`);
     const run = parseResults(dom);
 
     if (!run) {

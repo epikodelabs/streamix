@@ -31,6 +31,16 @@ complete JSON result to the page and to `window.__SX_BENCHMARK_RESULTS__`.
 ?samples=11&warmup=4&scalar=100000&coalesced=10000&rows=1000&reorders=1000
 ```
 
+The headless runner takes the same names as flags:
+
+```bash
+npm run bench:angular -- --samples=15 --rows=2000
+```
+
+Repeat runs vary with the machine's state — CPU boost, thermal, background
+load — by up to 2× on these short loops; compare repeats from one sitting,
+never single runs, and never across tabs or machines.
+
 The headless runner reads the results out of the page after the load event, so
 a case has to finish synchronously — `runBenchmark` does. Serve it through the
 script, not a hand-typed `vite` path: Vite accepts a wrong `--root` without
