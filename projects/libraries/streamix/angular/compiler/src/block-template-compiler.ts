@@ -642,8 +642,11 @@ function emitElement(
   state: EmitState,
 ): string {
   if (element.inputs.length > 0) {
+    // Native property bindings and attribute interpolation (`title="{{ x }}"`)
+    // both arrive as inputs; the compiled element writes static attributes
+    // verbatim, so either would be dropped on the floor.
     throw new Error(
-      `Property bindings inside compiled sx structural element <${element.name}> are not yet supported. ` +
+      `Property bindings and attribute interpolation inside compiled sx structural element <${element.name}> are not yet supported. ` +
       'Use @if/@for conditions or simple interpolation in this compiler stage.',
     );
   }
@@ -660,6 +663,13 @@ function emitElement(
   }
 
   for (const attribute of element.attributes) {
+    if (attribute.value.includes('{{')) {
+      throw new Error(
+        `Unsupported attribute interpolation ${JSON.stringify(attribute.name)} inside a compiled block. ` +
+        'The compiled element writes attributes verbatim; keep the attribute static or move it out of the block.',
+      );
+    }
+
     state.create.push(
       `${variable}.setAttribute(${JSON.stringify(attribute.name)}, ${JSON.stringify(attribute.value)});`,
     );

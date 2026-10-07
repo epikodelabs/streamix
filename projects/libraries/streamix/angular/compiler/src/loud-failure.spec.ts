@@ -76,6 +76,44 @@ describe('reactive reads the compiler cannot own', () => {
     )).toThrowError(/cannot bind "count"/);
   });
 
+  it('rejects atom reads in attribute interpolation', () => {
+    expect(() => transformAngularComponentTemplate(
+      '<span title="{{ count }}"></span>',
+      'inline.html',
+      { resolveReactiveSource },
+    )).toThrowError(/cannot bind "count".*Attribute interpolation/s);
+  });
+
+  it('leaves attribute interpolation over plain state to Angular', () => {
+    const template = '<span title="{{ plainTitle }}"></span>';
+    const result = transformAngularComponentTemplate(
+      template,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe(template);
+  });
+
+  it('keeps a block with attribute interpolation on the Angular path', () => {
+    // The body cannot compile, so the block stays Angular-owned — and the
+    // reactive read in its condition fails the build rather than rendering
+    // once and never updating.
+    expect(() => transformAngularComponentTemplate(
+      `@if (ready) { <span title="{{ plainTitle }}"></span> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    )).toThrowError(/cannot bind "ready"/);
+  });
+
+  it('rejects attribute interpolation when the block stays Angular-owned', () => {
+    expect(() => transformAngularComponentTemplate(
+      `@if (ready) { <span title="{{ count }}"></span> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    )).toThrowError(/cannot bind/);
+  });
+
   it('rejects atom reads inside a @defer trigger and body', () => {
     expect(() => transformAngularComponentTemplate(
       '@defer (when count > 3) { <p>{{ count }}</p> }',

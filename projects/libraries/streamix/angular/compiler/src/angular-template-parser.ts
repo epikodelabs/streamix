@@ -358,6 +358,25 @@ function visitElement(
     const publicName = extractPublicBindingName(raw);
 
     if (!publicName) {
+      // Attribute interpolation (`title="{{ count }}"`) arrives here as an
+      // input Angular evaluates itself: a reactive read would render once and
+      // go stale.
+      for (const match of raw.matchAll(/\{\{([\s\S]*?)\}\}/g)) {
+        const analysis = analyzeSxExpression(
+          match[1],
+          state.resolveReactiveSource,
+        );
+
+        if (analysis) {
+          throw new Error(
+            angularOwnedReadError(
+              analysis.dependencies[0] ?? match[1].trim(),
+              'Attribute interpolation is evaluated by Angular, not by the compiled view.',
+            ),
+          );
+        }
+      }
+
       continue;
     }
 
