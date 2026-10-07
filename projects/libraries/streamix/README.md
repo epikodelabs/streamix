@@ -94,19 +94,23 @@ app.events = 'hello';
 
 console.log(app.doubled); // 10
 
-// Scope properties stay value-first. Reach for `refs` only when you need the
-// reactive backing object itself.
-app.refs.count.set(6);
-app.refs.count.subscribe(value => console.log(value));
+// Scope properties stay value-first. Reach for the atom behind one only when
+// you need the reactive object itself.
+app.get('count').set(6);
+app.subscribeTo('count', value => console.log(value));
 
 console.log(app.count); // 6
 
 app.dispose();
 ```
 
-`scope.refs` mirrors nested scope state recursively: `app.user.name` is the
-plain value, while `app.refs.user.name` is its writable/readable Streamix ref.
-Dynamic lookup remains available as `app.refs('count')`.
+`app.get('count')` returns the backing atom and `app.set('count', value)`
+writes through it; `subscribeTo(key, callback)` observes a member.
+
+A scope keeps the atoms it owns **live**: it subscribes to them on creation and
+releases them on `dispose()`. A `flow`-backed member therefore starts producing
+as soon as the scope exists — you read `app.events` and it is current, without
+wiring a subscription — and nested scopes inherit the same guarantee.
 
 ### 🔄 Flows: sequences through familiar operators
 

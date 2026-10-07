@@ -219,6 +219,88 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should start owned flow members without an explicit subscriber', async () => {
+      let pushes = 0;
+
+      const s = scope({
+        // Long-running on purpose: a completed flow disposes itself, and the
+        // assertions below read the member while it is live.
+        value: flowExpr(() => flow(async function* (signal?: AbortSignal) {
+          let index = 0;
+          while (!signal?.aborted) {
+            pushes += 1;
+            yield index++;
+            await delay(5);
+          }
+        })),
+        doubled: (self: any) =>
+          typeof self.value === 'number' ? self.value * 2 : -1,
+      });
+
+      // Owning the flow is enough: nobody subscribed, yet it produced values
+      // and the derived member tracked them.
+      await delay(30);
+
+      expect(pushes).toBeGreaterThan(0);
+      expect(s.value).toBeGreaterThan(0);
+      expect(s.doubled).toBe(s.value * 2);
+
+      s.dispose();
+    });
+
+    it('should stop owned atoms when the scope is disposed', async () => {
+      let pushes = 0;
+      let aborted = false;
+
+      const s = scope({
+        value: flowExpr(() => flow(async function* (signal?: AbortSignal) {
+          signal?.addEventListener('abort', () => {
+            aborted = true;
+          });
+
+          let index = 0;
+          while (!signal?.aborted) {
+            pushes += 1;
+            yield index++;
+            await delay(5);
+          }
+        })),
+      });
+
+      await delay(20);
+      expect(pushes).toBeGreaterThan(0);
+
+      s.dispose();
+
+      const atDispose = pushes;
+      await delay(20);
+
+      expect(aborted).toBeTrue();
+      expect(pushes).toBe(atDispose);
+    });
+
+    it('should deliver owned flow values to explicit subscribers too', async () => {
+      const s = scope({
+        value: flowExpr(() => flow(async function* (signal?: AbortSignal) {
+          let index = 0;
+          while (!signal?.aborted) {
+            yield index++;
+            await delay(5);
+          }
+        })),
+      });
+
+      const seen: number[] = [];
+      s.subscribeTo('value', (value: number) => seen.push(value));
+
+      await delay(30);
+
+      expect(seen.length).toBeGreaterThan(1);
+      expect(seen[seen.length - 1]).toBeGreaterThan(seen[0]);
+
+      s.dispose();
+    });
+
     it('should support nested scopes', () => {
       const parent = scope({
         child: { x: 42 },

@@ -135,8 +135,8 @@ const state = useScope(() => scope({
   doubled: self => self.count * 2,
 }));
 
-const count = useWritable(state.refs.count);
-const doubled = useIterable(state.refs.doubled);
+const count = useWritable(state.get('count'));
+const doubled = useIterable(state.get('doubled'));
 </script>
 
 <template>

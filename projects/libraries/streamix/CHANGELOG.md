@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Scopes keep the atoms they own live.** Creating a scope subscribes to the
+  atoms it owns, so a `flow`-backed member starts producing immediately
+  instead of waiting for the application to wire a subscription — `app.events`
+  reads the current value and derived members track it. `dispose()` releases
+  those subscriptions with the rest of the scope's cleanups. Read-only and
+  writable atoms are unaffected beyond the empty observer that keeps them hot.
 - **SSR and hydration are covered by a harness.** `npm run test:node` renders a
   fixture through `renderApplication` (with `provideServerRendering()`, which
   is what serializes the `ng-state` script) and asserts the server contract:

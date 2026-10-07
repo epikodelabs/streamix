@@ -1030,6 +1030,23 @@ export function registerWithCurrentScope(atomInstance: Atom<any>): void {
     updateDirtyHierarchy(targetContext, dirty ? 1 : -1);
   });
   targetContext.cleanups.add(() => stopDirtyTracking());
+
+  // Owning an atom means keeping it live. A flow-backed member produces
+  // nothing until something subscribes, so without this a scope member would
+  // read `undefined` until the application wired its own subscription. The
+  // observer is intentionally empty: it exists so the atom runs, and disposal
+  // releases it with every other cleanup.
+  if (typeof (atomInstance as { subscribe?: unknown }).subscribe === "function") {
+    const autoSubscription = atomInstance.subscribe(() => {});
+
+    if (disposers instanceof Set) {
+      const stopAutoSubscription = () => autoSubscription();
+      disposers.add(stopAutoSubscription);
+      targetContext.cleanups.add(() => disposers.delete(stopAutoSubscription));
+    } else {
+      targetContext.cleanups.add(() => autoSubscription());
+    }
+  }
 }
 
 /**
