@@ -1,17 +1,8 @@
 # Vue Adoption Layer
 
-Vue bindings for [Streamix](https://github.com/epikodelabs/streamix).
-Vue owns rendering; Streamix owns reactive state, async iteration, and model
-lifecycle.
+`@epikodelabs/streamix/vue` lets Vue components use Streamix state through familiar Vue refs.
 
-The adapter uses the same capability vocabulary as the React package, but maps
-it to idiomatic Vue primitives:
-
-- `useWritable()` — a writable Vue ref backed directly by Streamix.
-- `useIterable()` — a read-only Vue ref for Streamix sources or any `AsyncIterable`.
-- `useScope()` — tie a Streamix scope to the current Vue effect scope.
-
-There is intentionally no `useAtom`.
+Vue still renders the interface. Streamix holds state, derived values, and asynchronous work. The adapter makes those sources feel natural in the Composition API and in templates.
 
 ## Install
 
@@ -19,14 +10,9 @@ There is intentionally no `useAtom`.
 npm install @epikodelabs/streamix vue
 ```
 
-`vue` is an optional peer dependency of the main package and is only required
-when this entry point is imported.
+## Read and update state
 
-## `useWritable(source)`
-
-Use `useWritable` when Vue needs both observation and mutation. It returns a
-writable computed ref, so it works with normal Composition API code and
-`v-model`.
+Use `useWritable()` when a Vue component needs to display and change a Streamix value.
 
 ```vue
 <script setup lang="ts">
@@ -42,15 +28,14 @@ const count = useWritable(counter);
 </template>
 ```
 
-For form state:
+The returned value behaves like a writable Vue ref, so it also works with `v-model`.
 
 ```vue
 <script setup lang="ts">
 import { atom } from '@epikodelabs/streamix';
 import { useWritable } from '@epikodelabs/streamix/vue';
 
-const nameSource = atom('Ada');
-const name = useWritable(nameSource);
+const name = useWritable(atom('Ada'));
 </script>
 
 <template>
@@ -58,15 +43,11 @@ const name = useWritable(nameSource);
 </template>
 ```
 
-The ref does not own a second copy of the value. Its getter reads through the
-Streamix-backed `useIterable()` bridge and its setter calls `source.next()`.
+The value is not copied into a second store. Vue reads and writes the same Streamix source.
 
-## `useIterable(source, initialValue?)`
+## Read derived values and flows
 
-Use `useIterable` for observation. Streamix atoms, readables, derived values,
-and flows expose `.value` plus `subscribe()`, so the returned ref reads the
-current Streamix value directly and Vue is only invalidated when the source
-emits.
+Use `useIterable()` when a component only needs to observe a Streamix atom, derived value, or flow.
 
 ```vue
 <script setup lang="ts">
@@ -74,8 +55,9 @@ import { atom, derived } from '@epikodelabs/streamix';
 import { useIterable } from '@epikodelabs/streamix/vue';
 
 const count = atom(2);
-const doubledSource = derived(() => count.value * 2);
-const doubled = useIterable(doubledSource);
+const doubled = useIterable(
+  derived(() => count.value * 2),
+);
 </script>
 
 <template>
@@ -83,15 +65,14 @@ const doubled = useIterable(doubledSource);
 </template>
 ```
 
-`useIterable` also accepts a plain `AsyncIterable<T>`. Because a plain async
-iterable has no synchronous current value, pass an initial value:
+`useIterable()` can also read a regular `AsyncIterable`. Give Vue an initial value to show before the first result arrives.
 
 ```vue
 <script setup lang="ts">
 import { useIterable } from '@epikodelabs/streamix/vue';
 
 async function* messages() {
-  // ...
+  // Receive messages over time.
 }
 
 const message = useIterable(messages(), 'Waiting…');
@@ -102,24 +83,9 @@ const message = useIterable(messages(), 'Waiting…');
 </template>
 ```
 
-The iterator is closed when the current Vue effect scope stops.
+## Keep feature state together
 
-For component-owned Streamix sources, pass a factory. Disposable sources are
-then disposed together with the component/effect scope:
-
-```ts
-const online = useIterable(
-  () => flow(() => connectionStatus()),
-  false,
-);
-```
-
-Externally-owned sources are unsubscribed but are never disposed by the Vue
-adapter.
-
-## `useScope(factory)`
-
-A Streamix scope created in Vue setup can share the component's lifetime:
+Use `useScope()` when a component owns a group of related Streamix state.
 
 ```vue
 <script setup lang="ts">
@@ -146,33 +112,25 @@ const doubled = useIterable(state.get('doubled'));
 </template>
 ```
 
-Vue component setup is already one-shot, so `useScope()` does not need the
-memoization/deferred-disposal machinery used by the React adapter.
+The scope is tied to the component’s lifetime. When the component goes away, its local Streamix work is cleaned up too.
 
-## Which composable?
+## Which composable should I use?
 
-| Source / intent | Vue binding |
+| When the component needs to… | Use |
 | --- | --- |
-| `Writable<T>` edited by the component | `useWritable(source)` |
-| Atom / readable / derived / flow | `useIterable(source)` |
-| Plain `AsyncIterable<T>` | `useIterable(source, initialValue)` |
-| Component-owned source | `useIterable(() => source, initialValue?)` |
-| Component-owned Streamix scope | `useScope(() => scope(...))` |
+| Read and update a Streamix value | `useWritable(source)` |
+| Read an atom, derived value, or flow | `useIterable(source)` |
+| Read a plain async iterable | `useIterable(source, initialValue)` |
+| Own related Streamix state for the component lifetime | `useScope(() => scope(...))` |
 
-The split is capability-based: **writable** when Vue needs mutation,
-**iterable** when Vue only needs observation.
+There is no `useAtom` composable because the useful question is not “is this an atom?” It is: does the component need to **change** this value, or only **observe** it?
 
-## Why no Vue-specific `useAtom`?
+## Loading and Suspense
 
-`Atom` is one concrete Streamix type. The integration boundary is broader:
-derived values and flow-backed sources are readable too, and plain async
-iterables can participate without first becoming Vue state. Naming the bridge
-by capability keeps the adapter aligned with Streamix rather than a specific
-source implementation.
+Vue already has its own approach to loading through async setup and `<Suspense>`. Streamix keeps its role smaller: it provides reactive values and async flows; Vue decides how the loading boundary should look.
 
-## Suspense
+## The goal
 
-This scaffold intentionally does not copy React's `useSuspense()` API. React
-Suspense is entered by throwing a promise during render; Vue `<Suspense>` waits
-for async component setup/dependencies. The loading boundary therefore belongs
-to Vue's async setup layer rather than to a fake React-shaped Streamix hook.
+The Vue adapter does not replace Vue’s reactivity or component model. It gives Streamix state a natural Vue surface.
+
+Keep state and asynchronous work in Streamix. Use Vue for components and templates. Let the adapter connect them.

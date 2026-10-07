@@ -1,16 +1,8 @@
 # React Adoption Layer
 
-React bindings for [streamix](https://github.com/epikodelabs/streamix).
-React owns rendering; streamix owns reactive state, async iteration, and
-lifecycle.
+`@epikodelabs/streamix/react` connects Streamix state to React components.
 
-The adapter intentionally exposes Streamix concepts instead of adding a
-React-specific `useAtom` vocabulary:
-
-- `useWritable()` — bind mutable Streamix state as `[value, setValue]`.
-- `useIterable()` — read Streamix atoms/readables/flows or any `AsyncIterable`.
-- `useScope()` — tie a Streamix scope to a component lifetime.
-- `suspense()` / `useSuspense()` — bridge first-emission loading to Suspense.
+React still renders the UI. Streamix holds state, derived values, and asynchronous work. The adapter gives components a small set of hooks for reading, writing, and owning those reactive sources.
 
 ## Install
 
@@ -18,13 +10,9 @@ React-specific `useAtom` vocabulary:
 npm install @epikodelabs/streamix react
 ```
 
-`react` is an optional peer dependency and is only required when this entry
-point is imported.
+## Read and write an atom
 
-## `useWritable(source)`
-
-Use `useWritable` when the component both reads and writes a Streamix
-`Writable`.
+Use `useWritable()` when a component needs to display a value and update it.
 
 ```tsx
 import { atom } from '@epikodelabs/streamix';
@@ -43,14 +31,11 @@ function Counter() {
 }
 ```
 
-The hook does not mirror the value into React state. Reads are backed by
-`useSyncExternalStore`; writes go directly to the Streamix source.
+The component receives the familiar `[value, setValue]` shape. The value still belongs to Streamix, so other components can use the same atom without creating a second copy of the state.
 
-## `useIterable(source, initialValue?)`
+## Read reactive values
 
-Use `useIterable` for observation. Streamix atoms, readables, derived values,
-and flows already expose a synchronous value/subscription contract and are also
-async iterable, so they use React's external-store path without tearing.
+Use `useIterable()` when the component only needs to observe a Streamix atom, derived value, or flow.
 
 ```tsx
 import { derived } from '@epikodelabs/streamix';
@@ -64,13 +49,11 @@ function Total() {
 }
 ```
 
-`useIterable` also accepts a plain `AsyncIterable<T>`. Because a plain iterable
-has no synchronous current value, provide the value React should render before
-the first emission:
+`useIterable()` also works with a regular `AsyncIterable`. Provide an initial value for anything that does not have a value immediately:
 
 ```tsx
 async function* messages() {
-  // ...
+  // Receive messages over time.
 }
 
 function Messages() {
@@ -79,39 +62,22 @@ function Messages() {
 }
 ```
 
-For component-owned sources, pass a factory. The source is created once. An
-owned Streamix atom/flow is disposed on unmount; a plain async iterator is
-closed when React unsubscribes.
+## Keep feature state with the component
 
-```tsx
-import { flow } from '@epikodelabs/streamix';
-import { on } from '@epikodelabs/streamix/dom';
-import { useIterable } from '@epikodelabs/streamix/react';
-
-function PointerCapability() {
-  const finePointer = useIterable(
-    () => flow(() => on('mediaQuery', '(pointer: fine)')),
-    false,
-  );
-
-  return <span>{finePointer ? 'fine' : 'coarse'}</span>;
-}
-```
-
-## `useScope(factory)`
-
-Creates a Streamix scope once and ties its disposal to the component lifetime.
-Use `useWritable` for writable scope fields and `useIterable` for read-only or
-derived fields.
+Use `useScope()` when a component owns a group of related state.
 
 ```tsx
 import { scope } from '@epikodelabs/streamix';
-import { useIterable, useScope, useWritable } from '@epikodelabs/streamix/react';
+import {
+  useIterable,
+  useScope,
+  useWritable,
+} from '@epikodelabs/streamix/react';
 
 function Counter() {
   const state = useScope(() => scope({
     count: 0,
-    doubled: (self) => self.count * 2,
+    doubled: self => self.count * 2,
   }));
 
   const [count, setCount] = useWritable(state.get('count'));
@@ -125,35 +91,37 @@ function Counter() {
 }
 ```
 
-## `suspense(source)` / `useSuspense(source)`
+The scope is created once for the component and is cleaned up when the component is no longer on screen. This is useful for local state, calculated values, and asynchronous work that belong to the same feature.
 
-`suspense` adapts an atom into a Suspense resource. `useSuspense` combines the
-first-emission suspend with live observation after the value arrives.
+## Work with loading states
+
+Use `useSuspense()` when a component should wait for an atom’s first value before rendering.
 
 ```tsx
+import { useSuspense } from '@epikodelabs/streamix/react';
+
 function Profile({ source }: { source: Atom<Profile> }) {
   const profile = useSuspense(source);
   return <span>{profile.name}</span>;
 }
 ```
 
-## Which hook?
+Wrap the component in React’s `<Suspense>` boundary to decide what people see while the first value is loading.
 
-| Source | Hook |
+## Which hook should I use?
+
+| When the component needs to… | Use |
 | --- | --- |
-| `Writable<T>` that the component edits | `useWritable(source)` |
-| Atom / readable / derived / flow | `useIterable(source)` |
-| Plain `AsyncIterable<T>` | `useIterable(source, initialValue)` |
-| Component-owned atom / flow | `useIterable(() => source, initialValue?)` |
-| Component-owned scope | `useScope(() => scope(...))` |
+| Read and update an atom | `useWritable(source)` |
+| Read an atom, derived value, or flow | `useIterable(source)` |
+| Read a plain async iterable | `useIterable(source, initialValue)` |
+| Own related Streamix state for its lifetime | `useScope(() => scope(...))` |
+| Wait for the first atom value with Suspense | `useSuspense(source)` |
 
-There is intentionally no `useAtom`. React code chooses by capability instead:
-**writable** when it needs mutation, **iterable** when it needs observation.
+There is no `useAtom` hook because React components usually need one of two things: a value they can **change**, or a value they can **observe**. The hook name makes that choice clear.
 
-## StrictMode disposal
+## The goal
 
-`useScope` and factory-owned Streamix sources defer disposal by one microtask.
-That absorbs React StrictMode's development-only mount → unmount → remount
-cycle. A real unmount still disposes the resource immediately after that small
-deferral. Plain async iterables use the same deferred-stop idea so StrictMode
-does not close an iterator between its synthetic unsubscribe/resubscribe pair.
+The React adapter is intentionally small. It does not replace React’s rendering model or ask you to learn a second component model.
+
+Keep shared state and asynchronous work in Streamix. Use React for components. Let the adapter connect the two.

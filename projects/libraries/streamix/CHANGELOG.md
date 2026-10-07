@@ -2,7 +2,7 @@
 
 ## 3.0.4 - 2026-10-07
 
-- **Automatic subscription for scoped atoms, documented end to end.** A scope
+- **Automatic subscription for scoped atoms, documented end to end.😊** A scope
   keeps its atoms awake: a `flow`-backed member produces as soon as the scope
   exists, derived members track it, and `dispose()` stops it (rule #12). The
   runtime already behaved this way — this release pins it with specs and states

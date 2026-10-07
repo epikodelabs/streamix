@@ -168,7 +168,7 @@ We'd love to hear what you build.
 
 ## 📜 License
 
-GNU AGPL v3 or later
+MIT
 
 <p align="center">
   <br>
