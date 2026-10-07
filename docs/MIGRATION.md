@@ -117,7 +117,7 @@ const results = pipe(query, searchPipeline);
 ```ts
 const counter = scope({
   count: 0,
-  doubled: self => self.count * 2,
+  doubled: (self: any) => self.count * 2,
   increment: method((self: any) => {
     self.count += 1;
   }),
@@ -129,7 +129,7 @@ const counter = scope({
 const form = scope({
   email: "",
   password: "",
-  isValid: self => self.email.includes("@") && self.password.length >= 8,
+  isValid: (self: any) => self.email.includes("@") && self.password.length >= 8,
   submit: method((self: any) => {
     if (!self.isValid) return;
     // submit form

@@ -5,7 +5,7 @@ is compiled to direct DOM updates driven by the `model` scope: plain bindings
 and the control flow blocks both update without change detection.
 
 Streamix DOM streams drive the canvas rainbow animation and viewport resizing.
-After the tenth click, seven canvas arcs grow into a full rainbow and the
+After the fifth click, seven canvas arcs grow into a full rainbow and the
 compiled `@if` badge appears. The page keeps its natural composition and
 scales as one unit only when needed to remain fully visible without scroll.
 

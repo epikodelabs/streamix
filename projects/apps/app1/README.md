@@ -7,11 +7,11 @@ Real-time operator demos powered by streamix.
 | Section | Operators |
 |---------|-----------|
 | Live Metrics | `interval` + `scan` + `tap` |
-| Search Stream | `fromEvent` + `map` + `debounce` + `filter` |
-| Event Buffer | `atom` + `bufferCount` + `merge` |
-| Combined Stream | `combineLatest` + `map` |
+| Search Stream | `addListener` + `map` + `debounce` + `filter` |
+| Event Buffer | `atomExpr` + `subscribeTo` (manual batching) |
+| Combined Stream | scope-derived value |
 | Activity Log | `merge` + `tap` + `throttle` |
-| Julia Set (Non-optimized) | `range` + `map` + `bufferCount` + `delay` + `finalize` |
+| Julia Set (Non-optimized) | `range` + `map` + `bufferCount` + `tap` + `finalize` |
 
 ## Run
 

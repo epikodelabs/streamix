@@ -28,7 +28,7 @@
 
 ## 🧭 About This Repository
 
-This is the **streamix solution repository** — the monorepo where the library is built. It holds the core reactive flows package, its optional add-ons, five demo applications, the documentation sources, and the tooling that ties them together.
+This is the **streamix solution repository** — the monorepo where the library is built. It holds the core reactive flows package, its optional add-ons, six demo applications, the documentation sources, and the tooling that ties them together.
 
 A taste of what lives here:
 
@@ -152,7 +152,7 @@ Some former companion modules now live as separate packages, compatible with str
 | `npm run docs:build` | Full docs pipeline (prepare → generate → build) |
 | `npm run docs:prepare` | Copy markdown & assets into `dist/` |
 | `npm run clean` | Auto-fix ESLint issues |
-| `npm run minify` | Minify bundles & regenerate types |
+| `npm run minify` | Minify built bundles (also drops the intermediate `.d.ts` and `lib` trees) |
 
 ---
 

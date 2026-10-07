@@ -5,7 +5,9 @@ imported from components, hooks, services, or event handlers.
 
 The caveat: streamix does not disappear into React's model. It brings its own
 atoms, scopes, cleanup, async pipelines, DOM sources, and networking. React
-already has conventions for many of those jobs.
+already has conventions for many of those jobs. The official adapter —
+`@epikodelabs/streamix/react` — connects the two without pretending they are
+one runtime.
 
 So the honest answer is:
 
@@ -24,7 +26,15 @@ streamix fits best when React owns the UI and streamix owns workflow logic:
 - component-local orchestration with explicit cleanup
 - services that feed React at a controlled boundary
 
-A typical integration is manual but valid:
+The adapter covers the common handoff directly:
+
+```tsx
+import { useWritable } from '@epikodelabs/streamix/react';
+
+const [value, setValue] = useWritable(source);
+```
+
+A manual subscription is still valid, and is what the hooks do underneath:
 
 ```tsx
 useEffect(() => {
@@ -57,32 +67,31 @@ runtime owns each part of the problem.
 | Package use | Good | React apps can import streamix normally. |
 | TypeScript | Good | APIs are typed and work in TS projects. |
 | Tree shaking | Good | ESM package with `sideEffects: false`. |
-| Component usage | Partial | Works through effects, refs, and manual subscriptions. |
-| Hook support | Missing | No official `useAtom`, `useFlow`, or `useScope`. |
-| External-store bridge | Missing | No official `useSyncExternalStore` adapter. |
-| Concurrent rendering | Unclear | No policy for snapshots, tearing, or render-phase reads. |
-| Suspense | Missing | No official Suspense resource adapter. |
+| Component usage | Good | The adapter's hooks cover reads, writes, and ownership. |
+| Hook support | Good | `useWritable`, `useIterable`, `useScope`, `useSuspense`. |
+| External-store bridge | Good | `useIterable` reads through `useSyncExternalStore`. |
+| Concurrent rendering | Covered | Snapshots come from the external-store bridge, not render-phase reads. |
+| Suspense | Good | `useSuspense(atom)` and `suspense(atom)` for resources. |
 | SSR | Unclear | DOM, networking, and workers need explicit boundaries. |
 
-## 🧩 What A React Adapter Would Need
+## 🧩 The React Adapter
 
-A React-specific entry point could make the boundary easier to repeat:
+`@epikodelabs/streamix/react` is the official entry point, and it stays small:
 
-```ts
-@epikodelabs/streamix/react
-```
+- `useWritable(source)` - `[value, setValue]` for a writable atom
+- `useIterable(source)` - observe an atom, derived value, or flow (an initial
+  value is required for plain async iterables)
+- `useScope(() => scope(...))` - own a scope for the component's lifetime
+- `useSuspense(source)` - wait for an atom's first value inside `<Suspense>`
+- `suspense(source)` - adapt an atom into a Suspense resource for loaders
 
-Useful APIs:
+There is deliberately no `useAtom`: a component usually needs either a value it
+can change or a value it can observe, and the hook names make that choice
+explicit. The full surface lives in the
+[React adoption layer README](https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/react/README.md).
 
-- `useScope(options?)` - create and dispose a streamix scope with a component
-- `useAtom(atom)` - read an atom through `useSyncExternalStore`
-- `useFlow(flow, initialValue?)` - expose the latest flow value to React
-- `useSubscription(source, callback, deps?)` - bind a subscription to effect cleanup
-- `useAsyncIterable(source, options?)` - consume async iterables with cancellation
-- `createSuspenseResource(source)` - adapt async work to Suspense
-
-These helpers would not make streamix part of React's core model. They would make
-the boundary safer.
+The hooks do not make streamix part of React's core model. They make the
+boundary safe to repeat.
 
 ## 🛠️ Practical Guidance
 

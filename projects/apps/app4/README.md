@@ -6,8 +6,8 @@ Vanilla-JS scroll-driven animations with streamix DOM operators.
 
 - **`on('animationFrame')`** — smooth interpolation loops
 - **`on('intersection')`** — reveal-on-scroll triggers
-- **`fromEvent`** — focus, blur, mouseenter, mouseleave streams
-- **`merge`** + **`debounce`** + **`filter`** + **`tap`** — coordinated animation state
+- **`addListener`** — focus, blur, mouseenter, mouseleave streams
+- **`merge`** + **`filter`** + **`tap`** — coordinated animation state
 
 ## Run
 

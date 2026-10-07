@@ -4,7 +4,7 @@ Async generators are great. What if we just add operator pipelines to them?
 
 That's Streamix—a library that wraps async generators with composable operators while keeping the pull-based semantics intact.
 
-The examples below use the current atom-based API: [`pipe`](/api/#function-pipe) / [`from`](/api/#function-from) for operator pipelines, and [`flow`](/ATOMS) / [`loop`](/api/#function-loop) / [`listen`](/api/#function-listen) for shared hot sources.
+The examples below use the current atom-based API: [`pipe`](/api/src/public-api/functions/pipe) / [`from`](/api/src/public-api/functions/from) for operator pipelines, and [`flow`](/ATOMS) / [`loop`](/api/src/public-api/functions/loop) / [`addListener`](/api/src/public-api/functions/addListener) for shared hot sources.
 
 ```bash
 npm install @epikodelabs/streamix
@@ -12,11 +12,11 @@ npm install @epikodelabs/streamix
 
 ✅ **What you get:**
 - Familiar operators: `pipe`, `map`, `filter`, `merge`, `debounce`, etc.
-- Same pull-based execution—consumer still controls the pace
+- Same pull-based execution—the source is only pulled while something is subscribed
 - Operators work with sync/async/promises without distinction
 - Two consumption styles: `for await...of` or `subscribe()`
 - Multicast when you need shared execution
-- ~9-11 KB gzipped, zero dependencies
+- ~9-11 KB gzipped, only `tslib` at runtime
 
 ---
 
@@ -98,13 +98,13 @@ for await (const fish of fishingTrip()) {
 }
 ```
 
-streamix keeps this pull behavior even with `subscribe()`. The callback style is implemented using internal buffering over pull-based iteration—the consumer's pace still controls the producer.
+The iteration underneath stays pull-based with `subscribe()` too, but a callback does not pace the producer: values that arrive while a callback is still running queue up in an internal buffer, which is unbounded (see the note on queue growth below).
 
 ---
 
 ## 🔁 / 🔂 Multicast vs Unicast
 
-**Unicast** (`pipe` from an async generator): each consumer gets its own iterator.
+**Unicast** (`pipe` from an async generator): one shared run, and no replay. `pipe(...)` builds its iterator up front, so a second consumer joins the same execution instead of getting a fresh one — and once the source completes, the atom disposes, so a consumer that arrives after the run has finished sees nothing.
 
 ```typescript
 const piped = pipe(
@@ -116,7 +116,7 @@ for await (const toy of piped) { /* chain 1 */ }
 for await (const toy of piped) { /* chain 2 */ }
 ```
 
-**Multicast** ([`flow`](/ATOMS) / [`listen`](/api/#function-listen)): shared execution across subscribers.
+**Multicast** ([`flow`](/ATOMS) / [`addListener`](/api/src/public-api/functions/addListener)): shared execution across subscribers.
 
 ```typescript
 import { flow } from '@epikodelabs/streamix';
@@ -131,7 +131,7 @@ shared.subscribe(toy => console.log("Kid 2:", toy));
 
 ## ⏳ Backpressure
 
-Natural backpressure is preserved—slow consumers pause producers:
+A producer is not paced by its consumers — it runs at the source's pace, and values that arrive while the consumer works buffer up:
 
 ```typescript
 async function* candyMachine(signal: AbortSignal) {
@@ -178,7 +178,7 @@ async function* paintJob(signal: AbortSignal) {
 const paints = flow(paintJob);
 
 for await (const paint of paints) {
-  if (paint === "Blue") break;
+  if (paint === "Blue paint") break;
 }
 // Output: Cleaning brushes!
 ```
@@ -285,9 +285,9 @@ for await (const line of errors) {
 | Scenario | Use |
 |----------|-----|
 | Simple iteration | Plain async generators |
-| Operator pipelines | [`pipe`](/api/#function-pipe) |
-| Hot sources (events, WebSockets) | [`listen`](/api/#function-listen) / [`flow`](/ATOMS) |
-| Resource-intensive work | streamix (automatic backpressure) |
+| Operator pipelines | [`pipe`](/api/src/public-api/functions/pipe) |
+| Hot sources (events, WebSockets) | [`addListener`](/api/src/public-api/functions/addListener) / [`flow`](/ATOMS) |
+| Fast producers outrunning consumers | streamix — values buffer, or drop them with `throttle` / `filter` |
 | Multiple consumers | [`flow`](/ATOMS) with shared async generators |
 | Small bundle size matters | streamix (~9KB) |
 
@@ -297,7 +297,7 @@ for await (const line of errors) {
 
 The core idea: **add operator pipelines to async generators.**
 
-streamix keeps the pull-based semantics you get with native async iteration—consumer controls pace, natural backpressure, lazy evaluation—while adding the composability of reactive operators.
+streamix keeps the pull-based iteration you get from native async generators — lazy start, cancellation by abandoning the iterator, and production that stops when nobody is listening — while adding the composability of reactive operators.
 
 ```typescript
 // Before: nested functions

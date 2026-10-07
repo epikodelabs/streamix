@@ -19,14 +19,14 @@ import { cancelDeferredDispose, deferDispose } from "./internal/deferredDispose"
  * function Counter() {
  *   const state = useScope(() => scope({
  *     count: 0,
- *     doubled: (self) => self.count * 2,
+ *     doubled: (self: any) => self.count * 2,
  *   }));
  *
- *   const count = useIterable(state.refs.count);
- *   const doubled = useIterable(state.refs.doubled);
+ *   const [count, setCount] = useWritable(state.get('count'));
+ *   const doubled = useIterable(state.get('doubled'));
  *
  *   return (
- *     <button onClick={() => { state.count = count + 1; }}>
+ *     <button onClick={() => setCount(count + 1)}>
  *       {count} (doubled: {doubled})
  *     </button>
  *   );

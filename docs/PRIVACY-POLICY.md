@@ -13,7 +13,7 @@ We collect minimal information. Depending on how you interact with us, we may re
 - Public GitHub profile information and contributions when you sign in with GitHub to purchase a commercial license
 - Basic logs from hosting providers
 
-We do not use analytics cookies, and we do not track you across external sites.
+The documentation site uses Google Analytics to measure aggregate traffic (see section 4). We do not track you across external sites.
 
 ## 2. How we use information
 
@@ -31,6 +31,7 @@ We may use information to:
 The website may link to or rely on third-party services including:
 
 - GitHub (authentication, source code hosting, and licensed repository access)
+- Google Analytics (aggregate traffic measurement on the documentation site)
 - npm (package distribution)
 - Payment processors (when applicable)
 - External feedback or contact forms
@@ -39,9 +40,11 @@ Those services operate under their own privacy policies, and we are not responsi
 
 ## 4. Cookies and tracking
 
-This site does not intentionally use analytics, advertising, or cross-site tracking cookies beyond what is required for authentication or normal browser and hosting behavior.
+The documentation site loads Google Analytics (property `G-R225GQFN7D`), which sets first-party cookies and collects standard usage data — pages viewed, referrer, approximate location, and device and browser information — to measure aggregate traffic. Google's own privacy policy governs how that data is handled.
 
-If analytics, cookies, or similar tools are added later, this policy will be updated accordingly.
+Beyond that, this site does not intentionally use advertising or cross-site tracking cookies beyond what is required for authentication or normal browser and hosting behavior.
+
+If analytics or similar tools change, this policy will be updated accordingly.
 
 ## 5. Data retention
 

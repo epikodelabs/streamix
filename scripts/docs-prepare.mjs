@@ -74,6 +74,14 @@ if (fs.existsSync(docsRoot)) {
   }
 }
 
+const packageChangelogPath = path.join(repoRoot, 'projects', 'libraries', 'streamix', 'CHANGELOG.md');
+if (!fs.existsSync(packageChangelogPath)) {
+  throw new Error('projects/libraries/streamix/CHANGELOG.md not found. The changelog page is generated from it.');
+}
+// The changelog is written next to the version it describes and ships in the
+// package; the site shows that file so the page cannot fall behind a release.
+copyFile(packageChangelogPath, path.join(distRoot, 'CHANGELOG.md'));
+
 for (const entry of fs.readdirSync(repoRoot, { withFileTypes: true })) {
   if (!entry.isFile()) {
     continue;

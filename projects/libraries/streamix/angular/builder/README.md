@@ -1,4 +1,4 @@
-# @epikodelabs/streamix/builder
+# @epikodelabs/streamix/angular/builder
 
 Angular architect builder that compiles an application's components through
 the Streamix virtual layer before delegating to the regular Angular
@@ -32,13 +32,13 @@ application build or dev server.
 
 All other options are forwarded to the delegate target. Keys that only this
 builder understands, plus empty placeholder values materialized by CLI
-schema validation, are dropped before forwarding (see `options.mjs`, which
+schema validation, are dropped before forwarding (see `src/options.ts`, which
 also holds the pure helpers covered by `builder-options.spec.ts`).
 
 ## Distribution
 
-The builder ships inside the `@epikodelabs/streamix` package as the `builder/`
-subpackage:
+The builder ships inside the `@epikodelabs/streamix` package as the
+`angular/builder/` subpackage:
 
 It is a secondary entry point of the library, built by ng-packagr alongside
 the runtime and the compiler:
@@ -61,8 +61,7 @@ the runtime and the compiler:
 
 Runtime dependencies are resolved from the consuming workspace, which has them
 through the Angular CLI: `@angular-devkit/architect`, `@angular/compiler` and
-`typescript`. They are declared as optional peers on the main package. Node
-`>=20.11` is required.
+`typescript`. They are declared as optional peers on the main package.
 
 The builder runs the generator in process — no child process, no `ts-node`
 registration: the compiled entry imports `generateProject` directly.

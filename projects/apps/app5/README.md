@@ -7,13 +7,13 @@ Interactive networking demo using real public APIs — no local server required.
 | Card | API | Operators |
 |------|-----|-----------|
 | GET /posts | JSONPlaceholder | `readJson` + `useTimeout` + `useFallback` |
-| POST /posts | JSONPlaceholder | `readJson` + `useHeader` |
-| GET /users | JSONPlaceholder | `readJson` + `useTimeout` |
+| POST /posts | JSONPlaceholder | `readJson` + `useRequest` (custom header) |
+| GET /users | JSONPlaceholder | `readText` + `useTimeout` |
 | GET /pokemon | PokeAPI | `readJson` |
 | GET /random dog | Dog CEO API | `readJson` |
 | 404 Not Found | JSONPlaceholder | `catchError` |
-| Redirects | httpbin.org | `useRedirect` |
-| Timeout | httpbin.org | `useTimeout` + `catchError` |
+| Redirects | httpbin.org | `readStatus` + `redirect: 'follow'` |
+| Timeout | JSONPlaceholder | `useTimeout` + `catchError` |
 
 ## Run
 

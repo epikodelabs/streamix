@@ -17,7 +17,7 @@
     <img src="https://raw.githubusercontent.com/epikodelabs/epikodelabs.github.io/161dea3e83f7bb6c27dcee0e33d615ba91cc5c5b/streamix/bundle-size.svg">
   </a>
   <a href="https://github.com/epikodelabs/streamix/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg?style=flat-square">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License">
   </a>
 </p>
 
@@ -69,26 +69,25 @@ for await (const item of valid) {
 
 > **Pipe signature:** `pipe()` is a standalone function — the source comes first, followed by any number of operators: `pipe(source, op1, op2, ...)`. The source can be an atom, a flow, or any async iterable. This replaces the v2 method-chaining style (`source.pipe(op1, op2)`); the pipeline reads left-to-right and returns a new atom. Up to 16 operators keep full type inference — beyond that, the result falls back to `Atom<any>`. See the [migration guide](MIGRATION.md) for the full v2 → v3 mapping.
 
-Full catalog: `audit`, `buffer`, `bufferCount`, `bufferUntil`, `bufferWhile`, `catchError`, `concatMap`, `debounce`, `defaultIfEmpty`, `delay`, `delayUntil`, `distinctUntilChanged`, `distinctUntilKeyChanged`, `endWith`, `exhaustMap`, `expand`, `filter`, `finalize`, `first`, `fork`, `groupBy`, `ignoreElements`, `last`, `map`, `mergeMap`, `observeOn`, `partition`, `reduce`, `sample`, `scan`, `select`, `shareReplay`, `skip`, `skipUntil`, `skipWhile`, `slidingPair`, `startWith`, `switchMap`, `take`, `takeUntil`, `takeWhile`, `tap`, `throttle`, `throwError`, `toArray`, `withLatestFrom`.
+Full catalog: `audit`, `buffer`, `bufferCount`, `bufferUntil`, `bufferWhile`, `catchError`, `concatMap`, `debounce`, `defaultIfEmpty`, `delay`, `delayUntil`, `delayWhile`, `distinctUntilChanged`, `distinctUntilKeyChanged`, `endWith`, `exhaustMap`, `expand`, `filter`, `finalize`, `first`, `fork`, `groupBy`, `ignoreElements`, `last`, `map`, `mergeMap`, `observeOn`, `partition`, `reduce`, `sample`, `scan`, `select`, `share`, `shareReplay`, `skip`, `skipUntil`, `skipWhile`, `slidingPair`, `startWith`, `switchMap`, `take`, `takeUntil`, `takeWhile`, `tap`, `throttle`, `throwError`, `toArray`, `withLatestFrom`.
 
 ### Flow Factories
 
 | Factory | Description |
 |---------|-------------|
+| `addListener(target, event)` | DOM / Node events |
 | `combineLatest(...sources)` | Latest value from each source, combined |
 | `concat(...sources)` | Sources run sequentially |
 | `defer(factory)` | Fresh flow per subscriber |
-| `EMPTY()` | Completes immediately |
+| `EMPTY` | Completes immediately (`empty()` creates a fresh one) |
 | `forkJoin(...sources)` | Emits once when all complete |
 | `from(source)` | Arrays, iterables, generators, promises |
-| `fromEvent(target, event)` | DOM / Node events |
-| `fromPromise(p)` | Promise as a single-emission flow |
 | `interval(ms)` | Counter every `ms` milliseconds |
 | `merge(...sources)` | Interleaved concurrent emissions |
-| `of(...values)` | Fixed sequence, then complete |
+| `of(value)` | Single value, then complete |
 | `race(...sources)` | First source to emit wins |
 | `range(start, count)` | Sequential integers |
-| `retry(source, n)` | Retry on error, up to `n` times |
+| `retry(factory, maxRetries?, delay?)` | Retry the source factory on error |
 | `timer(delay, period?)` | Delayed, optionally repeating |
 | `zip(...sources)` | Pair emissions by index |
 
@@ -124,14 +123,14 @@ The pipeline completes after the first emitted value.
 ## HTTP client
 
 ```ts
-import { createHttpClient, readJson, useBase, useTimeout } from '@epikodelabs/streamix/networking';
+import { createHttpClient, readJson, useTimeout } from '@epikodelabs/streamix/networking';
 
-const api = createHttpClient().withDefaults(
-  useBase('https://api.example.com'),
-  useTimeout(5000)
-);
+const api = createHttpClient({
+  baseUrl: 'https://api.example.com',
+  middlewares: [useTimeout(5000)],
+});
 
-for await (const data of api.get('/items', readJson)) {
+for await (const data of api.request('/items', readJson)) {
   console.log(data);
 }
 ```
@@ -184,4 +183,4 @@ This gives you on-demand computation, bounded memory, and consumer-driven backpr
 
 ## License
 
-GNU AGPL v3 or later
+MIT

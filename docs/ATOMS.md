@@ -139,7 +139,7 @@ const taskManager = scope({
 
 ### Understanding the Compiled Output:
 
-* **Direct Read/Write (`taskManager.filter`)**: Accessing a property reads the current value; assigning a value pushes it into the backing writable atom. The keyed alternatives are `taskManager.get("filter")` and `taskManager.set("filter", "active")`.
+* **Direct Read/Write (`taskManager.filter`)**: Accessing a property reads the current value; assigning a value pushes it into the backing writable atom. The keyed alternatives are `taskManager.get("filter").value` for the value (`taskManager.get("filter")` on its own hands back the atom) and `taskManager.set("filter", "active")` for the write.
 * **Dependency Tracking (`taskManager.visibleTasks`)**: Whenever the input atoms update, `visibleTasks` automatically recalculates. Read it as `taskManager.visibleTasks`.
 * **Action Execution (`taskManager.addTask("...")`)**: Methods are called as standard imperative functions to safely execute side effects and mutations.
 * **Typing `self`**: TypeScript cannot infer `self` for you here. `method()` gives its callback's `self` no inference site (it always needs an annotation), and computed properties only infer `self` when the scope declares an explicit shape. Quick samples use `self: any`; for real code, prefer a shape interface — `scope<TaskManagerShape>(...)` infers `self` in computed properties, and `method((self: TaskManagerShape, id: number) => ...)` types your methods end to end.
@@ -169,7 +169,7 @@ taskManager.tasks = [...taskManager.tasks, { id: 3, text: "New Task", done: fals
 Never mutate writable state inside a derived property (the computed formulas). Formulas must remain **pure, side-effect-free functions** that only read and compute data.
 
 ```ts
-// ❌ WRONG: Writing to state inside a computed formula causes infinite update loops!
+// ❌ WRONG: Writing to state inside a computed formula throws a TypeError at evaluation time!
 const badScope = scope({
   count: 0,
   doubled: (self: any) => {
@@ -182,16 +182,16 @@ const badScope = scope({
 
 ### Rule C: Use Named Scope Accessors in Templates
 
-`scope.get("name")` reads the current value and `scope.set("name", value)` writes it. The key and value are inferred from the scope definition, making these helpers useful for generated template bindings without exposing a `.refs` namespace.
+`scope.get("name")` returns the member's underlying atom and `scope.set("name", value)` pushes a value into it. The key and value are inferred from the scope definition, making these helpers useful for generated template bindings without exposing a `.refs` namespace.
 
 ```ts
-// Reading the resolved value (Standard)
-console.log(taskManager.get("visibleTasks")); 
-
 // Accessing the underlying reactive Atom (For subscribing / stream operations)
 const subscription = taskManager.subscribeTo("visibleTasks", tasks => {
   console.log("Tasks updated:", tasks);
 });
+
+// Reading the current value through the atom reference
+console.log(taskManager.get("visibleTasks").value);
 
 ```
 

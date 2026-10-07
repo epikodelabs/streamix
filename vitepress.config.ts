@@ -23,7 +23,7 @@ export default defineConfig({
           { text: 'Refund Policy', link: '/REFUND-POLICY' }
         ]
       },
-      { text: 'GitHub', link: 'https://github.com/epikodelabs/streamix-community' }
+      { text: 'GitHub', link: 'https://github.com/epikodelabs/streamix' }
     ],
 
     sidebar: {
@@ -32,11 +32,13 @@ export default defineConfig({
           text: 'API Reference',
           items: [
             { text: 'Overview', link: '/api/' },
-            { text: 'Enumerations', link: '/api/#enumerations' },
-            { text: 'Functions', link: '/api/#functions' },
-            { text: 'Interfaces', link: '/api/#interfaces' },
-            { text: 'Type Aliases', link: '/api/#type-aliases' },
-            { text: 'Variables', link: '/api/#variables' }
+            { text: 'Core', link: '/api/src/public-api/' },
+            { text: 'Angular', link: '/api/angular/src/public-api/' },
+            { text: 'React', link: '/api/react/src/public-api/' },
+            { text: 'Vue', link: '/api/vue/src/public-api/' },
+            { text: 'DOM', link: '/api/dom/src/public-api/' },
+            { text: 'Networking', link: '/api/networking/src/public-api/' },
+            { text: 'Aggregates', link: '/api/aggregates/src/public-api/' }
           ]
         }
       ],
@@ -70,11 +72,11 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/epikodelabs/streamix-community' }
+      { icon: 'github', link: 'https://github.com/epikodelabs/streamix' }
     ],
 
     footer: {
-      message: 'Released under the GNU AGPL v3 or later.',
+      message: 'Released under the MIT License.',
       copyright: 'Copyright © 2026 epikodelabs'
     },
 
