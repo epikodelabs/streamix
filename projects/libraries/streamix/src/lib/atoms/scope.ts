@@ -335,7 +335,7 @@ type ScopeResolvedValue<T> =
   : Writable<WidenValue<T>>;
 
 /**
- * Applies {@link ScopeResolvedValue} across a config object.
+ * Applies the internal `ScopeResolvedValue` mapping across a config object.
  */
 export type ScopeOfConfig<T extends Record<string, any>> = { [K in keyof T]: ScopeResolvedValue<T[K]>; };
 /**

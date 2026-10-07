@@ -36,7 +36,6 @@
     }
   },
   "intentionallyNotExported": [
-    "DefinedValue",
     "FormulaContext",
     "Method",
     "ScopeOf",
@@ -44,7 +43,21 @@
     "WithLatestInput",
     "AtomNode",
     "ForkHandlerResult",
-    "Observer"
+    "Observer",
+    "Simplify",
+    "ScopeAtomOf",
+    "ScopeAtomValue",
+    "ScopeResolvedValue",
+    "ScopeValue",
+    "ReadonlyScopeConfigKeys",
+    "WritableScopeConfigKeys",
+    "NormalizedScope",
+    "ConfiguredScope",
+    "DefinedInput",
+    "ScopeWithSetup",
+    "ScopeSetupCallback",
+    "ByteSource",
+    "TextSource"
   ],
   "sort": [
     "source-order"

@@ -97,7 +97,7 @@ export class TaskPanel {
 
 Without the builder, the same scope works as ordinary Angular state: read the
 values you need into component fields. See the
-[Angular subpackage README](../projects/libraries/streamix/angular/README.md)
+[Angular subpackage README](https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/angular/README.md)
 for the compiled surface (control flow, expressions, events, two-way bindings)
 and the build integration.
 
