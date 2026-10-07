@@ -36,7 +36,6 @@
     "@angular/core": "^22.1.0",
     "@angular/platform-browser": "^22.1.0",
     "@angular/platform-browser-dynamic": "^22.1.0",
-    "@epikodelabs/streamix": "^3.0.3",
     "fflate": "^0.8.3",
     "tslib": "^2.8.1",
     "zone.js": "^0.16.2"
