@@ -3,13 +3,15 @@
 ## Unreleased
 
 - **SSR and hydration are covered by a harness.** `npm run test:node` renders a
-  fixture through `renderApplication` and asserts the server contract: lowered
-  blocks keep their marker element (empty), every direct binding renders
+  fixture through `renderApplication` (with `provideServerRendering()`, which
+  is what serializes the `ng-state` script) and asserts the server contract:
+  lowered blocks keep their marker element empty, every direct binding renders
   through its Angular fallback, and no event listener is attached. A browser
-  spec boots the client over that exact markup and asserts the takeover:
-  markers become anchors, block content renders, listeners fire exactly once,
-  and atom updates flow with no change detection. The server HTML is committed
-  as a fixture, regenerated with `STREAMIX_UPDATE_FIXTURES=1`.
+  spec then boots the client over that exact document and asserts both halves:
+  Angular's DOM reuse keeps the server's nodes, and the compiled view takes the
+  markers over — content rendered, listeners firing exactly once, atom updates
+  flowing with no change detection. The server HTML is committed as a fixture,
+  regenerated with `STREAMIX_UPDATE_FIXTURES=1`.
 - **View mounting is idempotent, and markers only come back for a rebind.** A
   platform that does not set `ngServerMode` (a plain server TestBed, for
   example) could run both the server hook and the first client render, which

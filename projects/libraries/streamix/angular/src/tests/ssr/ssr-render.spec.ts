@@ -1,6 +1,9 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { bootstrapApplication, provideClientHydration } from '@angular/platform-browser';
-import { renderApplication } from '@angular/platform-server';
+import {
+  provideServerRendering,
+  renderApplication,
+} from '@angular/platform-server';
 
 import { SsrFixtureComponent } from './ssr-fixture';
 
@@ -17,7 +20,12 @@ async function renderFixture(): Promise<string> {
     context =>
       bootstrapApplication(
         SsrFixtureComponent,
-        { providers: [provideClientHydration()] },
+        {
+          // A real SSR app registers both: hydration on the client *and*
+          // server rendering, which is what serializes the `ng-state` script
+          // the client needs to enable DOM reuse.
+          providers: [provideClientHydration(), provideServerRendering()],
+        },
         context,
       ),
     {
