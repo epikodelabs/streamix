@@ -9,15 +9,18 @@ The browser runner currently executes:
 - `sx/coalesced-100-writes`
 - `sx/keyed-reorder-N`
 
-Serve this directory through Vite from a workspace where
-`@epikodelabs/streamix` resolves normally:
+Serve this directory through Vite from the repository root:
 
 ```bash
-npx vite ./angular/benchmarks
+npm run bench:angular
 ```
 
 Open the printed URL. `browser-runner.ts` prints a console table and writes the
 complete JSON result to the page and to `window.__SX_BENCHMARK_RESULTS__`.
+
+Run it from the repository root: Vite accepts a `--root` path without checking
+that it exists, so a wrong path boots a server whose every request is a 404
+("page is not available") and exits nowhere. The script pins the path for you.
 
 Tune workloads with URL parameters:
 

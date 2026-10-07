@@ -1,4 +1,4 @@
-# `@epikodelabs/streamix/vue`
+# Vue Adoption Layer
 
 Vue bindings for [Streamix](https://github.com/epikodelabs/streamix).
 Vue owns rendering; Streamix owns reactive state, async iteration, and model

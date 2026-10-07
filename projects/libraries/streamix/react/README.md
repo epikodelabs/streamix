@@ -1,4 +1,4 @@
-# `@epikodelabs/streamix/react`
+# React Adoption Layer
 
 React bindings for [streamix](https://github.com/epikodelabs/streamix).
 React owns rendering; streamix owns reactive state, async iteration, and
