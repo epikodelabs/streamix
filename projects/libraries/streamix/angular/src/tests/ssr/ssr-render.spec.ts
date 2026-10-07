@@ -52,7 +52,13 @@ describe('compiled view under server rendering', () => {
       return;
     }
 
-    expect(readFileSync(FIXTURE_PATH, 'utf8')).toBe(contents);
+    // Line endings are normalized: a Windows checkout reports CRLF where the
+    // generator writes LF, which says nothing about the rendered markup.
+    const normalize = (text: string) => text.replace(/\r\n/g, '\n');
+
+    expect(normalize(readFileSync(FIXTURE_PATH, 'utf8'))).toBe(
+      normalize(contents),
+    );
   });
 
   it('keeps empty markers and renders the rest of the template', async () => {
