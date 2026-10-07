@@ -57,22 +57,30 @@ Start with the **[library README](./projects/libraries/streamix/README.md)** for
 streamix/
 ├── projects/
 │   ├── libraries/
-│   │   └── streamix/           # Core npm package (@epikodelabs/streamix)
-│   │       ├── src/            # Flows, atoms, scopes, operators
-│   │       ├── aggregates/     # Aggregate operators (average, min/max, etc.)
-│   │       ├── dom/            # DOM observation utilities
-│   │       └── networking/     # HTTP client, WebSocket, JSONP
+│   │   └── streamix/               # The published package (@epikodelabs/streamix)
+│   │       ├── src/                # Atoms, scopes, flows, operators
+│   │       ├── aggregates/         # Aggregate operators (average, min/max, …)
+│   │       ├── dom/                # DOM observation utilities
+│   │       ├── networking/         # HTTP client, WebSocket, JSONP
+│   │       ├── angular/            # Angular runtime, compiler, and builder
+│   │       │   ├── src/            #   runtime bindings and structural blocks
+│   │       │   ├── compiler/       #   template compiler and component installer
+│   │       │   ├── builder/        #   Architect builder that runs the compiler
+│   │       │   └── benchmarks/     #   browser runner for the compiled path
+│   │       ├── react/              # React bindings
+│   │       └── vue/                # Vue bindings
 │   └── apps/
-│       ├── app1/              # Stream monitor — live operator demos
-│       ├── app2/              # Reactive wizard — scopes + custom renderer
-│       ├── app3/              # Brownian motion — animationFrame + Angular
-│       ├── app4/              # Travel blog — scroll-driven DOM animations
-│       └── app5/              # HTTP client — networking demos
-├── docs/                       # VitePress documentation source
-├── scripts/                    # Build, SEO, and docs automation
-├── dist/                       # Build output & VitePress site
-├── README.md                   # ← You are here
-└── package.json                # Workspace scripts & dependencies
+│       ├── app1/                   # Stream monitor — live operator demos
+│       ├── app2/                   # Reactive wizard — scopes + custom renderer
+│       ├── app3/                   # Brownian motion — animationFrame + Angular
+│       ├── app4/                   # Travel blog — scroll-driven DOM animations
+│       ├── app5/                   # HTTP client — networking demos
+│       └── app6/                   # Rainbow clicker — compiled Angular templates
+├── docs/                           # VitePress documentation source
+├── scripts/                        # Build, docs, and packaging automation
+├── dist/                           # Build output (library, apps, API docs)
+├── README.md                       # ← You are here
+└── package.json                    # Workspace scripts & dependencies
 ```
 
 ---

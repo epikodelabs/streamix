@@ -45,6 +45,35 @@ That makes it a good fit for dashboards, interactive applications, and concurren
 
 ---
 
+## 📏 The Rules
+
+Fourteen unofficial guidelines shape everything below — the full write-up lives in
+[Chronicles #19 · New Library, New Rules](https://github.com/epikodelabs/streamix/discussions/36).
+
+1. If it has a value, make it an atom.
+2. If it can be calculated, don't store it — use `derived`.
+3. If it takes time, let it flow.
+4. Don't chase values — `for await` the next one.
+5. When nobody is listening, go home.
+6. If it belongs together, scope it together.
+7. Don't recompute everything on every rapid change.
+8. Cancellation should be trivial — abandoning the iterator stops production.
+9. Abstractions should disappear with familiarity.
+10. Less machinery. Fewer surprises. Nothing to prove.
+11. A subscriber receives the current value right away — the atom already knows something.
+12. A scope keeps its atoms awake — you still close the door.
+13. A pipe produces an atom too.
+14. Atoms multicast: one sequence, many listeners.
+
+**Start with a scope, not a bare atom.** A lone atom is the exception — one
+detached value with no owner. The moment a few pieces belong together, a scope
+is the better home: it groups them behind plain properties, keeps their atoms
+awake, derives what can be derived, owns the cleanup, and disposes in one call.
+If you find yourself holding several loose atoms and wiring their lifecycles by
+hand, that is a scope.
+
+---
+
 ## 📦 Installation
 
 ```bash
@@ -71,6 +100,11 @@ An atom is a reactive value. Read it synchronously, write to it, subscribe to it
 `derived()` is synchronous by design. If a computation needs `await`, cancellation, or restart behavior, that's a job for `flow()`.
 
 **Every atom emits its current value on subscription when it has one. Flows included.**
+
+An atom is the right tool for a value — but a *bare* atom is a value with no
+owner: you wire its lifecycle, its cleanup, and its relationships yourself.
+Prefer a [scope](#-scopes-state-with-a-lifecycle) and reach for a lone atom only
+when one value genuinely stands alone.
 
 ### 🧭 Scopes: state with a lifecycle
 
@@ -107,10 +141,16 @@ app.dispose();
 `app.get('count')` returns the backing atom and `app.set('count', value)`
 writes through it; `subscribeTo(key, callback)` observes a member.
 
-A scope keeps the atoms it owns **live**: it subscribes to them on creation and
-releases them on `dispose()`. A `flow`-backed member therefore starts producing
-as soon as the scope exists — you read `app.events` and it is current, without
-wiring a subscription — and nested scopes inherit the same guarantee.
+A scope keeps the atoms it owns **awake**: it watches them from the moment they
+are created, so a `flow`-backed member starts producing as soon as the scope
+exists — you read `app.events` and it is current, without wiring a subscription
+— and `dispose()` stops it. Nested scopes inherit the same guarantee, and atoms
+handed to the scope from outside are watched through the same path.
+
+**This is why scopes are the default.** They are the unit that owns state: the
+atoms stay awake, derived members track them, the cleanup runs once, and the
+whole thing reads as one object. A collection of bare atoms has to be given all
+of that by hand.
 
 ### 🔄 Flows: sequences through familiar operators
 

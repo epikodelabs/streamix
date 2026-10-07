@@ -77,6 +77,53 @@ The TypeScript-aware resolver maps those value paths to their atom accessors
 (`model.count` -> `model.get('count')`). The generated browser bindings
 subscribe to the atom; the Angular SSR fallback reads `.value` from it.
 
+### Scoped atoms, natively — via the builder
+
+Nothing about the scope is special-cased in the template: the support comes
+from the build. Point an application's `angular.json` at the Streamix builder
+and the scope becomes part of the component's compiled view:
+
+```json
+{
+  "build": {
+    "builder": "@epikodelabs/streamix/angular/builder:application",
+    "options": {
+      "delegateTarget": "app6:application",
+      "sourceRoot": "projects/apps/app6/src"
+    }
+  }
+}
+```
+
+With that target in place the builder:
+
+- compiles every component under `sourceRoot` that uses an inline template;
+- reads each `scope({...})` field and its members from the component's
+  TypeScript program, so `model.count` resolves to `model.get('count')` and a
+  two-way binding writes through `model.set('count', …)`;
+- discovers standalone atom fields the same way;
+- writes the transformed components into `.angular/streamix/<app>/src/…` (a
+  virtual tree) and hands the build to `delegateTarget`.
+
+What that buys a scope in a template:
+
+```ts
+readonly model = scope({ count: 0, name: '', /* derived members, flows */ });
+```
+
+```html
+<span>{{ model.count }}</span>          <!-- property binding  -->
+@if (model.count > 3) { … }             <!-- compiled condition -->
+<input [(value)]="model.name">          <!-- two-way write-back -->
+@for (row of model.rows; track row.id) { … }   <!-- keyed collection -->
+```
+
+Plain members, derived members, and flow-backed members all read the same way;
+only *writable* members are accepted in `[(...)]`, and a member the compiler
+cannot prove is a build error naming the read rather than a silent fallback.
+Because a scope keeps its own atoms awake, a flow-backed member is already
+current when the template renders it.
+
 ### Control flow
 
 Use Angular's native control flow—there is no Streamix structural directive:

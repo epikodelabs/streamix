@@ -1,94 +1,24 @@
 # Changelog
 
-## Unreleased
+## 3.0.4 - 2026-10-07
 
-- **Scopes keep the atoms they own live.** Creating a scope subscribes to the
-  atoms it owns, so a `flow`-backed member starts producing immediately
-  instead of waiting for the application to wire a subscription — `app.events`
-  reads the current value and derived members track it. `dispose()` releases
-  those subscriptions with the rest of the scope's cleanups. Read-only and
-  writable atoms are unaffected beyond the empty observer that keeps them hot.
-- **SSR and hydration are covered by a harness.** `npm run test:node` renders a
-  fixture through `renderApplication` (with `provideServerRendering()`, which
-  is what serializes the `ng-state` script) and asserts the server contract:
-  lowered blocks keep their marker element empty, every direct binding renders
-  through its Angular fallback, and no event listener is attached. A browser
-  spec then boots the client over that exact document and asserts both halves:
-  Angular's DOM reuse keeps the server's nodes, and the compiled view takes the
-  markers over — content rendered, listeners firing exactly once, atom updates
-  flowing with no change detection. The server HTML is committed as a fixture,
-  regenerated with `STREAMIX_UPDATE_FIXTURES=1`.
-- **View mounting is idempotent, and markers only come back for a rebind.** A
-  platform that does not set `ngServerMode` (a plain server TestBed, for
-  example) could run both the server hook and the first client render, which
-  rendered every compiled block twice. Final teardown no longer restores block
-  markers either: only a rebind needs them, and mutating a dying view's DOM
-  upset Angular's own destroy pass.
-- **The component install is a TypeScript transform.** Installing the compiled
-  view no longer scans component text: the file is parsed and edited through
-  the AST, so generics, `abstract`, and `export default` classes install
-  correctly, an authored `ngAfterViewInit` is merged rather than duplicated,
-  and idempotence is decided by what the class declares — a comment that
-  merely mentions `ɵinstallSxCompiledView(` can no longer disable
-  installation. `typescript` is now declared as an optional peer of the
-  package; the builder already required it.
-- **Zone.js applications get told when scheduling is wrong.** When a global
-  `Zone` exists and `provideSxZoneScheduling()` was never installed, the
-  renderer scheduler warns once that every Streamix update is dragging an
-  Angular change-detection pass along. Nothing is patched implicitly.
-- **Sanitizer boundaries are pinned by tests.** URL/resource/HTML sinks
-  (`[href]`, `[src]`, `[innerHTML]`, `[srcdoc]`, `[attr.href]`, URL-bearing
-  styles) are covered by specs asserting the compiler refuses the reactive
-  read and leaves the explicit `.value` form to Angular's sanitizer, while the
-  allow-listed attribute/property/style bindings still lower.
-- **Two-way bindings compile for writable atoms.**
-  `[(value)]="count"` (and `checked`, `selectedIndex`, `valueAsNumber`) on a
-  native element lowers to a property binding plus a listener that stores the
-  DOM value back through the atom, so the round trip needs no change
-  detection. Scope members go through `scope.set`. Security-sensitive
-  properties (`[(innerHTML)]`, `attr.*`, `style.*`), derived members, and
-  component elements are refused with an actionable error, and a two-way
-  binding over plain Angular state is left untouched.
-- **Event bindings compile.** Native `(event)="handler(...)"` bindings are
-  installed by the compiler and removed from Angular's template, so one click
-  runs one handler. Modifiers are reproduced: `.stop`, `.prevent`, `.self`,
-  `.once`, `.capture` and key filters such as `(keyup.enter)`. Inside a
-  compiled body a handler may read the loop context, so
-  `@for (row of rows) { <button (click)="select(row.id)"> }` selects the row
-  that was clicked. Component outputs, animations, `window:`/`document:`
-  targets, unknown events or modifiers, and non-call handlers stay
-  Angular-owned untouched.
-- **Control flow nests.** `@if`/`@switch`/`@for` (with `@empty`) inside a
-  compiled body now compile instead of forcing the whole outer block back onto
-  Angular, so `@for (row of rows) { @if (row.done) { … } }` renders as direct
-  DOM. A nested condition or collection may read the enclosing loop context
-  (`row.done`) or reactive sources; the enclosing update re-evaluates it
-  synchronously. `@let` inside a compiled body is inlined into the expressions
-  that read it, including reactive reads.
-- **Compound expressions now compile.** `@if (count > 3)`, `@else if`, `@switch`
-  over expressions, `@for (row of items.concat(more))`, body interpolations like
-  `{{ total * 2 }}`, and native bindings such as `[class.active]="count > 3"`
-  are all lowered to direct DOM when every read is a reactive source — including
-  scope accessor reads (`model.get('total').value`). The block runtime accepts a
-  `{ sources, read }` expression that re-evaluates once per renderer flush, so
-  multi-source conditions and collections update with no change detection.
-- **Angular templates now fail the build instead of going stale.** A template
-  expression that reads a reactive source but mixes it with component state or
-  Angular-only expression features (pipes, assignments, template literals) used
-  to be left to Angular, which rendered it once and never updated it. Such
-  expressions are now rejected with a message naming the read and the fix.
-  Composite `@defer` triggers and bodies and root `@let` declarations are
-  scanned for the same reason, and scope-backed reads such as
-  `{{ model.count * 2 }}` are now recognized as reactive instead of silently
-  falling through.
-- **Removed** unreachable Angular compiler exports: the legacy structural-plan
-  emitter (`emitStructuralBlock`, `emitStructuralModule`, `SxStructuralPlan`,
-  `parseSxExpression`, `createSxStructuralPlanEntry`), `emitRuntimeImportHeader`,
-  and `isComponentPathExpression`. The `*sx` microsyntax they served is a
-  compile error and has been replaced by standard Angular control flow.
-- **Removed** the inert `ɵinstallSxAngularZone` no-op and the unused
-  `static-block.ts` runtime module. Zone scheduling stays provider-driven
-  through `provideSxZoneScheduling()`.
+- **Automatic subscription for scoped atoms, documented end to end.** A scope
+  keeps its atoms awake: a `flow`-backed member produces as soon as the scope
+  exists, derived members track it, and `dispose()` stops it (rule #12). The
+  runtime already behaved this way — this release pins it with specs and states
+  it in the docs, next to the fourteen rules from
+  [Chronicles #19](https://github.com/epikodelabs/streamix/discussions/36).
+- **Angular adoption layer:** templates compile compound expressions, nested
+  `@if`/`@for`/`@switch` bodies, and `@let`; native events (with
+  `.stop`/`.prevent`/`.once`/key modifiers) and two-way bindings for writable
+  atoms lower to direct DOM; the component install is a TypeScript AST
+  transform; in-zone scheduling warns once; SSR and hydration are covered by a
+  Node suite and a browser spec that hydrates the committed server document.
+- **Breaking:** the compiler rejects a reactive read it cannot own instead of
+  leaving it to Angular to go stale, and the unreachable `*sx`-era exports
+  (`emitStructuralBlock`, `emitStructuralModule`, `SxStructuralPlan`,
+  `parseSxExpression`, `createSxStructuralPlanEntry`, `emitRuntimeImportHeader`,
+  `isComponentPathExpression`, `ɵinstallSxAngularZone`) are removed.
 
 ## 3.0.3 - 2026-09-28
 
