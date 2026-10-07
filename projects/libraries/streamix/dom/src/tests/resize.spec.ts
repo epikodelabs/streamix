@@ -253,7 +253,7 @@ idescribe('onResize', () => {
     let didThrow = false;
     try {
       unsubscribe();
-    } catch (e) {
+    } catch {
       didThrow = true;
     }
     

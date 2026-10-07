@@ -438,7 +438,7 @@ idescribe('onNetwork', () => {
     try {
       unsubscribe();
       expect(true).toBe(true); // Passed
-    } catch (e) {
+    } catch {
       // Cleanup errors should be caught
       expect(true).toBe(true);
     }

@@ -1,4 +1,4 @@
-import { createPushOperator, MaybePromise, normalizeError, type Operator } from "../atoms";
+import { createPushOperator, MaybePromise, normalizeError } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from '../factories';
 import { createAsyncCoordinator, type RunnerEvent } from '../utils';

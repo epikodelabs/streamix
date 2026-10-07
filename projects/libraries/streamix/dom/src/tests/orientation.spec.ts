@@ -296,7 +296,7 @@ idescribe('onOrientation', () => {
     let didThrow = false;
     try {
       unsubscribe();
-    } catch (e) {
+    } catch {
       didThrow = true;
     }
     

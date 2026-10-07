@@ -233,9 +233,7 @@ describe('retry', () => {
   });
 
   it('should stop retrying when unsubscribed during delay', async () => {
-    let attempt = 0;
     const factory = jasmine.createSpy('factory').and.callFake(() => {
-      attempt++;
       return flow<number>( async function* () {
         throw new Error("nope");
       });
@@ -303,11 +301,9 @@ describe('retry', () => {
   });
 
   it('should handle abort during delay and cleanup iterator', async () => {
-    let attempt = 0;
     let returnCalled = false;
 
     const factory = jasmine.createSpy('factory').and.callFake(() => {
-      attempt++;
       return flow<number>( async function* () {
         try {
           yield 1;

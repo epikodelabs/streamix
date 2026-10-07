@@ -39,6 +39,8 @@ export default defineConfig([
       '@typescript-eslint/adjacent-overload-signatures': 'warn',
       '@typescript-eslint/no-unused-vars': ['warn', {
         argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
       }],
 
       // Unused imports rules
