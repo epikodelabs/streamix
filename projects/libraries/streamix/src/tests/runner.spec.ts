@@ -25,9 +25,7 @@ describe("runner", () => {
             res = await runner.next();
         }
 
-        // Debug: show actual results
         // The actual chronological order of events:
-        // eslint-disable-next-line no-console
         expect(results).toEqual([
             { type: 'value', value: 'A', sourceIndex: 0 },    // 20ms
             { type: 'value', value: 'B', sourceIndex: 1 },    // 40ms
