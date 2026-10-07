@@ -25,7 +25,8 @@
     "docs:build": "npm run docs:prepare && npm run docs:generate && npm run docs:fix-api-links && npm run docs:seo && vitepress build dist && npm run docs:rewrite",
     "docs:rewrite": "node scripts/rewrite-vitepress-base.mjs",
     "postbuild": "node scripts/finalize-dist.mjs",
-    "test:node": "testify --config testify.node.json --headless --browser node"
+    "test:node": "testify --config testify.node.json --headless --browser node",
+    "bench:angular": "vite projects/libraries/streamix/angular/benchmarks"
   },
   "dependencies": {
     "@angular/animations": "^22.1.0",
@@ -70,6 +71,7 @@
     "typedoc": "^0.28.20",
     "typedoc-plugin-markdown": "^4.12.0",
     "typescript": "^6.0.3",
+    "vite": "^8.3.0",
     "vitepress": "^1.6.4",
     "vue": "^3.5.43"
   },
