@@ -26,7 +26,8 @@
     "docs:rewrite": "node scripts/rewrite-vitepress-base.mjs",
     "postbuild": "node scripts/finalize-dist.mjs",
     "test:node": "testify --config testify.node.json --headless --browser node",
-    "bench:angular": "vite projects/libraries/streamix/angular/benchmarks"
+    "bench:angular": "node scripts/run-angular-benchmarks.mjs",
+    "bench:angular:serve": "vite projects/libraries/streamix/angular/benchmarks"
   },
   "dependencies": {
     "@angular/animations": "^22.1.0",
