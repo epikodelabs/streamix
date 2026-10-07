@@ -20,6 +20,7 @@ import type { SxReactiveSourceResolver } from './source-resolution';
 import {
   analyzeSxExpression,
   rewriteLocalReads,
+  stripAnyCasts,
 } from './text-expression';
 
 export type SxCompiledBlockBinding =
@@ -609,7 +610,9 @@ function trackByText(
   template: string,
   item: string,
 ): string {
-  const text = expressionSourceOf(trackBy, template);
+  // The track expression is spliced into a generated JavaScript lambda, so a
+  // `$any(...)` cast has to go the way of every other compiled expression.
+  const text = stripAnyCasts(expressionSourceOf(trackBy, template));
 
   return text === '$index' ? '_index' : text || item;
 }

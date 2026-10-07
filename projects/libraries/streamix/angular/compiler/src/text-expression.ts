@@ -87,11 +87,118 @@ const ALLOWED_BARE_IDENTIFIERS = new Set([
  * Returns `undefined` when the expression reads no Streamix value at all; such
  * expressions are ordinary Angular bindings.
  */
+/**
+ * Removes Angular's `$any(...)` cast, keeping whatever it wraps.
+ *
+ * Angular erases the cast in its own output, but the compiled view emits
+ * plain JavaScript, where no `$any` exists. Treating it as transparent keeps
+ * it available as the per-expression way to silence the editor's template
+ * type checker — which refuses a bare atom in operator positions
+ * (`{{ count * 2 }}`, `@if (count > 3)`) and as a `@for` iterable — while the
+ * build still compiles, and stays reactive about, the expression inside.
+ *
+ * A cast whose parentheses never close, and a cast that is member-accessed
+ * (`$any(count).value`), are left alone: the expression then fails analysis
+ * exactly as before, instead of being silently truncated into something
+ * weaker.
+ */
+export function stripAnyCasts(expression: string): string {
+  if (!expression.includes('$any')) {
+    return expression;
+  }
+
+  let stripped = '';
+  let index = 0;
+
+  while (index < expression.length) {
+    const char = expression[index];
+
+    if (char === '"' || char === "'" || char === '`') {
+      const end = endOfString(expression, index);
+      stripped += expression.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (
+      char === '$' &&
+      expression.startsWith('$any', index) &&
+      !isPathContinuation(expression[index - 1]) &&
+      !isPathContinuation(expression[index + 4])
+    ) {
+      let open = index + 4;
+
+      while (open < expression.length && /\s/.test(expression[open])) {
+        open += 1;
+      }
+
+      if (expression[open] === '(') {
+        const close = matchingParen(expression, open);
+
+        if (close !== -1 && expression[close + 1] !== '.') {
+          stripped += stripAnyCasts(expression.slice(open + 1, close).trim());
+          index = close + 1;
+          continue;
+        }
+      }
+    }
+
+    stripped += char;
+    index += 1;
+  }
+
+  return stripped;
+}
+
+function endOfString(expression: string, start: number): number {
+  const quote = expression[start];
+  let escaped = false;
+
+  for (let index = start + 1; index < expression.length; index += 1) {
+    const char = expression[index];
+
+    if (escaped) {
+      escaped = false;
+    } else if (char === '\\') {
+      escaped = true;
+    } else if (char === quote) {
+      return index + 1;
+    }
+  }
+
+  return expression.length;
+}
+
+function matchingParen(expression: string, open: number): number {
+  let depth = 0;
+
+  for (let index = open; index < expression.length; index += 1) {
+    const char = expression[index];
+
+    if (char === '"' || char === "'" || char === '`') {
+      index = endOfString(expression, index) - 1;
+      continue;
+    }
+
+    if (char === '(') {
+      depth += 1;
+    } else if (char === ')') {
+      depth -= 1;
+
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
 export function analyzeSxExpression(
   expressionSource: string,
   resolveReactiveSource?: SxReactiveSourceResolver,
 ): SxTextExpressionAnalysis | undefined {
-  const authoredExpression = expressionSource.trim();
+  const authoredExpression = stripAnyCasts(expressionSource.trim());
 
   if (!authoredExpression) {
     return undefined;

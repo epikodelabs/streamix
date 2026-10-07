@@ -21,6 +21,7 @@ import {
   analyzeSxTextInterpolation,
   extractComponentSourcePath,
   extractDirectValueSource,
+  stripAnyCasts,
 } from './text-expression';
 import {
   adaptDependencySourceResolver,
@@ -396,9 +397,12 @@ function visitElement(
     // Native Angular bindings can be authored either as `<source>.value` or,
     // when the TypeScript-aware build adapter proves the path is a
     // DependencySource, transparently as `<source>`.
-    const explicitSource = extractDirectValueSource(expression);
+    // `$any(read)` is the editor-silencing spelling of a direct read, so the
+    // source extraction has to look through the cast.
+    const unwrappedExpression = stripAnyCasts(expression);
+    const explicitSource = extractDirectValueSource(unwrappedExpression);
     const transparentPath = !explicitSource
-      ? extractComponentSourcePath(expression)
+      ? extractComponentSourcePath(unwrappedExpression)
       : undefined;
     const transparentSource = transparentPath &&
       state.resolveReactiveSource?.(transparentPath);
