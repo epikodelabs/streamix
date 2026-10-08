@@ -575,6 +575,88 @@ describe('Atom System', () => {
   });
 
   describe('flow()', () => {
+    it('should derive through two independently asynchronous flows and nested derived atoms', async () => {
+      let emitLeft!: (value: number) => void;
+      let emitRight!: (value: number) => void;
+
+      const left = flow<number>(async function* () {
+        while (true) {
+          yield await new Promise<number>(resolve => { emitLeft = resolve; });
+        }
+      });
+      const right = flow<number>(async function* () {
+        while (true) {
+          yield await new Promise<number>(resolve => { emitRight = resolve; });
+        }
+      });
+      const total = derived(($: DerivedScope) => {
+        const leftValue = $(left);
+        const rightValue = $(right);
+        return leftValue === undefined || rightValue === undefined
+          ? undefined
+          : leftValue + rightValue;
+      });
+      const labelledTotal = derived(($: DerivedScope) => {
+        const value = $(total);
+        return value === undefined ? 'pending' : `total:${value}`;
+      });
+      const values: string[] = [];
+      // Standalone flows are lazy. Keep each source active while this test
+      // controls their independent emissions.
+      const stopLeft = left.subscribe(() => {});
+      const stopRight = right.subscribe(() => {});
+      const unsubscribe = labelledTotal.subscribe(value => values.push(value));
+
+      // The two flows start independently. A downstream derived atom must wait
+      // for both values without losing the first flow's emission.
+      await delay();
+      emitLeft(2);
+      await delay();
+      expect(values).toEqual(['pending']);
+
+      emitRight(3);
+      await delay();
+      expect(values).toEqual(['pending', 'total:5']);
+
+      emitLeft(7);
+      await delay();
+      expect(values).toEqual(['pending', 'total:5', 'total:10']);
+
+      unsubscribe();
+      stopLeft();
+      stopRight();
+      labelledTotal.dispose();
+      total.dispose();
+      left.dispose();
+      right.dispose();
+    });
+
+    it('should allow a flow-backed atom to depend on a derived atom', async () => {
+      const source = atom(2);
+      const doubled = derived(($: DerivedScope) => $(source) * 2);
+      const asynchronous = flow(async function* () {
+        yield doubled.value + 1;
+      });
+      const result = derived(($: DerivedScope) => {
+        const value = $(asynchronous);
+        return value === undefined ? undefined : value * 10;
+      });
+      const values: Array<number | undefined> = [];
+      const stopFlow = asynchronous.subscribe(() => {});
+      const unsubscribe = result.subscribe(value => values.push(value));
+
+      await delay();
+      expect(values).toContain(50);
+      expect(result.value).toBe(50);
+
+      unsubscribe();
+      stopFlow();
+      result.dispose();
+      asynchronous.dispose();
+      doubled.dispose();
+      source.dispose();
+    });
+
     it('should seed flow atoms from another atom safeValue', async () => {
       const source = atom(7);
       const streamed = flow(source);

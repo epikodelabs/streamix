@@ -433,6 +433,46 @@ describe('Scope System', () => {
   });
 
   describe('loading state', () => {
+    it('should stay loading while async flow inputs of nested derived members initialize', async () => {
+      let emitLeft!: (value: number) => void;
+      let emitRight!: (value: number) => void;
+
+      const s = scope({
+        left: flowExpr(() => flow<number>(async function* () {
+          while (true) {
+            yield await new Promise<number>(resolve => { emitLeft = resolve; });
+          }
+        })),
+        right: flowExpr(() => flow<number>(async function* () {
+          while (true) {
+            yield await new Promise<number>(resolve => { emitRight = resolve; });
+          }
+        })),
+        total: (self: any) =>
+          self.left === undefined || self.right === undefined
+            ? undefined
+            : self.left + self.right,
+        label: (self: any) => self.total === undefined ? 'pending' : `total:${self.total}`,
+      });
+
+      await delay();
+      expect(s.loading).toBe(true);
+      expect(s.label).toBe('pending');
+
+      emitLeft(2);
+      await delay();
+      expect(s.loading).toBe(true);
+      expect(s.label).toBe('pending');
+
+      emitRight(3);
+      await delay();
+      expect(s.loading).toBe(false);
+      expect(s.total).toBe(5);
+      expect(s.label).toBe('total:5');
+
+      s.dispose();
+    });
+
     it('should be true until all atoms emit', async () => {
       interface Shape {
         a: number;
