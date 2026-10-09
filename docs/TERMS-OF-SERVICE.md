@@ -13,10 +13,10 @@ These Terms apply to:
 - The `streamix` documentation website
 - Public documentation, examples, and related content
 - Links to the public GitHub repository and npm package pages
-- Commercial license purchases and access to the private licensed repository
 - Any other paid services we may offer
 
-The open-source software itself is also subject to the applicable license terms distributed with the package, including the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`) where provided. If you purchase a commercial license, the commercial license terms control your use of the licensed software and override the AGPL for your proprietary code.
+The open-source software is distributed under the [MIT License](../LICENSE).
+That license governs use of Streamix, including commercial and proprietary use.
 
 ## 2. Permitted use
 
@@ -27,7 +27,6 @@ You may use the website and documentation for lawful purposes only. You agree no
 - Attempt to gain unauthorized access to systems or data
 - Copy, frame, or republish site content in a misleading or deceptive way
 - Use the website to distribute malware, spam, or abusive content
-- Misrepresent your license status or redistribute the commercial licensed code in violation of the commercial license terms
 
 ## 3. Open-source materials
 
@@ -35,11 +34,11 @@ You may use the website and documentation for lawful purposes only. You agree no
 
 If there is a conflict between these Terms and the applicable open-source license for the software itself, the license terms control for the software.
 
-## 4. Commercial licenses and paid services
+## 4. Paid services
 
-Commercial licenses for `streamix` are available for a one-time fee and grant perpetual usage rights subject to the applicable commercial license agreement. Purchases are processed through third-party payment providers and/or GitHub account access.
-
-All paid services, including consulting or custom support, are governed by the separate written agreement or statement of work that applies to those services.
+Optional paid services, including consulting or custom support, are governed by
+the separate written agreement or statement of work that applies to those
+services. They do not alter the MIT license for the open-source software.
 
 ## 5. No warranty
 
