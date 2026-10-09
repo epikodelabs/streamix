@@ -211,4 +211,4 @@ projects/libraries/streamix/
 
 ## License
 
-GNU AGPL v3 or later
+Streamix is open source under the [MIT License](./LICENSE).

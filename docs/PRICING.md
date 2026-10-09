@@ -2,7 +2,7 @@
 
 Effective date: May 7, 2026
 
-`streamix` is currently available as a free, open-source package under the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`).
+`streamix` is a free, open-source package under the [MIT License](https://github.com/epikodelabs/streamix/blob/main/LICENSE). It may be used in open-source, proprietary, and commercial projects under the terms of that license.
 
 ## Current Pricing
 
@@ -17,7 +17,7 @@ Effective date: May 7, 2026
 - Full access to the published npm package
 - Access to the public documentation site
 - Access to the public GitHub repository
-- Use under the terms of `AGPL-3.0-or-later`
+- Use under the terms of the MIT License
 
 ## No subscriptions
 

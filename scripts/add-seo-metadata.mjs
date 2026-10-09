@@ -93,8 +93,8 @@ const PAGE_METADATA = {
 
   'PRICING.md': {
     title: 'Pricing & Licensing | streamix',
-    description: 'Explore streamix pricing. Free AGPL-3.0 open-source and $25/$30 one-time commercial licenses for individuals and teams.',
-    keywords: ['pricing', 'license', 'licensing', 'commercial', 'one-time payment', 'open source', 'agpl', 'enterprise', 'individual', 'team']
+    description: 'Explore Streamix pricing. The library is free and open source under the MIT License.',
+    keywords: ['pricing', 'license', 'licensing', 'MIT', 'open source']
   },
 
   // =================================================================
@@ -102,20 +102,20 @@ const PAGE_METADATA = {
   // =================================================================
   'TERMS-OF-SERVICE.md': {
     title: 'Terms of Service | streamix',
-    description: 'Read the terms and conditions for using the streamix library, documentation, and commercial licenses.',
-    keywords: ['terms', 'terms of service', 'legal', 'conditions', 'agreement', 'tos', 'commercial license']
+    description: 'Read the terms and conditions for using the Streamix library and documentation.',
+    keywords: ['terms', 'terms of service', 'legal', 'conditions', 'agreement', 'tos', 'MIT']
   },
 
   'PRIVACY-POLICY.md': {
     title: 'Privacy Policy | streamix',
-    description: 'Learn how epikodelabs handles data for the streamix documentation site, open-source project, and commercial license purchases.',
+    description: 'Learn how epikodelabs handles data for the Streamix documentation site and open-source project.',
     keywords: ['privacy', 'privacy policy', 'data protection', 'gdpr', 'ccpa', 'security', 'compliance', 'legal', 'github']
   },
 
   'REFUND-POLICY.md': {
     title: 'Refund Policy | streamix',
-    description: 'Review the refund policy for streamix commercial licenses and paid services.',
-    keywords: ['refund', 'refund policy', 'commercial license', 'paid services', 'non-refundable', 'support']
+    description: 'Review the refund policy for Streamix paid services.',
+    keywords: ['refund', 'refund policy', 'paid services', 'support']
   }
 };
 

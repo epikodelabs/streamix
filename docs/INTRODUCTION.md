@@ -17,7 +17,7 @@
     <img src="https://epikodelabs.github.io/streamix/bundle-size.svg?style=flat-square">
   </a>
   <a href="https://github.com/epikodelabs/streamix/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg?style=flat-square">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square">
   </a>
 </p>
 
@@ -230,4 +230,4 @@ projects/libraries/streamix/
 
 ## License
 
-GNU AGPL v3 or later
+MIT
