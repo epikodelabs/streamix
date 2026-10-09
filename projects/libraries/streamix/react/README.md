@@ -1,8 +1,81 @@
-# React Adoption Layer
+# Archived React Runtime Adapter
+
+> The custom React hooks documented below have been removed. React integration
+> is now compiler-first; see [`docs/REACT.md`](../../../../docs/REACT.md) and
+> `@epikodelabs/streamix/react/compiler` instead.
 
 `@epikodelabs/streamix/react` connects Streamix state to React components.
 
 React still renders the UI. Streamix holds state, derived values, and asynchronous work. The adapter gives components a small set of hooks for reading, writing, and owning those reactive sources.
+
+## JSX adoption contract
+
+React components use atoms directly. The compiler resolves reactive expressions
+before they reach React; application code does not import subscription helpers.
+
+```tsx
+function Profile() {
+  let title = atom('Ready');
+  const state = scope({ enabled: true, message: 'Connected' });
+
+  return (
+    <section>
+      <input value={title} onChange={event => title = event.target.value} />
+      <input type="checkbox" checked={state.enabled}
+        onChange={event => state.enabled = event.target.checked} />
+      <p>{title}: {state.message}</p>
+    </section>
+  );
+}
+```
+
+### What the compiler does
+
+- A standalone `atom(...)` or `flow(...)` used in a JSX prop or child becomes
+  a React subscription.
+- A `derived(...)` atom is handled the same way, so a derived value can be
+  rendered directly as `{total}`.
+- A value-first scope field such as `state.message` is resolved reactively by
+  the compiler.
+- `atom = value` becomes `atom.next(value)`. Declare an atom with `let` when
+  using assignment syntax.
+- `scope.field = value` retains the normal scope write semantics.
+- Component code receives ordinary values; React never receives an atom object.
+
+All generated subscription code is an implementation detail. It is not part of
+application source or the public authoring API.
+
+### Enable the compiler builder
+
+Use the Streamix React builder as the `build` and `serve` target, with a normal
+Angular application target as its delegate. The builder copies the application
+to `.angular/streamix-react/`, transforms every `.tsx` file, and delegates the
+generated entry to the normal esbuild application builder.
+
+```json
+{
+  "build": {
+    "builder": "@epikodelabs/streamix/react/builder:application",
+    "options": {
+      "delegateTarget": "my-app:application",
+      "sourceRoot": "projects/apps/my-app/src"
+    }
+  }
+}
+```
+
+Configure the delegated `application` target to use the generated entry and
+generated TypeScript project:
+
+```json
+{
+  "browser": ".angular/streamix-react/projects/apps/my-app/src/main.tsx",
+  "tsConfig": ".angular/streamix-react/projects/apps/my-app/tsconfig.app.json"
+}
+```
+
+`app7` is the complete working example, including standalone atoms, scoped
+properties, writes, boolean/select props, and a `flow()` source.
 
 ## Install
 

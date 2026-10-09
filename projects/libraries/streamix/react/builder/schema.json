@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "Streamix React application builder",
+  "type": "object",
+  "properties": {
+    "delegateTarget": { "type": "string" },
+    "sourceRoot": { "type": "string" }
+  },
+  "required": ["delegateTarget", "sourceRoot"],
+  "additionalProperties": true
+}

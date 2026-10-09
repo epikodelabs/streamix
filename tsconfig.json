@@ -15,6 +15,7 @@
     "sourceMap": true,
     "experimentalDecorators": true,
     "moduleResolution": "bundler",
+    "jsx": "react-jsx",
     "importHelpers": true,
     "target": "ESNext",
     "module": "ESNext",
@@ -46,8 +47,11 @@
       "@epikodelabs/streamix/angular": [
         "./projects/libraries/streamix/angular/src/lib/index.ts"
       ],
-      "@epikodelabs/streamix/react": [
-        "./projects/libraries/streamix/react/src/lib/index.ts"
+      "@epikodelabs/streamix/react/compiler": [
+        "./projects/libraries/streamix/react/compiler/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/react/builder": [
+        "./projects/libraries/streamix/react/builder/src/public-api.ts"
       ],
       "@epikodelabs/streamix/vue": [
         "./projects/libraries/streamix/vue/src/lib/index.ts"

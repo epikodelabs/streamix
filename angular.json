@@ -573,6 +573,65 @@
         }
       }
     },
+    "app7": {
+      "projectType": "application",
+      "root": "projects/apps/app7",
+      "sourceRoot": "projects/apps/app7/src",
+      "architect": {
+        "application": {
+          "builder": "@angular/build:application",
+          "options": {
+            "outputPath": "dist/apps/app7",
+            "index": "projects/apps/app7/src/index.html",
+            "browser": ".angular/streamix-react/projects/apps/app7/src/main.tsx",
+            "polyfills": [],
+            "tsConfig": ".angular/streamix-react/projects/apps/app7/tsconfig.app.json",
+            "inlineStyleLanguage": "scss",
+            "assets": [],
+            "styles": ["projects/apps/app7/src/styles.scss"],
+            "scripts": []
+          },
+          "configurations": {
+            "production": { "outputHashing": "all" },
+            "development": { "optimization": false, "extractLicenses": false, "sourceMap": true }
+          },
+          "defaultConfiguration": "production"
+        },
+        "build": {
+          "builder": "@epikodelabs/streamix/react/builder:application",
+          "options": {
+            "delegateTarget": "app7:application",
+            "sourceRoot": "projects/apps/app7/src"
+          },
+          "configurations": {
+            "production": { "outputHashing": "all" },
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@epikodelabs/streamix/react/builder:application",
+          "options": { "delegateTarget": "app7:dev-server", "sourceRoot": "projects/apps/app7/src" },
+          "configurations": {
+            "production": {},
+            "development": {}
+          },
+          "defaultConfiguration": "development"
+        },
+        "dev-server": {
+          "builder": "@angular/build:dev-server",
+          "configurations": {
+            "production": { "buildTarget": "app7:application:production" },
+            "development": { "buildTarget": "app7:application:development" }
+          },
+          "defaultConfiguration": "development"
+        }
+      }
+    },
     "streamix": {
       "projectType": "library",
       "root": "projects/libraries/streamix",

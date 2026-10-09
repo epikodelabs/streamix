@@ -29,9 +29,22 @@ try {
  */
 const manifest = JSON.parse(await fs.readFile(packagePath, 'utf8'));
 const builderManifest = './angular/builder/package.json';
+const reactBuilderManifest = './react/builder/package.json';
+
+// React has no public runtime adapter. The compiler injects its small React
+// bridge into transformed modules, so only the build-time compiler and builder
+// subpaths remain publicly importable.
+if (manifest.exports?.['./react']) {
+  delete manifest.exports['./react'];
+  await fs.writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
 
 if (manifest.exports && !manifest.exports[builderManifest]) {
   manifest.exports[builderManifest] = builderManifest;
+  await fs.writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+if (manifest.exports && !manifest.exports[reactBuilderManifest]) {
+  manifest.exports[reactBuilderManifest] = reactBuilderManifest;
   await fs.writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
@@ -42,6 +55,9 @@ if (manifest.exports && !manifest.exports[builderManifest]) {
  */
 const builderPackagePath = path.resolve(
   'dist/streamix/angular/builder/package.json',
+);
+const reactBuilderPackagePath = path.resolve(
+  'dist/streamix/react/builder/package.json',
 );
 
 try {
@@ -62,6 +78,16 @@ try {
   ) {
     throw error;
   }
+}
+
+try {
+  const builderPackage = JSON.parse(await fs.readFile(reactBuilderPackagePath, 'utf8'));
+  if (builderPackage.builders !== './builders.json') {
+    builderPackage.builders = './builders.json';
+    await fs.writeFile(reactBuilderPackagePath, `${JSON.stringify(builderPackage, null, 2)}\n`);
+  }
+} catch (error) {
+  if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
 }
 
 // ---------------------------------------------------------------------------

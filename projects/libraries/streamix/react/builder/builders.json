@@ -1,0 +1,9 @@
+{
+  "builders": {
+    "application": {
+      "implementation": "./application.mjs",
+      "schema": "./schema.json",
+      "description": "Compiles Streamix React JSX before delegating to an Angular application target."
+    }
+  }
+}

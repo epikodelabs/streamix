@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../../out-tsc/app",
+    "types": [],
+    "jsx": "react-jsx"
+  },
+  "files": ["src/main.tsx"],
+  "include": ["src/**/*.d.ts"]
+}

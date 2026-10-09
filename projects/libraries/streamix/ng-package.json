@@ -6,7 +6,10 @@
     "angular/builder/builders.json",
     "angular/builder/schema.json",
     "angular/builder/README.md",
-    "angular/builder/application.mjs"
+    "angular/builder/application.mjs",
+    "react/builder/builders.json",
+    "react/builder/schema.json",
+    "react/builder/application.mjs"
   ],
   "lib": {
     "entryFile": "src/public-api.ts"
