@@ -15,7 +15,7 @@ These Terms apply to:
 - Links to the public GitHub repository and npm package pages
 - Any other paid services we may offer
 
-The open-source software is distributed under the [MIT License](../LICENSE).
+The open-source software is distributed under the [MIT License](https://github.com/epikodelabs/streamix/blob/main/LICENSE).
 That license governs use of Streamix, including commercial and proprietary use.
 
 ## 2. Permitted use

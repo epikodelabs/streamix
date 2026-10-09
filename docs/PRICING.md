@@ -2,7 +2,7 @@
 
 Effective date: May 7, 2026
 
-`streamix` is free and open source under the [MIT License](../LICENSE). You may
+`streamix` is free and open source under the [MIT License](https://github.com/epikodelabs/streamix/blob/main/LICENSE). You may
 use, modify, distribute, and use it in proprietary or commercial software under
 that license. No commercial license or purchase is required.
 
@@ -15,7 +15,7 @@ that license. No commercial license or purchase is required.
 | Public GitHub source code access | Free |
 
 The MIT License is the only software license for the public package and
-repository. See [LICENSE](../LICENSE) for the complete terms.
+repository. See [LICENSE](https://github.com/epikodelabs/streamix/blob/main/LICENSE) for the complete terms.
 
 ## Optional paid services
 

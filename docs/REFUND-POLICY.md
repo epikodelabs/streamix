@@ -4,7 +4,7 @@ Effective date: May 7, 2026
 
 ## Open-source access
 
-`streamix` is distributed free of charge under the [MIT License](../LICENSE).
+`streamix` is distributed free of charge under the [MIT License](https://github.com/epikodelabs/streamix/blob/main/LICENSE).
 Access to the public package, documentation site, and public GitHub repository
 is free, so no refunds apply to open-source access.
 
