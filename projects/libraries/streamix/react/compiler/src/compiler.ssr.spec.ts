@@ -2,6 +2,7 @@ import { createElement } from "react";
 import * as React from "react";
 import { renderToString } from "react-dom/server";
 import * as jsxRuntime from "react/jsx-runtime";
+import * as streamixReact from "@epikodelabs/streamix/react";
 import ts from "typescript";
 import { atom } from "@epikodelabs/streamix";
 import { transformReactJsx } from "./compiler";
@@ -26,6 +27,7 @@ function compileGeneratedModule(source: string): CompiledModule {
   const require = (name: string): unknown => {
     if (name === "react") return React;
     if (name === "react/jsx-runtime") return jsxRuntime;
+    if (name === "@epikodelabs/streamix/react") return streamixReact;
     if (name === "@epikodelabs/streamix") return { atom };
     throw new Error(`Unexpected generated import: ${name}`);
   };

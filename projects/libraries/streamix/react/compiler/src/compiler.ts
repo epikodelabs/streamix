@@ -107,20 +107,33 @@ function scopeBinds(node: ts.Node, name: string): boolean {
 function isShadowedName(name: string, site: ts.Node, component: ts.Node): boolean {
   let p: ts.Node | undefined = site.parent;
   while (p && p !== component) {
+    // Declarations in the component's own body are handled by
+    // `plainShadowed`. Treating this block as a nested scope would also hide
+    // a component-local atom from every JSX read that follows its declaration.
+    if (ts.isBlock(p) && p.parent === component) {
+      p = p.parent;
+      continue;
+    }
     if (scopeBinds(p, name)) return true;
     p = p.parent;
   }
   return false;
 }
+
+/** True when a top-level statement can bypass later compiler-generated hooks. */
+function statementMayReturn(statement: ts.Statement): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found || ts.isFunctionLike(node)) return;
+    if (ts.isReturnStatement(node)) { found = true; return; }
+    ts.forEachChild(node, visit);
+  };
+  visit(statement);
+  return found;
+}
 function isShadowed(site: ts.Identifier, component: ts.Node): boolean {
   return isShadowedName(site.text, site, component);
 }
-function isShadowedAtomTarget(target: ts.Expression, component: ts.Node): boolean {
-  let root = target;
-  while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
-  return ts.isIdentifier(root) && isShadowed(root, component);
-}
-
 type FactoryImports = { aliases: Map<string, string>; namespaces: Set<string>; excluded: Set<string> };
 function streamixFactoryImports(file: ts.SourceFile): FactoryImports {
   const aliases = new Map<string, string>();
@@ -202,8 +215,13 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
       collectTypedAtomProps(node, moduleAtoms, atoms);
       collectTypedScopeProps(node, moduleScopes, scopes);
 
+      let hasEarlierReturn = false;
       functionBody.statements.forEach((statement, index) => {
-        if (!ts.isVariableStatement(statement)) return;
+        const statementReturns = statementMayReturn(statement);
+        if (!ts.isVariableStatement(statement)) {
+          if (statementReturns) hasEarlierReturn = true;
+          return;
+        }
         for (const declaration of statement.declarationList.declarations) {
           if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)) {
             continue;
@@ -211,12 +229,28 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
           {
             const kind = factoryKind(declaration.initializer, imports);
             if (kind === "atom" || kind === "derived" || kind === "flow") {
+              if (hasEarlierReturn) {
+                diagnostics.push(diagnostic(
+                  declaration,
+                  "error",
+                  "A component-local reactive declaration cannot appear after a possible return. Move it before every return or use an explicit hook so React hook order is static.",
+                ));
+                continue;
+              }
               atoms.add(declaration.name.text);
               localReactiveDeclarations.add(declaration);
               reportLocalFactoryImpurity(declaration.initializer, diagnostics);
               if ((statement.declarationList.flags & ts.NodeFlags.Let) !== 0) writableBindings.add(declaration.name.text);
             }
             if (kind === "scope") {
+              if (hasEarlierReturn) {
+                diagnostics.push(diagnostic(
+                  declaration,
+                  "error",
+                  "A component-local reactive declaration cannot appear after a possible return. Move it before every return or use an explicit hook so React hook order is static.",
+                ));
+                continue;
+              }
               scopes.add(declaration.name.text);
               localReactiveDeclarations.add(declaration);
               reportLocalFactoryImpurity(declaration.initializer, diagnostics);
@@ -224,6 +258,7 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
           }
         }
         if (atoms.size > 0 || scopes.size > 0) insertionIndex = index + 1;
+        if (statementReturns) hasEarlierReturn = true;
       });
 
       // Static aliases retain atom identity. Object maps are supported only
@@ -563,7 +598,7 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
       // would lie for interrupted concurrent renders.
       if ((ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) && node.name && /^[A-Z]/.test(node.name.text)) {
         bindings.push(factory.createExpressionStatement(factory.createCallExpression(
-          factory.createIdentifier("__streamixUseEffect"),
+          factory.createIdentifier("__streamixAfterCommit"),
           undefined,
           [factory.createArrowFunction(
             undefined,
@@ -783,60 +818,7 @@ function isAtomReferenceExpression(expression: ts.Expression, atoms: ReadonlySet
     ts.isIdentifier(expression.arguments[0]) && atoms.has(expression.arguments[0].text);
 }
 
-const runtimePrelude = `import { useEffect as __streamixUseEffect, useRef as __streamixUseRef, useSyncExternalStore as __streamixUseSyncExternalStore } from "react";
-const __streamixSubscriptions = new WeakMap<object, { listeners: Set<() => void>; stop: any; generation: number }>();
-const __streamixLocalDisposals = new WeakMap<object, object>();
-function __streamixLocal(factory: () => any): any {
-  const ref = __streamixUseRef<any>(null);
-  if (ref.current === null) ref.current = factory();
-  __streamixUseEffect(() => {
-    const instance = ref.current;
-    const token = {};
-    __streamixLocalDisposals.set(instance, token);
-    return () => {
-      queueMicrotask(() => {
-        if (__streamixLocalDisposals.get(instance) !== token) return;
-        __streamixLocalDisposals.delete(instance);
-        if (typeof instance?.dispose === "function") instance.dispose();
-      });
-    };
-  }, []);
-  return ref.current;
-}
-function __streamixTrace(type: "read" | "subscription" | "write" | "unsubscribe" | "render", source: string): void {
-  (globalThis as any).__streamixDevtoolsRecord?.({ type, source });
-}
-function __streamixUse(source: any, sourceName = "dynamic atom"): any {
-  return __streamixUseSyncExternalStore(
-    (notify: () => void) => {
-      __streamixTrace("subscription", sourceName);
-      let entry = __streamixSubscriptions.get(source);
-      if (!entry) {
-        entry = { listeners: new Set(), stop: null, generation: 0 };
-        __streamixSubscriptions.set(source, entry);
-      }
-      entry.generation++;
-      entry.listeners.add(notify);
-      if (!entry.stop) {
-        entry.stop = source.subscribe(() => { __streamixTrace("write", sourceName); for (const listener of entry!.listeners) listener(); });
-      }
-      return () => {
-        entry!.listeners.delete(notify);
-        if (entry!.listeners.size > 0) return;
-        const generation = ++entry!.generation;
-        queueMicrotask(() => {
-          if (entry!.generation !== generation || entry!.listeners.size > 0) return;
-          __streamixTrace("unsubscribe", sourceName);
-          void entry!.stop();
-          __streamixSubscriptions.delete(source);
-        });
-      };
-    },
-    () => { try { return source.value; } catch { return undefined; } },
-    () => { try { return source.value; } catch { return undefined; } },
-  );
-}
-`;
+const runtimePrelude = `import { __streamixAfterCommit, __streamixLocal, __streamixTrace, __streamixUse } from "@epikodelabs/streamix/react";`;
 
 function collectModuleBindings(sourceFile: ts.SourceFile, factoryName: string, imports: FactoryImports): Set<string> {
   const names = new Set<string>();

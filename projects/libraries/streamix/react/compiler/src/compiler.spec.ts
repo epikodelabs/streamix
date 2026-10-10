@@ -11,7 +11,7 @@ describe("React JSX compiler", () => {
     `);
 
     expect(result.bindingCount).toBe(2);
-    expect(result.code).toContain('useSyncExternalStore as __streamixUseSyncExternalStore');
+    expect(result.code).toContain('import { __streamixAfterCommit, __streamixLocal, __streamixTrace, __streamixUse } from "@epikodelabs/streamix/react"');
     expect(result.code).toContain('__streamixUse(count, "count")');
     expect(result.code).toContain('__streamixUse(state.get("title"), "state.title")');
     expect(result.code).toContain('count.next(count.value + 1)');

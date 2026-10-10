@@ -38,4 +38,16 @@ describe("Streamix React adoption regressions", () => {
     const result = transformReactJsx(`"use client"; const status = atom(1); function View() { return <b>{status}</b>; }`);
     expect(result.code.trimStart().startsWith('"use client";')).toBe(true);
   });
+
+  it("rejects local reactive declarations after a possible early return", () => {
+    const result = transformReactJsx(`
+      function App({ enabled }: { enabled: boolean }) {
+        if (!enabled) return null;
+        const count = atom(0);
+        return <output>{count}</output>;
+      }
+    `);
+    expect(result.diagnostics.some(diagnostic => diagnostic.category === "error" && diagnostic.message.includes("after a possible return"))).toBe(true);
+    expect(result.code).not.toContain("__streamixLocal");
+  });
 });

@@ -2,6 +2,7 @@ import { StrictMode, Suspense, act, createElement } from "react";
 import * as React from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import * as jsxRuntime from "react/jsx-runtime";
+import * as streamixReact from "@epikodelabs/streamix/react";
 import ts from "typescript";
 import { atom, scope, type Writable } from "@epikodelabs/streamix";
 import { transformReactJsx } from "./compiler";
@@ -30,6 +31,7 @@ function compileGeneratedModule(
   const require = (name: string): unknown => {
     if (name === "react") return React;
     if (name === "react/jsx-runtime") return jsxRuntime;
+    if (name === "@epikodelabs/streamix/react") return streamixReact;
     if (name === "@epikodelabs/streamix") return { atom: atomFactory, scope: scopeFactory };
     throw new Error(`Unexpected generated import: ${name}`);
   };

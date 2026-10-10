@@ -17,9 +17,93 @@ export interface AtomSnapshotPayload {
 type Disposable = { dispose(): void };
 type Listener = () => void;
 
+// Shared compiler runtime. Keeping these helpers in the adapter means every
+// transformed module observes the same subscription and ownership registries,
+// rather than injecting a private copy into each compiled file.
+const compilerSubscriptions = new WeakMap<object, {
+  listeners: Set<Listener>;
+  stop: (() => void) | null;
+  generation: number;
+}>();
+const compilerLocalDisposals = new WeakMap<object, object>();
+
 function isDisposable(value: unknown): value is Disposable {
   return (typeof value === "object" || typeof value === "function") && value !== null &&
     typeof (value as Partial<Disposable>).dispose === "function";
+}
+
+/** @internal Shared compiler trace bridge; emitted only after React commits. */
+export function __streamixTrace(
+  type: "read" | "subscription" | "write" | "unsubscribe" | "render",
+  source: string,
+): void {
+  recordStreamixDevtoolsEvent({ type, source });
+}
+
+/** @internal Registers compiler tracing only after a component commits. */
+export function __streamixAfterCommit(effect: () => void): void {
+  useEffect(effect);
+}
+
+/** @internal Stable component-local ownership slot used by compiler output. */
+export function __streamixLocal<T>(factory: () => T): T {
+  const ref = useRef<T | null>(null);
+  if (ref.current === null) ref.current = factory();
+
+  useEffect(() => {
+    const instance = ref.current!;
+    const token = {};
+    if ((typeof instance === "object" || typeof instance === "function") && instance !== null) {
+      compilerLocalDisposals.set(instance, token);
+    }
+    return () => {
+      queueMicrotask(() => {
+        if ((typeof instance === "object" || typeof instance === "function") && instance !== null) {
+          if (compilerLocalDisposals.get(instance) !== token) return;
+          compilerLocalDisposals.delete(instance);
+        }
+        if (isDisposable(instance)) instance.dispose();
+      });
+    };
+  }, []);
+
+  return ref.current;
+}
+
+/** @internal Concurrent-safe shared subscription used by compiler JSX reads. */
+export function __streamixUse<T>(source: DependencySource<T>, sourceName = "dynamic atom"): T {
+  return useSyncExternalStore(
+    (notify: Listener) => {
+      __streamixTrace("subscription", sourceName);
+      const sourceKey = source as unknown as object;
+      let entry = compilerSubscriptions.get(sourceKey);
+      if (!entry) {
+        entry = { listeners: new Set(), stop: null, generation: 0 };
+        compilerSubscriptions.set(sourceKey, entry);
+      }
+      entry.generation++;
+      entry.listeners.add(notify);
+      if (!entry.stop) {
+        entry.stop = source.subscribe(() => {
+          __streamixTrace("write", sourceName);
+          for (const listener of entry!.listeners) listener();
+        });
+      }
+      return () => {
+        entry!.listeners.delete(notify);
+        if (entry!.listeners.size > 0) return;
+        const generation = ++entry!.generation;
+        queueMicrotask(() => {
+          if (entry!.generation !== generation || entry!.listeners.size > 0) return;
+          __streamixTrace("unsubscribe", sourceName);
+          entry!.stop?.();
+          compilerSubscriptions.delete(sourceKey);
+        });
+      };
+    },
+    () => source.value,
+    () => source.value,
+  );
 }
 
 /** Reads an atom explicitly, without compiler involvement. */
