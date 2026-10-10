@@ -80,6 +80,17 @@ import { atomRef } from "@epikodelabs/streamix/react";
 <x-editor source={atomRef(title)} />;
 ```
 
+Scopes can cross a component boundary the same way. Type the destructured prop
+as `typeof state`, then read its fields directly:
+
+```tsx
+function Summary({ model }: { model: typeof state }) {
+  return <output>{model.title}</output>;
+}
+
+<Summary model={state} />;
+```
+
 ## Strict Mode and ownership
 
 Local reactive declarations are stable for a committed component instance and

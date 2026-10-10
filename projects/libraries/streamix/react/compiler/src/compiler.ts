@@ -106,6 +106,7 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
       // component compiler-first too: `<Editor source={title} />` can render
       // `{source}` without a manual `.value` read.
       collectTypedAtomProps(node, moduleAtoms, atoms);
+      collectTypedScopeProps(node, moduleScopes, scopes);
 
       node.body.statements.forEach((statement, index) => {
         if (!ts.isVariableStatement(statement)) return;
@@ -798,6 +799,33 @@ function collectTypedAtomProps(
         ? staticPropertyName(element.propertyName)
         : element.name.text;
       if (propertyName && typedProperties.has(propertyName)) atoms.add(element.name.text);
+    }
+  }
+}
+
+/** Recognizes destructured scope props annotated as `typeof someScope`. */
+function collectTypedScopeProps(
+  node: ts.FunctionLikeDeclarationBase,
+  knownScopes: ReadonlySet<string>,
+  scopes: Set<string>,
+): void {
+  for (const parameter of node.parameters) {
+    if (!ts.isObjectBindingPattern(parameter.name) || !parameter.type || !ts.isTypeLiteralNode(parameter.type)) {
+      continue;
+    }
+    const typedProperties = new Set<string>();
+    for (const member of parameter.type.members) {
+      if (!ts.isPropertySignature(member) || !member.type || !member.name || !ts.isTypeQueryNode(member.type)) continue;
+      const propertyName = staticPropertyName(member.name);
+      const typeName = ts.isIdentifier(member.type.exprName) ? member.type.exprName.text : undefined;
+      if (propertyName && typeName && knownScopes.has(typeName)) typedProperties.add(propertyName);
+    }
+    for (const element of parameter.name.elements) {
+      if (!ts.isIdentifier(element.name)) continue;
+      const propertyName = element.propertyName
+        ? staticPropertyName(element.propertyName)
+        : element.name.text;
+      if (propertyName && typedProperties.has(propertyName)) scopes.add(element.name.text);
     }
   }
 }

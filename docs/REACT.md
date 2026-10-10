@@ -80,6 +80,17 @@ import { atomRef } from "@epikodelabs/streamix/react";
 <x-editor source={atomRef(title)} />;
 ```
 
+Scopes can be passed by reference too. A destructured prop typed as
+`typeof state` receives granular field subscriptions:
+
+```tsx
+function Summary({ model }: { model: typeof state }) {
+  return <output>{model.title}</output>;
+}
+
+<Summary model={state} />;
+```
+
 ## Strict Mode and ownership
 
 Local reactive declarations are stable for a committed component instance and

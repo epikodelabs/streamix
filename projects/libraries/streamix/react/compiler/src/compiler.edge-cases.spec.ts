@@ -211,6 +211,21 @@ describe("React JSX compiler edge cases", () => {
     expect(result.code).toContain("<Editor source={title}/>");
   });
 
+  it("reads a destructured scope prop typed with typeof at field granularity", () => {
+    const result = transformReactJsx(`
+      const state = scope({ title: "Ready", enabled: true });
+      function Editor({ model }: { model: typeof state }) {
+        return <input checked={model.enabled} value={model.title} />;
+      }
+      function Screen() { return <Editor model={state} />; }
+    `);
+
+    expect(result.bindingCount).toBe(2);
+    expect(result.code).toContain('__streamixUse(model.get("enabled"), "model.enabled")');
+    expect(result.code).toContain('__streamixUse(model.get("title"), "model.title")');
+    expect(result.code).toContain("<Editor model={state}/>");
+  });
+
   it("still passes an atom snapshot to a native DOM property", () => {
     const result = transformReactJsx(`
       const count = atom(0);
