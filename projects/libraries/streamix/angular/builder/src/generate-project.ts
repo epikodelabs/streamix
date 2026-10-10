@@ -276,4 +276,22 @@ export async function generateProject({
 
   await pruneStaleEntries();
 
+  // Angular's template compiler requires decorated components to be program
+  // roots, not merely transitively imported by a file replacement. Point the
+  // delegated build at a virtual tsconfig which includes the entire generated
+  // source tree. This keeps consuming projects free from `.angular` paths.
+  await writeFile(
+    resolve(outputDirectory, '..', 'tsconfig.app.json'),
+    `${JSON.stringify({
+      extends: configPath(relative(resolve(outputDirectory, '..'), resolve(workspaceRoot, 'tsconfig.json'))),
+      compilerOptions: { types: [] },
+      include: ['src/**/*.ts'],
+    }, null, 2)}\n`,
+  );
+
+}
+
+function configPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  return normalized.startsWith('.') ? normalized : `./${normalized}`;
 }

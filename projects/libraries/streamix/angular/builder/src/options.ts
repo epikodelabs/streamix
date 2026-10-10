@@ -80,6 +80,11 @@ export function virtualRootOf(sourceRoot: string): string {
     .replace(/\/src$/, '')}/src`;
 }
 
+/** Generated tsconfig used by the delegated Angular compiler. */
+export function virtualTsconfigOf(sourceRoot: string): string {
+  return virtualRootOf(sourceRoot).replace(/\/src$/, '/tsconfig.app.json');
+}
+
 /**
  * Serializes generated template text as a backtick literal so the virtual
  * component stays readable. Escapes cover exactly what template literals

@@ -13,5 +13,6 @@ export {
   shouldRegenerateOn,
   templateLiteral,
   virtualRootOf,
+  virtualTsconfigOf,
   type SxBuilderOptions,
 } from './options';

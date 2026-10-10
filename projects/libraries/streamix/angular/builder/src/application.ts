@@ -8,6 +8,8 @@ import {
   buildDelegateOptions,
   resolveSourceRoot,
   shouldRegenerateOn,
+  virtualRootOf,
+  virtualTsconfigOf,
 } from './options';
 
 const REGENERATE_DEBOUNCE_MS = 50;
@@ -249,6 +251,12 @@ const applicationBuilder = createBuilder(async function* (options, context) {
   });
 
   const delegateOptions = buildDelegateOptions(options);
+  // Redirect both compiler roots into the generated tree. A consuming
+  // workspace therefore never needs to add `.angular/.streamix` to its own
+  // tsconfig or configure a file replacement by hand.
+  const virtualRoot = virtualRootOf(sourceRoot);
+  delegateOptions['browser'] = `${virtualRoot}/main.ts`;
+  delegateOptions['tsConfig'] = virtualTsconfigOf(sourceRoot);
 
   const delegate: Target = { project, target };
 
