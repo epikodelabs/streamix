@@ -156,6 +156,23 @@ use `renderAtomSnapshotScript()` on the server and
 writes, unsubscriptions, and committed renders. Compiler-added bindings map
 back to their originating JSX expression through generated source maps.
 
+## Hosts
+
+React is supported through both native Vite and Angular Architect hosts. For a
+native Vite app, run the Streamix plugin before the React plugin:
+
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { sx } from "@epikodelabs/streamix/react/vite";
+
+export default defineConfig({ plugins: [sx(), react()] });
+```
+
+The Angular-hosted React builder remains available for workspaces that use
+Angular Architect; it preprocesses into `.angular/.streamix/<app>/src` before
+delegating to the application target.
+
 For the complete semantics and limitations, see
 [React compiler semantics](../../../../docs/REACT-COMPILER-SEMANTICS.md) and
 [React documentation](../../../../docs/REACT.md).

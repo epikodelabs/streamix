@@ -105,6 +105,24 @@ identity.
 
 ## Builder setup
 
+### Native Vite React
+
+Use the Vite plugin before the React JSX plugin. It transforms authored TSX,
+reports source-located compiler diagnostics, and returns a map Vite can compose
+with its normal React build pipeline.
+
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { sx } from "@epikodelabs/streamix/react/vite";
+
+export default defineConfig({
+  plugins: [sx(), react()],
+});
+```
+
+### Angular-hosted React
+
 Use the Streamix React builder for `build` and `serve`, delegating to a normal
 Angular application target:
 

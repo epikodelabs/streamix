@@ -9,6 +9,7 @@
     "./projects/libraries/streamix/angular/compiler/src",
     "./projects/libraries/streamix/react/src",
     "./projects/libraries/streamix/react/builder/src",
+    "./projects/libraries/streamix/react/vite/src",
     "./projects/libraries/streamix/react/compiler/src"
   ],
   "testDirs": [
@@ -21,6 +22,7 @@
     "./projects/libraries/streamix/angular/builder/src",
     "./projects/libraries/streamix/react/src",
     "./projects/libraries/streamix/react/builder/src",
+    "./projects/libraries/streamix/react/vite/src",
     "./projects/libraries/streamix/react/compiler/src"
   ],
   "exclude": [
