@@ -227,7 +227,7 @@ export function transformReactJsx(
   const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
     const factory = context.factory;
 
-    const transformFunction = <T extends ts.FunctionLikeDeclarationBase>(node: T): T => {
+    const transformFunction = <T extends ts.FunctionLikeDeclarationBase>(node: T, traceName?: string): T => {
       if (!node.body) return node;
       const functionBody = ts.isBlock(node.body) ? node.body :
         factory.createBlock([factory.createReturnStatement(node.body)], true);
@@ -240,6 +240,12 @@ export function transformReactJsx(
       const atomMaps = new Map(moduleAtomMaps);
       const writableBindings = new Set<string>(moduleWritableAtoms);
       const localReactiveDeclarations = new Set<ts.VariableDeclaration>();
+      // Statements whose declarations supply names the generated hook bindings
+      // reference directly (local atoms/scopes, aliases, map bases, and
+      // destructured map members). Bindings must be inserted after the last
+      // one so every referenced name is initialized; nothing before that point
+      // may return conditionally, or the hooks would run conditionally.
+      const bindingDependencies = new Set<number>();
       let insertionIndex = 0;
 
       // A destructured prop explicitly typed as `typeof someAtom` is a shared
@@ -252,6 +258,7 @@ export function transformReactJsx(
       let hasEarlierReturn = false;
       functionBody.statements.forEach((statement, index) => {
         const statementReturns = statementMayReturn(statement);
+        let declaresReactive = false;
         if (!ts.isVariableStatement(statement)) {
           if (statementReturns) hasEarlierReturn = true;
           return;
@@ -275,6 +282,7 @@ export function transformReactJsx(
               localReactiveDeclarations.add(declaration);
               reportLocalFactoryImpurity(declaration.initializer, diagnostics);
               if ((statement.declarationList.flags & ts.NodeFlags.Let) !== 0) writableBindings.add(declaration.name.text);
+              declaresReactive = true;
             }
             if (kind === "scope") {
               if (hasEarlierReturn) {
@@ -288,10 +296,11 @@ export function transformReactJsx(
               scopes.add(declaration.name.text);
               localReactiveDeclarations.add(declaration);
               reportLocalFactoryImpurity(declaration.initializer, diagnostics);
+              declaresReactive = true;
             }
           }
         }
-        if (atoms.size > 0 || scopes.size > 0) insertionIndex = index + 1;
+        if (declaresReactive) insertionIndex = index + 1;
         if (statementReturns) hasEarlierReturn = true;
       });
 
@@ -301,8 +310,8 @@ export function transformReactJsx(
       let changed = true;
       while (changed) {
         changed = false;
-        for (const statement of functionBody.statements) {
-          if (!ts.isVariableStatement(statement)) continue;
+        functionBody.statements.forEach((statement, index) => {
+          if (!ts.isVariableStatement(statement)) return;
           for (const declaration of statement.declarationList.declarations) {
             if (!declaration.initializer) continue;
             if (
@@ -314,6 +323,7 @@ export function transformReactJsx(
               atoms.add(declaration.name.text);
               if ((statement.declarationList.flags & ts.NodeFlags.Let) !== 0) writableBindings.add(declaration.name.text);
               changed = true;
+              bindingDependencies.add(index);
             }
             if (ts.isIdentifier(declaration.name) && ts.isObjectLiteralExpression(declaration.initializer)) {
               const entries = new Map<string, string>();
@@ -328,7 +338,10 @@ export function transformReactJsx(
                 }
                 entries.set(propertyName, value.text);
               }
-              if (entries.size > 0) atomMaps.set(declaration.name.text, entries);
+              if (entries.size > 0) {
+                atomMaps.set(declaration.name.text, entries);
+                bindingDependencies.add(index);
+              }
             }
             if (
               ts.isObjectBindingPattern(declaration.name) &&
@@ -336,6 +349,7 @@ export function transformReactJsx(
               atomMaps.has(declaration.initializer.text)
             ) {
               const map = atomMaps.get(declaration.initializer.text)!;
+              let contributed = false;
               for (const element of declaration.name.elements) {
                 const propertyName = element.propertyName
                   ? staticPropertyName(element.propertyName)
@@ -347,9 +361,29 @@ export function transformReactJsx(
                 if ((statement.declarationList.flags & ts.NodeFlags.Let) !== 0 && writableBindings.has(atomName)) {
                   writableBindings.add(element.name.text);
                 }
+                contributed = true;
               }
+              if (contributed) bindingDependencies.add(index);
             }
           }
+        });
+      }
+
+      // Generated hook bindings must execute after every name they reference
+      // is initialized. Nothing before that insertion point may return
+      // conditionally, or React would observe a different hook order between
+      // renders, so report it instead of emitting conditional hooks.
+      for (const dependencyIndex of bindingDependencies) {
+        insertionIndex = Math.max(insertionIndex, dependencyIndex + 1);
+      }
+      for (let guardIndex = 0; guardIndex < insertionIndex; guardIndex++) {
+        if (statementMayReturn(functionBody.statements[guardIndex])) {
+          diagnostics.push(diagnostic(
+            functionBody.statements[guardIndex],
+            "error",
+            "A possible return precedes the reactive declarations, so the generated subscription hooks would run conditionally. Move the reactive declarations before every return so React hook order stays static.",
+          ));
+          break;
         }
       }
 
@@ -472,6 +506,25 @@ export function transformReactJsx(
       };
       const rewriteJsxValue = (expression: ts.Expression): ts.Expression => {
         const jsxValueVisitor: ts.Visitor = (value) => {
+          // An explicit `.value` read is still a JSX read of the atom. Lower
+          // the whole expression to the subscription binding rather than
+          // descending into the base identifier, which would leave the
+          // binding (already the current value) with a second `.value`.
+          if (
+            ts.isPropertyAccessExpression(value) &&
+            value.name.text === "value" &&
+            !isHiddenTarget(value.expression)
+          ) {
+            const baseName = atomReferenceName(value.expression, atoms, atomMaps);
+            if (baseName) return bindingForAtom(baseName, value);
+            if (
+              ts.isElementAccessExpression(value.expression) &&
+              ts.isIdentifier(value.expression.expression) &&
+              atomMaps.has(value.expression.expression.text)
+            ) {
+              return bindingForSource(value.expression, value.expression.getText(sourceFile), value);
+            }
+          }
           if (ts.isIdentifier(value) && atoms.has(value.text) && !isNamePosition(value) && !isHidden(value)) {
             return bindingForAtom(value.text, value);
           }
@@ -594,6 +647,19 @@ export function transformReactJsx(
               ),
             );
           }
+          if (isLogicalAssignment(child.operatorToken.kind)) {
+            return writeLogicalAtom(
+              factory,
+              atomName,
+              child.operatorToken.kind,
+              rewriteAtomReads(child.right, atoms, atomMaps, context),
+            );
+          }
+          // The operator table and the write-operator predicate disagree;
+          // leaving the statement unrewritten would write the atom object
+          // itself instead of emitting a value.
+          diagnostics.push(diagnostic(child, "error", `Compound write "${child.operatorToken.getText(sourceFile)}" cannot be lowered for atom \"${atomName}\". Write ${atomName}.next(...) explicitly.`));
+          return child;
         }
         if (ts.isPrefixUnaryExpression(child) || ts.isPostfixUnaryExpression(child)) {
           const operand = child.operand;
@@ -629,8 +695,9 @@ export function transformReactJsx(
 
       // Trace only after React commits. Recording while the function body is
       // evaluated would itself be an observable render-phase side effect and
-      // would lie for interrupted concurrent renders.
-      if ((ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) && node.name && /^[A-Z]/.test(node.name.text)) {
+      // would lie for interrupted concurrent renders. Arrow and memo/forwardRef
+      // components trace under their declared name.
+      if (traceName && /^[A-Z]/.test(traceName)) {
         bindings.push(factory.createExpressionStatement(factory.createCallExpression(
           factory.createIdentifier("__streamixAfterCommit"),
           undefined,
@@ -644,7 +711,7 @@ export function transformReactJsx(
               factory.createExpressionStatement(factory.createCallExpression(
                 factory.createIdentifier("__streamixTrace"),
                 undefined,
-                [factory.createStringLiteral("render"), factory.createStringLiteral(node.name.text)],
+                [factory.createStringLiteral("render"), factory.createStringLiteral(traceName)],
               )),
             ], true),
           )],
@@ -660,23 +727,23 @@ export function transformReactJsx(
       return updateFunctionLike(factory, node, updatedBody);
     };
 
-    const transformInitializer = (expr: ts.Expression): ts.Expression => {
-      if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) return transformFunction(expr);
+    const transformInitializer = (expr: ts.Expression, traceName?: string): ts.Expression => {
+      if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) return transformFunction(expr, traceName);
       if (ts.isCallExpression(expr) && expr.arguments.length > 0 &&
           (ts.isIdentifier(expr.expression) && (expr.expression.text === "memo" || expr.expression.text === "forwardRef") ||
           ts.isPropertyAccessExpression(expr.expression) && (expr.expression.name.text === "memo" || expr.expression.name.text === "forwardRef"))) {
-        const first = transformInitializer(expr.arguments[0]);
+        const first = transformInitializer(expr.arguments[0], traceName);
         return first === expr.arguments[0] ? expr : factory.updateCallExpression(expr, expr.expression, expr.typeArguments, [first, ...expr.arguments.slice(1)]);
       }
       return expr;
     };
     return file => {
       const statements = file.statements.map(statement => {
-        if (ts.isFunctionDeclaration(statement)) return transformFunction(statement);
+        if (ts.isFunctionDeclaration(statement)) return transformFunction(statement, statement.name?.text);
         if (ts.isVariableStatement(statement)) {
           const declarations = statement.declarationList.declarations.map(declaration => {
             if (!ts.isIdentifier(declaration.name) || !/^[A-Z]/.test(declaration.name.text) || !declaration.initializer) return declaration;
-            const updated = transformInitializer(declaration.initializer);
+            const updated = transformInitializer(declaration.initializer, declaration.name.text);
             return updated === declaration.initializer ? declaration : factory.updateVariableDeclaration(declaration, declaration.name, declaration.exclamationToken, declaration.type, updated);
           });
           return factory.updateVariableStatement(statement, statement.modifiers,
@@ -1091,7 +1158,7 @@ function reportLocalFactoryImpurity(
 }
 
 function isAssignmentOperator(kind: ts.SyntaxKind): boolean {
-  return kind === ts.SyntaxKind.EqualsToken || compoundOperator(ts.factory, kind) !== undefined;
+  return kind === ts.SyntaxKind.EqualsToken || compoundOperator(ts.factory, kind) !== undefined || isLogicalAssignment(kind);
 }
 
 function staticPropertyName(name: ts.PropertyName | ts.BindingName | undefined): string | undefined {
@@ -1256,8 +1323,78 @@ function compoundOperator(factory: ts.NodeFactory, kind: ts.SyntaxKind): ts.Bina
     case ts.SyntaxKind.AmpersandEqualsToken: return factory.createToken(ts.SyntaxKind.AmpersandToken) as ts.BinaryOperatorToken;
     case ts.SyntaxKind.BarEqualsToken: return factory.createToken(ts.SyntaxKind.BarToken) as ts.BinaryOperatorToken;
     case ts.SyntaxKind.CaretEqualsToken: return factory.createToken(ts.SyntaxKind.CaretToken) as ts.BinaryOperatorToken;
+    case ts.SyntaxKind.AsteriskAsteriskEqualsToken: return factory.createToken(ts.SyntaxKind.AsteriskAsteriskToken) as ts.BinaryOperatorToken;
+    case ts.SyntaxKind.LessThanLessThanEqualsToken: return factory.createToken(ts.SyntaxKind.LessThanLessThanToken) as ts.BinaryOperatorToken;
+    case ts.SyntaxKind.GreaterThanGreaterThanEqualsToken: return factory.createToken(ts.SyntaxKind.GreaterThanGreaterThanToken) as ts.BinaryOperatorToken;
+    case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken: return factory.createToken(ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken) as ts.BinaryOperatorToken;
     default: return undefined;
   }
+}
+
+/** True for the short-circuiting assignment operators. */
+function isLogicalAssignment(kind: ts.SyntaxKind): boolean {
+  return kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken ||
+    kind === ts.SyntaxKind.BarBarEqualsToken ||
+    kind === ts.SyntaxKind.QuestionQuestionEqualsToken;
+}
+
+/**
+ * Lowers `atom &&= right`, `atom ||= right`, and `atom ??= right` while
+ * preserving JavaScript's short-circuit and result semantics: the atom only
+ * emits when the operator's condition assigns, and the expression evaluates to
+ * the atom's value afterwards.
+ */
+function writeLogicalAtom(
+  factory: ts.NodeFactory,
+  atomName: string,
+  kind: ts.SyntaxKind,
+  right: ts.Expression,
+): ts.CallExpression {
+  const atom = factory.createIdentifier(atomName);
+  const current = factory.createUniqueName("__streamixCurrent");
+  const condition = kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken
+    ? current as ts.Expression
+    : kind === ts.SyntaxKind.BarBarEqualsToken
+      ? factory.createPrefixUnaryExpression(ts.SyntaxKind.ExclamationToken, current as ts.Expression)
+      : factory.createBinaryExpression(
+          factory.createBinaryExpression(
+            factory.createParenthesizedExpression(factory.createAsExpression(current, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword))),
+            factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
+            factory.createNull(),
+          ),
+          factory.createToken(ts.SyntaxKind.BarBarToken),
+          factory.createBinaryExpression(
+            factory.createParenthesizedExpression(factory.createAsExpression(current, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword))),
+            factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
+            factory.createIdentifier("undefined"),
+          ),
+        );
+  return factory.createCallExpression(
+    factory.createParenthesizedExpression(factory.createArrowFunction(
+      undefined,
+      undefined,
+      [],
+      undefined,
+      factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+      factory.createBlock([
+        factory.createVariableStatement(undefined, factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(current, undefined, undefined, factory.createPropertyAccessExpression(atom, "value")),
+        ], ts.NodeFlags.Const)),
+        factory.createIfStatement(
+          condition,
+          factory.createBlock([
+            factory.createExpressionStatement(writeAtom(factory, atom, right)),
+            factory.createReturnStatement(factory.createPropertyAccessExpression(atom, "value")),
+          ]),
+          factory.createBlock([
+            factory.createReturnStatement(current as ts.Expression),
+          ]),
+        ),
+      ], true),
+    )),
+    undefined,
+    [],
+  );
 }
 
 function rewriteAtomReads(
@@ -1267,6 +1404,16 @@ function rewriteAtomReads(
   context: ts.TransformationContext,
 ): ts.Expression {
   const visitor: ts.Visitor = (node) => {
+    // An explicit `.value` read already observes the atom's current value.
+    // Leave the whole expression untouched; descending would produce a
+    // nonsensical second `.value` on the resolved value.
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      node.name.text === "value" &&
+      atomReferenceName(node.expression, atoms, atomMaps)
+    ) {
+      return node;
+    }
     if (ts.isIdentifier(node) && atoms.has(node.text)) {
       return context.factory.createPropertyAccessExpression(node, "value");
     }

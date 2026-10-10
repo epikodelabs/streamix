@@ -79,4 +79,100 @@ describe("Streamix React adoption regressions", () => {
     expect(result.bindingCount).toBe(0);
     expect(result.code).not.toContain("__streamixUse");
   });
+
+  it("lowers every supported compound write instead of assigning to the atom object", () => {
+    const result = transformReactJsx(`
+      let count = atom(2);
+      let flag = atom(true);
+      let guess = atom(0);
+      export function Counter() {
+        count **= 3;
+        count <<= 1;
+        count >>= 1;
+        count >>>= 1;
+        count *= 4;
+        count &&= flag;
+        count ||= guess;
+        count ??= guess;
+        return <output>{count}</output>;
+      }
+    `);
+
+    expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
+    expect(result.code).toContain("count.next(count.value ** 3)");
+    expect(result.code).toContain("count.next(count.value << 1)");
+    expect(result.code).toContain("count.next(count.value >> 1)");
+    expect(result.code).toContain("count.next(count.value >>> 1)");
+    expect(result.code).toContain("count.next(count.value * 4)");
+    expect(result.code).toContain("count.next(flag.value)");
+    // Short-circuit writes only assign when the operator's condition holds.
+    expect(result.code).toContain("const __streamixCurrent");
+    expect((result.code.match(/const __streamixCurrent/g) ?? []).length).toBe(3);
+    expect(result.code).toContain("if (__streamixCurrent");
+    expect(result.code).toContain("!__streamixCurrent");
+    expect(result.code).toContain("=== null ||");
+    expect(result.code).toContain("=== undefined");
+  });
+
+  it("lowers explicit .value reads in JSX without producing a second .value", () => {
+    const result = transformReactJsx(`
+      let count = atom(2);
+      const model = { count };
+      export function Counter({ k }: { k: string }) {
+        count = count.value + 1;
+        return <output title={count.value.toFixed(2)}>{model[k].value}{model.count.value}</output>;
+      }
+    `);
+
+    expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
+    expect(result.code).toContain("count.next(count.value + 1)");
+    expect(result.code).toContain('__streamixUse(model[k], "model[k]")');
+    expect(result.code).toContain('__streamixUse(count, "count")');
+    expect(result.code).not.toContain(".value.value");
+    expect(result.code).toContain(".toFixed(2)");
+  });
+
+  it("keeps generated hooks before a possible return even with unrelated locals", () => {
+    const result = transformReactJsx(`
+      const count = atom(0);
+      export function Counter({ open }: { open: boolean }) {
+        const label = "counter";
+        if (!open) return null;
+        const detail = "static";
+        return <output data-label={label}>{count}</output>;
+      }
+    `);
+
+    expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
+    const hookIndex = result.code.indexOf("__streamixUse(count");
+    const returnIndex = result.code.indexOf("if (!open)");
+    expect(hookIndex).toBeGreaterThan(-1);
+    expect(returnIndex).toBeGreaterThan(-1);
+    expect(hookIndex).toBeLessThan(returnIndex);
+  });
+
+  it("reports a reactive binding that can only be initialized after a possible return", () => {
+    const result = transformReactJsx(`
+      const count = atom(0);
+      export function Counter({ open }: { open: boolean }) {
+        if (!open) return null;
+        const alias = count;
+        return <output>{alias}</output>;
+      }
+    `);
+
+    expect(result.diagnostics.some(d => d.category === "error" && d.message.includes("would run conditionally"))).toBe(true);
+  });
+
+  it("traces committed renders for arrow and memo components under their declared name", () => {
+    const arrow = transformReactJsx(`const status = atom("Ready"); export const App = () => <div>{status}</div>;`);
+    expect(arrow.code).toContain('__streamixTrace("render", "App")');
+
+    const memo = transformReactJsx(`
+      import { memo } from "react";
+      const status = atom("Ready");
+      export const App = memo(() => <div>{status}</div>);
+    `);
+    expect(memo.code).toContain('__streamixTrace("render", "App")');
+  });
 });
