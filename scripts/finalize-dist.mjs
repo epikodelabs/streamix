@@ -1,5 +1,5 @@
-import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,14 +30,6 @@ try {
 const manifest = JSON.parse(await fs.readFile(packagePath, 'utf8'));
 const builderManifest = './angular/builder/package.json';
 const reactBuilderManifest = './react/builder/package.json';
-
-// React has no public runtime adapter. The compiler injects its small React
-// bridge into transformed modules, so only the build-time compiler and builder
-// subpaths remain publicly importable.
-if (manifest.exports?.['./react']) {
-  delete manifest.exports['./react'];
-  await fs.writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`);
-}
 
 if (manifest.exports && !manifest.exports[builderManifest]) {
   manifest.exports[builderManifest] = builderManifest;
