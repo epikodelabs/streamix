@@ -126,7 +126,7 @@ describe("Streamix React adoption regressions", () => {
 
     expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
     expect(result.code).toContain("count.next(count.value + 1)");
-    expect(result.code).toContain('__streamixUse(model[k], "model[k]")');
+    expect(result.code).toContain('__streamixUse(model[k] as any, "model[k]")');
     expect(result.code).toContain('__streamixUse(count, "count")');
     expect(result.code).not.toContain(".value.value");
     expect(result.code).toContain(".toFixed(2)");
@@ -162,6 +162,20 @@ describe("Streamix React adoption regressions", () => {
     `);
 
     expect(result.diagnostics.some(d => d.category === "error" && d.message.includes("would run conditionally"))).toBe(true);
+  });
+
+  it("keeps heterogeneous dynamic selections type-agnostic at the generated call", () => {
+    const result = transformReactJsx(`
+      const title = atom("Ready");
+      const count = atom(0);
+      const model = { title, count };
+      export function View({ key }: { key: string }) {
+        return <output>{model[key]}</output>;
+      }
+    `);
+
+    expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
+    expect(result.code).toContain("__streamixUse(model[key] as any, \"model[key]\")");
   });
 
   it("traces committed renders for arrow and memo components under their declared name", () => {

@@ -91,8 +91,10 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.code).toContain("alias.next(alias.value + 1)");
-    expect(result.code).toContain('__streamixUse(useAlternate ? alternate : alias, "useAlternate ? alternate : alias")');
-    expect(result.code).toContain('__streamixUse(choices[useAlternate ? "alternate" : "count"], "choices[useAlternate ? \\"alternate\\" : \\"count\\"]")');
+    // Dynamic selections are type-agnostic at the subscription boundary so a
+    // heterogeneous atom union still satisfies the generated call.
+    expect(result.code).toContain('__streamixUse(useAlternate ? alternate : alias as any, "useAlternate ? alternate : alias")');
+    expect(result.code).toContain('__streamixUse(choices[useAlternate ? "alternate" : "count"] as any, "choices[useAlternate ? \\"alternate\\" : \\"count\\"]")');
   });
 
   it("reports direct assignment to a const atom binding instead of hiding TypeScript's error", () => {

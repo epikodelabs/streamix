@@ -460,7 +460,11 @@ export function transformReactJsx(
               undefined,
               factory.createAsExpression(
                 factory.createCallExpression(factory.createIdentifier("__streamixUse"), undefined, [
-                  atomSource,
+                  // Dynamic selections resolve to whatever atom lives at the
+                  // key at runtime, so the source is deliberately type-agnostic:
+                  // a heterogeneous union (string and number atoms) must still
+                  // satisfy the subscription helper's parameter.
+                  factory.createAsExpression(atomSource, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword)),
                   factory.createStringLiteral(key),
                 ]),
                 factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
