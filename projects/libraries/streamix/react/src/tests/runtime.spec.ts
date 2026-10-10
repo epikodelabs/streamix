@@ -1,4 +1,4 @@
-import { act, createElement, useState } from "react";
+import { act, createElement, StrictMode, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { atom, type Writable } from "@epikodelabs/streamix";
 import {
@@ -48,6 +48,31 @@ describe("React runtime escape hatches", () => {
 
     expect(seen.length).toBe(2);
     expect(seen[0]).toBe(seen[1]);
+  });
+
+  it("keeps a useAtom-owned atom writable through Strict Mode's mount-cleanup-remount cycle", async () => {
+    let owned!: Writable<number>;
+
+    function Counter() {
+      owned = useAtom(() => atom(0));
+      return createElement("output", null, String(owned.value));
+    }
+
+    await act(async () => {
+      root.render(createElement(StrictMode, null, createElement(Counter)));
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toBe("0");
+    expect(owned.disposed).toBe(false);
+    // A disposed atom ignores writes, so this only passes if the simulated
+    // Strict-Mode teardown never disposed the committed instance.
+    act(() => owned.next(1));
+    expect(owned.value).toBe(1);
+
+    act(() => root.unmount());
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(owned.disposed).toBe(true);
   });
 
   it("provides explicit read, write, reference, and SSR snapshot APIs", () => {

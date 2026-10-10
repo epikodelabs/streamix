@@ -82,13 +82,17 @@ export function __streamixUse<T>(source: DependencySource<T>, sourceName = "dyna
         compilerSubscriptions.set(sourceKey, entry);
       }
       entry.generation++;
-      entry.listeners.add(notify);
+      // Subscribe before joining the listener set: stateful atoms replay the
+      // current value synchronously during subscribe, and the value a new
+      // subscriber will read through getSnapshot is that same replay. Joining
+      // afterwards keeps React free of a redundant synchronous store change.
       if (!entry.stop) {
         entry.stop = source.subscribe(() => {
           __streamixTrace("write", sourceName);
           for (const listener of entry!.listeners) listener();
         });
       }
+      entry.listeners.add(notify);
       return () => {
         entry!.listeners.delete(notify);
         if (entry!.listeners.size > 0) return;
@@ -153,21 +157,14 @@ export function useWritable<T>(source: Writable<T>): [T, (value: T) => void] {
  * Creates a component-owned atom once per mounted component instance.
  * Factories must be render-pure: React may invoke them for an abandoned or
  * Strict-Mode development render. The owned atom is disposed after unmount.
+ *
+ * Ownership delegates to the same Strict-Mode-safe slot the compiler uses: the
+ * dispose pass is cancelled when the instance is re-owned by the remount of
+ * the same component, so a simulated Strict-Mode teardown never disposes an
+ * atom the committed component still holds.
  */
 export function useAtom<T extends Atom<any>>(factory: () => T): T {
-  const instance = useRef<T | null>(null);
-  if (instance.current === null) instance.current = factory();
-
-  useEffect(() => {
-    const owned = instance.current!;
-    return () => {
-      queueMicrotask(() => {
-        if (isDisposable(owned)) owned.dispose();
-      });
-    };
-  }, []);
-
-  return instance.current;
+  return __streamixLocal(factory);
 }
 
 export type ResourceStatus = "pending" | "ready" | "error";
@@ -308,16 +305,22 @@ export function useResource<T>(
     revision.current++; for (const notify of revisionNotify.current) notify();
     return stop;
   }, [getResource]);
-  return {
-    get status() { return resource.current?.status ?? "pending"; },
-    get data() { return resource.current?.data; },
-    get error() { return resource.current?.error; },
-    read() {
-      if (!resource.current) throw new Error("useResource loads after commit. For first-render Suspense, preload createResource() outside React render.");
-      return resource.current.read();
-    },
-    reload() { resource.current?.reload(); },
-  };
+  // The view is created once so consumers can depend on the resource object
+  // without it being a new identity every render; the getters stay live.
+  const view = useRef<Resource<T> | null>(null);
+  if (!view.current) {
+    view.current = {
+      get status() { return resource.current?.status ?? "pending"; },
+      get data() { return resource.current?.data; },
+      get error() { return resource.current?.error; },
+      read() {
+        if (!resource.current) throw new Error("useResource loads after commit. For first-render Suspense, preload createResource() outside React render.");
+        return resource.current.read();
+      },
+      reload() { resource.current?.reload(); },
+    };
+  }
+  return view.current;
 }
 
 /** Captures named atom values for an SSR payload. */
