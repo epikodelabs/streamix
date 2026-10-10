@@ -490,7 +490,7 @@
             "fileReplacements": [
               {
                 "replace": "projects/apps/app6/src/main.ts",
-                "with": ".angular/streamix/app6/src/main.ts"
+                "with": ".angular/.streamix/app6/src/main.ts"
               }
             ],
             "inlineStyleLanguage": "scss",
@@ -583,9 +583,9 @@
           "options": {
             "outputPath": "dist/apps/app7",
             "index": "projects/apps/app7/src/index.html",
-            "browser": ".angular/streamix-react/projects/apps/app7/src/main.tsx",
+            "browser": ".angular/.streamix/app7/src/main.tsx",
             "polyfills": [],
-            "tsConfig": ".angular/streamix-react/projects/apps/app7/tsconfig.app.json",
+            "tsConfig": ".angular/.streamix/app7/tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "assets": [],
             "styles": ["projects/apps/app7/src/styles.scss"],

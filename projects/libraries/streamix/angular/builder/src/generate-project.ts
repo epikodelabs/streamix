@@ -18,7 +18,7 @@ export interface SxGenerateProjectOptions {
 /**
  * Compiles one application source root through the Streamix compiler.
  *
- * Copies the source tree into `.angular/streamix/<app>/src`, rewrites every
+ * Copies the source tree into `.angular/.streamix/<app>/src`, rewrites every
  * component that has an inline template and writes the result — with the
  * compiled setup inlined — back into the virtual tree.
  */

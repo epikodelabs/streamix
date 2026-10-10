@@ -42,8 +42,8 @@ describe('streamix builder options', () => {
   });
 
   it('maps application source roots to virtual project roots', () => {
-    expect(virtualRootOf('projects/apps/app6/src')).toBe('.angular/streamix/app6/src');
-    expect(virtualRootOf('projects/apps/demo/src')).toBe('.angular/streamix/demo/src');
+    expect(virtualRootOf('projects/apps/app6/src')).toBe('.angular/.streamix/app6/src');
+    expect(virtualRootOf('projects/apps/demo/src')).toBe('.angular/.streamix/demo/src');
   });
 
 

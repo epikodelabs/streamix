@@ -75,7 +75,7 @@ export function shouldRegenerateOn(
 
 /** Maps an application source root to its virtual project root. */
 export function virtualRootOf(sourceRoot: string): string {
-  return `.angular/streamix/${sourceRoot
+  return `.angular/.streamix/${sourceRoot
     .replace(/^projects\/apps\//, '')
     .replace(/\/src$/, '')}/src`;
 }
