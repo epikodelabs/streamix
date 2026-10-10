@@ -2,6 +2,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { atom, derived, flow, scope } from "@epikodelabs/streamix";
+import { Button, Card, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from "./components/ui";
 
 // A standalone atom: a compiler lowers `value={title}` through atomBinding().
 let title = atom("Native atom property");
@@ -60,7 +61,7 @@ function LocalIsland() {
 
   return (
     <div className="island">
-      <button type="button" onClick={() => hits++}>Local atom clicks: {hits}</button>
+      <Button onClick={() => hits++}>Local atom clicks: {hits}</Button>
       <p className="muted">Scope tone: {local.tone} — owned by this component instance.</p>
     </div>
   );
@@ -82,80 +83,83 @@ function App() {
       </p>
 
       <section className="dashboard">
-        <article className="card profile-card">
+        <Card className="card profile-card">
           <div className="card-heading"><h2>Scoped profile</h2></div>
           <div className="grid">
             <label>
               Name
-              <input value={state.name} onChange={(event) => state.name = event.target.value} />
+              <Input value={state.name} onChange={(event) => state.name = event.target.value} />
             </label>
             <label>
               Role
-              <input value={state.role} onChange={(event) => state.role = event.target.value} />
+              <Input value={state.role} onChange={(event) => state.role = event.target.value} />
             </label>
             <label>
               Scoped message
-              <input value={state.message} onChange={(event) => state.message = event.target.value} />
+              <Input value={state.message} onChange={(event) => state.message = event.target.value} />
             </label>
             <label>
               Accent
-              <select value={state.accent} onChange={(event) => state.accent = event.target.value}>
-                <option value="violet">Violet</option>
-                <option value="cyan">Cyan</option>
-                <option value="lime">Lime</option>
-              </select>
+              <Select value={state.accent} onValueChange={(accent) => state.accent = accent}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="violet">Violet</SelectItem>
+                  <SelectItem value="cyan">Cyan</SelectItem>
+                  <SelectItem value="lime">Lime</SelectItem>
+                </SelectContent>
+              </Select>
             </label>
           </div>
           <div className="toggles">
-            <label className="toggle"><input type="checkbox" checked={state.enabled} onChange={(event) => state.enabled = event.target.checked} /> Enable workspace</label>
-            <label className="toggle"><input type="checkbox" checked={state.notifications} onChange={(event) => state.notifications = event.target.checked} /> Notifications</label>
+            <label className="toggle"><Switch checked={state.enabled} onCheckedChange={(enabled) => state.enabled = enabled} /> Enable workspace</label>
+            <label className="toggle"><Switch checked={state.notifications} onCheckedChange={(enabled) => state.notifications = enabled} /> Notifications</label>
           </div>
-        </article>
+        </Card>
 
-        <article className="card signal-card">
+        <Card className="card signal-card">
           <div className="card-heading"><h2>Standalone atoms</h2></div>
           <label>
             Atom-backed title
-            <input value={title} onChange={(event) => title = event.target.value} />
+            <Input value={title.value} onChange={(event) => title = event.target.value} />
           </label>
-          <button type="button" onClick={() => { clicks = clicks + 1; lastAction = `Counter incremented to ${clicks}`; }}>
+          <Button onClick={() => { clicks = clicks + 1; lastAction = `Counter incremented to ${clicks}`; }}>
             Increment atom counter: {clicks}
-          </button>
+          </Button>
           <p className="derived"><strong>Derived:</strong> {summary}</p>
           <p className="muted">Last action: {lastAction}</p>
-        </article>
+        </Card>
 
-        <article className="card flow-card">
+        <Card className="card flow-card">
           <div className="card-heading"><h2>Scope-owned flow</h2></div>
           <p className="flow-value">{state.connection ?? "Connecting…"}</p>
           <p className="muted">The flow progresses once, remains live, and is disposed with its scope.</p>
-        </article>
+        </Card>
 
-        <article className="card operators-card">
+        <Card className="card operators-card">
           <div className="card-heading"><h2>Write operators</h2></div>
           <div className="button-row">
-            <button type="button" onClick={() => tally += 2}>tally += 2</button>
-            <button type="button" onClick={() => tally *= 3}>tally *= 3</button>
-            <button type="button" onClick={() => tally++}>tally++</button>
-            <button type="button" onClick={() => power **= 2}>power **= 2</button>
-            <button type="button" onClick={() => label ||= "Labeled!"}>label ||= "Labeled!"</button>
-            <button type="button" onClick={() => nullable ??= 42}>nullable ??= 42</button>
+            <Button onClick={() => tally += 2}>tally += 2</Button>
+            <Button onClick={() => tally *= 3}>tally *= 3</Button>
+            <Button onClick={() => tally++}>tally++</Button>
+            <Button onClick={() => power **= 2}>power **= 2</Button>
+            <Button onClick={() => label ||= "Labeled!"}>label ||= "Labeled!</Button>
+            <Button onClick={() => nullable ??= 42}>nullable ??= 42</Button>
           </div>
           <p className="mono">tally {tally} · power {power} · label {label || "(empty)"} · nullable {nullable ?? "unset"}</p>
           <p className="muted">Compound, update, and logical writes all lower to atom emissions. Explicit read stays reactive: {tally.value}</p>
-        </article>
+        </Card>
 
-        <article className="card island-card">
+        <Card className="card island-card">
           <div className="card-heading"><h2>Component-local ownership</h2></div>
           <div className="button-row">
-            <button type="button" onClick={() => islandMounted = !islandMounted}>
+            <Button onClick={() => islandMounted = !islandMounted}>
               {islandMounted ? "Unmount island" : "Mount island"}
-            </button>
+            </Button>
           </div>
           {islandMounted ? <LocalIsland /> : <p className="muted">Island unmounted — its atom and scope were disposed with the instance.</p>}
-        </article>
+        </Card>
 
-        <article className="card alias-card">
+        <Card className="card alias-card">
           <div className="card-heading"><h2>Aliases, maps, selection</h2></div>
           <div className="button-row">
             <button type="button" onClick={() => clicks = clicks + 5}>clicks + 5 → {alias}</button>
@@ -164,7 +168,7 @@ function App() {
           </div>
           <p className="mono">Alias {alias} · Map {model.title} · Keyed {model[swapped.value ? "tally" : "title"]} · Destructured {mappedTitle}</p>
           <p className="derived"><strong>Selection:</strong> {swapped.value ? alias : title}</p>
-        </article>
+        </Card>
 
       </section>
 

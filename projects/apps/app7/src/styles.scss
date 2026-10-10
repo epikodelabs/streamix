@@ -1,12 +1,12 @@
 :root {
   color: #1d1d20;
-  background: #f3e7cd;
+  background: #fbf5e7;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; }
 html, body, #app { width: 100%; min-width: 320px; height: 100%; }
-body { margin: 0; min-height: 100dvh; overflow: auto; background: radial-gradient(circle at 12% 14%, #e4b723 0 3rem, transparent 3.1rem), radial-gradient(circle at 88% 10%, #1b4f9c 0 4.5rem, transparent 4.6rem), radial-gradient(circle at 92% 87%, #cf3d32 0 3rem, transparent 3.1rem), #f3e7cd; }
+body { margin: 0; min-height: 100dvh; overflow: auto; background: #fbf5e7; }
 
 /* The whole laboratory fits the viewport: hero, copy, dashboard, and preview
    share one non-scrolling grid. */
@@ -66,6 +66,20 @@ input:not([type="checkbox"]):focus, select:focus { border-color: #1b4f9c; outlin
 select { appearance: none; padding-right: 2.25rem; background-image: linear-gradient(45deg, transparent 50%, #1b4f9c 50%), linear-gradient(135deg, #1b4f9c 50%, transparent 50%); background-position: calc(100% - 1rem) 1rem, calc(100% - .7rem) 1rem; background-repeat: no-repeat; background-size: .32rem .32rem; cursor: pointer; }
 .toggle { grid-template-columns: auto 1fr; align-items: center; cursor: pointer; }
 .toggle input { width: 1rem; height: 1rem; margin: 0; accent-color: #cf3d32; cursor: pointer; }
+.ui-select-trigger { display: inline-flex; align-items: center; justify-content: space-between; width: 100%; min-height: 2.35rem; border: 2px solid #1d1d20; border-radius: .65rem; padding: .45rem .65rem; background: rgba(255, 250, 238, .92); color: #1d1d20; box-shadow: inset 0 1px rgba(29, 29, 32, .08); }
+.ui-select-trigger:hover { border-color: #1b4f9c; background: rgba(255, 250, 238, .92); box-shadow: inset 0 1px rgba(29, 29, 32, .08); transform: none; }
+.ui-select-trigger:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(27, 79, 156, .3); }
+.ui-select-icon { width: 1rem; height: 1rem; color: #1b4f9c; }
+.ui-select-content { z-index: 50; min-width: var(--radix-select-trigger-width); overflow: hidden; border: 2px solid #1d1d20; border-radius: .65rem; background: #fbf5e7; box-shadow: 4px 4px 0 #1d1d20; }
+.ui-select-item { position: relative; display: flex; align-items: center; min-height: 2.15rem; padding: .45rem 2rem .45rem .65rem; color: #1d1d20; font-size: .85rem; font-weight: 700; cursor: pointer; outline: none; }
+.ui-select-item[data-highlighted] { background: #f1ce54; }
+.ui-select-check { position: absolute; right: .6rem; display: grid; place-items: center; color: #cf3d32; }
+button.ui-switch { display: inline-flex; flex: 0 0 auto; align-items: center; width: 2.45rem; height: 1.4rem; min-height: 0; margin: 0; padding: 2px; border: 2px solid #1d1d20; border-radius: 99px; background: #d5e2f3; box-shadow: none; cursor: pointer; transform: none; }
+button.ui-switch[data-state="checked"] { background: #1b4f9c; }
+button.ui-switch:hover { background: #d5e2f3; box-shadow: none; transform: none; }
+button.ui-switch[data-state="checked"]:hover { background: #1b4f9c; }
+.ui-switch-thumb { display: block; width: .9rem; height: .9rem; border-radius: 50%; background: #fff9ec; box-shadow: 1px 1px 0 rgba(29, 29, 32, .35); transition: transform .16s ease; }
+.ui-switch-thumb[data-state="checked"] { transform: translateX(.95rem); }
 .toggles { display: grid; gap: .5rem; }
 .derived, .muted { margin: 0; }
 .derived { color: #a52e27; font-size: .85rem; }
