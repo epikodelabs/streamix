@@ -10,6 +10,16 @@ describe("Streamix React Vite fixture", () => {
     try {
       const entry = join(root, "src", "main.tsx");
       await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: {
+          baseUrl: process.cwd(),
+          jsx: "preserve",
+          paths: {
+            "@epikodelabs/streamix": ["projects/libraries/streamix/src/public-api.ts"],
+          },
+        },
+        include: ["src/**/*.tsx"],
+      }));
       await writeFile(entry, `
         import { atom } from "@epikodelabs/streamix";
         export const count = atom(0);
