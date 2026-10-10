@@ -1,56 +1,101 @@
-# Archived React Runtime Adapter
+# React Adoption Layer
 
-> The custom React hooks documented below have been removed. React integration
-> is now compiler-first; see [`docs/REACT.md`](../../../../docs/REACT.md) and
-> `@epikodelabs/streamix/react/compiler` instead.
-
-`@epikodelabs/streamix/react` connects Streamix state to React components.
-
-React still renders the UI. Streamix holds state, derived values, and asynchronous work. The adapter gives components a small set of hooks for reading, writing, and owning those reactive sources.
-
-## JSX adoption contract
-
-React components use atoms directly. The compiler resolves reactive expressions
-before they reach React; application code does not import subscription helpers.
+`@epikodelabs/streamix/react` is a compiler-first integration for React.
+Write Streamix atoms and scopes directly in TSX; the compiler lowers JSX reads
+to React's concurrent-safe external-store contract.
 
 ```tsx
-function Profile() {
-  let title = atom('Ready');
-  const state = scope({ enabled: true, message: 'Connected' });
+import { atom, scope } from "@epikodelabs/streamix";
+
+export function Profile() {
+  let name = atom("Ada");
+  const state = scope({ saved: true });
 
   return (
     <section>
-      <input value={title} onChange={event => title = event.target.value} />
-      <input type="checkbox" checked={state.enabled}
-        onChange={event => state.enabled = event.target.checked} />
-      <p>{title}: {state.message}</p>
+      <input value={name} onChange={event => name = event.target.value} />
+      <p>{state.saved ? "Saved" : "Editing"}: {name}</p>
     </section>
   );
 }
 ```
 
-### What the compiler does
+No subscription hook belongs in ordinary application component code.
 
-- A standalone `atom(...)` or `flow(...)` used in a JSX prop or child becomes
-  a React subscription.
-- A `derived(...)` atom is handled the same way, so a derived value can be
-  rendered directly as `{total}`.
-- A value-first scope field such as `state.message` is resolved reactively by
-  the compiler.
-- `atom = value` becomes `atom.next(value)`. Declare an atom with `let` when
-  using assignment syntax.
-- `scope.field = value` retains the normal scope write semantics.
-- Component code receives ordinary values; React never receives an atom object.
+## What the compiler supports
 
-All generated subscription code is an implementation detail. It is not part of
-application source or the public authoring API.
+- JSX reads of `atom(...)`, `derived(...)`, `flow(...)`, and scope fields.
+- Stable component-local atom, derived, flow, and scope ownership.
+- Direct, compound, prefix/postfix, and fully-known destructured atom writes.
+- Static aliases, destructuring, literal atom maps, and conditional selection.
+- Atom-reference transport to capitalized React components.
+- Concurrent-safe reads through `useSyncExternalStore`; subscriptions begin only
+  after a render commits.
 
-### Enable the compiler builder
+```tsx
+let primary = atom("Primary");
+const secondary = atom("Secondary");
+const choices = { primary, secondary };
 
-Use the Streamix React builder as the `build` and `serve` target, with a normal
-Angular application target as its delegate. The builder copies the application
-to `.angular/streamix-react/`, transforms every `.tsx` file, and delegates the
-generated entry to the normal esbuild application builder.
+function Choice({ alternate }: { alternate: boolean }) {
+  const { primary: selected } = choices;
+  return <button onClick={() => primary++}>
+    {choices[alternate ? "secondary" : "primary"]}: {selected}
+  </button>;
+}
+```
+
+Scope fields are granular:
+
+```tsx
+const state = scope({ title: "Ready", enabled: true });
+
+return <input
+  checked={state.enabled}
+  onChange={event => state.enabled = event.target.checked}
+  value={state.title}
+/>;
+```
+
+## Prop boundaries
+
+Atoms are values in JSX and native DOM props, but references when passed to a
+capitalized React component:
+
+```tsx
+const title = atom("Ready");
+
+function Editor({ source }: { source: typeof title }) {
+  return <input value={source.value} />;
+}
+
+<Editor source={title} />;
+```
+
+For custom elements or third-party components, mark a reference explicitly:
+
+```tsx
+import { atomRef } from "@epikodelabs/streamix/react";
+
+<x-editor source={atomRef(title)} />;
+```
+
+## Strict Mode and ownership
+
+Local reactive declarations are stable for a committed component instance and
+dispose after unmount. React development Strict Mode can abandon an initial
+render, so local initialization must be render-pure. The compiler rejects
+obvious render work in a local initializer: unknown calls, `new`, `await`, and
+writes.
+
+Start work from an effect, event handler, route loader, or explicit resource
+preload. A hook cannot retroactively give an abandoned render a committed
+identity.
+
+## Builder setup
+
+Use the Streamix React builder for `build` and `serve`, delegating to a normal
+Angular application target:
 
 ```json
 {
@@ -64,137 +109,42 @@ generated entry to the normal esbuild application builder.
 }
 ```
 
-Configure the delegated `application` target to use the generated entry and
-generated TypeScript project:
+Point the delegated target at preprocessing output:
 
 ```json
 {
-  "browser": ".angular/streamix-react/projects/apps/my-app/src/main.tsx",
-  "tsConfig": ".angular/streamix-react/projects/apps/my-app/tsconfig.app.json"
+  "browser": ".angular/.streamix/my-app/src/main.tsx",
+  "tsConfig": ".angular/.streamix/my-app/tsconfig.app.json"
 }
 ```
 
-`app7` is the complete working example, including standalone atoms, scoped
-properties, writes, boolean/select props, and a `flow()` source.
+The builder transforms TSX into `.angular/.streamix/<app>/src`, writes source
+maps beside transformed files, then delegates to the normal application build.
+`app7` is the working example.
 
-## Install
+## Explicit runtime boundaries
 
-```bash
-npm install @epikodelabs/streamix react
-```
-
-## Read and write an atom
-
-Use `useWritable()` when a component needs to display a value and update it.
+Dynamic paths, re-exports, proxy/getter-backed objects, unknown third-party
+props, and callbacks needing the current value remain explicit:
 
 ```tsx
-import { atom } from '@epikodelabs/streamix';
-import { useWritable } from '@epikodelabs/streamix/react';
+import { read, write } from "@epikodelabs/streamix/react";
 
-const counter = atom(0);
-
-function Counter() {
-  const [count, setCount] = useWritable(counter);
-
-  return (
-    <button onClick={() => setCount(count + 1)}>
-      {count}
-    </button>
-  );
-}
+setTimeout(() => console.log(read(status)), 1000);
+write(status, "Saved");
 ```
 
-The component receives the familiar `[value, setValue]` shape. The value still belongs to Streamix, so other components can use the same atom without creating a second copy of the state.
+`createResource(loader)` supplies explicit abortable Suspense resources:
+preload outside render, then call `read()` inside a Suspense boundary. For SSR,
+use `renderAtomSnapshotScript()` on the server and
+`hydrateAtomSnapshotFromDocument()` before `hydrateRoot()`.
 
-## Read reactive values
+## Tooling
 
-Use `useIterable()` when the component only needs to observe a Streamix atom, derived value, or flow.
+`StreamixDevtools` is an opt-in panel for reactive reads, subscriptions,
+writes, unsubscriptions, and committed renders. Compiler-added bindings map
+back to their originating JSX expression through generated source maps.
 
-```tsx
-import { derived } from '@epikodelabs/streamix';
-import { useIterable } from '@epikodelabs/streamix/react';
-
-const doubled = derived(() => counter.value * 2);
-
-function Total() {
-  const value = useIterable(doubled);
-  return <strong>{value}</strong>;
-}
-```
-
-`useIterable()` also works with a regular `AsyncIterable`. Provide an initial value for anything that does not have a value immediately:
-
-```tsx
-async function* messages() {
-  // Receive messages over time.
-}
-
-function Messages() {
-  const message = useIterable(messages(), 'Waiting…');
-  return <span>{message}</span>;
-}
-```
-
-## Keep feature state with the component
-
-Use `useScope()` when a component owns a group of related state.
-
-```tsx
-import { scope } from '@epikodelabs/streamix';
-import {
-  useIterable,
-  useScope,
-  useWritable,
-} from '@epikodelabs/streamix/react';
-
-function Counter() {
-  const state = useScope(() => scope({
-    count: 0,
-    doubled: self => self.count * 2,
-  }));
-
-  const [count, setCount] = useWritable(state.get('count'));
-  const doubled = useIterable(state.get('doubled'));
-
-  return (
-    <button onClick={() => setCount(count + 1)}>
-      {count} (doubled: {doubled})
-    </button>
-  );
-}
-```
-
-The scope is created once for the component and is cleaned up when the component is no longer on screen. This is useful for local state, calculated values, and asynchronous work that belong to the same feature.
-
-## Work with loading states
-
-Use `useSuspense()` when a component should wait for an atom’s first value before rendering.
-
-```tsx
-import { useSuspense } from '@epikodelabs/streamix/react';
-
-function Profile({ source }: { source: Atom<Profile> }) {
-  const profile = useSuspense(source);
-  return <span>{profile.name}</span>;
-}
-```
-
-Wrap the component in React’s `<Suspense>` boundary to decide what people see while the first value is loading.
-
-## Which hook should I use?
-
-| When the component needs to… | Use |
-| --- | --- |
-| Read and update an atom | `useWritable(source)` |
-| Read an atom, derived value, or flow | `useIterable(source)` |
-| Read a plain async iterable | `useIterable(source, initialValue)` |
-| Own related Streamix state for its lifetime | `useScope(() => scope(...))` |
-| Wait for the first atom value with Suspense | `useSuspense(source)` |
-
-There is no `useAtom` hook because React components usually need one of two things: a value they can **change**, or a value they can **observe**. The hook name makes that choice clear.
-
-## The goal
-
-The React adapter is intentionally small. It does not replace React’s rendering model or ask you to learn a second component model.
-
-Keep shared state and asynchronous work in Streamix. Use React for components. Let the adapter connect the two.
+For the complete semantics and limitations, see
+[React compiler semantics](../../../../docs/REACT-COMPILER-SEMANTICS.md) and
+[React documentation](../../../../docs/REACT.md).

@@ -1,125 +1,150 @@
-# ⚛️ Streamix and React
+# React Adoption Layer
 
-React apps can use streamix today. It is a TypeScript ESM library, so it can be
-imported from components, hooks, services, or event handlers.
-
-The caveat: streamix does not disappear into React's model. It brings its own
-atoms, scopes, cleanup, async pipelines, DOM sources, and networking. React
-already has conventions for many of those jobs. The official adapter —
-`@epikodelabs/streamix/react` — connects the two without pretending they are
-one runtime.
-
-So the honest answer is:
-
-> streamix is React-compatible, but it is not React-native.
-
-It can be useful in React, especially for async orchestration, but it should be
-treated as a separate runtime with a clear boundary.
-
-## ✅ Where It Fits
-
-streamix fits best when React owns the UI and streamix owns workflow logic:
-
-- event flows that are easier to express as pipelines
-- sequential async workflows
-- browser APIs that produce ongoing values
-- component-local orchestration with explicit cleanup
-- services that feed React at a controlled boundary
-
-The adapter covers the common handoff directly:
+`@epikodelabs/streamix/react` is a compiler-first integration for React.
+Write Streamix atoms and scopes directly in TSX; the compiler lowers JSX reads
+to React's concurrent-safe external-store contract.
 
 ```tsx
-import { useWritable } from '@epikodelabs/streamix/react';
+import { atom, scope } from "@epikodelabs/streamix";
 
-const [value, setValue] = useWritable(source);
+export function Profile() {
+  let name = atom("Ada");
+  const state = scope({ saved: true });
+
+  return (
+    <section>
+      <input value={name} onChange={event => name = event.target.value} />
+      <p>{state.saved ? "Saved" : "Editing"}: {name}</p>
+    </section>
+  );
+}
 ```
 
-A manual subscription is still valid, and is what the hooks do underneath:
+No subscription hook belongs in ordinary application component code.
+
+## What the compiler supports
+
+- JSX reads of `atom(...)`, `derived(...)`, `flow(...)`, and scope fields.
+- Stable component-local atom, derived, flow, and scope ownership.
+- Direct, compound, prefix/postfix, and fully-known destructured atom writes.
+- Static aliases, destructuring, literal atom maps, and conditional selection.
+- Atom-reference transport to capitalized React components.
+- Concurrent-safe reads through `useSyncExternalStore`; subscriptions begin only
+  after a render commits.
 
 ```tsx
-useEffect(() => {
-  const unsubscribe = flow.subscribe(value => {
-    setValue(value);
-  });
+let primary = atom("Primary");
+const secondary = atom("Secondary");
+const choices = { primary, secondary };
 
-  return () => unsubscribe();
-}, [flow]);
+function Choice({ alternate }: { alternate: boolean }) {
+  const { primary: selected } = choices;
+  return <button onClick={() => primary++}>
+    {choices[alternate ? "secondary" : "primary"]}: {selected}
+  </button>;
+}
 ```
 
-## ⚠️ Where It Does Not Blend In
+Scope fields are granular:
 
-streamix overlaps with React and its ecosystem:
+```tsx
+const state = scope({ title: "Ready", enabled: true });
 
-| Concern | React ecosystem | streamix |
-| --- | --- | --- |
-| Local UI state | `useState`, `useReducer`, external stores | atoms and derived atoms |
-| Subscriptions | `useSyncExternalStore` | atom subscriptions and async iterables |
-| Lifecycle | `useEffect` cleanup | scopes and cleanup sets |
-| DOM events | JSX handlers and refs | `addListener` and DOM event sources |
-| Data fetching | loaders, TanStack Query, SWR, Suspense patterns | pipelines and networking |
-This does not make streamix incompatible. It means you need to decide which
-runtime owns each part of the problem.
+return <input
+  checked={state.enabled}
+  onChange={event => state.enabled = event.target.checked}
+  value={state.title}
+/>;
+```
 
-## 📊 Current Fit
+## Prop boundaries
 
-| Area | Fit | Notes |
-| --- | --- | --- |
-| Package use | Good | React apps can import streamix normally. |
-| TypeScript | Good | APIs are typed and work in TS projects. |
-| Tree shaking | Good | ESM package with `sideEffects: false`. |
-| Component usage | Good | The adapter's hooks cover reads, writes, and ownership. |
-| Hook support | Good | `useWritable`, `useIterable`, `useScope`, `useSuspense`. |
-| External-store bridge | Good | `useIterable` reads through `useSyncExternalStore`. |
-| Concurrent rendering | Covered | Snapshots come from the external-store bridge, not render-phase reads. |
-| Suspense | Good | `useSuspense(atom)` and `suspense(atom)` for resources. |
-| SSR | Unclear | DOM, networking, and workers need explicit boundaries. |
+Atoms are values in JSX and native DOM props, but references when passed to a
+capitalized React component:
 
-## 🧩 The React Adapter
+```tsx
+const title = atom("Ready");
 
-`@epikodelabs/streamix/react` is the official entry point, and it stays small:
+function Editor({ source }: { source: typeof title }) {
+  return <input value={source.value} />;
+}
 
-- `useWritable(source)` - `[value, setValue]` for a writable atom
-- `useIterable(source)` - observe an atom, derived value, or flow (an initial
-  value is required for plain async iterables)
-- `useScope(() => scope(...))` - own a scope for the component's lifetime
-- `useSuspense(source)` - wait for an atom's first value inside `<Suspense>`
-- `suspense(source)` - adapt an atom into a Suspense resource for loaders
+<Editor source={title} />;
+```
 
-There is deliberately no `useAtom`: a component usually needs either a value it
-can change or a value it can observe, and the hook names make that choice
-explicit. The full surface lives in the
-[React adoption layer README](https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/react/README.md).
+For custom elements or third-party components, mark a reference explicitly:
 
-The hooks do not make streamix part of React's core model. They make the
-boundary safe to repeat.
+```tsx
+import { atomRef } from "@epikodelabs/streamix/react";
 
-## 🛠️ Practical Guidance
+<x-editor source={atomRef(title)} />;
+```
 
-Use React first for React-shaped problems:
+## Strict Mode and ownership
 
-- local UI state
-- rendering subscriptions
-- JSX event handlers
-- route and framework data loading
-- server rendering boundaries
-- existing data-cache workflows
+Local reactive declarations are stable for a committed component instance and
+dispose after unmount. React development Strict Mode can abandon an initial
+render, so local initialization must be render-pure. The compiler rejects
+obvious render work in a local initializer: unknown calls, `new`, `await`, and
+writes.
 
-Use streamix when the problem is better described as workflow orchestration:
+Start work from an effect, event handler, route loader, or explicit resource
+preload. A hook cannot retroactively give an abandoned render a committed
+identity.
 
-- "listen to this source, transform it, cancel stale work"
-- "run these async steps in order"
-- "coordinate background work"
-- "consume browser events as a flow"
-- "keep this orchestration outside the component tree"
+## Builder setup
 
-The clean architecture is not "replace React patterns with streamix." It is
-"let React render, let streamix orchestrate, and keep the handoff small."
+Use the Streamix React builder for `build` and `serve`, delegating to a normal
+Angular application target:
 
-## 🎯 Final Assessment
+```json
+{
+  "build": {
+    "builder": "@epikodelabs/streamix/react/builder:application",
+    "options": {
+      "delegateTarget": "my-app:application",
+      "sourceRoot": "projects/apps/my-app/src"
+    }
+  }
+}
+```
 
-streamix can work well in React, but it should not be presented as seamless
-React ecosystem integration.
+Point the delegated target at preprocessing output:
 
-> streamix is React-compatible today. It can live inside React apps as a
-> companion runtime for async orchestration, but because it implements overlapping
-> primitives itself, the integration boundary should be explicit.
+```json
+{
+  "browser": ".angular/.streamix/my-app/src/main.tsx",
+  "tsConfig": ".angular/.streamix/my-app/tsconfig.app.json"
+}
+```
+
+The builder transforms TSX into `.angular/.streamix/<app>/src`, writes source
+maps beside transformed files, then delegates to the normal application build.
+`app7` is the working example.
+
+## Explicit runtime boundaries
+
+Dynamic paths, re-exports, proxy/getter-backed objects, unknown third-party
+props, and callbacks needing the current value remain explicit:
+
+```tsx
+import { read, write } from "@epikodelabs/streamix/react";
+
+setTimeout(() => console.log(read(status)), 1000);
+write(status, "Saved");
+```
+
+`createResource(loader)` supplies explicit abortable Suspense resources:
+preload outside render, then call `read()` inside a Suspense boundary. For SSR,
+use `renderAtomSnapshotScript()` on the server and
+`hydrateAtomSnapshotFromDocument()` before `hydrateRoot()`.
+
+## Tooling
+
+`StreamixDevtools` is an opt-in panel for reactive reads, subscriptions,
+writes, unsubscriptions, and committed renders. Compiler-added bindings map
+back to their originating JSX expression through generated source maps.
+
+For the complete semantics and limitations, see
+[React compiler semantics](../../../../docs/REACT-COMPILER-SEMANTICS.md) and
+[React documentation](../../../../docs/REACT.md).

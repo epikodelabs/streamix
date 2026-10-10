@@ -2,7 +2,7 @@
 
 Interactive React smoke-test application for the Streamix JSX adoption layer.
 
-It covers the complete first-pass React adoption surface:
+It covers the compiler-first React adoption surface:
 
 - a standalone atom adapted with `atomBinding()`;
 - a value-first scope field adapted with `scopeBinding(scope, key)`, which uses
@@ -18,6 +18,6 @@ Run it with:
 npx ng serve app7
 ```
 
-This is the compiler target shape. The forthcoming JSX compiler will generate
-the binding and `useBinding()` calls automatically from atom-valued JSX
-expressions.
+The Streamix React builder compiles direct JSX atom reads and preserves atom
+references at capitalized component boundaries. Generated hooks and
+subscriptions are compiler implementation details, not application APIs.
