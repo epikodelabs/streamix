@@ -1,4 +1,5 @@
 import { transformReactJsx } from "./compiler";
+import ts from "typescript";
 
 describe("Streamix React adoption regressions", () => {
   it("adopts arrow components and preserves local atom ownership without JSX reads", () => {
@@ -49,5 +50,33 @@ describe("Streamix React adoption regressions", () => {
     `);
     expect(result.diagnostics.some(diagnostic => diagnostic.category === "error" && diagnostic.message.includes("after a possible return"))).toBe(true);
     expect(result.code).not.toContain("__streamixLocal");
+  });
+
+  it("uses a host TypeScript program to refuse same-named non-Streamix factories", () => {
+    const fileName = "/workspace/Counter.tsx";
+    const source = `
+      const atom = (value: number) => ({ value });
+      const count = atom(0);
+      export function Counter() { return <span>{count}</span>; }
+    `;
+    const host: ts.CompilerHost = {
+      getSourceFile: name => name === fileName
+        ? ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+        : undefined,
+      getDefaultLibFileName: () => "",
+      writeFile: () => undefined,
+      getCurrentDirectory: () => "/workspace",
+      getCanonicalFileName: name => name,
+      useCaseSensitiveFileNames: () => true,
+      getNewLine: () => "\n",
+      fileExists: name => name === fileName,
+      readFile: name => name === fileName ? source : undefined,
+      getDirectories: () => [],
+    };
+    const program = ts.createProgram([fileName], { jsx: ts.JsxEmit.Preserve, noLib: true }, host);
+
+    const result = transformReactJsx(source, fileName, { program });
+    expect(result.bindingCount).toBe(0);
+    expect(result.code).not.toContain("__streamixUse");
   });
 });

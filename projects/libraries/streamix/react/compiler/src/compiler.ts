@@ -7,8 +7,14 @@ export interface ReactJsxTransformResult {
   readonly bindingCount: number;
   /** Diagnostics for syntax that cannot receive a safe implicit rewrite. */
   readonly diagnostics: readonly ReactJsxDiagnostic[];
-  /** Statement-anchored original-source map for downstream bundler composition. */
+  /** Original-source map with generated-binding and preserved-token anchors. */
   readonly sourceMap?: ReactJsxSourceMap;
+}
+
+/** Optional semantic context supplied by hosts that own a TypeScript Program. */
+export interface ReactJsxTransformOptions {
+  /** Resolves imported/re-exported Streamix factories by TypeScript symbol. */
+  readonly program?: ts.Program;
 }
 
 export interface ReactJsxSourceMap {
@@ -155,9 +161,14 @@ function streamixFactoryImports(file: ts.SourceFile): FactoryImports {
   }
   return { aliases, namespaces, excluded };
 }
-function factoryKind(node: ts.Expression, imports: FactoryImports): string | undefined {
+function factoryKind(
+  node: ts.Expression,
+  imports: FactoryImports,
+  checker?: ts.TypeChecker,
+): string | undefined {
   if (!ts.isCallExpression(node)) return undefined;
   const callee = node.expression;
+  if (checker) return semanticFactoryKind(callee, checker);
   if (ts.isIdentifier(callee)) {
     const name = imports.aliases.get(callee.text) ?? (imports.excluded.has(callee.text) ? undefined : callee.text);
     return name && ["atom", "derived", "flow", "scope"].includes(name) ? name : undefined;
@@ -168,26 +179,49 @@ function factoryKind(node: ts.Expression, imports: FactoryImports): string | und
   return undefined;
 }
 
-export function transformReactJsx(source: string, fileName = "component.tsx"): ReactJsxTransformResult {
-  const sourceFile = ts.createSourceFile(
+function semanticFactoryKind(callee: ts.Expression, checker: ts.TypeChecker): string | undefined {
+  const candidate = ts.isIdentifier(callee)
+    ? callee
+    : ts.isPropertyAccessExpression(callee) ? callee.name : undefined;
+  if (!candidate) return undefined;
+  let symbol = checker.getSymbolAtLocation(candidate);
+  if (!symbol) return undefined;
+  if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+  const name = symbol.getName();
+  if (!['atom', 'derived', 'flow', 'scope'].includes(name)) return undefined;
+  const isStreamixDeclaration = (symbol.declarations ?? []).some(declaration => {
+    const path = declaration.getSourceFile().fileName.replace(/\\/g, '/');
+    return path.includes('/@epikodelabs/streamix/') || path.includes('/projects/libraries/streamix/');
+  });
+  return isStreamixDeclaration ? name : undefined;
+}
+
+export function transformReactJsx(
+  source: string,
+  fileName = "component.tsx",
+  options: ReactJsxTransformOptions = {},
+): ReactJsxTransformResult {
+  const programSource = options.program?.getSourceFile(fileName);
+  const sourceFile = programSource?.text === source ? programSource : ts.createSourceFile(
     fileName,
     source,
     ts.ScriptTarget.Latest,
     true,
     ts.ScriptKind.TSX,
   );
+  const checker = programSource?.text === source ? options.program?.getTypeChecker() : undefined;
   const imports = streamixFactoryImports(sourceFile);
   let bindingCount = 0;
   let needsRuntimeImport = false;
   const diagnostics: ReactJsxDiagnostic[] = [];
   const sourceMapAnchors: SourceMapAnchor[] = [];
   const moduleAtoms = new Set([
-    ...collectModuleBindings(sourceFile, "atom", imports),
-    ...collectModuleBindings(sourceFile, "derived", imports),
-    ...collectModuleBindings(sourceFile, "flow", imports),
+    ...collectModuleBindings(sourceFile, "atom", imports, checker),
+    ...collectModuleBindings(sourceFile, "derived", imports, checker),
+    ...collectModuleBindings(sourceFile, "flow", imports, checker),
   ]);
-  const moduleScopes = collectModuleBindings(sourceFile, "scope", imports);
-  const moduleWritableAtoms = collectModuleWritableBindings(sourceFile, imports);
+  const moduleScopes = collectModuleBindings(sourceFile, "scope", imports, checker);
+  const moduleWritableAtoms = collectModuleWritableBindings(sourceFile, imports, checker);
   const moduleAtomMaps = collectModuleAtomMaps(sourceFile, moduleAtoms, moduleWritableAtoms);
 
   const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
@@ -227,7 +261,7 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
             continue;
           }
           {
-            const kind = factoryKind(declaration.initializer, imports);
+            const kind = factoryKind(declaration.initializer, imports, checker);
             if (kind === "atom" || kind === "derived" || kind === "flow") {
               if (hasEarlierReturn) {
                 diagnostics.push(diagnostic(
@@ -331,7 +365,7 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
         for (const declaration of statement.declarationList.declarations) {
           const names = new Set<string>(); boundNames(declaration.name, names);
           for (const name of names) {
-            if (!localReactiveDeclarations.has(declaration) &&
+            if (!atomMaps.has(name) && !localReactiveDeclarations.has(declaration) &&
                 !(ts.isIdentifier(declaration.name) && declaration.initializer && ts.isIdentifier(declaration.initializer) && atoms.has(declaration.initializer.text)) &&
                 !(ts.isObjectBindingPattern(declaration.name) && atoms.has(name))) {
               plainShadowed.add(name);
@@ -686,11 +720,10 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
 }
 
 /**
- * Emits original-source anchors for each printed top-level statement. The
- * prelude and compiler-created expressions intentionally remain unmapped;
- * their code is not authored by the user. Bundlers can compose these anchors
- * with their normal TSX/JS maps without pointing diagnostics at the virtual
- * preprocessing directory.
+ * Emits original-source anchors for generated bindings and preserved tokens.
+ * Generated runtime imports intentionally remain unmapped, while compiler
+ * bindings map directly to their JSX source expression. Bundlers can compose
+ * this with their normal TSX/JS maps without exposing the virtual source tree.
  */
 function createStatementSourceMap(
   original: ts.SourceFile,
@@ -723,6 +756,25 @@ function createStatementSourceMap(
     const position = code.indexOf(emitted);
     if (position >= 0) addAnchor(position, anchor.source);
   }
+  // TS retains original nodes through the transformation. Anchor preserved
+  // leaf tokens too, which gives composed maps real columns within authored
+  // expressions rather than only their enclosing statement's start column.
+  const leaves: ts.Node[] = [];
+  const collectLeaves = (node: ts.Node): void => {
+    const originalNode = ts.getOriginalNode(node);
+    if (originalNode.pos >= 0 && isMappableSourceLeaf(node)) leaves.push(node);
+    ts.forEachChild(node, collectLeaves);
+  };
+  collectLeaves(transformed);
+  let leafSearchFrom = printedOffset;
+  for (const leaf of leaves) {
+    const emitted = printer.printNode(ts.EmitHint.Unspecified, leaf, transformed);
+    if (!emitted || emitted.includes("\n")) continue;
+    const position = code.indexOf(emitted, leafSearchFrom);
+    if (position < 0) continue;
+    addAnchor(position, ts.getOriginalNode(leaf));
+    leafSearchFrom = position + Math.max(1, emitted.length);
+  }
   return {
     version: 3,
     file: original.fileName,
@@ -731,6 +783,13 @@ function createStatementSourceMap(
     names: [],
     mappings: encodeLineMappings(mapLines),
   };
+}
+
+function isMappableSourceLeaf(node: ts.Node): boolean {
+  return ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node) ||
+    ts.isNoSubstitutionTemplateLiteral(node) || node.kind === ts.SyntaxKind.ThisKeyword ||
+    node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword ||
+    node.kind === ts.SyntaxKind.NullKeyword;
 }
 
 function lineAndColumnAt(text: string, offset: number): { line: number; column: number } {
@@ -820,13 +879,18 @@ function isAtomReferenceExpression(expression: ts.Expression, atoms: ReadonlySet
 
 const runtimePrelude = `import { __streamixAfterCommit, __streamixLocal, __streamixTrace, __streamixUse } from "@epikodelabs/streamix/react";`;
 
-function collectModuleBindings(sourceFile: ts.SourceFile, factoryName: string, imports: FactoryImports): Set<string> {
+function collectModuleBindings(
+  sourceFile: ts.SourceFile,
+  factoryName: string,
+  imports: FactoryImports,
+  checker?: ts.TypeChecker,
+): Set<string> {
   const names = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
       if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)) continue;
-      if (factoryKind(declaration.initializer, imports) === factoryName) {
+      if (factoryKind(declaration.initializer, imports, checker) === factoryName) {
         names.add(declaration.name.text);
       }
     }
@@ -834,13 +898,17 @@ function collectModuleBindings(sourceFile: ts.SourceFile, factoryName: string, i
   return names;
 }
 
-function collectModuleWritableBindings(sourceFile: ts.SourceFile, imports: FactoryImports): Set<string> {
+function collectModuleWritableBindings(
+  sourceFile: ts.SourceFile,
+  imports: FactoryImports,
+  checker?: ts.TypeChecker,
+): Set<string> {
   const names = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement) || (statement.declarationList.flags & ts.NodeFlags.Let) === 0) continue;
     for (const declaration of statement.declarationList.declarations) {
       if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)) continue;
-      if (["atom", "derived", "flow"].includes(factoryKind(declaration.initializer, imports) ?? "")) {
+      if (["atom", "derived", "flow"].includes(factoryKind(declaration.initializer, imports, checker) ?? "")) {
         names.add(declaration.name.text);
       }
     }

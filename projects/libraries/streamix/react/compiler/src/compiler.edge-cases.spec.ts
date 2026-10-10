@@ -9,11 +9,12 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.bindingCount).toBe(0);
-    expect(result.code).not.toContain("__streamixUseSyncExternalStore");
+    expect(result.code).not.toContain("__streamixUse");
     expect(result.code).toContain("<span>{text}</span>");
     expect(result.sourceMap?.sources.length).toBe(1);
     expect(result.sourceMap?.sourcesContent.join("\n")).toContain("function Label");
     expect(result.sourceMap?.mappings.length).toBeGreaterThan(0);
+    expect((result.sourceMap?.mappings.match(/,/g) ?? []).length).toBeGreaterThan(1);
   });
 
   it("subscribes to a module-owned atom without changing its ownership", () => {
@@ -36,7 +37,7 @@ describe("React JSX compiler edge cases", () => {
       }
     `);
 
-    expect(result.code).toContain("useRef as __streamixUseRef");
+    expect(result.code).toContain('import { __streamixAfterCommit, __streamixLocal, __streamixTrace, __streamixUse } from "@epikodelabs/streamix/react"');
     expect(result.code).toContain("let count = __streamixLocal(() => atom(0))");
     expect(result.code).toContain('__streamixUse(count, "count")');
   });
@@ -281,46 +282,45 @@ describe("React JSX compiler edge cases", () => {
     expect(result.code).toContain("total.next(__streamixAssigned");
   });
 
-  it("installs subscriptions through useSyncExternalStore rather than while evaluating JSX", () => {
+  it("uses the shared concurrent-safe runtime rather than injecting subscriptions into JSX", () => {
     const result = transformReactJsx(`
       const count = atom(0);
       function Counter() { return <span>{count}</span>; }
     `);
 
-    // React invokes the subscribe callback only after a render commits. This
-    // protects interrupted/concurrently abandoned renders from subscribing.
-    expect(result.code).toContain("return __streamixUseSyncExternalStore(");
-    expect(result.code).toContain("entry.stop = source.subscribe");
+    expect(result.code).toContain('from "@epikodelabs/streamix/react"');
+    expect(result.code).toContain('__streamixUse(count, "count")');
+    expect(result.code).not.toContain("source.subscribe");
   });
 
-  it("defers final unsubscribe so Strict Mode's effect re-subscribe preserves a shared source", () => {
+  it("delegates Strict Mode-safe teardown to the shared runtime", () => {
     const result = transformReactJsx(`
       const count = atom(0);
       function Counter() { return <span>{count}</span>; }
     `);
 
-    expect(result.code).toContain("queueMicrotask(() => {");
-    expect(result.code).toContain("entry!.generation !== generation || entry!.listeners.size > 0");
-    expect(result.code).toContain("void entry!.stop()");
+    expect(result.code).toContain("__streamixUse");
+    expect(result.code).not.toContain("queueMicrotask");
   });
 
-  it("removes the final subscription on unmount and releases its shared registry entry", () => {
+  it("uses one shared registry implementation for unmount cleanup", () => {
     const result = transformReactJsx(`
       const count = atom(0);
       function Counter() { return <span>{count}</span>; }
     `);
 
-    expect(result.code).toContain("entry!.listeners.delete(notify)");
-    expect(result.code).toContain("__streamixSubscriptions.delete(source)");
+    expect(result.code).toContain('from "@epikodelabs/streamix/react"');
+    expect(result.code).not.toContain("__streamixSubscriptions");
   });
 
-  it("generates a server snapshot getter alongside the client snapshot getter", () => {
+  it("delegates server snapshot reads to the shared runtime", () => {
     const result = transformReactJsx(`
       const count = atom(0);
       function Counter() { return <span>{count}</span>; }
     `);
 
-    expect((result.code.match(/return source\.value; \} catch \{ return undefined; \}/g) ?? []).length).toBe(2);
+    expect(result.code).toContain('__streamixUse(count, "count")');
+    expect(result.code).not.toContain("return source.value");
   });
 
   it("traces committed component renders without a render-phase side effect", () => {
@@ -330,6 +330,6 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.code).toContain('__streamixTrace("render", "Counter")');
-    expect(result.code).toContain("__streamixUseEffect(() => {");
+    expect(result.code).toContain("__streamixAfterCommit(() => {");
   });
 });
