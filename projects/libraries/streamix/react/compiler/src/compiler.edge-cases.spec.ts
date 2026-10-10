@@ -197,6 +197,20 @@ describe("React JSX compiler edge cases", () => {
     expect(result.code).toContain("<Child source={count}/>");
   });
 
+  it("reads a destructured atom prop typed with typeof directly in JSX", () => {
+    const result = transformReactJsx(`
+      const title = atom("Ready");
+      function Editor({ source }: { source: typeof title }) {
+        return <input value={source} />;
+      }
+      function Screen() { return <Editor source={title} />; }
+    `);
+
+    expect(result.bindingCount).toBe(1);
+    expect(result.code).toContain('__streamixUse(source, "source")');
+    expect(result.code).toContain("<Editor source={title}/>");
+  });
+
   it("still passes an atom snapshot to a native DOM property", () => {
     const result = transformReactJsx(`
       const count = atom(0);

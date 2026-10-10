@@ -101,6 +101,12 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
       const localReactiveDeclarations = new Set<ts.VariableDeclaration>();
       let insertionIndex = 0;
 
+      // A destructured prop explicitly typed as `typeof someAtom` is a shared
+      // atom reference at this component boundary. This keeps the receiving
+      // component compiler-first too: `<Editor source={title} />` can render
+      // `{source}` without a manual `.value` read.
+      collectTypedAtomProps(node, moduleAtoms, atoms);
+
       node.body.statements.forEach((statement, index) => {
         if (!ts.isVariableStatement(statement)) return;
         for (const declaration of statement.declarationList.declarations) {
@@ -768,6 +774,32 @@ function collectModuleAtomMaps(
     }
   }
   return maps;
+}
+
+function collectTypedAtomProps(
+  node: ts.FunctionLikeDeclarationBase,
+  knownAtoms: ReadonlySet<string>,
+  atoms: Set<string>,
+): void {
+  for (const parameter of node.parameters) {
+    if (!ts.isObjectBindingPattern(parameter.name) || !parameter.type || !ts.isTypeLiteralNode(parameter.type)) {
+      continue;
+    }
+    const typedProperties = new Map<string, string>();
+    for (const member of parameter.type.members) {
+      if (!ts.isPropertySignature(member) || !member.type || !member.name || !ts.isTypeQueryNode(member.type)) continue;
+      const propertyName = staticPropertyName(member.name);
+      const typeName = ts.isIdentifier(member.type.exprName) ? member.type.exprName.text : undefined;
+      if (propertyName && typeName && knownAtoms.has(typeName)) typedProperties.set(propertyName, typeName);
+    }
+    for (const element of parameter.name.elements) {
+      if (!ts.isIdentifier(element.name)) continue;
+      const propertyName = element.propertyName
+        ? staticPropertyName(element.propertyName)
+        : element.name.text;
+      if (propertyName && typedProperties.has(propertyName)) atoms.add(element.name.text);
+    }
+  }
 }
 
 function diagnostic(node: ts.Node, category: ReactJsxDiagnostic["category"], message: string): ReactJsxDiagnostic {

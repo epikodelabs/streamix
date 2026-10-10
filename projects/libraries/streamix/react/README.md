@@ -66,7 +66,7 @@ capitalized React component:
 const title = atom("Ready");
 
 function Editor({ source }: { source: typeof title }) {
-  return <input value={source.value} />;
+  return <input value={source} />;
 }
 
 <Editor source={title} />;
