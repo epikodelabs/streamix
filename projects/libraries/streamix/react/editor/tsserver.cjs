@@ -7,6 +7,28 @@
 module.exports = function init(modules) {
   const ts = modules.typescript;
 
+  // Atom writes the editor lowers to `.next(...)` in the virtual document so
+  // the authored operator type-checks. Mirrors the production compiler's
+  // operator table. `null` marks plain assignment.
+  const WRITE_OPERATORS = new Map([
+    [ts.SyntaxKind.EqualsToken, null],
+    [ts.SyntaxKind.PlusEqualsToken, "+"],
+    [ts.SyntaxKind.MinusEqualsToken, "-"],
+    [ts.SyntaxKind.AsteriskEqualsToken, "*"],
+    [ts.SyntaxKind.SlashEqualsToken, "/"],
+    [ts.SyntaxKind.PercentEqualsToken, "%"],
+    [ts.SyntaxKind.AmpersandEqualsToken, "&"],
+    [ts.SyntaxKind.BarEqualsToken, "|"],
+    [ts.SyntaxKind.CaretEqualsToken, "^"],
+    [ts.SyntaxKind.AsteriskAsteriskEqualsToken, "**"],
+    [ts.SyntaxKind.LessThanLessThanEqualsToken, "<<"],
+    [ts.SyntaxKind.GreaterThanGreaterThanEqualsToken, ">>"],
+    [ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken, ">>>"],
+    [ts.SyntaxKind.AmpersandAmpersandEqualsToken, "&&"],
+    [ts.SyntaxKind.BarBarEqualsToken, "||"],
+    [ts.SyntaxKind.QuestionQuestionEqualsToken, "??"],
+  ]);
+
   function isTsx(fileName) { return /\.tsx$/i.test(fileName); }
 
   function virtualize(fileName, source) {
@@ -29,35 +51,110 @@ module.exports = function init(modules) {
       ts.forEachChild(node, visit);
     };
     visit(file);
+
+    // An explicit `.value` read already observes the current value; rewriting
+    // its base would produce a nonsensical second `.value` in the virtual
+    // document.
+    const isValueRead = node => ts.isPropertyAccessExpression(node.parent) &&
+      node.parent.expression === node && node.parent.name.text === "value";
+
     const rewriteReads = node => {
-      // The emitted compiler lowers reactive values in JSX to `.value` (via
-      // its React subscription helper).  The virtual file only needs the type
-      // shape, so preserving `.value` gives TypeScript the authored value type
-      // without injecting runtime behavior into the editor process.
-      if (ts.isIdentifier(node) && atoms.has(node.text)) {
+      // The emitted compiler lowers reactive values in JSX to their current
+      // value (through the runtime's concurrent-safe subscription helper). The
+      // virtual file only needs the type shape, so an identifier read becomes
+      // `.value`, giving TypeScript the authored value type without injecting
+      // runtime behavior into the editor process.
+      if (ts.isIdentifier(node) && atoms.has(node.text) && !isValueRead(node)) {
         edits.push({ start: node.getStart(file), end: node.end, text: `${node.text}.value` });
         return;
       }
-      // A write is handled by the outer traversal.  Never rewrite its target
-      // as a read, including inside JSX callback expressions.
+      // A write is lowered by the outer traversal, which patches reads on the
+      // right side itself. Never rewrite the target as a read, and don't
+      // descend into a right side that the whole-write edit will replace.
       if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) && atoms.has(node.left.text) &&
-          (node.operatorToken.kind === ts.SyntaxKind.EqualsToken || node.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken)) {
-        rewriteReads(node.right);
+          WRITE_OPERATORS.has(node.operatorToken.kind)) {
         return;
       }
       if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
           ts.isIdentifier(node.operand) && atoms.has(node.operand.text)) return;
       ts.forEachChild(node, rewriteReads);
     };
+
+    // Reads inside a write's right-hand side must observe the value inside the
+    // lowered `.next(...)` argument. Collect them into a private list so the
+    // whole-write edit can apply them itself.
+    const collectReadEdits = (node, out) => {
+      if (ts.isIdentifier(node) && atoms.has(node.text) && !isValueRead(node)) {
+        out.push({ start: node.getStart(file), end: node.end, text: `${node.text}.value` });
+        return;
+      }
+      if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) && atoms.has(node.left.text) &&
+          WRITE_OPERATORS.has(node.operatorToken.kind)) {
+        return;
+      }
+      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+          ts.isIdentifier(node.operand) && atoms.has(node.operand.text)) return;
+      ts.forEachChild(node, n => collectReadEdits(n, out));
+    };
+
+    const patchText = (text, localEdits, baseOffset) => {
+      if (localEdits.length === 0) return text;
+      let cursor = 0;
+      let patched = "";
+      for (const edit of localEdits) {
+        patched += text.slice(cursor, edit.start - baseOffset);
+        patched += edit.text;
+        cursor = edit.end - baseOffset;
+      }
+      patched += text.slice(cursor);
+      return patched;
+    };
+
     const rewrite = node => {
       if (ts.isJsxExpression(node) && node.expression) rewriteReads(node.expression);
-      if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) && atoms.has(node.left.text)) {
-        const right = source.slice(node.right.getStart(file), node.right.end);
-        if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-          edits.push({ start: node.getStart(file), end: node.end, text: `${node.left.text}.next(${right})` });
-        } else if (node.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken) {
-          edits.push({ start: node.getStart(file), end: node.end, text: `${node.left.text}.next(${node.left.text}.value + (${right}))` });
+      if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) && atoms.has(node.left.text) &&
+          WRITE_OPERATORS.has(node.operatorToken.kind)) {
+        const right = node.right;
+        const rightStart = right.getStart(file);
+        // Reads inside the right side must observe the value inside the
+        // lowered `.next(...)` argument, so patch them into the replacement
+        // instead of letting whole-write edit overlap drop them.
+        const rightEdits = [];
+        collectReadEdits(right, rightEdits);
+        const rightText = patchText(source.slice(rightStart, right.end), rightEdits, rightStart);
+        const atom = node.left.text;
+        const kind = node.operatorToken.kind;
+        const operator = WRITE_OPERATORS.get(kind);
+        let text;
+        if (kind === ts.SyntaxKind.EqualsToken) {
+          text = `${atom}.next(${rightText})`;
+        } else if (operator === "&&" || operator === "||" || operator === "??") {
+          // Short-circuit operators keep their condition in the virtual
+          // document so the value types match the lowered runtime semantics.
+          const current = `${atom}.value`;
+          const condition = operator === "&&" ? current
+            : operator === "||" ? `!${current}`
+            : `(${current} === null || ${current} === undefined)`;
+          text = `${atom}.next(${condition} ? (${rightText}) : ${current})`;
+        } else {
+          text = `${atom}.next(${atom}.value ${operator} (${rightText}))`;
         }
+        edits.push({ start: node.getStart(file), end: node.end, text });
+        return;
+      }
+      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+          ts.isIdentifier(node.operand) && atoms.has(node.operand.text)) {
+        const name = node.operand.text;
+        const delta = node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
+        const previous = "__streamixEditorValue";
+        if (ts.isPostfixUnaryExpression(node)) {
+          edits.push({ start: node.getStart(file), end: node.end,
+            text: `(() => { const ${previous} = ${name}.value; ${name}.next(${previous} ${delta} 1); return ${previous}; })()` });
+        } else {
+          edits.push({ start: node.getStart(file), end: node.end,
+            text: `(() => { const ${previous} = ${name}.value; ${name}.next(${previous} ${delta} 1); return ${name}.value; })()` });
+        }
+        return;
       }
       ts.forEachChild(node, rewrite);
     };

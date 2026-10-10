@@ -8,13 +8,8 @@ const createPlugin = require(resolve(process.cwd(), "projects/libraries/streamix
 };
 
 describe("Streamix React tsserver plugin", () => {
-  it("exposes implicit JSX atom reads as their value type and retains writable atom checks", () => {
+  function diagnose(source: string): ts.Diagnostic[] {
     const fileName = ts.sys.resolvePath(resolve(process.cwd(), "virtual-streamix-editor.tsx")).replaceAll("\\", "/");
-    const source = `
-      import { atom } from "@epikodelabs/streamix";
-      let count = atom(1);
-      export const App = () => <button onClick={() => count += 1}>{count.toFixed()} {count.toUpperCase()}</button>;
-    `;
     const options: ts.CompilerOptions = {
       jsx: ts.JsxEmit.ReactJSX,
       module: ts.ModuleKind.ESNext,
@@ -45,16 +40,56 @@ describe("Streamix React tsserver plugin", () => {
       project: { projectService: { logger: { info: () => undefined } } },
       config: {},
     } as unknown as ts.server.PluginCreateInfo);
+    return service.getSemanticDiagnostics(fileName);
+  }
 
-    const diagnostics = service.getSemanticDiagnostics(fileName);
-    const propertyError = diagnostics.find(diagnostic =>
-      ts.flattenDiagnosticMessageText(diagnostic.messageText, " ").includes("toUpperCase"),
-    );
+  const messageOf = (diagnostic: ts.Diagnostic): string =>
+    ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
+
+  it("exposes implicit JSX atom reads as their value type and retains writable atom checks", () => {
+    const source = `
+      import { atom } from "@epikodelabs/streamix";
+      let count = atom(1);
+      export const App = () => <button onClick={() => count += 1}>{count.toFixed()} {count.toUpperCase()}</button>;
+    `;
+
+    const diagnostics = diagnose(source);
+    const propertyError = diagnostics.find(diagnostic => messageOf(diagnostic).includes("toUpperCase"));
 
     expect(propertyError).toBeDefined();
     expect(propertyError!.start).toBe(source.indexOf("toUpperCase"));
-    expect(diagnostics.some(diagnostic =>
-      ts.flattenDiagnosticMessageText(diagnostic.messageText, " ").includes("Operator '+='"),
-    )).toBe(false);
+    expect(diagnostics.some(diagnostic => messageOf(diagnostic).includes("Operator '+='"))).toBe(false);
+  });
+
+  it("does not double-.value explicit reads and lowers every compound write", () => {
+    const source = `
+      import { atom } from "@epikodelabs/streamix";
+      let count = atom(1);
+      let title = atom("x");
+      export const App = () => (
+        <button
+          onClick={() => {
+            count = count.value + 1;
+            count *= 3;
+            count **= 2;
+            count <<= 1;
+            count ??= 0;
+            count &&= 2;
+            count ||= 5;
+            count++;
+            --count;
+            title ||= "y";
+          }}>
+          {count} {count.value} {count.toFixed()}
+        </button>
+      );
+    `;
+
+    const diagnostics = diagnose(source);
+    // The only tolerated diagnostic family would be genuine authoring errors;
+    // none of these shapes may surface operator or double-read false errors.
+    const offenders = diagnostics.filter(diagnostic =>
+      /Operator '|read-only|\.value|Cannot find/.test(messageOf(diagnostic)));
+    expect(offenders.map(offender => messageOf(offender))).toEqual([]);
   });
 });
