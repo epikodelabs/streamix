@@ -10,11 +10,19 @@ type Listener = () => void;
 let events: readonly StreamixDevtoolsEvent[] = [];
 const listeners = new Set<Listener>();
 const maxEvents = 250;
-
-/** Internal bridge used by compiler-generated bindings in development. */
+const enabled = typeof process === "undefined" || process.env.NODE_ENV !== "production";
+let queued = false;
+/** Queues DevTools notifications outside React's render and snapshot phases. */
 export function recordStreamixDevtoolsEvent(event: Omit<StreamixDevtoolsEvent, "time">): void {
+  if (!enabled) return;
   events = [...events, { ...event, time: Date.now() }].slice(-maxEvents);
-  for (const listener of listeners) listener();
+  if (!queued) {
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      for (const listener of listeners) listener();
+    });
+  }
 }
 
 function subscribe(listener: Listener): () => void {
@@ -47,4 +55,4 @@ export function StreamixDevtools(): ReturnType<typeof createElement> {
 const globalScope = globalThis as typeof globalThis & {
   __streamixDevtoolsRecord?: (event: Omit<StreamixDevtoolsEvent, "time">) => void;
 };
-globalScope.__streamixDevtoolsRecord = recordStreamixDevtoolsEvent;
+if (enabled) globalScope.__streamixDevtoolsRecord = recordStreamixDevtoolsEvent;

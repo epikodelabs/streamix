@@ -64,6 +64,97 @@ export function formatReactJsxDiagnostics(
  * The generated hook calls are static and are inserted immediately after the
  * relevant atom/scope declarations, preserving React's Rules of Hooks.
  */
+function isAtomWriteOperator(kind: ts.SyntaxKind): boolean {
+  return kind === ts.SyntaxKind.EqualsToken || kind === ts.SyntaxKind.PlusEqualsToken ||
+    kind === ts.SyntaxKind.MinusEqualsToken || kind === ts.SyntaxKind.AsteriskEqualsToken ||
+    kind === ts.SyntaxKind.SlashEqualsToken || kind === ts.SyntaxKind.PercentEqualsToken ||
+    kind === ts.SyntaxKind.AsteriskAsteriskEqualsToken || kind === ts.SyntaxKind.AmpersandEqualsToken ||
+    kind === ts.SyntaxKind.BarEqualsToken || kind === ts.SyntaxKind.CaretEqualsToken ||
+    kind === ts.SyntaxKind.LessThanLessThanEqualsToken || kind === ts.SyntaxKind.GreaterThanGreaterThanEqualsToken ||
+    kind === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken ||
+    kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken || kind === ts.SyntaxKind.BarBarEqualsToken ||
+    kind === ts.SyntaxKind.QuestionQuestionEqualsToken;
+}
+
+function isNamePosition(node: ts.Identifier): boolean {
+  const p = node.parent;
+  if (!p) return false;
+  if (ts.isPropertyAccessExpression(p) && p.name === node) return true;
+  if ((ts.isPropertyAssignment(p) || ts.isMethodDeclaration(p) || ts.isPropertyDeclaration(p) ||
+       ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)) && p.name === node) return true;
+  return false;
+}
+function boundNames(name: ts.BindingName, out: Set<string>): void {
+  if (ts.isIdentifier(name)) { out.add(name.text); return; }
+  for (const part of name.elements) if (!ts.isOmittedExpression(part)) boundNames(part.name, out);
+}
+function scopeBinds(node: ts.Node, name: string): boolean {
+  const names = new Set<string>();
+  if (ts.isFunctionLike(node)) for (const param of node.parameters) boundNames(param.name, names);
+  if (ts.isBlock(node) || ts.isSourceFile(node)) {
+    for (const stmt of node.statements) {
+      if (ts.isVariableStatement(stmt)) for (const declaration of stmt.declarationList.declarations) boundNames(declaration.name, names);
+      if (ts.isFunctionDeclaration(stmt) && stmt.name) names.add(stmt.name.text);
+    }
+  }
+  if (ts.isArrowFunction(node) && ts.isExpression(node.body)) { /* parameters already checked */ }
+  if (ts.isCatchClause(node) && node.variableDeclaration) boundNames(node.variableDeclaration.name, names);
+  if ((ts.isForStatement(node) || ts.isForOfStatement(node) || ts.isForInStatement(node)) &&
+      node.initializer && ts.isVariableDeclarationList(node.initializer))
+    for (const decl of node.initializer.declarations) boundNames(decl.name, names);
+  return names.has(name);
+}
+function isShadowedName(name: string, site: ts.Node, component: ts.Node): boolean {
+  let p: ts.Node | undefined = site.parent;
+  while (p && p !== component) {
+    if (scopeBinds(p, name)) return true;
+    p = p.parent;
+  }
+  return false;
+}
+function isShadowed(site: ts.Identifier, component: ts.Node): boolean {
+  return isShadowedName(site.text, site, component);
+}
+function isShadowedAtomTarget(target: ts.Expression, component: ts.Node): boolean {
+  let root = target;
+  while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
+  return ts.isIdentifier(root) && isShadowed(root, component);
+}
+
+type FactoryImports = { aliases: Map<string, string>; namespaces: Set<string>; excluded: Set<string> };
+function streamixFactoryImports(file: ts.SourceFile): FactoryImports {
+  const aliases = new Map<string, string>();
+  const namespaces = new Set<string>();
+  const excluded = new Set<string>();
+  for (const stmt of file.statements) {
+    if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier) || !stmt.importClause) continue;
+    const isStreamix = /^@epikodelabs\/streamix(?:\/|$)/.test(stmt.moduleSpecifier.text);
+    const bindings = stmt.importClause.namedBindings;
+    if (stmt.importClause.name) excluded.add(stmt.importClause.name.text);
+    if (bindings && ts.isNamespaceImport(bindings)) {
+      (isStreamix ? namespaces : excluded).add(bindings.name.text);
+    } else if (bindings && ts.isNamedImports(bindings)) {
+      for (const item of bindings.elements) {
+        if (isStreamix) aliases.set(item.name.text, (item.propertyName ?? item.name).text);
+        else excluded.add(item.name.text);
+      }
+    }
+  }
+  return { aliases, namespaces, excluded };
+}
+function factoryKind(node: ts.Expression, imports: FactoryImports): string | undefined {
+  if (!ts.isCallExpression(node)) return undefined;
+  const callee = node.expression;
+  if (ts.isIdentifier(callee)) {
+    const name = imports.aliases.get(callee.text) ?? (imports.excluded.has(callee.text) ? undefined : callee.text);
+    return name && ["atom", "derived", "flow", "scope"].includes(name) ? name : undefined;
+  }
+  if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) &&
+      imports.namespaces.has(callee.expression.text) && ["atom", "derived", "flow", "scope"].includes(callee.name.text))
+    return callee.name.text;
+  return undefined;
+}
+
 export function transformReactJsx(source: string, fileName = "component.tsx"): ReactJsxTransformResult {
   const sourceFile = ts.createSourceFile(
     fileName,
@@ -72,24 +163,27 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
     true,
     ts.ScriptKind.TSX,
   );
+  const imports = streamixFactoryImports(sourceFile);
   let bindingCount = 0;
   let needsRuntimeImport = false;
   const diagnostics: ReactJsxDiagnostic[] = [];
   const sourceMapAnchors: SourceMapAnchor[] = [];
   const moduleAtoms = new Set([
-    ...collectModuleBindings(sourceFile, "atom"),
-    ...collectModuleBindings(sourceFile, "derived"),
-    ...collectModuleBindings(sourceFile, "flow"),
+    ...collectModuleBindings(sourceFile, "atom", imports),
+    ...collectModuleBindings(sourceFile, "derived", imports),
+    ...collectModuleBindings(sourceFile, "flow", imports),
   ]);
-  const moduleScopes = collectModuleBindings(sourceFile, "scope");
-  const moduleWritableAtoms = collectModuleWritableBindings(sourceFile);
+  const moduleScopes = collectModuleBindings(sourceFile, "scope", imports);
+  const moduleWritableAtoms = collectModuleWritableBindings(sourceFile, imports);
   const moduleAtomMaps = collectModuleAtomMaps(sourceFile, moduleAtoms, moduleWritableAtoms);
 
   const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
     const factory = context.factory;
 
     const transformFunction = <T extends ts.FunctionLikeDeclarationBase>(node: T): T => {
-      if (!node.body || !ts.isBlock(node.body)) return node;
+      if (!node.body) return node;
+      const functionBody = ts.isBlock(node.body) ? node.body :
+        factory.createBlock([factory.createReturnStatement(node.body)], true);
 
       const atoms = new Set<string>(moduleAtoms);
       const scopes = new Set<string>(moduleScopes);
@@ -108,20 +202,21 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
       collectTypedAtomProps(node, moduleAtoms, atoms);
       collectTypedScopeProps(node, moduleScopes, scopes);
 
-      node.body.statements.forEach((statement, index) => {
+      functionBody.statements.forEach((statement, index) => {
         if (!ts.isVariableStatement(statement)) return;
         for (const declaration of statement.declarationList.declarations) {
           if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)) {
             continue;
           }
-          if (ts.isIdentifier(declaration.initializer.expression)) {
-            if (["atom", "derived", "flow"].includes(declaration.initializer.expression.text)) {
+          {
+            const kind = factoryKind(declaration.initializer, imports);
+            if (kind === "atom" || kind === "derived" || kind === "flow") {
               atoms.add(declaration.name.text);
               localReactiveDeclarations.add(declaration);
               reportLocalFactoryImpurity(declaration.initializer, diagnostics);
               if ((statement.declarationList.flags & ts.NodeFlags.Let) !== 0) writableBindings.add(declaration.name.text);
             }
-            if (declaration.initializer.expression.text === "scope") {
+            if (kind === "scope") {
               scopes.add(declaration.name.text);
               localReactiveDeclarations.add(declaration);
               reportLocalFactoryImpurity(declaration.initializer, diagnostics);
@@ -137,7 +232,7 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
       let changed = true;
       while (changed) {
         changed = false;
-        for (const statement of node.body.statements) {
+        for (const statement of functionBody.statements) {
           if (!ts.isVariableStatement(statement)) continue;
           for (const declaration of statement.declarationList.declarations) {
             if (!declaration.initializer) continue;
@@ -189,6 +284,32 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
         }
       }
 
+      // Plain locals and untyped parameters hide module-level reactive names.
+      // Do not mistake a shadowing primitive for the imported/module atom.
+      const plainShadowed = new Set<string>();
+      for (const param of node.parameters) {
+        const names = new Set<string>(); boundNames(param.name, names);
+        for (const name of names) if (!atoms.has(name) && !scopes.has(name)) plainShadowed.add(name);
+      }
+      for (const statement of functionBody.statements) {
+        if (!ts.isVariableStatement(statement)) continue;
+        for (const declaration of statement.declarationList.declarations) {
+          const names = new Set<string>(); boundNames(declaration.name, names);
+          for (const name of names) {
+            if (!localReactiveDeclarations.has(declaration) &&
+                !(ts.isIdentifier(declaration.name) && declaration.initializer && ts.isIdentifier(declaration.initializer) && atoms.has(declaration.initializer.text)) &&
+                !(ts.isObjectBindingPattern(declaration.name) && atoms.has(name))) {
+              plainShadowed.add(name);
+            }
+          }
+        }
+      }
+      const isHidden = (site: ts.Identifier): boolean => plainShadowed.has(site.text) || isShadowed(site, node);
+      const isHiddenTarget = (site: ts.Expression): boolean => {
+        let base: ts.Expression = site;
+        while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) base = base.expression;
+        return ts.isIdentifier(base) && isHidden(base);
+      };
       if (atoms.size === 0 && scopes.size === 0) return node;
 
       const bindings: ts.Statement[] = [];
@@ -282,13 +403,14 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
       };
       const rewriteJsxValue = (expression: ts.Expression): ts.Expression => {
         const jsxValueVisitor: ts.Visitor = (value) => {
-          if (ts.isIdentifier(value) && atoms.has(value.text)) {
+          if (ts.isIdentifier(value) && atoms.has(value.text) && !isNamePosition(value) && !isHidden(value)) {
             return bindingForAtom(value.text, value);
           }
           if (
             ts.isPropertyAccessExpression(value) &&
             ts.isIdentifier(value.expression) &&
             atomMaps.has(value.expression.text) &&
+            !isHidden(value.expression) &&
             atomFromMapAccess(value, atomMaps)
           ) {
             return bindingForAtom(atomFromMapAccess(value, atomMaps)!, value);
@@ -296,14 +418,16 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
           if (
             ts.isElementAccessExpression(value) &&
             ts.isIdentifier(value.expression) &&
-            atomMaps.has(value.expression.text)
+            atomMaps.has(value.expression.text) &&
+            !isHidden(value.expression)
           ) {
             return bindingForSource(value, value.getText(sourceFile));
           }
           if (
             ts.isPropertyAccessExpression(value) &&
             ts.isIdentifier(value.expression) &&
-            scopes.has(value.expression.text)
+            scopes.has(value.expression.text) &&
+            !isHidden(value.expression)
           ) {
             return bindingForScope(value.expression.text, value.name.text, value);
           }
@@ -311,6 +435,7 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
             ts.isElementAccessExpression(value) &&
             ts.isIdentifier(value.expression) &&
             scopes.has(value.expression.text) &&
+            !isHidden(value.expression) &&
             value.argumentExpression &&
             (ts.isStringLiteral(value.argumentExpression) || ts.isNumericLiteral(value.argumentExpression))
           ) {
@@ -319,7 +444,8 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
           if (
             ts.isElementAccessExpression(value) &&
             ts.isIdentifier(value.expression) &&
-            scopes.has(value.expression.text)
+            scopes.has(value.expression.text) &&
+            !isHidden(value.expression)
           ) {
             diagnostics.push(diagnostic(value, "error", "Dynamic scope-field reads are ambiguous. Use scope.get(key) with an explicit runtime boundary."));
             return value;
@@ -328,8 +454,8 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
             ts.isConditionalExpression(value) &&
             ts.isIdentifier(value.whenTrue) &&
             ts.isIdentifier(value.whenFalse) &&
-            atoms.has(value.whenTrue.text) &&
-            atoms.has(value.whenFalse.text)
+            atoms.has(value.whenTrue.text) && !isHidden(value.whenTrue) &&
+            atoms.has(value.whenFalse.text) && !isHidden(value.whenFalse)
           ) {
             return bindingForSource(value, value.getText(sourceFile));
           }
@@ -363,7 +489,7 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
           child.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
           (ts.isObjectLiteralExpression(child.left) || ts.isArrayLiteralExpression(child.left))
         ) {
-          const targets = destructuredAtomTargets(child.left, atoms, atomMaps);
+          const targets = destructuredAtomTargets(child.left, atoms, atomMaps).filter(target => !plainShadowed.has(target.atomName) && !isShadowedName(target.atomName, child, node));
           if (targets.length > 0) {
             const readOnly = targets.find(target => !writableBindings.has(target.atomName));
             if (readOnly) {
@@ -377,7 +503,8 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
             return child;
           }
         }
-        if (ts.isBinaryExpression(child) && atomReferenceName(child.left, atoms, atomMaps)) {
+        if (ts.isBinaryExpression(child) && isAtomWriteOperator(child.operatorToken.kind) &&
+            !isHiddenTarget(child.left) && atomReferenceName(child.left, atoms, atomMaps)) {
           const atomName = atomReferenceName(child.left, atoms, atomMaps)!;
           if (!writableBindings.has(atomName)) {
             diagnostics.push(diagnostic(child, "error", `Cannot assign to read-only atom binding \"${atomName}\". Declare it with let or call ${atomName}.next(value).`));
@@ -401,7 +528,7 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
         }
         if (ts.isPrefixUnaryExpression(child) || ts.isPostfixUnaryExpression(child)) {
           const operand = child.operand;
-          const atomName = atomReferenceName(operand, atoms, atomMaps);
+          const atomName = isHiddenTarget(operand) ? undefined : atomReferenceName(operand, atoms, atomMaps);
           const isIncrement = child.operator === ts.SyntaxKind.PlusPlusToken;
           const isDecrement = child.operator === ts.SyntaxKind.MinusMinusToken;
           if (atomName && (isIncrement || isDecrement)) {
@@ -426,15 +553,15 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
         return ts.visitEachChild(child, visit, context);
       };
 
-      const body = ts.visitEachChild(node.body, visit, context) as ts.Block;
-      if (bindings.length === 0) {
+      const body = ts.visitEachChild(functionBody, visit, context) as ts.Block;
+      if (bindings.length === 0 && localReactiveDeclarations.size === 0) {
         return node;
       }
 
       // Trace only after React commits. Recording while the function body is
       // evaluated would itself be an observable render-phase side effect and
       // would lie for interrupted concurrent renders.
-      if (ts.isFunctionDeclaration(node) && node.name && /^[A-Z]/.test(node.name.text)) {
+      if ((ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) && node.name && /^[A-Z]/.test(node.name.text)) {
         bindings.push(factory.createExpressionStatement(factory.createCallExpression(
           factory.createIdentifier("__streamixUseEffect"),
           undefined,
@@ -464,26 +591,57 @@ export function transformReactJsx(source: string, fileName = "component.tsx"): R
       return updateFunctionLike(factory, node, updatedBody);
     };
 
-    return (file) => {
-      const statements = file.statements.map((statement) => {
+    const transformInitializer = (expr: ts.Expression): ts.Expression => {
+      if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) return transformFunction(expr);
+      if (ts.isCallExpression(expr) && expr.arguments.length > 0 &&
+          (ts.isIdentifier(expr.expression) && (expr.expression.text === "memo" || expr.expression.text === "forwardRef") ||
+          ts.isPropertyAccessExpression(expr.expression) && (expr.expression.name.text === "memo" || expr.expression.name.text === "forwardRef"))) {
+        const first = transformInitializer(expr.arguments[0]);
+        return first === expr.arguments[0] ? expr : factory.updateCallExpression(expr, expr.expression, expr.typeArguments, [first, ...expr.arguments.slice(1)]);
+      }
+      return expr;
+    };
+    return file => {
+      const statements = file.statements.map(statement => {
         if (ts.isFunctionDeclaration(statement)) return transformFunction(statement);
         if (ts.isVariableStatement(statement)) {
-          return ts.visitEachChild(statement, (child) => {
-            if (ts.isArrowFunction(child)) return transformFunction(child);
-            return child;
-          }, context) as ts.VariableStatement;
+          const declarations = statement.declarationList.declarations.map(declaration => {
+            if (!ts.isIdentifier(declaration.name) || !/^[A-Z]/.test(declaration.name.text) || !declaration.initializer) return declaration;
+            const updated = transformInitializer(declaration.initializer);
+            return updated === declaration.initializer ? declaration : factory.updateVariableDeclaration(declaration, declaration.name, declaration.exclamationToken, declaration.type, updated);
+          });
+          return factory.updateVariableStatement(statement, statement.modifiers,
+            factory.updateVariableDeclarationList(statement.declarationList, declarations));
+        }
+        if (ts.isExportAssignment(statement)) {
+          const expr = transformInitializer(statement.expression);
+          return expr === statement.expression ? statement : factory.updateExportAssignment(statement, statement.modifiers, expr);
         }
         return statement;
       });
-
       return factory.updateSourceFile(file, statements);
     };
   };
 
+  // A class component cannot safely adopt compiler-generated React hooks.
+  // Report it rather than silently leaving live atoms as JSX children.
+  const inspectSkipped = (node: ts.Node): void => {
+    if (ts.isClassDeclaration(node) && node.name) {
+      const text = node.getText(sourceFile);
+      if ([...moduleAtoms, ...moduleScopes].some(name => new RegExp(`\\b${name}\\b`).test(text))) {
+        diagnostics.push(diagnostic(node.name, "warning", `Class component ${node.name.text} cannot be adopted. Use an explicit useAtomValue hook in a function component.`));
+      }
+    }
+    ts.forEachChild(node, inspectSkipped);
+  };
+  inspectSkipped(sourceFile);
   const transformed = ts.transform(sourceFile, [transformer]).transformed[0] as ts.SourceFile;
   const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
   const printed = printer.printFile(transformed);
-  const code = needsRuntimeImport ? `${runtimePrelude}\n${printed}` : printed;
+  const directive = printed.match(/^(\s*["']use client["'];?\s*\n)/);
+  const code = needsRuntimeImport ? (directive
+    ? `${directive[0]}${runtimePrelude}\n${printed.slice(directive[0].length)}`
+    : `${runtimePrelude}\n${printed}`) : printed;
   return {
     code,
     bindingCount,
@@ -517,7 +675,7 @@ function createStatementSourceMap(
     mapLines.set(generated.line, line);
   };
   let searchFrom = 0;
-  const printedOffset = code.lastIndexOf(printed);
+  const printedOffset = Math.max(0, code.lastIndexOf(printed));
   for (const statement of transformed.statements) {
     const emitted = printer.printNode(ts.EmitHint.Unspecified, statement, transformed);
     const position = printed.indexOf(emitted, searchFrom);
@@ -674,19 +832,19 @@ function __streamixUse(source: any, sourceName = "dynamic atom"): any {
         });
       };
     },
-    () => { __streamixTrace("read", sourceName); try { return source.value; } catch { return undefined; } },
-    () => { __streamixTrace("read", sourceName); try { return source.value; } catch { return undefined; } },
+    () => { try { return source.value; } catch { return undefined; } },
+    () => { try { return source.value; } catch { return undefined; } },
   );
 }
 `;
 
-function collectModuleBindings(sourceFile: ts.SourceFile, factoryName: string): Set<string> {
+function collectModuleBindings(sourceFile: ts.SourceFile, factoryName: string, imports: FactoryImports): Set<string> {
   const names = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
       if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)) continue;
-      if (ts.isIdentifier(declaration.initializer.expression) && declaration.initializer.expression.text === factoryName) {
+      if (factoryKind(declaration.initializer, imports) === factoryName) {
         names.add(declaration.name.text);
       }
     }
@@ -694,13 +852,13 @@ function collectModuleBindings(sourceFile: ts.SourceFile, factoryName: string): 
   return names;
 }
 
-function collectModuleWritableBindings(sourceFile: ts.SourceFile): Set<string> {
+function collectModuleWritableBindings(sourceFile: ts.SourceFile, imports: FactoryImports): Set<string> {
   const names = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement) || (statement.declarationList.flags & ts.NodeFlags.Let) === 0) continue;
     for (const declaration of statement.declarationList.declarations) {
       if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)) continue;
-      if (ts.isIdentifier(declaration.initializer.expression) && ["atom", "derived", "flow"].includes(declaration.initializer.expression.text)) {
+      if (["atom", "derived", "flow"].includes(factoryKind(declaration.initializer, imports) ?? "")) {
         names.add(declaration.name.text);
       }
     }
@@ -1106,5 +1264,6 @@ function updateFunctionLike<T extends ts.FunctionLikeDeclarationBase>(
       body,
     ) as unknown as T;
   }
+  if (ts.isFunctionExpression(node)) return factory.updateFunctionExpression(node, node.modifiers, node.asteriskToken, node.name, node.typeParameters, node.parameters, node.type, body) as unknown as T;
   return node;
 }

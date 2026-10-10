@@ -55,7 +55,6 @@ export function useAtomValue<T>(source: DependencySource<T>): T {
   }, [source]);
   const getSnapshot = useCallback(() => source.value, [source]);
   const value = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  recordStreamixDevtoolsEvent({ type: "read", source: "explicit atom read" });
   return value;
 }
 
@@ -169,58 +168,71 @@ export function createResource<T>(loader: (signal: AbortSignal) => Promise<T>): 
  * Runs an abortable async loader with React-safe cancellation and a Suspense /
  * error-boundary compatible `read()` method.
  */
+/**
+ * Observe a resource whose loading starts outside render. In particular,
+ * Suspense never throws a fulfilled placeholder promise for an idle resource.
+ * This is safe with concurrent rendering and aborted initial mounts.
+ */
+export function usePreloadedResource<T>(resource: PreloadedResource<T>): Resource<T> {
+  const subscribe = useCallback((notify: Listener) => resource.subscribe(notify), [resource]);
+  // An object snapshot must be cached. Subscribe to the primitive revision instead.
+  const version = useRef({ resource, version: 0, current: resource.status, data: resource.data, error: resource.error });
+  const getSnapshot = useCallback(() => {
+    const prev = version.current;
+    if (prev.resource !== resource || prev.current !== resource.status || prev.data !== resource.data || prev.error !== resource.error) {
+      version.current = { resource, version: prev.version + 1, current: resource.status, data: resource.data, error: resource.error };
+    }
+    return version.current;
+  }, [resource]);
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return resource;
+}
+
+/**
+ * Component-owned async resource. Loading begins after commit. Consumers may
+ * display `status` or call `read()` once the resource is ready. For initial
+ * Suspense, use createResource().preload() before rendering and
+ * usePreloadedResource(); effects cannot start loads in suspended renders.
+ */
 export function useResource<T>(
   loader: (signal: AbortSignal) => Promise<T>,
   dependencies: readonly unknown[],
 ): Resource<T> {
-  const state = useRef<{ status: ResourceStatus; data?: T; error?: unknown; promise: Promise<void> }>({
-    status: "pending",
-    promise: Promise.resolve(),
-  });
-  const revision = useRef(0);
-  const listeners = useRef(new Set<Listener>());
-  const controller = useRef<AbortController | null>(null);
-
-  const notify = () => { for (const listener of listeners.current) listener(); };
-  const start = useCallback(() => {
-    controller.current?.abort();
-    const active = new AbortController();
-    controller.current = active;
-    const token = ++revision.current;
-    const next = { status: "pending" as const, promise: Promise.resolve() };
-    state.current = next;
-    next.promise = loader(active.signal).then(
-      value => { if (token === revision.current && !active.signal.aborted) { state.current = { status: "ready", data: value, promise: next.promise }; notify(); } },
-      error => { if (token === revision.current && !active.signal.aborted) { state.current = { status: "error", error, promise: next.promise }; notify(); } },
-    );
-    notify();
-  // Caller controls loader identity through dependencies.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, dependencies);
-
+  const resource = useRef<PreloadedResource<T> | null>(null);
+  const loaderRef = useRef(loader);
+  loaderRef.current = loader;
+  const getResource = useCallback(() => createResource<T>(signal => loaderRef.current(signal)), dependencies);
   useEffect(() => {
-    start();
-    return () => controller.current?.abort();
-  }, [start]);
-
-  const subscribe = useCallback((listener: Listener) => {
-    listeners.current.add(listener);
-    return () => { listeners.current.delete(listener); };
+    const next = getResource();
+    resource.current = next;
+    next.preload();
+    return () => { next.dispose(); if (resource.current === next) resource.current = null; };
+  }, [getResource]);
+  const [revisionNotify] = [useRef(new Set<Listener>())];
+  const subscribe = useCallback((notify: Listener) => {
+    revisionNotify.current.add(notify);
+    return () => { revisionNotify.current.delete(notify); };
   }, []);
-  const getVersion = useCallback(() => state.current, []);
-  useSyncExternalStore(subscribe, getVersion, getVersion);
-
+  // React needs a stable primitive snapshot, incremented on resource changes.
+  const revision = useRef(0);
+  const getRevision = useCallback(() => revision.current, []);
+  useSyncExternalStore(subscribe, getRevision, getRevision);
+  useEffect(() => {
+    const item = resource.current;
+    if (!item) return;
+    const stop = item.subscribe(() => { revision.current++; for (const notify of revisionNotify.current) notify(); });
+    revision.current++; for (const notify of revisionNotify.current) notify();
+    return stop;
+  }, [getResource]);
   return {
-    get status() { return state.current.status; },
-    get data() { return state.current.data; },
-    get error() { return state.current.error; },
+    get status() { return resource.current?.status ?? "pending"; },
+    get data() { return resource.current?.data; },
+    get error() { return resource.current?.error; },
     read() {
-      const current = state.current;
-      if (current.status === "pending") throw current.promise;
-      if (current.status === "error") throw current.error;
-      return current.data as T;
+      if (!resource.current) throw new Error("useResource loads after commit. For first-render Suspense, preload createResource() outside React render.");
+      return resource.current.read();
     },
-    reload: start,
+    reload() { resource.current?.reload(); },
   };
 }
 

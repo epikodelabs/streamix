@@ -24,6 +24,9 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
       if (options.include && !options.include(fileName)) return null;
 
       const result = transformReactJsx(source, fileName);
+      for (const warning of result.diagnostics.filter(item => item.category === "warning")) {
+        this.warn(formatReactJsxDiagnostics(source, fileName, [warning]));
+      }
       const errors = result.diagnostics.filter(diagnostic => diagnostic.category === "error");
       if (errors.length > 0) {
         this.error(formatReactJsxDiagnostics(source, fileName, errors));

@@ -34,7 +34,7 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
   return output;
 }
 
-function virtualRootOf(sourceRoot: string): string {
+export function virtualRootOf(sourceRoot: string): string {
   return sourceRoot
     .replace(/^projects[\\/]apps[\\/]/, "")
     .replace(/[\\/]src$/, "/src");
@@ -54,4 +54,32 @@ async function collectTsxFiles(directory: string): Promise<string[]> {
     else if (entry.isFile() && path.endsWith(".tsx") && !path.endsWith(".d.tsx")) files.push(path);
   }
   return files;
+}
+
+/** Synchronize an original source change into the delegated virtual project. */
+export async function regenerateStreamixFile(workspaceRoot: string, sourceRoot: string, changedPath: string): Promise<void> {
+  const originalRoot = join(workspaceRoot, sourceRoot);
+  const destRoot = join(workspaceRoot, ".angular", ".streamix", virtualRootOf(sourceRoot));
+  const normalized = changedPath.replace(/\\/g, "/");
+  if (normalized.startsWith("../") || normalized.startsWith("/") || normalized.includes("/../")) return;
+  const origin = join(originalRoot, normalized);
+  const destination = join(destRoot, normalized);
+  let content: string;
+  try { content = await readFile(origin, "utf8"); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    await rm(destination, { force: true, recursive: true });
+    await rm(`${destination}.map`, { force: true });
+    return;
+  }
+  await mkdir(dirname(destination), { recursive: true });
+  if (normalized.endsWith(".tsx") && !normalized.endsWith(".d.tsx")) {
+    const transformed = transformReactJsx(content, relative(workspaceRoot, origin));
+    const errors = transformed.diagnostics.filter(item => item.category === "error");
+    if (errors.length) throw new Error(formatReactJsxDiagnostics(content, origin, errors));
+    await writeFile(destination, `${transformed.code}\n//# sourceMappingURL=${basename(destination)}.map\n`);
+    await writeFile(`${destination}.map`, JSON.stringify(transformed.sourceMap));
+  } else {
+    await writeFile(destination, await readFile(origin));
+  }
 }

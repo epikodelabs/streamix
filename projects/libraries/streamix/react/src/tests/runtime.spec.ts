@@ -128,9 +128,12 @@ describe("React runtime escape hatches", () => {
     expect(() => renderAtomSnapshotScript({ title: serverTitle }, "not valid")).toThrowError(/id must contain/);
   });
 
-  it("renders an opt-in DevTools trace", () => {
+  it("renders an opt-in DevTools trace", async () => {
     act(() => root.render(createElement(StreamixDevtools)));
-    act(() => recordStreamixDevtoolsEvent({ type: "write", source: "title" }));
+    await act(async () => {
+      recordStreamixDevtoolsEvent({ type: "write", source: "title" });
+      await Promise.resolve();
+    });
     expect(container.textContent).toContain("write: title");
   });
 });
