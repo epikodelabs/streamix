@@ -17,8 +17,9 @@ import {
   write,
 } from "../lib/runtime";
 import { recordStreamixDevtoolsEvent, StreamixDevtools } from "../lib/devtools";
+import { idescribe } from "./env.spec";
 
-describe("React runtime escape hatches", () => {
+idescribe("React runtime escape hatches", () => {
   let container: HTMLDivElement;
   let root: Root;
 

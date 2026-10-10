@@ -6,6 +6,7 @@ import * as streamixReact from "@epikodelabs/streamix/react";
 import ts from "typescript";
 import { atom, scope, type Writable } from "@epikodelabs/streamix";
 import { transformReactJsx } from "./compiler";
+import { idescribe } from "../../src/tests/env.spec";
 
 type CompiledModule = {
   App: () => ReturnType<typeof createElement>;
@@ -45,7 +46,7 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
-describe("React JSX compiler client lifecycle", () => {
+idescribe("React JSX compiler client lifecycle", () => {
   let container: HTMLDivElement;
   let root: Root | undefined;
 

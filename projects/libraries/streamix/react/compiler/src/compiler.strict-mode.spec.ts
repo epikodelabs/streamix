@@ -2,8 +2,9 @@ import { StrictMode, act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { atom, type Writable } from "@epikodelabs/streamix";
 import { transformReactJsx } from "./compiler";
+import { idescribe } from "../../src/tests/env.spec";
 
-describe("React JSX compiler Strict Mode semantics", () => {
+idescribe("React JSX compiler Strict Mode semantics", () => {
   let container: HTMLDivElement;
   let root: Root;
 
