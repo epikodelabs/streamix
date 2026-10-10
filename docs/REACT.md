@@ -172,7 +172,3 @@ export default defineConfig({ plugins: [sx(), react()] });
 The Angular-hosted React builder remains available for workspaces that use
 Angular Architect; it preprocesses into `.angular/.streamix/<app>/src` before
 delegating to the application target.
-
-For the complete semantics and limitations, see
-[React compiler semantics](../../../../docs/REACT-COMPILER-SEMANTICS.md) and
-[React documentation](../../../../docs/REACT.md).

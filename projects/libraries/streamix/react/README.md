@@ -197,6 +197,5 @@ use `renderAtomSnapshotScript()` on the server and
 writes, unsubscriptions, and committed renders. Compiler-added bindings map
 back to their originating JSX expression through generated source maps.
 
-For the complete semantics and limitations, see
-[React compiler semantics](../../../../docs/REACT-COMPILER-SEMANTICS.md) and
+For the complete semantics and limitations, see the
 [React documentation](../../../../docs/REACT.md).
