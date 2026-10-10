@@ -7,10 +7,12 @@
     "angular/builder/schema.json",
     "angular/builder/README.md",
     "angular/builder/application.mjs",
+    "angular/editor/README.md",
     "angular/editor/tsserver.cjs",
     "react/builder/builders.json",
     "react/builder/schema.json",
     "react/builder/application.mjs",
+    "react/editor/README.md",
     "react/editor/tsserver.cjs"
   ],
   "lib": {

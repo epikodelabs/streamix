@@ -19,6 +19,14 @@
     "importHelpers": true,
     "target": "ESNext",
     "module": "ESNext",
+    "plugins": [
+      {
+        "name": "@epikodelabs/streamix/angular/editor/tsserver"
+      },
+      {
+        "name": "@epikodelabs/streamix/react/editor/tsserver"
+      }
+    ],
     "useDefineForClassFields": false,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
