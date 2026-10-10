@@ -151,6 +151,29 @@ The builder transforms TSX into `.angular/.streamix/<app>/src`, writes source
 maps beside transformed files, then delegates to the normal application build.
 `app7` is the working example.
 
+## Editor type checking
+
+Add the TypeScript-server plugin to a React project's `tsconfig.json`. VS Code
+uses this through its built-in TypeScript extension; it is not a separate VS
+Code UI extension.
+
+```json
+{
+  "compilerOptions": {
+    "plugins": [
+      { "name": "@epikodelabs/streamix/react/editor/tsserver" }
+    ]
+  }
+}
+```
+
+Restart the TypeScript server after installing or changing this setting. For
+supported JSX expressions, the editor sees an atom as its current value (for
+example `atom(1)` is a `number` in `{count.toFixed()}`), while assignments are
+checked as `.next(...)` writes. Diagnostics and navigation spans map back to
+the authored TSX. The production compiler remains the authority for emitted
+JavaScript and its broader transform surface.
+
 ## Explicit runtime boundaries
 
 Dynamic paths, re-exports, proxy/getter-backed objects, unknown third-party

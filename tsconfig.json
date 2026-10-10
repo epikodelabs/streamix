@@ -56,6 +56,9 @@
       "@epikodelabs/streamix/react/vite": [
         "./projects/libraries/streamix/react/vite/src/public-api.ts"
       ],
+      "@epikodelabs/streamix/react/editor": [
+        "./projects/libraries/streamix/react/editor/src/public-api.ts"
+      ],
       "@epikodelabs/streamix/react": [
         "./projects/libraries/streamix/react/src/public-api.ts"
       ],

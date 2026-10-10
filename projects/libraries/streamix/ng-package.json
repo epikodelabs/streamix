@@ -9,7 +9,8 @@
     "angular/builder/application.mjs",
     "react/builder/builders.json",
     "react/builder/schema.json",
-    "react/builder/application.mjs"
+    "react/builder/application.mjs",
+    "react/editor/tsserver.cjs"
   ],
   "lib": {
     "entryFile": "src/public-api.ts"

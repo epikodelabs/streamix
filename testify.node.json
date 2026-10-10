@@ -9,12 +9,13 @@
     "./projects/libraries/streamix/angular/builder/src",
     "./projects/libraries/streamix/react/vite/src",
     "./projects/libraries/streamix/react/compiler/src",
-    "./projects/libraries/streamix/react/vite/src"
+    "./projects/libraries/streamix/react/editor/src"
   ],
   "testDirs": [
     "./projects/libraries/streamix/angular/src/tests/ssr",
     "./projects/libraries/streamix/react/compiler/src",
-    "./projects/libraries/streamix/react/vite/src"
+    "./projects/libraries/streamix/react/vite/src",
+    "./projects/libraries/streamix/react/editor/src"
   ],
   "exclude": [
     "**/node_modules/**",

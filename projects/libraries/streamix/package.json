@@ -29,6 +29,9 @@
     "CHANGELOG.md"
   ],
   "type": "module",
+  "exports": {
+    "./react/editor/tsserver": "./react/editor/tsserver.cjs"
+  },
   "sideEffects": false,
   "homepage": "https://epikodelabs.github.io/streamix",
   "repository": {
