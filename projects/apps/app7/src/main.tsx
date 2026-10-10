@@ -9,6 +9,21 @@ let clicks = atom(0);
 let lastAction = atom("Waiting for input");
 const summary = derived($ => `${$(title)} · ${$(clicks)} actions`);
 
+// Write-operator targets: every compound, update, and logical assignment on a
+// `let` atom lowers to an atom emission.
+let tally = atom(2);
+let power = atom(3);
+let label = atom("");
+let nullable = atom<number>();
+
+// Static aliases, atom maps, and destructured map members keep atom identity:
+// writing any of them emits through the same underlying atom.
+const alias = clicks;
+const model = { title, tally };
+let { title: mappedTitle, tally: mappedTally } = model;
+let swapped = atom(false);
+let islandMounted = atom(true);
+
 // A value-first scope: a compiler lowers `state.message` through
 // scopeBinding(state, "message"), which keeps state.get("message") reactive.
 const state = scope({
@@ -37,6 +52,27 @@ const state = scope({
   }),
 });
 
+// A component-local atom and scope: the compiler owns them for the mounted
+// instance and disposes both when the instance unmounts.
+function LocalIsland() {
+  let hits = atom(0);
+  const local = scope({ tone: "island-local" });
+
+  return (
+    <div className="island">
+      <button type="button" onClick={() => hits++}>Local atom clicks: {hits}</button>
+      <p className="muted">Scope tone: {local.tone} — owned by this component instance.</p>
+    </div>
+  );
+}
+
+// An atom crossing a component boundary stays a reference: the typed prop is
+// subscribed inside the receiving component. `typeof summary` is Atom<string>,
+// so both the writable title atom and the derived summary satisfy it.
+function Echo({ source }: { source: typeof summary }) {
+  return <output className="echo">Echo: {source}</output>;
+}
+
 function App() {
   return (
     <main className="demo">
@@ -46,8 +82,10 @@ function App() {
       </header>
       <h1>Direct atom JSX laboratory</h1>
       <p className="copy">
-        A comprehensive compiler sample: standalone atoms, scope fields,
-        derived values, and scope-owned flows are all used directly in TSX.
+        A comprehensive compiler sample: standalone atoms, scope fields, derived
+        values, scope-owned flows, write operators, component-local ownership,
+        aliases and maps, and atom transport across component boundaries are all
+        used directly in TSX.
       </p>
 
       <section className="dashboard">
@@ -98,6 +136,48 @@ function App() {
           <div className="card-heading"><span>03</span><h2>Scope-owned flow</h2></div>
           <p className="flow-value">{state.connection ?? "Connecting…"}</p>
           <p className="muted">The flow progresses once, remains live, and is disposed with its scope.</p>
+        </article>
+
+        <article className="card operators-card">
+          <div className="card-heading"><span>04</span><h2>Write operators</h2></div>
+          <div className="button-row">
+            <button type="button" onClick={() => tally += 2}>tally += 2</button>
+            <button type="button" onClick={() => tally *= 3}>tally *= 3</button>
+            <button type="button" onClick={() => tally++}>tally++</button>
+            <button type="button" onClick={() => power **= 2}>power **= 2</button>
+            <button type="button" onClick={() => label ||= "Labeled!"}>label ||= "Labeled!"</button>
+            <button type="button" onClick={() => nullable ??= 42}>nullable ??= 42</button>
+          </div>
+          <p className="mono">tally {tally} · power {power} · label {label || "(empty)"} · nullable {nullable ?? "unset"}</p>
+          <p className="muted">Compound, update, and logical writes all lower to atom emissions. Explicit read stays reactive: {tally.value}</p>
+        </article>
+
+        <article className="card island-card">
+          <div className="card-heading"><span>05</span><h2>Component-local ownership</h2></div>
+          <div className="button-row">
+            <button type="button" onClick={() => islandMounted = !islandMounted}>
+              {islandMounted ? "Unmount island" : "Mount island"}
+            </button>
+          </div>
+          {islandMounted ? <LocalIsland /> : <p className="muted">Island unmounted — its atom and scope were disposed with the instance.</p>}
+        </article>
+
+        <article className="card alias-card">
+          <div className="card-heading"><span>06</span><h2>Aliases, maps, selection</h2></div>
+          <div className="button-row">
+            <button type="button" onClick={() => clicks = clicks + 5}>clicks + 5 → {alias}</button>
+            <button type="button" onClick={() => mappedTally = mappedTally + 1}>mapped tally + 1</button>
+            <button type="button" onClick={() => swapped = !swapped}>{swapped.value ? "Show atom" : "Show alias"}</button>
+          </div>
+          <p className="mono">Alias {alias} · Map {model.title} · Keyed {model[swapped.value ? "tally" : "title"]} · Destructured {mappedTitle}</p>
+          <p className="derived"><strong>Selection:</strong> {swapped.value ? alias : title}</p>
+        </article>
+
+        <article className="card transport-card">
+          <div className="card-heading"><span>07</span><h2>Atom transport</h2></div>
+          <p className="muted">Typed props stay references; each Echo subscribes to the atom itself.</p>
+          <Echo source={title} />
+          <Echo source={summary} />
         </article>
       </section>
 
