@@ -44,6 +44,9 @@
       "@epikodelabs/streamix/angular/compiler": [
         "./projects/libraries/streamix/angular/compiler/src/public-api.ts"
       ],
+      "@epikodelabs/streamix/angular/editor": [
+        "./projects/libraries/streamix/angular/editor/src/public-api.ts"
+      ],
       "@epikodelabs/streamix/angular": [
         "./projects/libraries/streamix/angular/src/lib/index.ts"
       ],
@@ -53,11 +56,11 @@
       "@epikodelabs/streamix/react/builder": [
         "./projects/libraries/streamix/react/builder/src/public-api.ts"
       ],
-      "@epikodelabs/streamix/react/vite": [
-        "./projects/libraries/streamix/react/vite/src/public-api.ts"
-      ],
       "@epikodelabs/streamix/react/editor": [
         "./projects/libraries/streamix/react/editor/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/react/vite": [
+        "./projects/libraries/streamix/react/vite/src/public-api.ts"
       ],
       "@epikodelabs/streamix/react": [
         "./projects/libraries/streamix/react/src/public-api.ts"

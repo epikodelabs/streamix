@@ -30,6 +30,7 @@
   ],
   "type": "module",
   "exports": {
+    "./angular/editor/tsserver": "./angular/editor/tsserver.cjs",
     "./react/editor/tsserver": "./react/editor/tsserver.cjs"
   },
   "sideEffects": false,
@@ -42,6 +43,7 @@
   "peerDependencies": {
     "@angular-devkit/architect": ">=20.0.0",
     "@angular/compiler": ">=20.0.0",
+    "@angular/language-service": ">=20.0.0",
     "@angular/core": ">=20.0.0",
     "react": ">=18.0.0",
     "vue": ">=3.4.0",
@@ -55,6 +57,9 @@
       "optional": true
     },
     "@angular/compiler": {
+      "optional": true
+    },
+    "@angular/language-service": {
       "optional": true
     },
     "typescript": {

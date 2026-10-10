@@ -6,6 +6,7 @@
     "./projects/libraries/streamix/src/lib",
     "./projects/libraries/streamix/angular/src/lib",
     "./projects/libraries/streamix/angular/compiler",
+    "./projects/libraries/streamix/angular/editor/src",
     "./projects/libraries/streamix/angular/builder/src",
     "./projects/libraries/streamix/react/vite/src",
     "./projects/libraries/streamix/react/compiler/src",
@@ -13,6 +14,7 @@
   ],
   "testDirs": [
     "./projects/libraries/streamix/angular/src/tests/ssr",
+    "./projects/libraries/streamix/angular/editor/src",
     "./projects/libraries/streamix/react/compiler/src",
     "./projects/libraries/streamix/react/vite/src",
     "./projects/libraries/streamix/react/editor/src"

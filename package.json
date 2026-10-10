@@ -46,6 +46,7 @@
     "@angular/build": "^22.1.0",
     "@angular/cli": "^22.1.0",
     "@angular/compiler-cli": "^22.1.0",
+    "@angular/language-service": "^22.2.2",
     "@angular/platform-server": "^22.2.0",
     "@epikodelabs/testify": "^1.0.56",
     "@types/jasmine": "^6.0.0",

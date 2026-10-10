@@ -45,7 +45,30 @@ You do not need a special template language or a manual subscription for each va
 
 ## What your editor shows
 
-Template type-checking runs against exactly what you wrote. Scope members are typed as ordinary values, so scope-based templates stay clean in the editor and in the build.
+Install @angular/language-service and configure Streamix as the Angular
+language-service plugin in the project tsconfig:
+
+\`\`\`json
+{
+  "compilerOptions": {
+    "plugins": [
+      { "name": "@epikodelabs/streamix/angular/editor/tsserver" }
+    ]
+  }
+}
+\`\`\`
+
+It delegates to Angular's official language service after presenting inline
+\`@Component({ template: \`...\` })\` atom reads as current values. Thus
+\`{{ count * 2 }}\` type-checks \`count\` as a number when \`count = atom(1)\`.
+Restart the TypeScript server after changing this configuration.
+
+The current editor companion intentionally covers inline templates only.
+External \`templateUrl\` files still need explicit \`.value\` until an Angular
+template-host virtual-file layer is added.
+
+Scope members are typed as ordinary values, so scope-based templates stay clean
+in the editor and in the build.
 
 One case is expected, and worth recognising when you meet it: putting a **bare atom straight into an expression** — `{{ count * 2 }}`, `@if (count > 3)`, `@for (row of rows; …)` — compiles, but your editor will underline it. What you are holding there is the atom, not the number or the list, and the editor is right to say so. A lone `{{ count }}` is fine; interpolation accepts any type.
 
