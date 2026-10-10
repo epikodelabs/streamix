@@ -66,13 +66,6 @@ function LocalIsland() {
   );
 }
 
-// An atom crossing a component boundary stays a reference: the typed prop is
-// subscribed inside the receiving component. `typeof summary` is Atom<string>,
-// so both the writable title atom and the derived summary satisfy it.
-function Echo({ source }: { source: typeof summary }) {
-  return <output className="echo">Echo: {source}</output>;
-}
-
 function App() {
   return (
     <main className="demo">
@@ -90,7 +83,7 @@ function App() {
 
       <section className="dashboard">
         <article className="card profile-card">
-          <div className="card-heading"><span>01</span><h2>Scoped profile</h2></div>
+          <div className="card-heading"><h2>Scoped profile</h2></div>
           <div className="grid">
             <label>
               Name
@@ -120,7 +113,7 @@ function App() {
         </article>
 
         <article className="card signal-card">
-          <div className="card-heading"><span>02</span><h2>Standalone atoms</h2></div>
+          <div className="card-heading"><h2>Standalone atoms</h2></div>
           <label>
             Atom-backed title
             <input value={title} onChange={(event) => title = event.target.value} />
@@ -133,13 +126,13 @@ function App() {
         </article>
 
         <article className="card flow-card">
-          <div className="card-heading"><span>03</span><h2>Scope-owned flow</h2></div>
+          <div className="card-heading"><h2>Scope-owned flow</h2></div>
           <p className="flow-value">{state.connection ?? "Connecting…"}</p>
           <p className="muted">The flow progresses once, remains live, and is disposed with its scope.</p>
         </article>
 
         <article className="card operators-card">
-          <div className="card-heading"><span>04</span><h2>Write operators</h2></div>
+          <div className="card-heading"><h2>Write operators</h2></div>
           <div className="button-row">
             <button type="button" onClick={() => tally += 2}>tally += 2</button>
             <button type="button" onClick={() => tally *= 3}>tally *= 3</button>
@@ -153,7 +146,7 @@ function App() {
         </article>
 
         <article className="card island-card">
-          <div className="card-heading"><span>05</span><h2>Component-local ownership</h2></div>
+          <div className="card-heading"><h2>Component-local ownership</h2></div>
           <div className="button-row">
             <button type="button" onClick={() => islandMounted = !islandMounted}>
               {islandMounted ? "Unmount island" : "Mount island"}
@@ -163,7 +156,7 @@ function App() {
         </article>
 
         <article className="card alias-card">
-          <div className="card-heading"><span>06</span><h2>Aliases, maps, selection</h2></div>
+          <div className="card-heading"><h2>Aliases, maps, selection</h2></div>
           <div className="button-row">
             <button type="button" onClick={() => clicks = clicks + 5}>clicks + 5 → {alias}</button>
             <button type="button" onClick={() => mappedTally = mappedTally + 1}>mapped tally + 1</button>
@@ -173,19 +166,6 @@ function App() {
           <p className="derived"><strong>Selection:</strong> {swapped.value ? alias : title}</p>
         </article>
 
-        <article className="card transport-card">
-          <div className="card-heading"><span>07</span><h2>Atom transport</h2></div>
-          <p className="muted">Typed props stay references; each Echo subscribes to the atom itself.</p>
-          <Echo source={title} />
-          <Echo source={summary} />
-        </article>
-      </section>
-
-      <section className="diagnostics" aria-label="Reactive diagnostics">
-        <div><span>Scope flow</span><strong>{state.connection ?? "Connecting…"}</strong></div>
-        <div><span>Scope mode</span><strong>{state.enabled ? "Enabled" : "Paused"}</strong></div>
-        <div><span>Derived title</span><strong>{summary}</strong></div>
-        <div><span>Preferences</span><strong>{state.notifications ? "Notifications on" : "Notifications off"}</strong></div>
       </section>
 
       <output data-testid="preview" aria-live="polite" data-accent={state.accent}>
