@@ -59,4 +59,4 @@ Use the Streamix builder to enable compiler-aware templates, while delegating th
 }
 ```
 
-Static inline templates and literal `templateUrl` files are compiled in a virtual build tree; authored files are not modified. See the package [README](https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/angular/README.md) for the complete binding matrix and scheduler guidance.
+Static inline templates and literal `templateUrl` files are compiled in a virtual build tree; authored files are not modified.
