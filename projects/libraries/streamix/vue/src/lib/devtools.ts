@@ -17,10 +17,10 @@ type Listener = () => void;
 let events: readonly StreamixDevtoolsEvent[] = [];
 const listeners = new Set<Listener>();
 const maxEvents = 250;
-// Vite replaces import.meta.env.DEV at build time. The Node fallback is
-// intentionally false when process is absent in a non-Vite browser build.
-const enabled = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV ??
-  (typeof process !== 'undefined' && process.env['NODE_ENV'] !== 'production');
+// Browser-only: Vite replaces import.meta.env.DEV at build time, so a
+// production bundle proves itself at build time. Without a bundler the
+// environment is unknown and diagnostics stay disabled, not enabled.
+const enabled = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
 let queued = false;
 
 /** Queues DevTools notifications outside Vue's render and tracking phases. */

@@ -10,13 +10,10 @@ type Listener = () => void;
 let events: readonly StreamixDevtoolsEvent[] = [];
 const listeners = new Set<Listener>();
 const maxEvents = 250;
-// Build tools replace `process.env.NODE_ENV` statically. Reading it through
-// `globalThis` defeats that replacement and accidentally enables the panel in
-// production browser bundles.
-// Runtime-safe for native browser ESM where `process` does not exist.
-// Bundlers can still statically replace `process.env.NODE_ENV` in this form.
-// In unknown environments diagnostics are disabled, not enabled by default.
-const enabled = typeof process !== "undefined" && process.env["NODE_ENV"] !== "production";
+// Browser-only: Vite statically replaces `import.meta.env.DEV`, so a
+// production bundle proves itself at build time. Without a bundler the
+// environment is unknown and diagnostics stay disabled, not enabled.
+const enabled = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
 let queued = false;
 /** Queues DevTools notifications outside React's render and snapshot phases. */
 export function recordStreamixDevtoolsEvent(event: Omit<StreamixDevtoolsEvent, "time">): void {

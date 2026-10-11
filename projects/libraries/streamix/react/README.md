@@ -264,10 +264,9 @@ array, not the identity of `loader`; include every prop/state input affecting
 that loader. For initial Suspense, preload outside render and use
 `usePreloadedResource` instead.
 
-DevTools are disabled when production can be proven by `NODE_ENV=production`,
-and also in native/browser ESM environments without a `process` object. This
-prevents a production-side `ReferenceError`; enable a development-only bundle
-replacement if the DevTools panel is needed outside the usual toolchains.
+DevTools are enabled only when the bundler marks the build as development
+(`import.meta.env.DEV`). Production bundles and bundler-less browser ESM stay
+disabled; no `process` global is referenced.
 
 ## Release verification still required
 
