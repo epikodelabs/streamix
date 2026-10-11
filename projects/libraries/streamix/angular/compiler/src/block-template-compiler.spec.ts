@@ -31,6 +31,28 @@ describe('compileSxBlockTemplate', () => {
     expect(result.rootNodes.length).toBe(2);
   });
 
+  it('chains multi-root bodies inside a fragment so the runtime can move them', () => {
+    // The structural runtime walks first.nextSibling up to last when it moves
+    // an instance after its anchor. Roots that were created but never chained
+    // made every multi-root body throw "Invalid sx structural DOM range" the
+    // first time its block rendered.
+    const result = compileSxBlockTemplate(
+      '<span>{{ item }}</span><button>Open</button>',
+    );
+
+    expect(result.createBody).toContain('createDocumentFragment()');
+    for (const root of result.rootNodes) {
+      expect(result.createBody).toContain(`appendChild(${root});`);
+    }
+  });
+
+  it('keeps single-root bodies free of a wrapping fragment', () => {
+    const result = compileSxBlockTemplate('<li>{{ item.name }}</li>');
+
+    expect(result.rootNodes.length).toBe(1);
+    expect(result.createBody).not.toContain('createDocumentFragment()');
+  });
+
   it('fails loudly for inner Angular property bindings', () => {
     expect(() =>
       compileSxBlockTemplate(

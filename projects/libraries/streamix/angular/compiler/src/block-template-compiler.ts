@@ -194,6 +194,12 @@ export function compileSxBlockTemplate(
  * A body that owns nested blocks ends with an empty text node. Nested content
  * renders after its anchor, so the enclosing range must end past every anchor
  * for keyed moves and removals to stay correct.
+ *
+ * A multi-root body chains its roots inside a document fragment: the runtime
+ * moves instances by walking `first.nextSibling` up to `last`, which requires
+ * the roots to be siblings before the first render. Detached roots that were
+ * never chained made every multi-root body throw "Invalid sx structural DOM
+ * range" the first time its block rendered.
  */
 function appendTrailingRoot(state: EmitState): SxCompiledBlockBody {
   if (state.nested.length > 0) {
@@ -202,6 +208,16 @@ function appendTrailingRoot(state: EmitState): SxCompiledBlockBody {
       `const ${tail} = ${state.document}.createTextNode("");`,
     );
     state.roots.push(tail);
+  }
+
+  if (state.roots.length > 1) {
+    const fragment = nextVariable(state, 'fragment');
+    state.create.push(
+      `const ${fragment} = ${state.document}.createDocumentFragment();`,
+    );
+    for (const root of state.roots) {
+      state.create.push(`${fragment}.appendChild(${root});`);
+    }
   }
 
   return toBlockBody(state);
