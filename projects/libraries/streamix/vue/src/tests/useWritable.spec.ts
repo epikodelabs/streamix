@@ -1,8 +1,8 @@
-import {
-  effectScope,
-  type EffectScope,
-} from 'vue';
 import { atom } from '@epikodelabs/streamix';
+import {
+    effectScope,
+    type EffectScope,
+} from 'vue';
 import { useWritable } from '../lib/useWritable';
 
 describe('useWritable', () => {

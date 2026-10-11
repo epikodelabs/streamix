@@ -1,11 +1,11 @@
 import {
-  effectScope,
-  type EffectScope,
-} from 'vue';
-import {
-  scope,
-  type Scope,
+    scope,
+    type Scope,
 } from '@epikodelabs/streamix';
+import {
+    effectScope,
+    type EffectScope,
+} from 'vue';
 import { useScope } from '../lib/useScope';
 
 describe('useScope', () => {

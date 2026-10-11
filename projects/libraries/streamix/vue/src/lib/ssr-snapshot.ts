@@ -33,7 +33,7 @@ export function hydrateAtomSnapshot(
   snapshot: AtomSnapshot,
 ): void {
   for (const [name, value] of Object.entries(snapshot)) {
-    if (!(name in targets)) {
+    if (!Object.hasOwn(targets, name)) {
       throw new Error(`Unknown atom snapshot key: ${name}`);
     }
 

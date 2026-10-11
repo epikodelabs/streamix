@@ -3,7 +3,7 @@ import {
   getCurrentScope,
   h,
   onScopeDispose,
-  ref,
+  shallowRef,
   type Ref,
 } from 'vue';
 
@@ -17,10 +17,9 @@ type Listener = () => void;
 let events: readonly StreamixDevtoolsEvent[] = [];
 const listeners = new Set<Listener>();
 const maxEvents = 250;
-const environment = globalThis as typeof globalThis & {
-  process?: { env?: Record<string, string | undefined> };
-};
-const enabled = environment.process?.env?.['NODE_ENV'] !== 'production';
+// Keep this as a direct expression so standard production bundlers can fold
+// it away. Indirection through globalThis prevents that replacement.
+const enabled = typeof process === 'undefined' || process.env['NODE_ENV'] !== 'production';
 let queued = false;
 
 /** Queues DevTools notifications outside Vue's render and tracking phases. */
@@ -55,7 +54,7 @@ function snapshot(): readonly StreamixDevtoolsEvent[] {
 export function useStreamixDevtoolsEvents(): Readonly<
   Ref<readonly StreamixDevtoolsEvent[]>
 > {
-  const trace = ref(events) as Ref<readonly StreamixDevtoolsEvent[]>;
+  const trace = shallowRef(events) as Ref<readonly StreamixDevtoolsEvent[]>;
 
   const unsubscribe = subscribe(() => {
     trace.value = events;
@@ -72,7 +71,7 @@ export function useStreamixDevtoolsEvents(): Readonly<
 export const StreamixDevtools = defineComponent({
   name: 'StreamixDevtools',
   setup() {
-    const trace = ref(snapshot());
+    const trace = shallowRef(snapshot());
     const unsubscribe = subscribe(() => {
       trace.value = snapshot();
     });

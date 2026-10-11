@@ -1,11 +1,11 @@
 import {
-  effectScope,
-  type EffectScope,
-} from 'vue';
-import {
   atom,
   type Atom,
 } from '@epikodelabs/streamix';
+import {
+  effectScope,
+  type EffectScope,
+} from 'vue';
 import { useIterable } from '../lib/useIterable';
 
 async function flushMicrotasks() {
