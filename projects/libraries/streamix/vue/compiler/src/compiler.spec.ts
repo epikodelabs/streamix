@@ -91,6 +91,21 @@ describe('Vue SFC compiler', () => {
     expect(result.code).toContain('<p>Static</p>');
   });
 
+  it('keeps an authored ts-nocheck pragma effective above the generated import', () => {
+    const result = transformVueSfc(`
+      <script setup>
+      // @ts-nocheck -- bridged by the Streamix Vue compiler.
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(0);
+      </script>
+      <template><button @click="count++">{{ count }}</button></template>
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code.indexOf('@ts-nocheck')).toBeGreaterThanOrEqual(0);
+    expect(result.code.indexOf('@ts-nocheck')).toBeLessThan(result.code.indexOf('import { useWritable'));
+  });
+
   it('reports unknown scope bindings instead of guessing', () => {
     const result = transformVueSfc(`
       <script setup>

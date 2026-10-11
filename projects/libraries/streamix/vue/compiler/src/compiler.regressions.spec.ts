@@ -192,6 +192,17 @@ describe('Vue production regression gates', () => {
     expect(result.code).toContain('derived(() => count.value * 2)');
   });
 
+  it('preserves DerivedScope tracker arguments as atom references', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(2);
+      const doubled = derived($ => $(count));
+    `, '{{ doubled }}');
+    expectNoError(result);
+    expect(result.code).toContain('derived($ => $(count))');
+    expect(result.code).not.toContain('$(count.value)');
+  });
+
   it('only imports generated bridges actually needed by the SFC', () => {
     const result = compile(`
       import { atom } from '@epikodelabs/streamix';

@@ -614,7 +614,11 @@ function withRuntimeImport(source: string, installed: boolean): { insertion?: { 
   const required = [...BRIDGE_COMPOSABLES].filter(name => used.has(name) && !imported.has(name));
   if (required.length === 0) return {};
   const statement = `\nimport { ${required.join(', ')} } from "@epikodelabs/streamix/vue";\n`;
-  return { insertion: { offset: scriptSetup.loc.start.offset, text: statement } };
+  // TypeScript only honors `@ts-check` / `@ts-nocheck` within leading
+  // comments, so the generated import goes after such a pragma instead of
+  // at the very top of the script setup.
+  const pragma = /^\s*(?:\/\/[^\n]*\n)*\s*\/\/[^\n]*@ts-(?:no)?check\b[^\n]*\n/.exec(scriptSetup.content);
+  return { insertion: { offset: scriptSetup.loc.start.offset + (pragma?.[0].length ?? 0), text: statement } };
 }
 
 function factoryImports(script: string): FactoryImports {
@@ -773,7 +777,12 @@ function derivedAtomValueReadEdits(
     const callback = findNodeAt(file, derived.derivedCallbackStart!, derived.derivedCallbackEnd!);
     if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) continue;
     const body = callback.body;
+    const hasTrackerParameter = callback.parameters.some(parameter => containsBinding(parameter.name, '$'));
     const visit = (node: ts.Node): void => {
+      // `$` receives atom references and registers them as dependencies. Its
+      // arguments must not be lowered to `.value` reads.
+      if (hasTrackerParameter && ts.isCallExpression(node) &&
+          ts.isIdentifier(node.expression) && node.expression.text === '$') return;
       if (ts.isIdentifier(node) && atoms.has(node.text) &&
           isValueIdentifier(node) && !isShadowedIn(node, callback, node.text)) {
         const start = node.getStart(file);

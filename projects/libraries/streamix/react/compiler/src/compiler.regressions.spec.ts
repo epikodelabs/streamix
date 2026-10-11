@@ -40,6 +40,12 @@ describe("Streamix React adoption regressions", () => {
     expect(result.code.trimStart().startsWith('"use client";')).toBe(true);
   });
 
+  it("keeps an authored ts-nocheck pragma effective above the generated import", () => {
+    const result = transformReactJsx(`// @ts-nocheck -- compiled by @epikodelabs/streamix/react/builder before TypeScript checks JSX.\nconst status = atom(1); function View() { return <b>{status}</b>; }`);
+    expect(result.code.startsWith("// @ts-nocheck")).toBe(true);
+    expect(/^\/\/ @ts-nocheck[^\n]*\nimport \{ useStreamixSource/.test(result.code)).toBe(true);
+  });
+
   it("rejects local reactive declarations after a possible early return", () => {
     const result = transformReactJsx(`
       function App({ enabled }: { enabled: boolean }) {
@@ -188,5 +194,16 @@ describe("Streamix React adoption regressions", () => {
       export const App = memo(() => <div>{status}</div>);
     `);
     expect(memo.code).toContain('__streamixTrace("render", "App")');
+  });
+
+  it("preserves DerivedScope tracker arguments as atom references", () => {
+    const result = transformReactJsx(`
+      import { atom, derived } from "@epikodelabs/streamix";
+      const count = atom(0);
+      const summary = derived($ => $(count));
+    `);
+
+    expect(result.code).toContain('derived($ => $(count))');
+    expect(result.code).not.toContain('$(count.value)');
   });
 });

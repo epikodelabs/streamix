@@ -307,6 +307,11 @@ export function transformReactJsx(
       const canRead = (id: ts.Identifier): boolean => reactiveNames.has(id.text) &&
         !callbackParameters.has(id.text) && !hidden(id) && !isShadowedName(id.text, id, boundary);
       const lower: ts.Visitor = child => {
+        // `$` is the DerivedScope tracker. Its arguments must remain source
+        // references so `$` can register them; lowering `$(count)` to
+        // `$(count.value)` would pass a plain value instead of an atom.
+        if (ts.isCallExpression(child) && ts.isIdentifier(child.expression) &&
+            child.expression.text === "$" && callbackParameters.has("$")) return child;
         if (ts.isPropertyAccessExpression(child) && child.name.text === "value" &&
             ts.isIdentifier(child.expression) && canRead(child.expression)) return child;
         if (ts.isShorthandPropertyAssignment(child) && canRead(child.name)) {
@@ -1061,9 +1066,16 @@ export function transformReactJsx(
   const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
   const printed = printer.printFile(transformed);
   const directive = printed.match(/^(\s*["']use client["'];?\s*\n)/);
-  const code = needsRuntimeImport && /\b(?:useStreamixSource|useStreamixLocal|useStreamixAfterCommit)\s*\(/.test(printed) ? (directive
-    ? `${directive[0]}${runtimePreludeFor(printed)}\n${printed.slice(directive[0].length)}`
-    : `${runtimePreludeFor(printed)}\n${printed}`) : printed;
+  // A `"use client"` directive must remain the first statement, and
+  // TypeScript only honors `@ts-check` / `@ts-nocheck` within leading
+  // comments. The generated import goes after such a head instead of at
+  // the very top, so an authored pragma stays effective.
+  const head = directive?.[0] ??
+    /^\s*(?:\/\/[^\n]*\n)*\s*\/\/[^\n]*@ts-(?:no)?check\b[^\n]*\n/.exec(printed)?.[0] ??
+    "";
+  const code = needsRuntimeImport && /\b(?:useStreamixSource|useStreamixLocal|useStreamixAfterCommit)\s*\(/.test(printed)
+    ? `${head}${runtimePreludeFor(printed)}\n${printed.slice(head.length)}`
+    : printed;
   return {
     code,
     bindingCount,
