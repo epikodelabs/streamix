@@ -74,7 +74,12 @@ const message = useIterable(messages(), 'Waiting…');
 </template>
 ```
 
-Outside compiled SFCs, the same question guides a manual bridge: does the component need to **change** this value (`useWritable`) or only **observe** it (`useIterable`)? There is no `useAtom` composable because the useful question is not "is this an atom?"
+`useWritable()`, `useIterable()`, and `useScope()` require component `setup()`
+or an active Vue `effectScope()`. They throw before creating a subscription or
+owned scope otherwise. For manual non-Vue ownership, use
+`createIterableBridge(source)`, read `bridge.ref`, and call `bridge.dispose()`
+when the owner ends. There is no `useAtom` composable because the useful
+question is not "is this an atom?"
 
 ## Custom pipelines
 

@@ -64,7 +64,10 @@ const fullName = derived($ => `${$(firstName)} ${$(lastName)}`);
 
 ```
 
-The `$` helper tracks dependencies dynamically.
+The `$` helper tracks dependencies dynamically. Its arguments are atom
+references, not values: `$(firstName)` both reads the current value and records
+`firstName` as a dependency. Framework compilers preserve those tracker
+arguments exactly; they never lower them to `$(firstName.value)`.
 
 > `derived()` is intentionally synchronous. If the computation needs `await`, cancellation, or restart semantics, move that work into `flow()`.
 
