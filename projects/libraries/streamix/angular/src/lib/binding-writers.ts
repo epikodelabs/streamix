@@ -29,23 +29,20 @@ export function writeProperty(
 }
 
 /**
- * null / undefined remove the attribute. ARIA and data attributes are value
- * attributes, so booleans must be stringified just as Angular does. Other
- * attributes retain boolean-attribute semantics.
+ * Mirrors Angular's `[attr.name]` binding: nullish values remove an attribute;
+ * other values are stringified (including booleans). Only DOM properties and
+ * genuinely boolean HTML attributes have presence semantics, not attr.title.
  */
 export function writeAttribute(
   target: Element,
   attribute: string,
 ): (value: unknown) => void {
   return value => {
-    const valueAttribute = attribute.startsWith('aria-') || attribute.startsWith('data-');
-
-    if (value == null || (!valueAttribute && value === false)) {
+    if (value == null) {
       target.removeAttribute(attribute);
-      return;
+    } else {
+      target.setAttribute(attribute, String(value));
     }
-
-    target.setAttribute(attribute, valueAttribute ? String(value) : value === true ? '' : String(value));
   };
 }
 

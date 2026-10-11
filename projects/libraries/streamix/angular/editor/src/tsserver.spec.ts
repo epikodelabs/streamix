@@ -73,4 +73,40 @@ describe("Streamix Angular tsserver plugin", () => {
     const document = plugin.__streamixVirtualize("counter.ts", source);
     expect(document.code).toContain('derived(() => this.price.value * this.quantity.value)');
   });
+  it('never rewrites strings, comments, keys, or shadowed callback parameters', () => {
+    const plugin = createPlugin({ typescript: ts }) as ts.server.PluginModule & {
+      __streamixVirtualize(fileName: string, source: string): { code: string };
+    };
+    const source = [
+      'import { atom } from "@epikodelabs/streamix";',
+      '@Component({ template: `{{ "count" + obj.count + count }}',
+      '  <button (click)="count += 1"></button>',
+      '  @if (isReady((count + 1), "a)")) { <i>{{ count }}</i> }',
+      '` })',
+      'export class Test { count = atom(1); }',
+    ].join("\n");
+    const document = plugin.__streamixVirtualize('fixture.ts', source);
+    expect(document.code).toContain('"count" + obj.count + count.value');
+    expect(document.code).toContain('count.next(count.value + (1))');
+    expect(document.code).toContain('isReady((count.value + 1), "a)")');
+  });
+
+  it('keeps exact offsets across separate atom reads in the same template', () => {
+    const plugin = createPlugin({ typescript: ts }) as ts.server.PluginModule & {
+      __streamixVirtualize(fileName: string, source: string): {
+        code: string; toOriginal(offset: number): number; toGenerated(offset: number): number;
+      };
+    };
+    const source = 'import { atom } from "@epikodelabs/streamix"; '
+      + '@Component({ template: `<p>{{ count }}</p><output>{{ count }}</output>` }) '
+      + 'export class Test { count = atom(1); }';
+    const document = plugin.__streamixVirtualize('fixture.ts', source);
+    const second = source.lastIndexOf('{{ count }}') + 3;
+    const generated = document.code.lastIndexOf('{{ count.value }}') + 3;
+    expect(document.toGenerated(second)).toBe(generated);
+    expect(document.toOriginal(generated)).toBe(second);
+    expect(document.toOriginal(document.toGenerated(source.indexOf('class Test'))))
+      .toBe(source.indexOf('class Test'));
+  });
+
 });

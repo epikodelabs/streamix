@@ -102,4 +102,21 @@ describe('streamix builder options', () => {
 
     expect(installed).toContain('`<p>\\${spring} $& $1</p>`');
   });
+  it('supports inline templates with no styles or with styleUrls', () => {
+    const plain = '@Component({ template: `<p>old</p>` }) export class Test {}';
+    expect(installTransformedTemplate(plain, '<p>new</p>'))
+      .toContain('template: `<p>new</p>`');
+    const external = '@Component({ template: `<p>old</p>`, styleUrls: ["style.css"] }) export class Test {}';
+    const updated = installTransformedTemplate(external, '<p>new</p>');
+    expect(updated).toContain('styleUrls: ["style.css"]');
+    expect(updated).toContain('template: `<p>new</p>`');
+  });
+
+  it('handles escaped backticks and metadata following a template', () => {
+    const original = '@Component({ template: `<p>\\` old</p>`, changeDetection: 0 }) export class Test {}';
+    const updated = installTransformedTemplate(original, '<p>replacement</p>');
+    expect(updated).toContain('template: `<p>replacement</p>`');
+    expect(updated).toContain('changeDetection: 0');
+  });
+
 });

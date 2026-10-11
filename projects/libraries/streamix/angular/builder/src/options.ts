@@ -1,3 +1,5 @@
+import ts from 'typescript';
+
 // Pure helpers shared by the builder and its test suite. This module must
 // stay free of Node-only imports so the browser test suite can load it.
 
@@ -97,36 +99,81 @@ export function templateLiteral(text: string): string {
     .replace(/\$\{/g, '\\${') + '`';
 }
 
-/** Matches an inline template immediately followed by a styles literal. */
-const INLINE_TEMPLATE = /template:\s*`([\s\S]*?)`,\s*styles:/;
+/** A static inline @Component template and its exact literal source span. */
+export interface InlineSxTemplate {
+  readonly template: string;
+  readonly start: number;
+  readonly end: number;
+}
 
 /**
- * Installs the transformed template into the reprinted component source.
- *
- * The lifecycle install reprints the component, which normalizes line endings
- * and reindents the decorator, so the template occurrence matched on the raw
- * source may no longer exist there verbatim. Anchor on the reprinted output —
- * and refuse to continue silently: a component whose transformed template is
- * not written back would render Angular's own control flow while the compiled
- * setup walks marker paths that do not exist, crashing at runtime with no
- * build-time signal.
+ * Finds a template by its TypeScript syntax, not by the decorator's formatting,
+ * neighbouring metadata members, or the first backtick encountered.
+ */
+export function findInlineSxTemplate(source: string): InlineSxTemplate | undefined {
+  const file = ts.createSourceFile('sx-component.ts', source, ts.ScriptTarget.Latest, true);
+  let found: InlineSxTemplate | undefined;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isClassDeclaration(node)) {
+      for (const decorator of ts.getDecorators(node) ?? []) {
+        if (!ts.isCallExpression(decorator.expression) ||
+            !ts.isIdentifier(decorator.expression.expression) ||
+            decorator.expression.expression.text !== 'Component') continue;
+        const metadata = decorator.expression.arguments[0];
+        if (!metadata || !ts.isObjectLiteralExpression(metadata)) continue;
+        for (const property of metadata.properties) {
+          if (!ts.isPropertyAssignment(property) ||
+              property.name.getText(file).replace(/["']/g, '') !== 'template') continue;
+          const literal = property.initializer;
+          if (ts.isStringLiteral(literal) || ts.isNoSubstitutionTemplateLiteral(literal)) {
+            found = {
+              template: literal.text,
+              start: literal.getStart(file),
+              end: literal.end,
+            };
+            return;
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  if (found) return found;
+  // A real decorator with a computed/dynamic template must not accidentally
+  // adopt a lookalike `template:` token from unrelated source text.
+  if (/@Component\s*\(/.test(source)) return undefined;
+  // Backwards-compatible support for a decorator metadata fragment (used by
+  // callers that only reprint `template: ...` rather than the whole class).
+  // A TypeScript scanner, not a delimiter regex, determines the literal end.
+  const fragment = /\btemplate\s*:\s*/.exec(source);
+  if (!fragment) return undefined;
+  const start = fragment.index + fragment[0].length;
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source.slice(start),
+  );
+  const kind = scanner.scan();
+  if (kind !== ts.SyntaxKind.FirstTemplateToken &&
+      kind !== ts.SyntaxKind.StringLiteral) return undefined;
+  if (scanner.getTokenText().endsWith('${')) return undefined;
+  return { template: scanner.getTokenValue(), start, end: start + scanner.getTextPos() };
+}
+
+/**
+ * Replaces the literal in the reprinted component. Preserve all other
+ * decorator metadata and the reprinted class/lifecycle setup unchanged.
  */
 export function installTransformedTemplate(
   reprintedSource: string,
   transformedTemplate: string,
 ): string {
-  const match = INLINE_TEMPLATE.exec(reprintedSource);
-
+  const match = findInlineSxTemplate(reprintedSource);
   if (!match) {
     throw new Error(
-      'The reprinted component no longer contains an inline template followed by styles; the transformed template cannot be installed.',
+      'The reprinted component no longer contains an inline template (static @Component template required); the transformed template cannot be installed.',
     );
   }
-
-  // Function replacer: a plain string replacement would interpret `$`
-  // sequences inside the template as replacement patterns.
-  return reprintedSource.replace(
-    match[0],
-    () => `template: ${templateLiteral(transformedTemplate)},\n  styles:`,
-  );
+  return reprintedSource.slice(0, match.start) +
+    templateLiteral(transformedTemplate) + reprintedSource.slice(match.end);
 }

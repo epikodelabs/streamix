@@ -137,4 +137,26 @@ export class HostComponent { source = first; }`,
     expect(result.changed).toBeTrue();
     expect(result.source).toContain('ɵinstallSxCompiledView');
   });
+  it('merges required symbols into an existing runtime import without duplicates', () => {
+    const source = `import { ɵinstallSxCompiledView, ɵsxText as oldText } from '@epikodelabs/streamix/angular';
+      export class CounterComponent {}`;
+    const result = installSxLifecycleIntoComponentSource(source, {
+      inlineSetup: 'function ɵsetupSxBindings() { ɵsxText; }',
+    });
+    // Existing canonical imports are reused, renamed imports do not shadow
+    // the canonical name expected by compiled setup.
+    expect(result.source.match(/import .*ɵinstallSxCompiledView/g)?.length).toBe(1);
+    expect(result.source).toContain('ɵsxText as oldText');
+    expect(result.source).toContain(', ɵsxText');
+  });
+
+  it('does not count runtime names mentioned only in strings or comments as imports', () => {
+    const result = installSxLifecycleIntoComponentSource(
+      'export class CounterComponent {}',
+      { inlineSetup: 'function ɵsetupSxBindings() { console.log("ɵsxText"); /* ɵsxClass */ }' },
+    );
+    expect(result.source).not.toContain('import { ɵsxText');
+    expect(result.source).not.toContain('ɵsxClass,');
+  });
+
 });

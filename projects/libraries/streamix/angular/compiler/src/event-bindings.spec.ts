@@ -85,4 +85,30 @@ describe('compiled event bindings', () => {
       `ctx.select('a,b')`,
     );
   });
+  it('preserves authored self/prevent modifier order', () => {
+    const result = transformAngularComponentTemplate(
+      '<button (click.self.prevent)="save()" (mousedown.prevent.self)="save()"></button>',
+      'inline.html',
+    );
+    expect(result.setup).toContain('if (event.target !== event.currentTarget) return; event.preventDefault();');
+    expect(result.setup).toContain('event.preventDefault(); if (event.target !== event.currentTarget) return;');
+  });
+
+  it('retains ordinary scope property writes in Angular event handlers', () => {
+    const input = '<button (click)="model.count = model.count + 1">Add</button>';
+    const result = transformAngularComponentTemplate(input, 'inline.html', {
+      resolveReactiveSource: path => path === 'model.count'
+        ? 'model.get("count")' : undefined,
+    });
+    expect(result.template).toBe(input);
+  });
+
+  it('refuses direct atom reassignment that would replace the source', () => {
+    expect(() => transformAngularComponentTemplate(
+      '<button (click)="count = 2">Add</button>', 'inline.html', {
+        resolveReactiveSource: path => path === 'count' ? 'count' : undefined,
+      },
+    )).toThrowError(/Cannot assign to Streamix source/);
+  });
+
 });

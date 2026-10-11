@@ -374,31 +374,20 @@ function eventHandlerBody(
 ): string {
   const guards: string[] = [];
 
-  if (modifiers?.includes('self')) {
-    guards.push(
-      'if (event.target !== event.currentTarget) return;',
-    );
-  }
-
-  if (modifiers?.includes('prevent')) {
-    guards.push('event.preventDefault();');
-  }
-
-  if (modifiers?.includes('stop')) {
-    guards.push('event.stopPropagation();');
-  }
-
+  // Source order is significant: (click.prevent.self) prevents the default
+  // even for descendants, while (click.self.prevent) does not.
   for (const modifier of modifiers ?? []) {
+    if (modifier === 'self') {
+      guards.push('if (event.target !== event.currentTarget) return;');
+    } else if (modifier === 'prevent') {
+      guards.push('event.preventDefault();');
+    } else if (modifier === 'stop') {
+      guards.push('event.stopPropagation();');
+    }
     const key = KEY_MODIFIER_KEYS[modifier];
-
-    if (key) {
-      guards.push(`if (event.key !== ${JSON.stringify(key)}) return;`);
-    }
-
+    if (key) guards.push(`if (event.key !== ${JSON.stringify(key)}) return;`);
     const held = HELD_KEY_MODIFIERS[modifier];
-    if (held) {
-      guards.push(`if (!event.${held}) return;`);
-    }
+    if (held) guards.push(`if (!event.${held}) return;`);
   }
 
   // The parameter is omitted when nothing reads it: generated components are

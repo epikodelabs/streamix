@@ -132,15 +132,13 @@ export function installSxLifecycleIntoComponentSource(
     statement === classNode ? updatedClass : statement,
   );
 
+  const withImports = mergeRuntimeImports(statements, runtimeSymbols, runtimeImport);
   const printed = printStatements(file, [
-    ...statements,
+    ...withImports,
     ...(hasSetup ? parseStatements(options.inlineSetup!) : []),
   ]);
 
-  return {
-    source: `${printImport(runtimeSymbols, runtimeImport)}\n${printed}`,
-    changed: true,
-  };
+  return { source: printed, changed: true };
 }
 
 /** The exported class declaration, named or default. */
@@ -337,28 +335,66 @@ function printStatements(
   );
 }
 
-/** Prints the runtime import, reusing the file's existing import when present. */
-function printImport(
+/**
+ * Merge the generated bindings into an existing named import, or add one.
+ * A namespace import cannot supply unqualified generated references and is
+ * deliberately left intact beside the new named import.
+ */
+function mergeRuntimeImports(
+  statements: readonly ts.Statement[],
   symbols: readonly string[],
-  runtimeImport: string,
-): string {
-  const unique = [...new Set(symbols)];
-
-  return (
-    `import { ${unique.join(', ')} } from ` +
-    `${JSON.stringify(runtimeImport)};\n`
+  moduleName: string,
+): readonly ts.Statement[] {
+  const required = new Set(symbols);
+  let mergeIndex = -1;
+  for (let index = 0; index < statements.length; index++) {
+    const statement = statements[index];
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+        statement.moduleSpecifier.text !== moduleName || !statement.importClause) continue;
+    const bindings = statement.importClause.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    if (mergeIndex < 0 && !statement.importClause.isTypeOnly) mergeIndex = index;
+    for (const element of bindings.elements) {
+      if (!element.isTypeOnly && !element.propertyName) required.delete(element.name.text);
+    }
+  }
+  if (required.size === 0) return statements;
+  const additions = [...required].map(name =>
+    ts.factory.createImportSpecifier(false, undefined, ts.factory.createIdentifier(name)));
+  if (mergeIndex >= 0) {
+    const result = [...statements];
+    const statement = result[mergeIndex] as ts.ImportDeclaration;
+    const clause = statement.importClause!;
+    const named = clause.namedBindings as ts.NamedImports;
+    result[mergeIndex] = ts.factory.updateImportDeclaration(
+      statement, statement.modifiers,
+      ts.factory.updateImportClause(clause, false, clause.name,
+        ts.factory.updateNamedImports(named, [...named.elements, ...additions])),
+      statement.moduleSpecifier, statement.attributes,
+    );
+    return result;
+  }
+  const generated = ts.factory.createImportDeclaration(
+    undefined,
+    ts.factory.createImportClause(false, undefined, ts.factory.createNamedImports(additions)),
+    ts.factory.createStringLiteral(moduleName),
   );
+  return [generated, ...statements];
 }
 
-/** Includes only primitives referenced by this setup, preserving noUnusedLocals. */
+/** Only include references to actual identifiers, not strings or comments. */
 function runtimeSymbolsForSetup(setup: string): readonly string[] {
-  return SX_SETUP_RUNTIME_SYMBOLS.filter(symbol =>
-    new RegExp(
-      `(^|[^A-Za-z0-9_$])${escapeRegExp(symbol)}(?![A-Za-z0-9_$])`,
-    ).test(setup),
-  );
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const required = new Set<string>();
+  const candidates = new Set<string>(SX_SETUP_RUNTIME_SYMBOLS);
+  const tree = ts.createSourceFile('sx-setup.ts', setup, ts.ScriptTarget.Latest, true);
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && candidates.has(node.text) &&
+        !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) &&
+        !(ts.isPropertyAssignment(node.parent) && node.parent.name === node)) {
+      required.add(node.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(tree);
+  return SX_SETUP_RUNTIME_SYMBOLS.filter(name => required.has(name));
 }

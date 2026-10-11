@@ -158,7 +158,7 @@ export class SxBindingTable {
 
   /** Removes one slot binding without destroying the table. */
   unbind(slot: BindingSlot): void {
-    this.assertSlot(slot);
+    this.assertLiveSlot(slot, 'unbind');
     this.unsubscribeSlot(slot);
     this.clearSlot(slot);
   }
@@ -259,6 +259,8 @@ export class SxBindingTable {
 
     while (index < this.dirtySlots.length) {
       const slot = this.dirtySlots[index++];
+      // Clear this flag before invoking the writer: synchronous re-emissions
+      // must enqueue a new slot instead of being silently dropped.
       this.dirtyFlags[slot] = 0;
 
       const write = this.writers[slot];
@@ -288,8 +290,7 @@ export class SxBindingTable {
       }
     }
 
-    // Clear before running writers: a write can itself cause Streamix
-    // emissions, which must enqueue fresh work rather than be erased here.
+    // All newly enqueued work was consumed by the dynamically sized loop.
     this.dirtySlots.length = 0;
   }
 
@@ -301,9 +302,9 @@ export class SxBindingTable {
     }
   }
 
-  private assertLiveSlot(slot: BindingSlot): void {
+  private assertLiveSlot(slot: BindingSlot, action = 'bind'): void {
     if (this.destroyed) {
-      throw new Error('Cannot bind a destroyed SxBindingTable.');
+      throw new Error(`Cannot ${action} a destroyed SxBindingTable.`);
     }
 
     this.assertSlot(slot);

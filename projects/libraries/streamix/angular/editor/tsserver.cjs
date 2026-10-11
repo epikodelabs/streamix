@@ -66,8 +66,11 @@ module.exports = function init(modules) {
           if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name) ||
               property.name.text !== "template" || !ts.isNoSubstitutionTemplateLiteral(property.initializer)) continue;
           const template = property.initializer;
-          const text = rewriteTemplate(template.text, atoms);
-          if (text !== template.text) edits.push({ start: template.getStart(file) + 1, end: template.getStart(file) + 1 + template.text.length, text });
+          const offset = template.getStart(file) + 1;
+          const raw = source.slice(offset, template.end - 1);
+          for (const edit of rewriteTemplateEdits(raw, atoms)) {
+            edits.push({ start: offset + edit.start, end: offset + edit.end, text: edit.text });
+          }
         }
       }
     }
@@ -99,31 +102,136 @@ module.exports = function init(modules) {
     const targetEnd = to + "End";
     for (const mapping of mappings) {
       if (position < mapping[start]) return Math.max(0, position + delta);
-      if (position <= mapping[end]) return mapping[targetStart];
+      if (position <= mapping[end]) {
+        // Positions inside an expanded identifier retain their original
+        // offset; only the appended `.value` tail maps to its end.
+        return mapping[targetStart] + Math.min(position - mapping[start],
+          mapping[targetEnd] - mapping[targetStart]);
+      }
       delta += (mapping[targetEnd] - mapping[targetStart]) - (mapping[end] - mapping[start]);
     }
     return Math.max(0, position + delta);
   }
 
-  function rewriteTemplate(template, atoms) {
-    return template
-      // Block headers and @let values are compiled positions too: the build
-      // lowers atom reads there, so the editor must see the same value shapes
-      // or every block condition would surface a false type error.
-      .replace(/(@(?:else\s+)?if|@switch|@for)\s*\(([\s\S]*?)\)\s*\{/g,
-        (_, header, expression) => header + " (" + rewriteExpression(expression, atoms) + ") {")
-      .replace(/(@let\s+[\w$]+\s*=\s*)([^;]+);/g,
-        (_, prefix, expression) => prefix + rewriteExpression(expression, atoms) + ";")
-      .replace(/\{\{([\s\S]*?)\}\}/g, (_, expression) => "{{" + rewriteExpression(expression, atoms) + "}}")
-      .replace(/((?:\[\([\w.-]+\)\]|\[[\w.-]+\]|\([\w.-]+\))\s*=\s*)(["'])([\s\S]*?)\2/g, (_, prefix, quote, expression) =>
-        prefix + quote + rewriteExpression(expression, atoms) + quote);
+  /** Match a control-flow header, ignoring nested calls and quoted parentheses. */
+  function closingParen(text, open) {
+    let depth = 0;
+    let quote = "";
+    let escaped = false;
+    for (let index = open; index < text.length; index++) {
+      const ch = text[index];
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === "`") { quote = ch; continue; }
+      if (ch === '(') depth++;
+      else if (ch === ')' && --depth === 0) return index;
+    }
+    return -1;
   }
 
-  function rewriteExpression(expression, atoms) {
+  /** Return source-relative edits so hover/navigation offsets stay precise. */
+  function rewriteTemplateEdits(template, atoms) {
+    const edits = [];
+    const addExpression = (expression, offset) => {
+      for (const edit of rewriteExpression(expression, atoms, true)) {
+        edits.push({ start: offset + edit.start, end: offset + edit.end, text: edit.text });
+      }
+    };
+    const header = /@(?:else\s+)?(?:if|switch|for)\s*\(/g;
+    for (const match of template.matchAll(header)) {
+      const start = match.index + match[0].length;
+      const close = closingParen(template, start - 1);
+      if (close < 0 || !/^\s*\{/.test(template.slice(close + 1))) continue;
+      const original = template.slice(start, close);
+      if (/\bfor\s*\($/.test(match[0])) {
+        const loop = /^(\s*[\w$]+\s+of\s+)([^;]+)([\s\S]*)$/.exec(original);
+        if (loop) addExpression(loop[2], start + loop[1].length);
+      } else addExpression(original, start);
+    }
+    for (const match of template.matchAll(/(@let\s+[\w$]+\s*=\s*)([^;]+);/g)) {
+      addExpression(match[2], match.index + match[1].length);
+    }
+    for (const match of template.matchAll(/\{\{([\s\S]*?)\}\}/g)) {
+      addExpression(match[1], match.index + 2);
+    }
+    for (const match of template.matchAll(/((?:\[\([\w.-]+\)\]|\[[\w.-]+\]|\([\w.-]+\))\s*=\s*)(["'])([\s\S]*?)\2/g)) {
+      addExpression(match[3], match.index + match[1].length + 1);
+    }
+    return edits.sort((a, b) => a.start - b.start);
+  }
+
+  /**
+   * TypeScript syntax-aware expression lowering. Its edits are restricted to
+   * actual identifier nodes, never strings, comments, or property names.
+   * Assignment lowering mirrors the compiler's Streamix writer semantics.
+   */
+  function rewriteExpression(expression, atoms, returnEdits = false) {
+    const prefix = 'const __sxExpression = (';
+    const suffix = ');';
+    const file = ts.createSourceFile('sx-template-expression.ts', prefix + expression + suffix,
+      ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const declaration = file.statements[0]?.declarationList?.declarations?.[0];
+    if (!declaration?.initializer || file.parseDiagnostics.length) return returnEdits ? [] : expression;
+    const edits = [];
+    const add = (node, text) => {
+      const start = node.getStart(file) - prefix.length;
+      const end = node.end - prefix.length;
+      if (start >= 0 && end <= expression.length) edits.push({ start, end, text });
+    };
+    const compound = new Map([
+      [ts.SyntaxKind.PlusEqualsToken, '+'], [ts.SyntaxKind.MinusEqualsToken, '-'],
+      [ts.SyntaxKind.AsteriskEqualsToken, '*'], [ts.SyntaxKind.SlashEqualsToken, '/'],
+      [ts.SyntaxKind.PercentEqualsToken, '%'],
+    ]);
+    const visit = node => {
+      if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left) && atoms.has(node.left.text) &&
+          (node.operatorToken.kind === ts.SyntaxKind.EqualsToken || compound.has(node.operatorToken.kind))) {
+        const name = node.left.text;
+        const right = rewriteExpression(node.right.getText(file), atoms);
+        const operator = compound.get(node.operatorToken.kind);
+        add(node, `${name}.next(${operator ? `${name}.value ${operator} (${right})` : right})`);
+        return;
+      }
+      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+          ts.isIdentifier(node.operand) && atoms.has(node.operand.text) &&
+          (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) {
+        const name = node.operand.text;
+        add(node, `${name}.next(${name}.value ${node.operator === ts.SyntaxKind.PlusPlusToken ? '+' : '-'} 1)`);
+        return;
+      }
+      if (ts.isShorthandPropertyAssignment(node) && atoms.has(node.name.text)) {
+        add(node, `${node.name.text}: ${node.name.text}.value`);
+        return;
+      }
+      if (ts.isIdentifier(node) && atoms.has(node.text)) {
+        const parent = node.parent;
+        if ((ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+            (ts.isPropertyAccessExpression(parent) && parent.expression === node &&
+              (parent.name.text === 'value' || parent.name.text === 'next' || parent.name.text === 'set')) ||
+            (ts.isPropertyAssignment(parent) && parent.name === node) ||
+            (ts.isParameter(parent) && parent.name === node) ||
+            (ts.isVariableDeclaration(parent) && parent.name === node)) return;
+        // A template callback can shadow a component atom with a parameter.
+        let enclosing = parent;
+        while (enclosing && enclosing !== declaration) {
+          if (ts.isFunctionLike(enclosing) && enclosing.parameters.some(param =>
+            ts.isIdentifier(param.name) && param.name.text === node.text)) return;
+          enclosing = enclosing.parent;
+        }
+        add(node, `${node.text}.value`);
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(declaration.initializer);
+    if (returnEdits) return edits;
     let result = expression;
-    for (const atom of atoms) {
-      const escaped = atom.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      result = result.replace(new RegExp("\\b" + escaped + "\\b(?!\\s*\\.)", "g"), atom + ".value");
+    for (const edit of edits.sort((a, b) => b.start - a.start)) {
+      result = result.slice(0, edit.start) + edit.text + result.slice(edit.end);
     }
     return result;
   }
@@ -146,17 +254,72 @@ module.exports = function init(modules) {
       const service = angularPlugin.create(info);
       const proxy = Object.create(null);
       for (const key of Object.keys(service)) proxy[key] = (...args) => service[key](...args);
-      const documentFor = fileName => documents.get(fileName);
-      proxy.getSemanticDiagnostics = fileName => service.getSemanticDiagnostics(fileName).map(diagnostic => {
-        const document = documentFor(fileName);
-        if (!document || diagnostic.start === undefined) return diagnostic;
-        return {
-          ...diagnostic,
-          start: document.toOriginal(diagnostic.start),
-          length: diagnostic.length === undefined ? undefined :
-            Math.max(0, document.toOriginal(diagnostic.start + diagnostic.length) - document.toOriginal(diagnostic.start)),
+      const documentFor = fileName => {
+        // Editor actions can arrive before the delegated language service has
+        // requested the transformed script snapshot for this particular file.
+        if (!documents.has(fileName)) host.getScriptSnapshot(fileName);
+        return documents.get(fileName);
+      };
+      const originalPosition = (fileName, position) => documentFor(fileName)?.toOriginal(position) ?? position;
+      const generatedPosition = (fileName, position) => documentFor(fileName)?.toGenerated(position) ?? position;
+      const originalSpan = (fileName, span) => {
+        if (!span) return span;
+        const start = originalPosition(fileName, span.start);
+        const end = originalPosition(fileName, span.start + span.length);
+        return { ...span, start, length: Math.max(0, end - start) };
+      };
+      const mapDiagnostic = (fileName, diagnostic) => diagnostic.start === undefined
+        ? diagnostic : { ...diagnostic, ...originalSpan(fileName,
+          { start: diagnostic.start, length: diagnostic.length ?? 0 }) };
+      for (const method of ['getSemanticDiagnostics', 'getSyntacticDiagnostics', 'getSuggestionDiagnostics']) {
+        if (typeof service[method] === 'function') {
+          proxy[method] = fileName => service[method](fileName).map(d => mapDiagnostic(fileName, d));
+        }
+      }
+      for (const method of ['getQuickInfoAtPosition', 'getRenameInfo']) {
+        if (typeof service[method] === 'function') {
+          proxy[method] = (fileName, position, ...args) => {
+            const result = service[method](fileName, generatedPosition(fileName, position), ...args);
+            return result && result.textSpan ? { ...result, textSpan: originalSpan(fileName, result.textSpan),
+              ...(result.triggerSpan ? { triggerSpan: originalSpan(fileName, result.triggerSpan) } : {}) } : result;
+          };
+        }
+      }
+      if (typeof service.getCompletionsAtPosition === 'function') {
+        proxy.getCompletionsAtPosition = (fileName, position, ...args) => {
+          const result = service.getCompletionsAtPosition(fileName, generatedPosition(fileName, position), ...args);
+          return result ? { ...result, entries: result.entries?.map(entry => ({ ...entry,
+            replacementSpan: originalSpan(fileName, entry.replacementSpan) })) } : result;
         };
-      });
+      }
+      const mapLocation = entry => entry && entry.fileName && entry.textSpan
+        ? { ...entry, textSpan: originalSpan(entry.fileName, entry.textSpan),
+            ...(entry.contextSpan ? { contextSpan: originalSpan(entry.fileName, entry.contextSpan) } : {}),
+            ...(entry.originalTextSpan ? { originalTextSpan: originalSpan(entry.fileName, entry.originalTextSpan) } : {}) }
+        : entry;
+      for (const method of ['getDefinitionAtPosition', 'getTypeDefinitionAtPosition',
+          'getImplementationAtPosition', 'getReferencesAtPosition', 'findRenameLocations']) {
+        if (typeof service[method] === 'function') {
+          proxy[method] = (fileName, position, ...args) => {
+            const result = service[method](fileName, generatedPosition(fileName, position), ...args);
+            return Array.isArray(result) ? result.map(mapLocation) : result;
+          };
+        }
+      }
+      if (typeof service.findReferences === 'function') {
+        proxy.findReferences = (fileName, position, ...args) => {
+          const result = service.findReferences(fileName, generatedPosition(fileName, position), ...args);
+          return result?.map(group => ({ ...group, definition: mapLocation(group.definition),
+            references: group.references?.map(mapLocation) })) ?? result;
+        };
+      }
+      if (typeof service.getDefinitionAndBoundSpan === 'function') {
+        proxy.getDefinitionAndBoundSpan = (fileName, position, ...args) => {
+          const result = service.getDefinitionAndBoundSpan(fileName, generatedPosition(fileName, position), ...args);
+          return result ? { ...result, textSpan: originalSpan(fileName, result.textSpan),
+            definitions: result.definitions?.map(mapLocation) } : result;
+        };
+      }
       return proxy;
     },
     getExternalFiles: angularPlugin.getExternalFiles,

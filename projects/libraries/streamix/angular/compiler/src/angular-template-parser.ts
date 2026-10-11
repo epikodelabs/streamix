@@ -517,7 +517,11 @@ function visitElement(
 
     const handlerSource = sourceText(state.template, output.handlerSpan);
     const assignment = /^\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*(?:=|\+=|-=|\*=|\/=|%=)/.exec(handlerSource);
-    if (assignment && state.resolveReactiveSource?.(assignment[1])) {
+    const assignedSource = assignment && state.resolveReactiveSource?.(assignment[1]);
+    // A scope member is a value-first proxy property; Angular may perform its
+    // normal assignment and the scope setter forwards it to its backing atom.
+    // A bare atom reference cannot be reassigned without destroying the source.
+    if (assignedSource && !isScopeBackingSource(assignedSource)) {
       throw new Error(
         `Cannot assign to Streamix source ${JSON.stringify(assignment[1])} in an Angular event expression. ` +
         'Use a component method or call .set(...) instead.',
@@ -620,16 +624,20 @@ function containsCompiledBinding(
   node: unknown,
   template: string,
   resolveReactiveSource?: SxReactiveSourceResolver,
+  visited = new WeakSet<object>(),
 ): boolean {
   if (Array.isArray(node)) {
     return node.some(child =>
-      containsCompiledBinding(child, template, resolveReactiveSource)
+      containsCompiledBinding(child, template, resolveReactiveSource, visited)
     );
   }
 
   if (!node || typeof node !== 'object') {
     return false;
   }
+
+  if (visited.has(node)) return false;
+  visited.add(node);
 
   if (isAngularDynamicNode(node)) {
     return false;
@@ -698,7 +706,7 @@ function containsCompiledBinding(
   const record = node as Record<string, unknown>;
   return Object.values(record).some(
     value => value !== (record as { inputs?: unknown }).inputs &&
-      containsCompiledBinding(value, template, resolveReactiveSource),
+      containsCompiledBinding(value, template, resolveReactiveSource, visited),
   );
 }
 

@@ -70,13 +70,14 @@ template-host virtual-file layer is added.
 Scope members are typed as ordinary values, so scope-based templates stay clean
 in the editor and in the build.
 
-One case is expected, and worth recognising when you meet it: putting a **bare atom straight into an expression** — `{{ count * 2 }}`, `@if (count > 3)`, `@for (row of rows; …)` — compiles, but your editor will underline it. What you are holding there is the atom, not the number or the list, and the editor is right to say so. A lone `{{ count }}` is fine; interpolation accepts any type.
-
-If you see those squiggles, there are three ways to clear them:
-
-- keep the state in a scope and read it as `model.count` — the recommended shape anyway;
-- or write the value explicitly — `count.value` — which the editor accepts;
-- or wrap the atom read itself in Angular's `$any(...)` cast — `{{ $any(count) * 2 }}`, `@if ($any(count) > 3)`, `@for (row of $any(rows); …)`. The editor stops checking the cast, and the build sees through it and still compiles the expression reactively. Wrap the *read*, not the whole expression: `$any(count * 2)` only silences the outer operation, and the inner `count * 2` is still checked.
+With the Streamix editor plugin active for **inline templates**, expressions
+such as `{{ count * 2 }}` and `@if (count > 3)` are virtualized to `.value`
+reads before Angular's language service checks them. Without this plugin,
+Angular sees the raw atom type and may underline the expression. External
+`templateUrl` files are not virtualized yet; use explicit `.value` there or
+migrate the relevant template to inline form until external-template support
+is implemented. Avoid `$any()` as a general workaround because it also hides
+unrelated template type errors.
 
 The editor also cannot see which scope members are writable, so it stays quiet on a two-way binding to a calculated member, such as `[(value)]="model.doubled"`. The build rejects that one, and the build's error is the authoritative one.
 
@@ -154,3 +155,44 @@ Vite serves the page and prints a URL to open.
 Streamix for Angular is not a new component model. It is a way to use Streamix atoms, derived values, flows, and scopes in Angular without making template code feel like plumbing.
 
 Write state as state. Write templates as templates. Let the integration connect them.
+
+## Current compiler ownership boundaries
+
+The compiler only takes over template positions it can address and update
+without calling Angular change detection. A structural block changes the number
+of DOM siblings, so a later sibling that also needs an sx binding cannot be
+addressed by a static child index. For example:
+
+```html
+@if (model.ready) { <p>Ready</p> }
+<button (click)="save()">Save</button>
+```
+
+This placement currently produces a **build error**, not an inert button.
+Move the event-bearing button before the structural block, or group the dynamic
+content into a compiled block that owns its descendants. Nested structural
+blocks are supported only where the block compiler can own their DOM.
+
+Inside a compiled structural block, dynamic property bindings and attribute
+interpolation are not supported yet. For example,
+`@for (row of model.items; track row.id) { <li [class.active]="row.active">...</li> }`
+is not a supported compiled-block template. Use a class binding in a supported
+static region, or restructure the block until full block-property lowering is
+implemented. Unsupported reactive reads are rejected at build time rather than
+silently rendered as stale Angular values.
+
+**Scheduler ownership:** `provideSxZoneScheduling()` configures the current
+module-level Streamix renderer scheduler, so it is a page-wide setting, not a
+per-Angular-app setting. Hosting multiple Angular applications with different
+zones requires a dedicated scheduler per owner before that setup is supported.
+
+**List keys:** compiled keyed blocks require unique keys. A collision is an
+error rather than an implicit index-based fallback, which would disguise a
+broken identity contract.
+
+**Event writes:** Scope fields are value-first properties, so an event handler
+may use `(click)="model.count = model.count + 1"`. A bare `count = atom(0)`
+is a source object, not a writable template variable: `(click)="count = 1"`
+would replace that object, so the compiler rejects it. Call `count.set(1)` in
+a component method instead. The editor's implicit atom-write virtualization
+helps type the expression but does not override this build-time safety rule.

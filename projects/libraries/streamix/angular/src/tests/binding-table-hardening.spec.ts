@@ -66,5 +66,11 @@ idescribe('sx binding table hardening', () => {
 
     expect(text.data).toBe('1');
   });
+  it('reports a consistent destroyed-table error from unbind', () => {
+    const table = createBindingTable(1);
+    table.destroy();
+    expect(() => table.unbind(0)).toThrowError(/Cannot unbind a destroyed SxBindingTable/);
+  });
+
 });
 import { idescribe } from '../../../src/tests/env.spec';

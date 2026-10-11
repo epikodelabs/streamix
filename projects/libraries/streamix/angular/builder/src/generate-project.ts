@@ -7,7 +7,7 @@ import ts from 'typescript';
 // than folding its sources into this entry.
 import { compileSxComponent } from '@epikodelabs/streamix/angular/compiler';
 import { installSxLifecycleIntoComponentSource } from '@epikodelabs/streamix/angular/compiler';
-import { installTransformedTemplate, virtualRootOf } from './options';
+import { findInlineSxTemplate, installTransformedTemplate, virtualRootOf } from './options';
 
 /** Input for one generator pass. */
 export interface SxGenerateProjectOptions {
@@ -215,10 +215,10 @@ export async function generateProject({
     }
 
     if (!source.includes('@Component')) continue;
-    const match = /template:\s*`([\s\S]*?)`,\s*styles:/.exec(source);
+    const match = findInlineSxTemplate(source);
     if (!match) {
       console.warn(
-        `[streamix] ${relativePath}: no inline template followed by styles was found; ` +
+        `[streamix] ${relativePath}: no static inline @Component template was found; ` +
         'copying the component through the virtual layer unchanged.',
       );
       continue;
@@ -226,7 +226,7 @@ export async function generateProject({
     const scopeValuePaths = scopeValuePathsFor(sourcePath);
     const compiled = compileSxComponent({
       componentPath: sourcePath,
-      template: match[1],
+      template: match.template,
       dependencySourcePaths: standaloneDependencySources(sourcePath),
       scopeValuePaths,
       writableSourcePaths: standaloneWritableSources(sourcePath),

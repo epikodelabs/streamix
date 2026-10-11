@@ -217,5 +217,21 @@ idescribe('direct bindings', () => {
     expect(() => bindStyleMap(styles, element, { scheduler }))
       .toThrowError(/sanitization/i);
   });
+  it('stringifies booleans for Angular attribute-style bindings', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const title = atom<unknown>(true);
+    const element = document.createElement('div');
+    const binding = bindAttribute(title, element, 'title', { scheduler });
+    expect(element.getAttribute('title')).toBe('true');
+    title.set(false);
+    frame.flush();
+    expect(element.getAttribute('title')).toBe('false');
+    title.set(null);
+    frame.flush();
+    expect(element.hasAttribute('title')).toBeFalse();
+    binding.destroy();
+  });
+
 });
 import { idescribe } from '../../../src/tests/env.spec';
