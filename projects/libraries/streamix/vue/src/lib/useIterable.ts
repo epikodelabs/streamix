@@ -23,6 +23,13 @@ type ErrorSource = {
  */
 export type IterableRef<T> = Readonly<ShallowRef<T>>;
 
+/** A manually owned Vue bridge for code outside a Vue effect scope. */
+export interface IterableBridge<T> {
+  readonly ref: IterableRef<T>;
+  /** Stops the Streamix subscription or iterator. Safe to call more than once. */
+  dispose(): void;
+}
+
 function isDependencySource<T>(source: unknown): source is DependencySource<T> {
   if ((typeof source !== 'object' && typeof source !== 'function') || source === null) {
     return false;
@@ -56,12 +63,13 @@ function isErrorSource(source: unknown): source is ErrorSource {
   );
 }
 
-function registerCleanup(cleanup: () => void): void {
+function requireEffectScope(api: string): void {
   if (!getCurrentScope()) {
-    return;
+    throw new Error(
+      `${api} must run inside Vue setup() or an active effectScope(). ` +
+      'Use createIterableBridge() and call dispose() for manually owned usage.',
+    );
   }
-
-  onScopeDispose(cleanup);
 }
 
 function readonlyBridgeRef<T>(read: () => T): {
@@ -96,7 +104,7 @@ function dependencyRef<T>(
   source: DependencySource<T>,
   initialValue: T | undefined,
   owned: boolean,
-): IterableRef<T> {
+): IterableBridge<T> {
   const sourceName = 'Vue reactive source';
   const bridge = readonlyBridgeRef(() => {
     const value = source.value;
@@ -118,7 +126,10 @@ function dependencyRef<T>(
     ? source.onError(() => bridge.invalidate())
     : undefined;
 
-  registerCleanup(() => {
+  let disposed = false;
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
     recordStreamixDevtoolsEvent({ type: 'unsubscribe', source: sourceName });
     void subscription();
     void errorSubscription?.();
@@ -126,16 +137,16 @@ function dependencyRef<T>(
     if (owned && isDisposable(source)) {
       source.dispose();
     }
-  });
+  };
 
-  return bridge.ref;
+  return { ref: bridge.ref, dispose };
 }
 
 function asyncIterableRef<T>(
   source: AsyncIterable<T>,
   initialValue: T,
   owned: boolean,
-): IterableRef<T> {
+): IterableBridge<T> {
   let value = initialValue;
   let error: unknown;
   let failed = false;
@@ -175,7 +186,10 @@ function asyncIterableRef<T>(
     }
   })();
 
-  registerCleanup(() => {
+  let disposed = false;
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
     active = false;
 
     if (typeof iterator.return === 'function') {
@@ -185,9 +199,9 @@ function asyncIterableRef<T>(
     if (owned && isDisposable(source)) {
       source.dispose();
     }
-  });
+  };
 
-  return bridge.ref;
+  return { ref: bridge.ref, dispose };
 }
 
 /**
@@ -208,6 +222,9 @@ function asyncIterableRef<T>(
  * Pass a factory to make this composable own the returned source. Owned
  * disposable Streamix sources are disposed when the current Vue effect scope
  * stops (component unmount, `effectScope().stop()`, etc.).
+ *
+ * This composable requires an active Vue effect scope. For manual ownership
+ * outside Vue setup, use {@link createIterableBridge} and dispose it directly.
  */
 export function useIterable<T>(source: DependencySource<T>, initialValue?: T): IterableRef<T>;
 export function useIterable<T>(source: AsyncIterable<T>, initialValue: T): IterableRef<T>;
@@ -220,6 +237,37 @@ export function useIterable<T>(
     | (() => DependencySource<T> | AsyncIterable<T>),
   initialValue?: T,
 ): IterableRef<T> {
+  requireEffectScope('useIterable()');
+  const bridge = createIterableBridgeImpl(sourceOrFactory, initialValue);
+  onScopeDispose(bridge.dispose);
+  return bridge.ref;
+}
+
+/**
+ * Creates a manually owned bridge for code outside `setup()` or an active
+ * Vue effect scope. Call {@link IterableBridge.dispose} when the owner ends.
+ */
+export function createIterableBridge<T>(source: DependencySource<T>, initialValue?: T): IterableBridge<T>;
+export function createIterableBridge<T>(source: AsyncIterable<T>, initialValue: T): IterableBridge<T>;
+export function createIterableBridge<T>(factory: () => DependencySource<T>, initialValue?: T): IterableBridge<T>;
+export function createIterableBridge<T>(factory: () => AsyncIterable<T>, initialValue: T): IterableBridge<T>;
+export function createIterableBridge<T>(
+  sourceOrFactory:
+    | DependencySource<T>
+    | AsyncIterable<T>
+    | (() => DependencySource<T> | AsyncIterable<T>),
+  initialValue?: T,
+): IterableBridge<T> {
+  return createIterableBridgeImpl(sourceOrFactory, initialValue);
+}
+
+function createIterableBridgeImpl<T>(
+  sourceOrFactory:
+    | DependencySource<T>
+    | AsyncIterable<T>
+    | (() => DependencySource<T> | AsyncIterable<T>),
+  initialValue?: T,
+): IterableBridge<T> {
   const owned = typeof sourceOrFactory === 'function';
   const source = owned
     ? (sourceOrFactory as () => DependencySource<T> | AsyncIterable<T>)()

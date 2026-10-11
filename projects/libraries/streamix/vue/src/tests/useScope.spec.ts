@@ -31,6 +31,16 @@ describe('useScope', () => {
     expect(state.count).toBe(0);
   });
 
+  it('fails before creating a Streamix scope without Vue ownership', () => {
+    let calls = 0;
+
+    expect(() => useScope(() => {
+      calls++;
+      return scope({ count: 0 });
+    })).toThrowError(/active effectScope/);
+    expect(calls).toBe(0);
+  });
+
   it('disposes the Streamix scope when the Vue effect scope stops', () => {
     let created!: Scope;
 

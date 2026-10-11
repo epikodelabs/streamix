@@ -6,7 +6,7 @@ import {
   effectScope,
   type EffectScope,
 } from 'vue';
-import { useIterable } from '../lib/useIterable';
+import { createIterableBridge, useIterable } from '../lib/useIterable';
 
 async function flushMicrotasks() {
   await Promise.resolve();
@@ -54,6 +54,40 @@ describe('useIterable', () => {
 
     vueScope.stop();
     expect(count.subscriberCount).toBe(0);
+  });
+
+  it('fails before subscribing when called without an active Vue effect scope', () => {
+    const count = atom(0);
+
+    expect(() => useIterable(count)).toThrowError(/active effectScope/);
+    expect(count.subscriberCount).toBe(0);
+  });
+
+  it('supports explicit manual ownership outside a Vue effect scope', () => {
+    const count = atom(0);
+    const bridge = createIterableBridge(count);
+
+    expect(bridge.ref.value).toBe(0);
+    expect(count.subscriberCount).toBe(1);
+
+    count.next(1);
+    expect(bridge.ref.value).toBe(1);
+
+    bridge.dispose();
+    bridge.dispose();
+    expect(count.subscriberCount).toBe(0);
+  });
+
+  it('disposes a factory-owned source when a manual bridge ends', () => {
+    let created!: Atom<number>;
+    const bridge = createIterableBridge(() => {
+      created = atom(0);
+      return created;
+    });
+
+    expect(created.disposed).toBe(false);
+    bridge.dispose();
+    expect(created.disposed).toBe(true);
   });
 
   it('does not dispose an externally-owned source', () => {
@@ -122,6 +156,27 @@ describe('useIterable', () => {
 
     vueScope.run(() => useIterable(source, 0));
     vueScope.stop();
+    await flushMicrotasks();
+
+    expect(closed).toBe(true);
+  });
+
+  it('closes a manually owned async iterator on dispose', async () => {
+    let closed = false;
+    const source: AsyncIterable<number> = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => new Promise<IteratorResult<number>>(() => {}),
+          return: async () => {
+            closed = true;
+            return { done: true, value: undefined };
+          },
+        };
+      },
+    };
+
+    const bridge = createIterableBridge(source, 0);
+    bridge.dispose();
     await flushMicrotasks();
 
     expect(closed).toBe(true);
