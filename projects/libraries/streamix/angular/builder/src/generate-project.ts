@@ -7,7 +7,7 @@ import ts from 'typescript';
 // than folding its sources into this entry.
 import { compileSxComponent } from '@epikodelabs/streamix/angular/compiler';
 import { installSxLifecycleIntoComponentSource } from '@epikodelabs/streamix/angular/compiler';
-import { findInlineSxTemplate, installTransformedTemplate, virtualRootOf } from './options';
+import { findSxComponentTemplate, installSxComponentTemplate, virtualRootOf } from './options';
 
 /** Input for one generator pass. */
 export interface SxGenerateProjectOptions {
@@ -31,13 +31,67 @@ export async function generateProject({
   const outputDirectory = resolve(workspaceRoot, virtualRoot);
   const tsconfigPath = resolve(sourceDirectory, '..', 'tsconfig.app.json');
   const tsconfig = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+  if (tsconfig.error) {
+    throw new Error(`Streamix Angular builder could not read ${tsconfigPath}: ` +
+      ts.flattenDiagnosticMessageText(tsconfig.error.messageText, '\n'));
+  }
   const parsedConfig = ts.parseJsonConfigFileContent(
-    tsconfig.config,
-    ts.sys,
-    dirname(tsconfigPath),
+    tsconfig.config, ts.sys, dirname(tsconfigPath), undefined, tsconfigPath,
   );
+  if (parsedConfig.errors.length) {
+    throw new Error(`Streamix Angular builder cannot use ${tsconfigPath}:\n` +
+      ts.formatDiagnosticsWithColorAndContext(parsedConfig.errors, {
+        getCanonicalFileName: path => path, getCurrentDirectory: () => workspaceRoot,
+        getNewLine: () => '\n',
+      }));
+  }
   const program = ts.createProgram(parsedConfig.fileNames, parsedConfig.options);
   const checker = program.getTypeChecker();
+
+  /** Only component-owned reactive fields affect template ownership checks.
+   * A service or store class in the same file must not make an ordinary
+   * templateUrl component fail adoption.
+   */
+  function decoratedComponents(sourcePath: string): ts.ClassDeclaration[] {
+    const source = program.getSourceFile(sourcePath);
+    if (!source) return [];
+    const result: ts.ClassDeclaration[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isClassDeclaration(node) && (ts.getDecorators(node) ?? []).some(decorator => {
+        const expression = decorator.expression;
+        return ts.isCallExpression(expression) && ts.isIdentifier(expression.expression) &&
+          expression.expression.text === 'Component';
+      })) result.push(node);
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(source, visit);
+    return result;
+  }
+
+  function componentHasReactiveFields(component: ts.ClassDeclaration): boolean {
+    const source = component.getSourceFile();
+    const factories = new Set<string>();
+    for (const statement of source.statements) {
+      if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+          !/^@epikodelabs\/streamix(?:\/|$)/.test(statement.moduleSpecifier.text)) continue;
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const item of bindings.elements) {
+          if (['atom', 'derived', 'flow', 'scope'].includes((item.propertyName ?? item.name).text))
+            factories.add(item.name.text);
+        }
+      }
+    }
+    return component.members.some(member => {
+      if (!ts.isPropertyDeclaration(member) || !member.initializer) return false;
+      const type = checker.getTypeAtLocation(member.initializer);
+      if (type.getProperty('type') && type.getProperty('value') &&
+          type.getProperty('subscribe')) return true;
+      return ts.isCallExpression(member.initializer) &&
+        ts.isIdentifier(member.initializer.expression) &&
+        factories.has(member.initializer.expression.text);
+    });
+  }
 
   // Overwrite in place rather than clearing the directory first: the delegate
   // dev server rebuilds on every change, and a wiped tree would let it compile
@@ -215,18 +269,47 @@ export async function generateProject({
     }
 
     if (!source.includes('@Component')) continue;
-    const match = findInlineSxTemplate(source);
+    const components = decoratedComponents(sourcePath);
+    const hasReactiveComponent = components.some(componentHasReactiveFields);
+    if (components.length > 1 && hasReactiveComponent) {
+      throw new Error(`[streamix] ${relativePath}: multiple @Component classes with Streamix sources ` +
+        'in one file are not supported by this compiler. Split components into separate files.');
+    }
+    const match = findSxComponentTemplate(source);
     if (!match) {
-      console.warn(
-        `[streamix] ${relativePath}: no static inline @Component template was found; ` +
-        'copying the component through the virtual layer unchanged.',
-      );
+      if (hasReactiveComponent) {
+        throw new Error(
+          `[streamix] ${relativePath}: a component with Streamix sources needs a static @Component template or templateUrl. ` +
+          'Computed Angular template metadata is not supported.',
+        );
+      }
+      // Ordinary Angular components without adopted Streamix sources are valid.
       continue;
+    }
+    let templateText: string;
+    let templatePath = sourcePath;
+    if (match.kind === 'external') {
+      const path = resolve(dirname(sourcePath), match.url);
+      const withinSource = relative(sourceDirectory, path).replace(/\\/g, '/');
+      if (!match.url || /^\w+:/.test(match.url) ||
+          withinSource === '..' || withinSource.startsWith('../') ||
+          withinSource.startsWith('/') || !path.endsWith('.html')) {
+        throw new Error(`[streamix] ${relativePath}: templateUrl ${JSON.stringify(match.url)} must resolve to an HTML file within sourceRoot.`);
+      }
+      try {
+        templateText = await readFile(path, 'utf8');
+        templatePath = path;
+      } catch (error) {
+        throw new Error(`[streamix] ${relativePath}: could not read templateUrl ${JSON.stringify(match.url)}: ${String(error)}`);
+      }
+    } else {
+      templateText = match.template;
     }
     const scopeValuePaths = scopeValuePathsFor(sourcePath);
     const compiled = compileSxComponent({
       componentPath: sourcePath,
-      template: match.template,
+      templatePath,
+      template: templateText,
       dependencySourcePaths: standaloneDependencySources(sourcePath),
       scopeValuePaths,
       writableSourcePaths: standaloneWritableSources(sourcePath),
@@ -247,7 +330,7 @@ export async function generateProject({
     }).source;
     let virtual: string;
     try {
-      virtual = installTransformedTemplate(lifecycle, compiled.transformedTemplate);
+      virtual = installSxComponentTemplate(lifecycle, compiled.transformedTemplate);
     } catch (error) {
       throw new Error(
         `[streamix] ${relativePath}: ${error instanceof Error ? error.message : String(error)}`,

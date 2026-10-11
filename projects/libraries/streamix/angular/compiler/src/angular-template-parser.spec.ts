@@ -8,18 +8,17 @@ describe('parseSxTemplate static topology', () => {
     'model.ready': "model.get('ready')",
   } as Record<string, string>)[path];
 
-  it('rejects compiled bindings on siblings after a structural block', () => {
-    // The rendered block content shifts element indices, so a static path
-    // computed for the second <p> would target the wrong DOM node.
-    expect(() => parseSxTemplate(
-      `<section>
-        <p [title]="model.msg">a</p>
-        @if (model.ready) { <b>b</b> }
-        <p [title]="model.msg">c</p>
-      </section>`,
-      'inline.html',
-      { resolveReactiveSource },
-    )).toThrowError(/static element topology/i);
+  it('addresses compiled bindings after Angular-owned structural siblings by stable targets', () => {
+    const source = `<section>
+      <p [title]="model.msg">a</p>
+      @if (model.ready) { <b>b</b> }
+      <p [title]="model.msg">c</p>
+    </section>`;
+    const parsed = parseSxTemplate(source, 'inline.html', { resolveReactiveSource });
+    expect(parsed.plan.size).toBe(2);
+    expect(parsed.nodeSelectors['node2']).toContain(':scope >');
+    expect(parsed.nodeSelectors['node2']).toContain('data-sx-node');
+    expect(parsed.bindingEdits.some(edit => edit.replacement.includes('data-sx-node'))).toBeTrue();
   });
 
   it('allows structural blocks after the last compiled binding', () => {

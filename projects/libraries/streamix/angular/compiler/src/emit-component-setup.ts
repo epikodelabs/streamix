@@ -49,7 +49,7 @@ function loweredValue(
 
   return (
     `{ sources: ${sources(value.dependencies)}, ` +
-    `read: () => ${rewriteSxTextExpression(value.expression)} }`
+    `read: () => ${'contextual' in value && value.contextual ? value.expression : rewriteSxTextExpression(value.expression)} }`
   );
 }
 
@@ -64,6 +64,14 @@ function elementPathExpression(path: SxElementPath): string {
   }
 
   return expression;
+}
+
+/** Use the authored marker when Angular control flow changes child indices. */
+function targetExpression(parsed: ParsedSxTemplate, nodeId: string): string {
+  const selector = parsed.nodeSelectors?.[nodeId];
+  return selector
+    ? `host.querySelector(${JSON.stringify(selector)})`
+    : elementPathExpression(parsed.nodePaths[nodeId]);
 }
 
 export function emitComponentSetup(
@@ -113,7 +121,7 @@ export function emitComponentSetup(
       }
 
       lines.push(
-        `  const ${entry.node} = ${elementPathExpression(path)} as HTMLElement;`,
+        `  const ${entry.node} = ${targetExpression(parsed, entry.node)} as HTMLElement;`,
       );
     }
 
@@ -256,7 +264,7 @@ function emitStructuralBlocks(
       throw new Error(`Missing static DOM path for structural marker ${block.marker}.`);
     }
 
-    lines.push(`  const marker${index} = ${elementPathExpression(path)} as Element;`);
+    lines.push(`  const marker${index} = ${targetExpression(parsed, nodeId!)} as Element;`);
   });
 
   blocks.forEach((block, index) => {
@@ -318,6 +326,7 @@ function emitStructuralBlocks(
       lines.push(`          (context) => {`);
       lines.push(`            currentContext = context;`);
       lines.push(indent(compiled.updateBody, 12));
+      lines.push(...blockContextRefreshLines(compiled, 12));
       lines.push(...nestedRefreshLines(compiled, 12));
       lines.push(`          },`);
       lines.push(`          currentContext,`);
@@ -439,13 +448,40 @@ function blockBindingLines(
         );
       }
 
+      const reader = binding.contextual ? binding.source : rewriteSxTextExpression(binding.source);
+      if (binding.kind !== 'text') {
+        const helper = {
+          property: 'ɵsxProperty', attribute: 'ɵsxAttribute',
+          class: 'ɵsxClass', style: 'ɵsxStyle',
+        }[binding.kind];
+        return binding.dependencies
+          ? `${pad}${helper}Expression(blockTable, ${slot}, ${binding.node}, ${JSON.stringify(binding.name)}, ${sources(binding.dependencies)}, () => ${reader});`
+          : `${pad}${helper}(blockTable, ${slot}, ${binding.node}, ${JSON.stringify(binding.name)}, ctx.${binding.source});`;
+      }
+
       // Block bodies build their own DOM, so the binding targets the text
       // node directly instead of Angular's rendered interpolation node.
       return binding.dependencies
-        ? `${pad}ɵsxTextExpression(blockTable, ${slot}, ${binding.node}, ${sources(binding.dependencies)}, () => ${rewriteSxTextExpression(binding.source)});`
+        ? `${pad}ɵsxTextExpression(blockTable, ${slot}, ${binding.node}, ${sources(binding.dependencies)}, () => ${reader});`
         : `${pad}ɵsxText(blockTable, ${slot}, ${binding.node}, ctx.${binding.source});`;
     }),
   ];
+}
+
+/**
+ * Keyed identity can remain stable while the row object, index, or a parent
+ * loop context changes. A mixed expression must refresh against that new
+ * context even when none of its Streamix dependencies emitted.
+ */
+function blockContextRefreshLines(
+  body: SxCompiledBlockBody,
+  spaces: number,
+): readonly string[] {
+  const pad = ' '.repeat(spaces);
+  return body.bindings.flatMap((binding, slot) =>
+    binding.kind !== 'event' && binding.contextual
+      ? [`${pad}blockTable.refreshExpression(${slot});`] : [],
+  );
 }
 
 /**
@@ -517,6 +553,7 @@ function emitNestedBlock(
   lines.push(`${pad}        (context) => {`);
   lines.push(`${pad}          currentContext = context;`);
   lines.push(indent(nested.body.updateBody, innerPad + 2));
+  lines.push(...blockContextRefreshLines(nested.body, innerPad + 2));
   lines.push(...nestedRefreshLines(nested.body, innerPad + 2));
   lines.push(`${pad}        },`);
   lines.push(`${pad}        currentContext,`);
@@ -708,6 +745,7 @@ function compiledBodyInstanceLines(
   lines.push(`${pad}  ${range.last},`);
   lines.push(`${pad}  () => {`);
   lines.push(indent(body.updateBody, spaces + 4));
+  lines.push(...blockContextRefreshLines(body, spaces + 4));
   lines.push(...nestedRefreshLines(body, spaces + 4));
   lines.push(`${pad}  },`);
   lines.push(`${pad}  ${context},`);

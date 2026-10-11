@@ -55,6 +55,40 @@ idescribe('sx structural runtime', () => {
     expect(host.textContent).toBe('');
   });
 
+  it('refreshes the existing conditional branch after an enclosing loop-context change', () => {
+    const host = document.createElement('div');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+    const ready = atom(true);
+    let current = { title: 'First' };
+    let created = 0;
+    let refreshed = 0;
+
+    const block = ɵcreateSxConditionalBlock(anchor, [{
+      source: ready,
+      factory: () => {
+        created += 1;
+        const element = document.createElement('span');
+        element.title = current.title;
+        return {
+          first: element, last: element,
+          refresh() { refreshed += 1; element.title = current.title; },
+          destroy() { element.remove(); },
+        };
+      },
+    }]);
+
+    const node = host.querySelector('span')!;
+    expect(node.title).toBe('First');
+    current = { title: 'Second' };
+    block.refresh();
+    expect(host.querySelector('span')).toBe(node);
+    expect(node.title).toBe('Second');
+    expect(created).toBe(1);
+    expect(refreshed).toBe(1);
+    block.destroy();
+  });
+
   it('selects and swaps conditional branches without Angular views', () => {
     const host = document.createElement('div');
     const anchor = document.createComment('sx');

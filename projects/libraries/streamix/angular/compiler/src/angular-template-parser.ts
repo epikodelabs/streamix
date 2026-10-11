@@ -85,6 +85,8 @@ export interface ParsedSxTemplate {
   readonly bindingEdits: readonly SxTemplateEdit[];
   readonly nodes: readonly string[];
   readonly nodePaths: Readonly<Record<string, SxElementPath>>;
+  /** Stable selector assigned only where Angular-owned control flow shifts sibling indices. */
+  readonly nodeSelectors: Readonly<Record<string, string>>;
   /** Lowered structural marker id (its `data-sx-block` value) to node id. */
   readonly markers: Readonly<Record<string, string>>;
 }
@@ -96,6 +98,10 @@ interface WalkState {
   readonly bindingEdits: SxTemplateEdit[];
   readonly nodes: string[];
   readonly nodePaths: Record<string, number[]>;
+  readonly nodeSelectors: Record<string, string>;
+  readonly nodeElements: Record<string, TmplAstElement>;
+  readonly nodeIdsByPath: Record<string, string>;
+  readonly unstableTargets: Set<string>;
   readonly markers: Record<string, string>;
   readonly strict: boolean;
   readonly resolveReactiveSource?: SxReactiveSourceResolver;
@@ -204,6 +210,10 @@ export function parseSxTemplate(
     bindingEdits: [],
     nodes: [],
     nodePaths: {},
+    nodeSelectors: {},
+    nodeElements: {},
+    nodeIdsByPath: {},
+    unstableTargets: new Set(),
     markers: {},
     strict: containsCompiledBinding(
       parsed.nodes,
@@ -216,6 +226,7 @@ export function parseSxTemplate(
   };
 
   walkStaticChildren(parsed.nodes, state, []);
+  installStableTargetMarkers(state);
 
   return {
     plan: createBindingPlan(state.bindings),
@@ -223,6 +234,7 @@ export function parseSxTemplate(
     bindingEdits: state.bindingEdits,
     nodes: state.nodes,
     nodePaths: state.nodePaths,
+    nodeSelectors: state.nodeSelectors,
     markers: state.markers,
   };
 }
@@ -231,9 +243,11 @@ function walkStaticChildren(
   nodes: readonly TmplAstNode[],
   state: WalkState,
   parentPath: readonly number[],
+  parentUnstable = false,
 ): void {
   let elementIndex = 0;
   const siblings = flattenTransparentContainers(nodes);
+  let precedingDynamic = parentUnstable;
 
   for (let index = 0; index < siblings.length; index += 1) {
     const node = siblings[index];
@@ -258,8 +272,8 @@ function walkStaticChildren(
       }
 
       const path = [...parentPath, elementIndex++];
-      visitElement(node, state, path);
-      walkStaticChildren(node.children, state, path);
+      visitElement(node, state, path, precedingDynamic);
+      walkStaticChildren(node.children, state, path, precedingDynamic);
       continue;
     }
 
@@ -270,20 +284,10 @@ function walkStaticChildren(
       // dynamic region renders. containsCompiledBinding deliberately skips
       // dynamic-node interiors, so bindings owned by the Angular control-flow
       // lowering do not trip this guard.
-      if (
-        shiftsElementTopology(node) &&
-        siblings
-          .slice(index + 1)
-          .some(sibling =>
-            containsCompiledBinding(
-              sibling,
-              state.template,
-              state.resolveReactiveSource,
-            ),
-          )
-      ) {
-        throw new Error(DYNAMIC_TOPOLOGY_ERROR);
-      }
+      // Nodes after an Angular-owned dynamic sibling receive an explicit
+      // element marker instead of a brittle Element.children[index] path.
+      // Only the dynamic region itself is still forbidden to contain reads
+      // that the compiler cannot own.
 
       if (
         containsCompiledBinding(node, state.template, state.resolveReactiveSource)
@@ -291,7 +295,7 @@ function walkStaticChildren(
         throw new Error(DYNAMIC_TOPOLOGY_ERROR);
       }
     }
-
+    if (shiftsElementTopology(node)) precedingDynamic = true;
   }
 }
 
@@ -337,10 +341,14 @@ function visitElement(
   element: TmplAstElement,
   state: WalkState,
   path: readonly number[],
+  unstable: boolean,
 ): void {
   const nodeId = `node${state.nextNode++}`;
+  const bindingsBefore = state.bindings.length;
   state.nodes.push(nodeId);
   state.nodePaths[nodeId] = [...path];
+  state.nodeElements[nodeId] = element;
+  state.nodeIdsByPath[path.join('/')] = nodeId;
 
   const marker = element.attributes.find(
     attribute => attribute.name === MARKER_ATTRIBUTE,
@@ -608,6 +616,45 @@ function visitElement(
         }
       }
     }
+  }
+
+  if (unstable && (state.bindings.length > bindingsBefore || marker)) {
+    state.unstableTargets.add(nodeId);
+  }
+
+}
+
+/**
+ * Scope selectors to each direct-child segment from the Angular component
+ * host. A bare descendant query can accidentally select a nested component's
+ * marker first (especially for recursive components), whereas the explicit
+ * chain belongs to the declaring component's DOM path.
+ */
+function installStableTargetMarkers(state: WalkState): void {
+  const marked = new Set<string>();
+  for (const target of state.unstableTargets) {
+    const path = state.nodePaths[target];
+    const segments: string[] = [];
+    for (let length = 1; length <= path.length; length++) {
+      const ancestor = state.nodeIdsByPath[path.slice(0, length).join('/')];
+      const element = ancestor && state.nodeElements[ancestor];
+      if (!ancestor || !element) {
+        throw new Error(`Cannot locate static ancestor for Streamix target ${target}.`);
+      }
+      if (!marked.has(ancestor)) {
+        if (element.attributes.some(attribute => attribute.name === 'data-sx-node')) {
+          throw new Error('data-sx-node is reserved for compiler-owned DOM addressing.');
+        }
+        const afterTag = element.sourceSpan.start.offset + 1 + element.name.length;
+        state.bindingEdits.push({
+          start: afterTag, end: afterTag,
+          replacement: ` data-sx-node="${ancestor}"`,
+        });
+        marked.add(ancestor);
+      }
+      segments.push(`[data-sx-node="${ancestor}"]`);
+    }
+    state.nodeSelectors[target] = `:scope > ${segments.join(' > ')}`;
   }
 }
 

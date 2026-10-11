@@ -26,14 +26,21 @@ export function ɵcreateSxCompiledBlock<C extends object>(
   initialContext: C,
   destroy: () => void = () => {},
 ): SxCompiledBlockInstance<C> {
+  let currentContext = initialContext;
   const instance: SxCompiledBlockInstance<C> = {
     first,
     last,
-    update,
+    update(context: C) {
+      currentContext = context;
+      update(context);
+    },
+    refresh() {
+      update(currentContext);
+    },
     destroy,
   };
 
-  update(initialContext);
+  instance.update(initialContext);
 
   return instance;
 }

@@ -8,6 +8,7 @@ import {
   buildDelegateOptions,
   resolveSourceRoot,
   shouldRegenerateOn,
+  shouldWatchSources,
   virtualRootOf,
   virtualTsconfigOf,
 } from './options';
@@ -274,18 +275,17 @@ const applicationBuilder = createBuilder(async function* (options, context) {
   // Rebuild hook: re-run the generator when its source inputs change. The
   // delegate (dev-server or watch build) rebuilds on its own once the
   // regenerated virtual component is rewritten.
-  const regenerator = createRegenerator(context, sourceRoot);
-  const stopWatcher = startSourceWatcher(
-    context,
-    sourceRoot,
-    regenerator.trigger,
-  );
+  const shouldWatch = shouldWatchSources(target, context.target?.target, delegateOptions['watch']);
+  const regenerator = shouldWatch ? createRegenerator(context, sourceRoot) : undefined;
+  const stopWatcher = regenerator
+    ? startSourceWatcher(context, sourceRoot, regenerator.trigger)
+    : () => undefined;
 
   try {
     yield* delegateOutputs(run);
   } finally {
     stopWatcher();
-    regenerator.stop();
+    regenerator?.stop();
   }
 });
 

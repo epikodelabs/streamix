@@ -12,6 +12,8 @@ export interface SxBlockInstance {
   readonly first: Node;
   readonly last: Node;
   destroy(): void;
+  /** Re-run compiled bindings when a parent loop's context changes. */
+  refresh?(): void;
 }
 
 export interface SxValueBlockFactory<T> {
@@ -312,6 +314,7 @@ export class SxConditionalBlock {
     const index = this.selectIndex();
 
     if (index === this.current) {
+      this.instance?.refresh?.();
       return;
     }
 

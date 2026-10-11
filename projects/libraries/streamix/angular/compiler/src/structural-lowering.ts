@@ -785,6 +785,9 @@ function tryLowerCollectionBlock(
       documentExpression: 'doc',
       resolveReactiveSource,
       allowLocals: true,
+      localNames: [item, 'index', 'count', 'first', 'last', 'even', 'odd',
+        '$index', '$count', '$first', '$last', '$even', '$odd',
+        ...block.contextVariables.map(variable => variable.name)],
     });
   } catch {
     return undefined;

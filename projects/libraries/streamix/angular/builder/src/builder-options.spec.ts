@@ -3,17 +3,24 @@ import {
   installTransformedTemplate,
   resolveSourceRoot,
   shouldRegenerateOn,
+  shouldWatchSources,
   templateLiteral,
   virtualRootOf,
   virtualTsconfigOf,
+  findSxComponentTemplate,
+  installSxComponentTemplate,
 } from './options';
 
 describe('streamix builder options', () => {
-  it('resolves the source root with the demo default', () => {
-    expect(resolveSourceRoot({})).toBe('projects/apps/app6/src');
+  it('requires an explicit workspace-relative source root', () => {
     expect(resolveSourceRoot({ sourceRoot: 'projects/apps/demo/src' }))
       .toBe('projects/apps/demo/src');
-    expect(resolveSourceRoot(undefined)).toBe('projects/apps/app6/src');
+    expect(() => resolveSourceRoot({})).toThrowError(/requires a non-empty sourceRoot/);
+    expect(() => resolveSourceRoot(undefined)).toThrowError(/requires a non-empty sourceRoot/);
+    expect(() => resolveSourceRoot({ sourceRoot: '../other' })).toThrowError(/workspace-relative/);
+    expect(() => resolveSourceRoot({ sourceRoot: '/tmp/demo' })).toThrowError(/workspace-relative/);
+    expect(() => resolveSourceRoot({ sourceRoot: '.' })).toThrowError(/workspace-relative/);
+    expect(() => resolveSourceRoot({ sourceRoot: '.angular' })).toThrowError(/workspace-relative/);
   });
 
   it('forwards only real delegate options', () => {
@@ -41,6 +48,13 @@ describe('streamix builder options', () => {
     expect(shouldRegenerateOn('app/page.ts', 'page.ts')).toBeTrue();
     expect(shouldRegenerateOn('page.ts', 'page.ts')).toBeTrue();
     expect(shouldRegenerateOn('app\\other.ts', 'page.ts')).toBeFalse();
+  });
+
+  it('watches serve and dev-server but not one-shot build targets', () => {
+    expect(shouldWatchSources('application', 'build', undefined)).toBeFalse();
+    expect(shouldWatchSources('application', 'build', true)).toBeTrue();
+    expect(shouldWatchSources('dev-server', undefined, undefined)).toBeTrue();
+    expect(shouldWatchSources('application', 'serve', undefined)).toBeTrue();
   });
 
   it('maps application source roots to virtual project roots', () => {
@@ -117,6 +131,18 @@ describe('streamix builder options', () => {
     const updated = installTransformedTemplate(original, '<p>replacement</p>');
     expect(updated).toContain('template: `<p>replacement</p>`');
     expect(updated).toContain('changeDetection: 0');
+  });
+
+  it('reads external component templates and installs compiled content in the virtual source', () => {
+    const input = '@Component({ selector: "demo", templateUrl: "./counter.html", styleUrls: ["./counter.css"] }) export class Counter {}';
+    const found = findSxComponentTemplate(input);
+    expect(found?.kind).toBe('external');
+    if (!found || found.kind !== 'external') return;
+    expect(found.url).toBe('./counter.html');
+    const output = installSxComponentTemplate(input, '<output>{{ count.value }}</output>');
+    expect(output).toContain('template: `<output>{{ count.value }}</output>`');
+    expect(output).not.toContain('templateUrl');
+    expect(output).toContain('styleUrls: ["./counter.css"]');
   });
 
 });

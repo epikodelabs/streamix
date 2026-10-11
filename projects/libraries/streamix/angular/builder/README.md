@@ -18,17 +18,18 @@ application build or dev server.
    or `app6:dev-server`). The delegate's `fileReplacements` entry points
    `main.ts` at the virtual copy, so the whole application compiles from the
    virtual tree.
-3. While the delegate runs, the builder watches the source root
+3. For `serve` or `watch: true` targets, the builder watches the source root
    (recursively) and re-runs the generator on save; the delegate rebuilds on
-   its own once the virtual files are rewritten.
+   its own once the virtual files are rewritten. One-shot builds do not open watchers.
 
 ## Options
 
 - `delegateTarget` (required): `"project:target"` pair that receives the
   generated component.
 - `sourceRoot`: application source directory, relative to the workspace
-  root. Defaults to the in-repo `projects/apps/app6/src` demo; consuming
-  workspaces should always pass their own.
+  root. **Required.** No workspace-specific demo path is used as a fallback.
+
+A missing or invalid source root fails before delegation. Reactive components using `templateUrl` or dynamic templates, and files with multiple reactive `@Component` classes, fail with an actionable build diagnostic instead of being copied as if compiled. Ordinary Angular-only components remain unchanged.
 
 All other options are forwarded to the delegate target. Keys that only this
 builder understands, plus empty placeholder values materialized by CLI
@@ -65,4 +66,3 @@ through the Angular CLI: `@angular-devkit/architect`, `@angular/compiler` and
 
 The builder runs the generator in process — no child process, no `ts-node`
 registration: the compiled entry imports `generateProject` directly.
-

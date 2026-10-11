@@ -156,6 +156,20 @@ export class SxBindingTable {
       target.removeEventListener(type, handler, options);
   }
 
+  /**
+   * Re-evaluates a contextual expression synchronously after a keyed row or
+   * enclosing context changes. The existing subscriptions remain installed.
+   * A pending source-triggered frame may still run, but equality suppresses
+   * duplicate DOM writes. Only compiler-owned expression slots may refresh.
+   */
+  refreshExpression(slot: BindingSlot): void {
+    this.assertLiveSlot(slot, 'refresh');
+    if (!this.readers[slot] || !this.writers[slot]) {
+      throw new Error(`Cannot refresh non-expression binding slot ${slot}.`);
+    }
+    this.renderExpressionSlot(slot);
+  }
+
   /** Removes one slot binding without destroying the table. */
   unbind(slot: BindingSlot): void {
     this.assertLiveSlot(slot, 'unbind');
@@ -263,35 +277,27 @@ export class SxBindingTable {
       // must enqueue a new slot instead of being silently dropped.
       this.dirtyFlags[slot] = 0;
 
-      const write = this.writers[slot];
-      if (!write) {
-        continue;
-      }
-
-      const previous = this.rendered[slot];
-      const equal = this.equals[slot] ?? Object.is;
-
-      try {
-        const next = this.readers[slot]
-          ? this.readers[slot]!()
-          : this.pending[slot];
-
-        if (equal(previous, next)) {
-          continue;
-        }
-
-        write(next);
-        this.rendered[slot] = next;
-      } catch (error) {
-        // One failing expression/writer must not strand sibling slots in the
-        // same flush. Keep the previous rendered value so a later emission can
-        // retry the expression/write.
-        console.error(`sx binding slot ${slot} update failed.`, error);
-      }
+      this.renderExpressionSlot(slot);
     }
 
     // All newly enqueued work was consumed by the dynamically sized loop.
     this.dirtySlots.length = 0;
+  }
+
+  private renderExpressionSlot(slot: BindingSlot): void {
+    const write = this.writers[slot];
+    if (!write) return;
+    const equal = this.equals[slot] ?? Object.is;
+    try {
+      const next = this.readers[slot] ? this.readers[slot]!() : this.pending[slot];
+      if (!equal(this.rendered[slot], next)) {
+        write(next);
+        this.rendered[slot] = next;
+      }
+    } catch (error) {
+      // Preserve the previous successful value and isolate sibling slots.
+      console.error(`sx binding slot ${slot} update failed.`, error);
+    }
   }
 
   private assertSlot(slot: BindingSlot): void {

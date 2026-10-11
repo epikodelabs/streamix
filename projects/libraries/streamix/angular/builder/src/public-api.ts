@@ -11,6 +11,7 @@ export {
   buildDelegateOptions,
   resolveSourceRoot,
   shouldRegenerateOn,
+  shouldWatchSources,
   templateLiteral,
   virtualRootOf,
   virtualTsconfigOf,

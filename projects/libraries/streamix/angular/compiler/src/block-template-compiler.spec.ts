@@ -73,11 +73,34 @@ describe('compileSxBlockTemplate', () => {
     ).toBe(`ctx.tagged('tag')`);
   });
 
-  it('fails loudly for inner Angular property bindings', () => {
-    expect(() =>
-      compileSxBlockTemplate(
-        '<button [disabled]="disabled">Save</button>',
-      ),
-    ).toThrowError(/not yet supported/i);
+  it('compiles safe property, class, style and attribute bindings in a collection body', () => {
+    const result = compileSxBlockTemplate(
+      '<li [class.active]="row.active" [title]="row.name" [style.width]="row.width" data-label="{{ row.name }}">{{ row.name }}</li>',
+      'fixture.html', { allowLocals: true },
+    );
+    expect(result.updateBody).toContain('classList.toggle("active"');
+    expect(result.updateBody).toContain('["title"]');
+    expect(result.updateBody).toContain('.style.setProperty("width"');
+    expect(result.updateBody).toContain('setAttribute("data-label"');
   });
+
+  it('binds reactive sources inside @if bodies through the same binding table writers', () => {
+    const result = compileSxBlockTemplate(
+      '<button [disabled]="model.disabled" [class.active]="model.active">Save</button>',
+      'fixture.html', {
+        resolveReactiveSource: path => ({
+          'model.disabled': 'model.get("disabled")',
+          'model.active': 'model.get("active")',
+        } as Record<string, string>)[path],
+      },
+    );
+    expect(result.bindings.map(binding => binding.kind)).toEqual(['property', 'class']);
+  });
+
+  it('rejects unsafe sanitizer-sensitive sinks inside compiled blocks', () => {
+    expect(() => compileSxBlockTemplate(
+      '<a [href]="row.url">bad</a>', 'fixture.html', { allowLocals: true },
+    )).toThrowError(/sanitizer-sensitive/);
+  });
+
 });

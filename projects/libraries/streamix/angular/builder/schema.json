@@ -38,6 +38,6 @@
     "clearScreen": { "type": "boolean" },
     "progress": { "type": "boolean" }
   },
-  "required": ["delegateTarget"],
+  "required": ["delegateTarget", "sourceRoot"],
   "additionalProperties": true
 }

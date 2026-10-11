@@ -6,7 +6,53 @@ module.exports = function init(modules) {
   const ts = modules.typescript;
   const angularPlugin = require("@angular/language-service")(modules);
 
-  function virtualize(fileName, source) {
+  /** Resolve factory identity from its lexical declaration, not its spelling.
+   * An imported `atom` shadowed inside an enclosing function is not a Streamix
+   * factory even when a matching import exists elsewhere in the module.
+   */
+  function isFactoryCall(callee, names, file, program) {
+    if (!ts.isIdentifier(callee) || !names.has(callee.text)) return false;
+    const hasName = name => ts.isIdentifier(name) && name.text === callee.text;
+    let owner = callee.parent;
+    while (owner && owner !== file) {
+      if (ts.isFunctionLike(owner) && owner.parameters.some(p => hasName(p.name))) return false;
+      if (ts.isCatchClause(owner) && owner.variableDeclaration && hasName(owner.variableDeclaration.name)) return false;
+      if (ts.isBlock(owner)) {
+        for (const stmt of owner.statements) {
+          if (ts.isFunctionDeclaration(stmt) && stmt.name && hasName(stmt.name)) return false;
+          if (ts.isVariableStatement(stmt) && stmt.declarationList.declarations.some(d => hasName(d.name))) return false;
+        }
+      }
+      owner = owner.parent;
+    }
+    // A live TypeScript program gives authoritative symbol resolution (including
+    // a nested declaration or a re-bound imported alias). Only use its AST when
+    // the text exactly matches the current editor snapshot.
+    const semanticFile = program?.getSourceFile(file.fileName);
+    if (!semanticFile || semanticFile.text !== file.text) return true;
+    let semanticCallee;
+    const find = node => {
+      if (semanticCallee || node.pos > callee.pos || node.end < callee.end) return;
+      if (ts.isIdentifier(node) && node.getStart(semanticFile) === callee.getStart(file)) {
+        semanticCallee = node;
+        return;
+      }
+      ts.forEachChild(node, find);
+    };
+    find(semanticFile);
+    if (!semanticCallee) return true;
+    const symbol = program.getTypeChecker().getSymbolAtLocation(semanticCallee);
+    if (!symbol) return true;
+    return (symbol.declarations || []).some(decl => {
+      if (!ts.isImportSpecifier(decl)) return false;
+      let parent = decl.parent;
+      while (parent && !ts.isImportDeclaration(parent)) parent = parent.parent;
+      return parent && ts.isStringLiteral(parent.moduleSpecifier) &&
+        /^@epikodelabs\/streamix(?:\/|$)/.test(parent.moduleSpecifier.text);
+    });
+  }
+
+  function virtualize(fileName, source, program) {
     if (!/\.tsx?$/i.test(fileName)) return undefined;
     const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
     const factories = new Set();
@@ -21,18 +67,21 @@ module.exports = function init(modules) {
       }
     }
     const edits = [];
-    for (const declaration of file.statements) {
-      if (!ts.isClassDeclaration(declaration)) continue;
+    const visitClass = declaration => {
+      if (!ts.isClassDeclaration(declaration)) {
+        ts.forEachChild(declaration, visitClass);
+        return;
+      }
       const atoms = new Set();
       for (const member of declaration.members) {
         if (ts.isPropertyDeclaration(member) && ts.isIdentifier(member.name) && member.initializer &&
             ts.isCallExpression(member.initializer) && ts.isIdentifier(member.initializer.expression) &&
-            factories.has(member.initializer.expression.text)) atoms.add(member.name.text);
+            isFactoryCall(member.initializer.expression, factories, file, program)) atoms.add(member.name.text);
       }
-      if (atoms.size === 0) continue;
+      if (atoms.size === 0) { ts.forEachChild(declaration, visitClass); return; }
       const rewriteDerivedCallbacks = node => {
         if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
-            derivedFactories.has(node.expression.text) && node.arguments.length > 0 &&
+            isFactoryCall(node.expression, derivedFactories, file, program) && node.arguments.length > 0 &&
             (ts.isArrowFunction(node.arguments[0]) || ts.isFunctionExpression(node.arguments[0]))) {
           const callback = node.arguments[0];
           const visitCallback = child => {
@@ -73,7 +122,9 @@ module.exports = function init(modules) {
           }
         }
       }
-    }
+      ts.forEachChild(declaration, visitClass);
+    };
+    ts.forEachChild(file, visitClass);
     if (edits.length === 0) return { code: source, toOriginal: position => position, toGenerated: position => position };
     edits.sort((a, b) => a.start - b.start);
     let cursor = 0;

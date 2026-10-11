@@ -96,6 +96,48 @@ idescribe('SxBindingTable', () => {
     table.destroy();
   });
 
+  it('refreshes contextual expressions on a reused keyed row without subscribing twice', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const table = createBindingTable(1, scheduler);
+    const suffix = atom('!');
+    const span = document.createElement('span');
+    let currentRow = { name: 'First' };
+
+    table.bindExpression(
+      0, [suffix], () => currentRow.name + suffix.value,
+      value => { span.title = value; },
+    );
+    expect(span.title).toBe('First!');
+    expect(suffix.subscriberCount).toBe(1);
+
+    currentRow = { name: 'Second' };
+    table.refreshExpression(0);
+    expect(span.title).toBe('Second!');
+    expect(suffix.subscriberCount).toBe(1);
+
+    suffix.set('?');
+    frame.flush();
+    expect(span.title).toBe('Second?');
+
+    currentRow = { name: 'Third' };
+    table.refreshExpression(0);
+    expect(span.title).toBe('Third?');
+
+    table.destroy();
+    expect(suffix.subscriberCount).toBe(0);
+    expect(() => table.refreshExpression(0)).toThrowError(/destroyed/);
+  });
+
+  it('rejects manual refresh of non-expression slots', () => {
+    const table = createBindingTable(1);
+    const source = atom(1);
+    const text = document.createTextNode('');
+    ɵsxText(table, 0, text, source);
+    expect(() => table.refreshExpression(0)).toThrowError(/non-expression/);
+    table.destroy();
+  });
+
   it('supports all compiler instructions', () => {
     const frame = new ManualFrameScheduler();
     const scheduler = new RendererScheduler(frame);

@@ -109,4 +109,45 @@ describe("Streamix Angular tsserver plugin", () => {
       .toBe(source.indexOf('class Test'));
   });
 
+  it('does not adopt a Streamix factory name shadowed by a nested local binding', () => {
+    const plugin = createPlugin({ typescript: ts }) as ts.server.PluginModule & {
+      __streamixVirtualize(fileName: string, source: string): { code: string };
+    };
+    const source = [
+      'import { atom } from "@epikodelabs/streamix";',
+      'function create() {',
+      '  const atom = (n: number) => ({ value: n });',
+      '  @Component({ template: `<p>{{ count }}</p>` })',
+      '  class Local { count = atom(1); }',
+      '  return Local;',
+      '}',
+    ].join("\n");
+    expect(plugin.__streamixVirtualize('shadowed.ts', source).code).toBe(source);
+  });
+
+  it('uses checker-resolved factory identity when a program is available', () => {
+    const plugin = createPlugin({ typescript: ts }) as ts.server.PluginModule & {
+      __streamixVirtualize(fileName: string, source: string, program: ts.Program): { code: string };
+    };
+    const fileName = '/virtual/shadow.ts';
+    const source = [
+      'import { atom } from "@epikodelabs/streamix";',
+      'function make() { const atom = (n: number) => ({ value: n });',
+      '  @Component({ template: `<p>{{ count }}</p>` }) class Local { count = atom(1); }',
+      '  return Local; }',
+      '@Component({ template: `<p>{{ count }}</p>` }) class External { count = atom(1); }',
+    ].join("\n");
+    const options: ts.CompilerOptions = { target: ts.ScriptTarget.ES2022, noLib: true, experimentalDecorators: true };
+    const host = ts.createCompilerHost(options);
+    const originalGetSource = host.getSourceFile;
+    host.getSourceFile = (name, version, ...args) => name === fileName
+      ? ts.createSourceFile(fileName, source, version, true) : originalGetSource(name, version, ...args);
+    const program = ts.createProgram([fileName], options, host);
+    const result = plugin.__streamixVirtualize(fileName, source, program).code;
+    expect(result).toContain('class Local { count = atom(1); }');
+    expect(result).toContain('class External { count = atom(1); }');
+    expect(result).toContain('template: `<p>{{ count.value }}</p>`');
+    expect(result).toContain('template: `<p>{{ count }}</p>`');
+  });
+
 });

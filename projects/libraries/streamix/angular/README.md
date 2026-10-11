@@ -158,28 +158,58 @@ Write state as state. Write templates as templates. Let the integration connect 
 
 ## Current compiler ownership boundaries
 
-The compiler only takes over template positions it can address and update
-without calling Angular change detection. A structural block changes the number
-of DOM siblings, so a later sibling that also needs an sx binding cannot be
-addressed by a static child index. For example:
+The compiler binds to static element paths when topology is fixed, and
+instruments stable `data-sx-node` targets where Angular-owned control flow
+can insert preceding sibling elements. Compiled bindings can therefore follow
+`@if` or `@for` blocks without being shifted by dynamic sibling changes:
 
 ```html
 @if (model.ready) { <p>Ready</p> }
 <button (click)="save()">Save</button>
 ```
 
-This placement currently produces a **build error**, not an inert button.
-Move the event-bearing button before the structural block, or group the dynamic
-content into a compiled block that owns its descendants. Nested structural
-blocks are supported only where the block compiler can own their DOM.
+Reactive bindings **inside Angular-owned dynamic regions** still need the sx
+structural compiler to own them; projected content and unrecognized directives
+are not silently adopted.
 
-Inside a compiled structural block, dynamic property bindings and attribute
-interpolation are not supported yet. For example,
-`@for (row of model.items; track row.id) { <li [class.active]="row.active">...</li> }`
-is not a supported compiled-block template. Use a class binding in a supported
-static region, or restructure the block until full block-property lowering is
-implemented. Unsupported reactive reads are rejected at build time rather than
-silently rendered as stale Angular values.
+Inside compiler-owned `@if` and `@for` bodies, the direct DOM compiler now
+accepts safe native property bindings (`[title]`, `[disabled]`, etc.),
+`[class.active]`, a conservative safe-style subset (`[style.width]`, etc.),
+`[attr.title]` / `data-*` / `aria-*`, and attribute interpolation of these
+safe attributes. Loop-local reads update when a keyed row's context changes;
+reactive sources use normal binding-table subscriptions. A single block
+binding can now combine a loop-local read and a reactive source, including
+arithmetic, comparisons and conditional expressions:
+
+```html
+@for (row of model.items; track row.id) {
+  <li [title]="row.name + model.suffix"
+      [class.active]="row.enabled && model.active">
+    {{ row.price * model.rate }}
+  </li>
+}
+```
+
+Such bindings evaluate initially, re-evaluate when the source emits, and
+refresh against the new loop context when an existing keyed row is reused.
+Nested `@if` conditions and surviving branch bindings are refreshed too.
+Generated DOM bindings do not create an Angular view or re-enter change
+detection. Arbitrary method calls, pipes, assignments, untracked component
+fields, URL, HTML, resource and unsafe style sinks still fail rather than
+bypassing Angular's expression semantics or sanitizer. This is not support
+for mixing arbitrary Angular component state with Streamix; local paths must
+be compiler-proven from the enclosing loop context.
+
+**Template source ownership:** Static inline templates and literal
+`templateUrl: './component.html'` files use the same compiler. External HTML
+is read relative to its owning component; only the virtual build receives the
+compiled inline template. The authored TS and HTML are left untouched. Dynamic
+computed template metadata and external templates outside the configured source
+root are rejected when compiler ownership is required.
+
+**Multiple component classes:** Files containing more than one `@Component` class and Streamix reactive fields are rejected; place each reactive component in its own module so the generated lifecycle and bindings have one unambiguous owner.
+
+**Accessor-backed fields:** `SourceReferenceCell` cannot intercept changes to accessor properties. Use a regular field for source replacement or explicitly rebind the source.
 
 **Scheduler ownership:** `provideSxZoneScheduling()` configures the current
 module-level Streamix renderer scheduler, so it is a page-wide setting, not a

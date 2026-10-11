@@ -6,20 +6,27 @@ import ts from 'typescript';
 /** Options understood by this builder. Everything else is forwarded. */
 export interface SxBuilderOptions {
   readonly delegateTarget: string;
-  readonly sourceRoot?: string;
+  readonly sourceRoot: string;
   readonly [key: string]: unknown;
 }
 
-// Default keeps the in-repo app6 demo building; consuming workspaces pass
-// their own `sourceRoot` builder option.
-export const DEFAULT_SOURCE_ROOT = 'projects/apps/app6/src';
+// Legacy exported constant for source compatibility; the production builder
+// requires an explicit sourceRoot and does not fall back to this path.
+export const DEFAULT_SOURCE_ROOT = 'src';
 
 export function resolveSourceRoot(options?: Record<string, unknown>): string {
   const sourceRoot = options?.['sourceRoot'];
 
-  return typeof sourceRoot === 'string' && sourceRoot
-    ? sourceRoot
-    : DEFAULT_SOURCE_ROOT;
+  if (typeof sourceRoot !== 'string' || !sourceRoot.trim()) {
+    throw new Error('Streamix Angular builder requires a non-empty sourceRoot (for example projects/apps/demo/src).');
+  }
+  const segments = sourceRoot.split(/[\\/]/);
+  if (sourceRoot.startsWith('/') || /^[A-Za-z]:[\\/]/.test(sourceRoot) ||
+      segments.includes('..') || segments.every(segment => !segment || segment === '.') ||
+      segments.some(segment => segment === '.angular' || segment === 'node_modules')) {
+    throw new Error('Streamix Angular builder sourceRoot must be a workspace-relative directory without parent traversal.');
+  }
+  return sourceRoot.replace(/\\/g, '/').replace(/\/$/, '');
 }
 
 /**
@@ -73,6 +80,17 @@ export function shouldRegenerateOn(
   }
 
   return String(filename).split(/[\\/]/).pop() === configuredFile;
+}
+
+/** True only for live serve/watch runs; one-shot builds allocate no source watcher. */
+export function shouldWatchSources(
+  delegatedTarget: string,
+  invokingTarget: string | undefined,
+  watch: unknown,
+): boolean {
+  return watch === true ||
+    delegatedTarget === 'serve' || delegatedTarget === 'dev-server' ||
+    invokingTarget === 'serve' || invokingTarget === 'dev-server';
 }
 
 /** Maps an application source root to its virtual project root. */
@@ -158,6 +176,69 @@ export function findInlineSxTemplate(source: string): InlineSxTemplate | undefin
       kind !== ts.SyntaxKind.StringLiteral) return undefined;
   if (scanner.getTokenText().endsWith('${')) return undefined;
   return { template: scanner.getTokenValue(), start, end: start + scanner.getTextPos() };
+}
+
+/** The one statically declared template owned by an Angular component. */
+export type SxComponentTemplate =
+  | ({ readonly kind: 'inline' } & InlineSxTemplate)
+  | { readonly kind: 'external'; readonly url: string; readonly start: number; readonly end: number };
+
+/**
+ * Reads @Component metadata without depending on field order, the presence of
+ * styles/styleUrls, or regexes that misinterpret escaped template literals.
+ * The builder resolves external URLs relative to their declaring source file.
+ */
+export function findSxComponentTemplate(source: string): SxComponentTemplate | undefined {
+  const file = ts.createSourceFile('sx-component.ts', source, ts.ScriptTarget.Latest, true);
+  let result: SxComponentTemplate | undefined;
+  const visit = (node: ts.Node): void => {
+    if (result) return;
+    if (ts.isClassDeclaration(node)) {
+      for (const decorator of ts.getDecorators(node) ?? []) {
+        const call = decorator.expression;
+        if (!ts.isCallExpression(call) || !ts.isIdentifier(call.expression) ||
+            call.expression.text !== 'Component') continue;
+        const metadata = call.arguments[0];
+        if (!metadata || !ts.isObjectLiteralExpression(metadata)) continue;
+        for (const property of metadata.properties) {
+          if (!ts.isPropertyAssignment(property)) continue;
+          const name = ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)
+            ? property.name.text : '';
+          const initializer = property.initializer;
+          if (name === 'template' &&
+              (ts.isStringLiteral(initializer) || ts.isNoSubstitutionTemplateLiteral(initializer))) {
+            result = { kind: 'inline', template: initializer.text,
+              start: initializer.getStart(file), end: initializer.end };
+            return;
+          }
+          if (name === 'templateUrl' && ts.isStringLiteral(initializer)) {
+            result = { kind: 'external', url: initializer.text,
+              start: property.getStart(file), end: property.end };
+            return;
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return result;
+}
+
+/**
+ * The virtual build receives one inline template regardless of authored form.
+ * This deliberately leaves the original HTML and @Component TS untouched.
+ */
+export function installSxComponentTemplate(
+  source: string,
+  compiledTemplate: string,
+): string {
+  const match = findSxComponentTemplate(source);
+  if (!match) throw new Error('Static @Component template or templateUrl was not found.');
+  const literal = templateLiteral(compiledTemplate);
+  return source.slice(0, match.start) +
+    (match.kind === 'external' ? `template: ${literal}` : literal) +
+    source.slice(match.end);
 }
 
 /**

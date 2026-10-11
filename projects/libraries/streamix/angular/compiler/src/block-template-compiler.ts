@@ -1,3 +1,5 @@
+import ts from 'typescript';
+
 import {
   TmplAstBoundText,
   TmplAstElement,
@@ -8,6 +10,7 @@ import {
   TmplAstText,
   parseTemplate,
   type TmplAstBoundEvent,
+  type TmplAstBoundAttribute,
   type TmplAstNode,
 } from '@angular/compiler';
 
@@ -22,6 +25,7 @@ import {
   analyzeSxExpression,
   rewriteLocalReads,
   stripAnyCasts,
+  rewriteSxTextExpression,
 } from './text-expression';
 
 export type SxCompiledBlockBinding =
@@ -31,6 +35,17 @@ export type SxCompiledBlockBinding =
       readonly source: string;
       /** Present when the interpolation is a compiled compound expression. */
       readonly dependencies?: readonly string[];
+      /** Re-read on enclosing keyed-row context changes as well as atom emissions. */
+      readonly contextual?: boolean;
+    }
+  | {
+      readonly kind: 'property' | 'attribute' | 'class' | 'style';
+      readonly node: string;
+      readonly name: string;
+      readonly source: string;
+      readonly dependencies?: readonly string[];
+      /** Reader closes over the latest enclosing loop context. */
+      readonly contextual?: boolean;
     }
   | {
       readonly kind: 'event';
@@ -53,6 +68,7 @@ export type SxCompiledValue =
       readonly kind: 'expression';
       readonly expression: string;
       readonly dependencies: readonly string[];
+      readonly contextual?: boolean;
     }
   /** Evaluated against the enclosing loop context, refreshed on item change. */
   | { readonly kind: 'local'; readonly expression: string };
@@ -117,6 +133,8 @@ export interface SxBlockTemplateOptions {
    * compiled update on every item change.
    */
   readonly allowLocals?: boolean;
+  /** In production lowering, the visible @for variable and context aliases. */
+  readonly localNames?: readonly string[];
 }
 
 interface EmitState {
@@ -131,6 +149,7 @@ interface EmitState {
   readonly lets: Map<string, string>;
   readonly resolveReactiveSource?: SxReactiveSourceResolver;
   readonly allowLocals: boolean;
+  readonly localNames?: ReadonlySet<string>;
   nextNode: number;
   bindingCount: number;
 }
@@ -150,6 +169,7 @@ function createEmitState(
     lets: new Map(),
     resolveReactiveSource: options.resolveReactiveSource,
     allowLocals: options.allowLocals === true,
+    localNames: options.localNames ? new Set(options.localNames) : undefined,
     nextNode: 0,
     bindingCount: 0,
   };
@@ -237,11 +257,15 @@ function appendTrailingRoot(state: EmitState): SxCompiledBlockBody {
 function compileNestedBody(
   children: readonly TmplAstNode[],
   parent: EmitState,
+  additionalLocals: readonly string[] = [],
 ): SxCompiledBlockBody {
   const state = createEmitState(parent.template, {
     documentExpression: parent.document,
     resolveReactiveSource: parent.resolveReactiveSource,
-    allowLocals: parent.allowLocals,
+    allowLocals: parent.allowLocals || additionalLocals.length > 0,
+    localNames: parent.localNames || additionalLocals.length > 0
+      ? [...(parent.localNames ?? []), ...additionalLocals]
+      : undefined,
   });
 
   // `@let` bindings are scoped to the body that declares them.
@@ -604,7 +628,11 @@ function emitNestedCollection(
     ? trackByText(block.trackBy, state.template, item)
     : item;
 
-  const body = compileNestedBody(block.children, state);
+  const body = compileNestedBody(block.children, state, [
+    item, 'index', 'count', 'first', 'last', 'even', 'odd',
+    '$index', '$count', '$first', '$last', '$even', '$odd',
+    ...block.contextVariables.map(alias => alias.name),
+  ]);
   const empty = block.empty
     ? compileNestedBody(block.empty.children, state)
     : undefined;
@@ -666,9 +694,15 @@ function compileNestedValue(
     }
 
     if (analysis) {
+      const mixed = analysis.mode === 'unsupported'
+        ? mixedBlockExpression(text, analysis.expression, analysis.dependencies, state)
+        : undefined;
+      if (mixed) {
+        return { kind: 'expression', ...mixed };
+      }
       throw new Error(
         `Unsupported sx block expression ${JSON.stringify(text)}. ` +
-        'Every read must be reactive; expressions that mix atoms with state Angular owns cannot be compiled.',
+        'Reactive sources may mix only with proven loop-local reads; Angular-owned component state is not tracked.',
       );
     }
   }
@@ -733,39 +767,231 @@ function isLiteralText(text: string): boolean {
   );
 }
 
+/**
+ * Only native DOM sinks already supported by the static compiler may be
+ * written without Angular's sanitizer. URL, resource, HTML, and dynamic
+ * attribute names stay Angular-owned and are rejected inside sx blocks.
+ */
+const SAFE_BLOCK_PROPERTIES = new Set([
+  'alt', 'checked', 'className', 'cols', 'colSpan', 'contentEditable',
+  'disabled', 'draggable', 'height', 'hidden', 'htmlFor', 'id', 'max',
+  'min', 'multiple', 'name', 'open', 'placeholder', 'readOnly', 'required',
+  'rows', 'rowSpan', 'selected', 'spellcheck', 'step', 'tabIndex',
+  'textContent', 'title', 'type', 'value', 'width',
+]);
+const SAFE_BLOCK_STYLES = new Set([
+  'display', 'height', 'opacity', 'transform', 'visibility', 'width',
+]);
+
+function boundInputKind(
+  input: TmplAstBoundAttribute,
+  state: EmitState,
+): { kind: 'property' | 'attribute' | 'class' | 'style'; name: string; expression: string } {
+  const authored = sourceSlice(state.template, input.sourceSpan.start.offset, input.sourceSpan.end.offset);
+  const bracket = /^\s*\[([^\]]+)\]\s*=/.exec(authored);
+  const interpolated = bracket ? null : /^\s*([^\s=]+)\s*=/.exec(authored);
+  const name = bracket?.[1] ?? interpolated?.[1] ?? input.name;
+  const interpolations = [...authored.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)];
+  let expression = expressionSourceOf(input.value, state.template);
+  if (interpolations.length > 0) {
+    // Compile all interpolated runs, keeping literal text intact and each
+    // reactive read visible to the same dependency analyzer as normal inputs.
+    const value = /=[ \t\r\n]*(["'])([\s\S]*)\1\s*$/.exec(authored);
+    if (!value) throw new Error(`Unsupported interpolated attribute ${JSON.stringify(name)}.`);
+    const pieces: string[] = [];
+    const inner = value[2];
+    const pattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
+    let cursor = 0, match: RegExpExecArray | null;
+    while ((match = pattern.exec(inner))) {
+      if (match.index > cursor) pieces.push(JSON.stringify(inner.slice(cursor, match.index)));
+      pieces.push(`(${match[1].trim()})`);
+      cursor = match.index + match[0].length;
+    }
+    if (cursor < inner.length) pieces.push(JSON.stringify(inner.slice(cursor)));
+    expression = pieces.join(' + ') || '""';
+  }
+
+  const normalized = name === 'readonly' ? 'readOnly' :
+    name === 'tabindex' ? 'tabIndex' :
+    name === 'colspan' ? 'colSpan' : name === 'rowspan' ? 'rowSpan' : name;
+  if (name.startsWith('class.') && /^[A-Za-z_-][\w-]*$/.test(name.slice(6))) {
+    return { kind: 'class', name: name.slice(6), expression };
+  }
+  if (name.startsWith('style.') && SAFE_BLOCK_STYLES.has(name.slice(6).toLowerCase())) {
+    return { kind: 'style', name: name.slice(6), expression };
+  }
+  if (name.startsWith('attr.')) {
+    const attribute = name.slice(5);
+    if (/^(?:data-[\w-]+|aria-[\w-]+|title|role|tabindex)$/.test(attribute)) {
+      return { kind: 'attribute', name: attribute, expression };
+    }
+  }
+  // Angular's attribute interpolation is semantically [attr.name], never a
+  // DOM property; reject security-sensitive sinks consistently.
+  if (interpolations.length && /^(?:data-[\w-]+|aria-[\w-]+|title|role|tabindex)$/.test(name)) {
+    return { kind: 'attribute', name, expression };
+  }
+  if (!name.includes('.') && SAFE_BLOCK_PROPERTIES.has(normalized)) {
+    return { kind: 'property', name: normalized, expression };
+  }
+  throw new Error(
+    `Unsupported or sanitizer-sensitive compiled block binding ${JSON.stringify(name)}. ` +
+    'Only safe DOM properties, attr.title/role/tabindex/data-/aria-, class.X, and safe style.X are compiled.',
+  );
+}
+
+/**
+ * A mixed block expression has two independent invalidation inputs:
+ *
+ * 1. Streamix dependency emissions (the binding table subscription); and
+ * 2. a keyed-row update (refreshExpression after currentContext is replaced).
+ *
+ * Its authored expression is validated before rewriting, so Angular pipes,
+ * writes, arbitrary method calls and unproven component fields cannot be
+ * executed under changed direct-DOM semantics.
+ */
+function mixedBlockExpression(
+  authored: string,
+  normalized: string,
+  dependencies: readonly string[],
+  state: EmitState,
+): { expression: string; dependencies: readonly string[]; contextual: true } | undefined {
+  if (!state.allowLocals || dependencies.length === 0) return undefined;
+
+  const source = stripAnyCasts(authored);
+  const parsed = ts.createSourceFile(
+    'sx-mixed-expression.ts', `(${source});`, ts.ScriptTarget.Latest, true,
+  );
+  if ((parsed as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }).parseDiagnostics.length > 0) return undefined;
+  const statement = parsed.statements[0];
+  if (!statement || !ts.isExpressionStatement(statement)) return undefined;
+
+  const safe = (node: ts.Node): boolean => {
+    if (ts.isParenthesizedExpression(node)) return safe(node.expression);
+    if (ts.isIdentifier(node)) {
+      return state.localNames ? state.localNames.has(node.text) ||
+        !!state.resolveReactiveSource?.(node.text) ||
+        ['undefined', 'NaN', 'Infinity'].includes(node.text) : true;
+    }
+    if (ts.isNumericLiteral(node) || ts.isStringLiteral(node) ||
+        node.kind === ts.SyntaxKind.TrueKeyword ||
+        node.kind === ts.SyntaxKind.FalseKeyword ||
+        node.kind === ts.SyntaxKind.NullKeyword) return true;
+    if (ts.isPropertyAccessExpression(node)) {
+      // The component/source roots and local roots must be proven separately.
+      if (state.localNames) {
+        const full = node.getText(parsed);
+        if (state.resolveReactiveSource?.(full)) return true;
+        const root = full.match(/^[A-Za-z_$][\w$]*/)?.[0];
+        if (root && !state.localNames.has(root) &&
+            !state.resolveReactiveSource?.(full) &&
+            !state.resolveReactiveSource?.(root)) return false;
+      }
+      return safe(node.expression);
+    }
+    if (ts.isElementAccessExpression(node)) return safe(node.expression) && safe(node.argumentExpression);
+    if (ts.isPrefixUnaryExpression(node)) {
+      return [ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken,
+        ts.SyntaxKind.ExclamationToken, ts.SyntaxKind.TildeToken].includes(node.operator) &&
+        safe(node.operand);
+    }
+    if (ts.isBinaryExpression(node)) {
+      const operator = node.operatorToken.kind;
+      return [
+        ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken,
+        ts.SyntaxKind.AsteriskToken, ts.SyntaxKind.SlashToken,
+        ts.SyntaxKind.PercentToken, ts.SyntaxKind.AsteriskAsteriskToken,
+        ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken,
+        ts.SyntaxKind.QuestionQuestionToken,
+        ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.EqualsEqualsEqualsToken,
+        ts.SyntaxKind.ExclamationEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken,
+        ts.SyntaxKind.GreaterThanToken, ts.SyntaxKind.GreaterThanEqualsToken,
+        ts.SyntaxKind.LessThanToken, ts.SyntaxKind.LessThanEqualsToken,
+      ].includes(operator) && safe(node.left) && safe(node.right);
+    }
+    if (ts.isConditionalExpression(node)) {
+      return safe(node.condition) && safe(node.whenTrue) && safe(node.whenFalse);
+    }
+    return false;
+  };
+
+  if (!safe(statement.expression)) return undefined;
+
+  // Need an actual loop-local read, not a component field that failed the
+  // analyzer for another reason. The rewritten expression already qualifies
+  // every Streamix read with ctx; the remaining paths resolve in currentContext.
+  const rewritten = rewriteLocalReads(
+    rewriteSxTextExpression(normalized), 'currentContext',
+  );
+  // The rewrite must have installed at least one local read, otherwise the
+  // analysis was unsupported for a reason unrelated to mixed loop context.
+  if (!rewritten.includes('ɵsxReadLocal(currentContext, ')) return undefined;
+
+  return { expression: rewritten, dependencies, contextual: true };
+}
+
+function compileBlockInput(
+  input: TmplAstBoundAttribute,
+  variable: string,
+  state: EmitState,
+): void {
+  const { kind, name, expression } = boundInputKind(input, state);
+  const expanded = substituteLets(expression, state);
+  const analysis = analyzeSxExpression(expanded, state.resolveReactiveSource);
+  if (analysis?.mode === 'direct' && analysis.directSource) {
+    state.bindings.push({ kind, node: variable, name, source: analysis.directSource });
+  } else if (analysis?.mode === 'expression') {
+    state.bindings.push({
+      kind, node: variable, name,
+      source: analysis.expression, dependencies: analysis.dependencies,
+    });
+  } else if (analysis?.mode === 'unsupported') {
+    const mixed = mixedBlockExpression(expanded, analysis.expression, analysis.dependencies, state);
+    if (!mixed) {
+      throw new Error(`Unsupported mixed Streamix/local compiled block binding ${JSON.stringify(expression)}.`);
+    }
+    state.bindings.push({ kind, node: variable, name, source: mixed.expression,
+      dependencies: mixed.dependencies, contextual: true });
+  } else if (state.allowLocals &&
+      !/[|;`]/.test(expanded) &&
+      !/[A-Za-z_$][\w$.]*\s*\(/.test(expanded)) {
+    const local = rewriteLocalReads(stripAnyCasts(expanded), 'currentContext');
+    if (kind === 'property') {
+      state.updates.push(`${variable}[${JSON.stringify(name)}] = ${local};`);
+    } else if (kind === 'class') {
+      state.updates.push(`${variable}.classList.toggle(${JSON.stringify(name)}, Boolean(${local}));`);
+    } else if (kind === 'style') {
+      state.updates.push(`{ const value = ${local}; if (value == null || value === false) ${variable}.style.removeProperty(${JSON.stringify(name)}); else ${variable}.style.setProperty(${JSON.stringify(name)}, String(value)); }`);
+    } else {
+      state.updates.push(`{ const value = ${local}; if (value == null) ${variable}.removeAttribute(${JSON.stringify(name)}); else ${variable}.setAttribute(${JSON.stringify(name)}, String(value)); }`);
+    }
+  } else {
+    throw new Error(
+      `Unsupported compiled block binding ${JSON.stringify(expression)}: ` +
+      'a static @if body requires reactive sources; @for bodies may also read loop-local fields.',
+    );
+  }
+  state.bindingCount += 1;
+}
+
 function emitElement(
   element: TmplAstElement,
   state: EmitState,
 ): string {
-  if (element.inputs.length > 0) {
-    // Native property bindings and attribute interpolation (`title="{{ x }}"`)
-    // both arrive as inputs; the compiled element writes static attributes
-    // verbatim, so either would be dropped on the floor.
-    throw new Error(
-      `Property bindings and attribute interpolation inside compiled sx structural element <${element.name}> are not yet supported. ` +
-      'Use @if/@for conditions or simple interpolation in this compiler stage.',
-    );
-  }
-
   const variable = nextVariable(state, 'el');
   state.create.push(
     `const ${variable} = ${state.document}.createElement(${JSON.stringify(element.name)});`,
   );
 
+  for (const input of element.inputs) compileBlockInput(input, variable, state);
   for (const output of element.outputs) {
-    state.bindings.push(
-      compileBlockEvent(element, output, variable, state),
-    );
+    state.bindings.push(compileBlockEvent(element, output, variable, state));
   }
 
   for (const attribute of element.attributes) {
     if (attribute.value.includes('{{')) {
-      throw new Error(
-        `Unsupported attribute interpolation ${JSON.stringify(attribute.name)} inside a compiled block. ` +
-        'The compiled element writes attributes verbatim; keep the attribute static or move it out of the block.',
-      );
+      throw new Error(`Unsupported unparsed interpolation in compiled attribute ${JSON.stringify(attribute.name)}.`);
     }
-
     state.create.push(
       `${variable}.setAttribute(${JSON.stringify(attribute.name)}, ${JSON.stringify(attribute.value)});`,
     );
@@ -776,7 +1002,6 @@ function emitElement(
       state.create.push(`${variable}.appendChild(${childVariable});`);
     }
   }
-
   return variable;
 }
 
@@ -842,7 +1067,7 @@ function emitBoundText(
     // loop locals mixed with sources stay unsupported.
     if (state.resolveReactiveSource) {
       const analysis = analyzeSxExpression(
-        part.value,
+        expression,
         state.resolveReactiveSource,
       );
 
@@ -857,11 +1082,19 @@ function emitBoundText(
         continue;
       }
 
+      if (analysis?.mode === 'unsupported') {
+        const mixed = mixedBlockExpression(expression, analysis.expression, analysis.dependencies, state);
+        if (mixed) {
+          state.bindings.push({ kind: 'text', node: variable, source: mixed.expression,
+            dependencies: mixed.dependencies, contextual: true });
+          state.bindingCount += 1;
+          continue;
+        }
+      }
       if (analysis?.mode === 'unsupported' || !state.allowLocals) {
         throw new Error(
           `Unsupported sx structural interpolation: ${JSON.stringify(part.value)}. ` +
-          'Only atom reads and loop-local values are supported in a compiled block body; ' +
-          'an expression that mixes both cannot be compiled.',
+          'Only reactive, local, and supported mixed loop-local/reactive expressions can be compiled.',
         );
       }
     }
