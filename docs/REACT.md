@@ -11,7 +11,21 @@ export function Counter() {
 }
 ```
 
-The compiler supports atoms, derived values, flows, scope fields, known aliases and atom maps, supported writes, anonymous default components, and imported `memo` / `forwardRef` wrappers. Class components and unknown higher-order wrappers are rejected when they contain implicit reactive JSX.
+The compiler supports atoms, derived values, flows, scope fields, known aliases and atom maps, supported writes, anonymous default components, class components, and higher-order wrappers. Class components receive an internal function-component subscription boundary; wrapper callbacks are compiled when assigned to a capitalized component binding.
+
+## Subscription ownership and cleanup
+
+Every implicit reactive JSX read becomes a retained `const` snapshot from
+`useStreamixSource()`. The binding is rendered by a function component (or
+passed to the generated class adapter), so React owns the subscription for the
+mounted component lifetime. On unmount, React runs the external-store cleanup;
+once the final consumer of a shared source has left, Streamix unsubscribes from
+that source and releases the shared subscription.
+
+For a class component, the compiler generates a private function wrapper that
+owns the hooks and passes its snapshots through `__streamixBindings`. The
+renamed inner class renders those snapshots. The private prop is generated
+after authored props, so an authored prop cannot replace it.
 
 ## Prop and runtime boundaries
 

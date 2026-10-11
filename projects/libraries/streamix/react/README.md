@@ -59,11 +59,14 @@ return <input
 />;
 ```
 
-**Class components:** implicit reactive JSX reads are not supported. The compiler
-raises an error rather than emitting a component that displays an atom object.
-Use a function component or explicitly subscribe through a class-compatible
-external-store adapter. Unrecognized third-party wrapper calls around implicit
-reactive JSX likewise fail the compilation instead of silently skipping it.
+**Class components and wrappers:** implicit reactive JSX reads are supported in
+class components through an internal function-component subscription boundary.
+Callbacks passed to a higher-order wrapper are compiled when they are assigned
+to a capitalized component binding, including application-defined wrappers.
+Generated function bindings retain the `useStreamixSource()` snapshot for the
+whole mounted lifetime. On unmount, the external-store cleanup releases the
+subscription once its final consumer leaves; class adapters pass those retained
+snapshots to their private inner class rather than rereading mutable sources.
 
 ## Prop boundaries
 
@@ -273,7 +276,3 @@ compiler output, Vite, and the Angular-hosted builder. Verify these against
 the project's actual React, TypeScript, Vite, and builder dependencies before
 release. The isolated TypeScript/compiler harness does not replace real React
 Compiler, Fast Refresh, Suspense, hydration, or esbuild map-composition tests.
-
-See [PRODUCTION.md](PRODUCTION.md) for the complete release gate matrix and
-acceptance criteria. Passing isolated TypeScript tests is not proof of React
-Compiler compatibility or production bundler/SSR integration.
