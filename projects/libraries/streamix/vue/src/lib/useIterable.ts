@@ -8,6 +8,7 @@ import type {
   DependencySource,
   Subscription,
 } from '@epikodelabs/streamix';
+import { recordStreamixDevtoolsEvent } from './devtools';
 
 type Disposable = { dispose(): void };
 type ErrorSource = {
@@ -96,6 +97,7 @@ function dependencyRef<T>(
   initialValue: T | undefined,
   owned: boolean,
 ): IterableRef<T> {
+  const sourceName = 'Vue reactive source';
   const bridge = readonlyBridgeRef(() => {
     const value = source.value;
     return value === undefined && initialValue !== undefined
@@ -104,8 +106,10 @@ function dependencyRef<T>(
   });
 
   let subscribing = true;
+  recordStreamixDevtoolsEvent({ type: 'subscription', source: sourceName });
   const subscription = source.subscribe(() => {
     if (!subscribing) bridge.invalidate();
+    if (!subscribing) recordStreamixDevtoolsEvent({ type: 'write', source: sourceName });
   });
   subscribing = false;
   const errorSubscription = isErrorSource(source)
@@ -113,6 +117,7 @@ function dependencyRef<T>(
     : undefined;
 
   registerCleanup(() => {
+    recordStreamixDevtoolsEvent({ type: 'unsubscribe', source: sourceName });
     void subscription();
     void errorSubscription?.();
 

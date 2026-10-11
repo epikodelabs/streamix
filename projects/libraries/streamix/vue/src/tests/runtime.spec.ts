@@ -17,6 +17,7 @@ import {
   recordStreamixDevtoolsEvent,
   useStreamixDevtoolsEvents,
 } from '../lib/devtools';
+import { useIterable } from '../lib/useIterable';
 
 describe('Vue runtime escape hatches', () => {
   it('reads, writes, and forwards atom references without a Vue store copy', () => {
@@ -68,13 +69,22 @@ describe('Vue runtime escape hatches', () => {
   });
 
   it('exposes queued DevTools events as a Vue ref', async () => {
-    const scope = effectScope();
-    const events = scope.run(() => useStreamixDevtoolsEvents())!;
+    const observerScope = effectScope();
+    const events = observerScope.run(() => useStreamixDevtoolsEvents())!;
+    const sourceScope = effectScope();
+    const count = atom(0);
+    sourceScope.run(() => useIterable(count));
 
     recordStreamixDevtoolsEvent({ type: 'write', source: 'title' });
+    count.next(1);
     await Promise.resolve();
 
     expect(events.value.some(event => event.type === 'write' && event.source === 'title')).toBe(true);
-    scope.stop();
+    expect(events.value.some(event => event.type === 'subscription' && event.source === 'Vue reactive source')).toBe(true);
+    expect(events.value.some(event => event.type === 'write' && event.source === 'Vue reactive source')).toBe(true);
+    sourceScope.stop();
+    await Promise.resolve();
+    expect(events.value.some(event => event.type === 'unsubscribe' && event.source === 'Vue reactive source')).toBe(true);
+    observerScope.stop();
   });
 });
