@@ -185,9 +185,36 @@ in sync.
 
 There is no `useAtom` composable because the useful question is not “is this an atom?” It is: does the component need to **change** this value, or only **observe** it?
 
+## Explicit runtime boundaries
+
+For code outside Vue's tracked render path—timers, callbacks, or third-party
+components—make the Streamix operation explicit:
+
+```ts
+import { atom } from '@epikodelabs/streamix';
+import { atomRef, read, write } from '@epikodelabs/streamix/vue';
+
+const status = atom('Saved');
+
+setTimeout(() => console.log(read(status)));
+write(status, 'Updated');
+sendToThirdPartyComponent(atomRef(status));
+```
+
+For server rendering, render `renderAtomSnapshotScript()` beside the Vue app
+and call `hydrateAtomSnapshotFromDocument()` before client mounting. This
+transfers named Streamix values without creating a second client store.
+
 ## Loading and Suspense
 
 Vue already has its own approach to loading through async setup and `<Suspense>`. Streamix keeps its role smaller: it provides reactive values and async flows; Vue decides how the loading boundary should look.
+
+## Tooling
+
+`StreamixDevtools` is an opt-in in-app panel. It shows explicit reads and
+writes as well as subscriptions, updates, and cleanup from Vue bridge refs.
+For custom tooling, `useStreamixDevtoolsEvents()` exposes the same bounded
+event trace as a Vue ref.
 
 ## The goal
 
