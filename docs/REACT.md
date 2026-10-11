@@ -41,4 +41,4 @@ The Angular Architect builder mirrors transformed files into `.angular/.streamix
 
 For atom-aware diagnostics and navigation, add `@epikodelabs/streamix/react/editor/tsserver` to `compilerOptions.plugins` and restart the TypeScript server. The editor is an aid; the production compiler is authoritative for generated output.
 
-`StreamixDevtools` is an opt-in panel. Production builds should prove `NODE_ENV=production`; see [PRODUCTION.md](../projects/libraries/streamix/react/PRODUCTION.md) for release gates and known limitations.
+`StreamixDevtools` is an opt-in panel. Production builds should prove `NODE_ENV=production`; see [PRODUCTION.md](https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/react/PRODUCTION.md) for release gates and known limitations.

@@ -39,4 +39,4 @@ Use `read`, `write`, and `atomRef` in timers, third-party callbacks, and other c
 
 To align Volar diagnostics with compiler shorthand, configure `@epikodelabs/streamix/vue/editor/tsserver` in `vueCompilerOptions.plugins`. The compiler remains authoritative for output and diagnostics.
 
-See the package [README](../projects/libraries/streamix/vue/README.md) for the Angular-hosted builder setup, DevTools, and detailed lifecycle guidance.
+See the package [README](https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/vue/README.md) for the Angular-hosted builder setup, DevTools, and detailed lifecycle guidance.
