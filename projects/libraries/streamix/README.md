@@ -24,6 +24,11 @@
   </a>
 </p>
 
+> **Status:** the active development phase is finished. Angular, React, and Vue
+> all support atoms and scopes today. What remains is comprehensive testing and
+> feedback — help us find out exactly what fails or needs improvement.
+> [Tell us what breaks.](https://github.com/epikodelabs/streamix/issues)
+
 ---
 
 ## ✨ What is streamix?
