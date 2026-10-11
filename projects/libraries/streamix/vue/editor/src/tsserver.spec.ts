@@ -37,4 +37,20 @@ describe('Streamix Vue language plugin', () => {
     expect(virtual?.text).toContain('derived(() => count.value + 1)');
     expect(virtual?.text).toContain('derive(() => count)');
   });
+
+  it('does not corrupt derived strings, comments, object literals or local shadows', () => {
+    const plugin = createPlugin({ modules: { typescript: ts } });
+    const source = `
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(2);
+      const a = derived(() => "count");
+      const b = derived(() => ({ count }));
+      const c = derived(() => { /* count */ const count = 4; return count; });
+    `;
+    const code = plugin.compileSFCScript('ts', source)?.text;
+    expect(code).toContain('"count"');
+    expect(code).toContain('({ count: count.value })');
+    expect(code).toContain('/* count */ const count = 4; return count;');
+  });
+
 });

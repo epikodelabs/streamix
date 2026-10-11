@@ -160,6 +160,8 @@ export function transformVueSfc(
   }
 
   diagnostics.push(...unsupportedTemplateDiagnostics(templateContent, templateOffset, declarations));
+  diagnostics.push(...readonlyTemplateDiagnostics(templateContent, templateOffset, declarations));
+  diagnostics.push(...generatedNameDiagnostics(scriptContent, scriptOffset, declarations));
 
   const templateUsage = collectTemplateUsage(templateContent, declarations);
   const vModelBindings = collectVModelScopeBindings(templateContent, declarations);
@@ -212,7 +214,8 @@ export function transformVueSfc(
   }
 
   for (const scope of scopes) {
-    const used = usedMembers(usage, scope.name);
+    const used = [...new Set([...usedMembers(usage, scope.name), ...vModelBindings
+      .filter(model => model.scope === scope.name).map(model => model.member)])].sort();
     const accepted: string[] = [];
 
     for (const member of used) {
@@ -327,11 +330,15 @@ export function transformVueSfc(
     reactive.length + Object.values(bridgedScopes).flat().length;
 
   return {
-    code: withRuntimeImport(code, scriptOffset, templateAndScriptEdits.length > 0),
+    code: withRuntimeImport(code, templateAndScriptEdits.length > 0),
     bindingCount,
     bridgedScopes,
     diagnostics,
   };
+}
+
+function isAssignmentKind(kind: ts.SyntaxKind): boolean {
+  return kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
 }
 
 /** Reject shapes the compiler cannot lower without changing Vue semantics. */
@@ -340,33 +347,141 @@ function unsupportedTemplateDiagnostics(
   templateOffset: number,
   declarations: readonly ReactiveDeclaration[],
 ): readonly VueSfcDiagnostic[] {
-  const scopes = declarations.filter(item => item.kind === 'scope').map(item => item.name);
-  const diagnostics: VueSfcDiagnostic[] = [];
-  const add = (match: RegExpExecArray, message: string): void => {
-    diagnostics.push({
-      category: 'error', message, start: templateOffset + match.index, length: match[0].length,
-    });
-  };
-  for (const scope of scopes) {
-    const escaped = scope.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    for (const match of template.matchAll(new RegExp(`\\b${escaped}(?:\\?\\.|\\[)`, 'g'))) {
-      add(match, `Unsupported dynamic scope access on ${scope}. Use scope.get(...) in script and bind the returned ref.`);
-    }
-    for (const match of template.matchAll(new RegExp(`\\b${escaped}\\.[A-Za-z_$][\\w$]*\\s*(?:\\+\\+|--|[+*/%&|^]?=)`, 'g'))) {
-      add(match, `Unsupported compound scope write on ${scope}. Use an explicit scope.set(...) handler.`);
-    }
-  }
-  for (const match of template.matchAll(/\bv-model(?:[:.]\S+)?\s*=\s*(["'])[^"']*\1/g)) {
-    if (match[0].startsWith('v-model=')) continue;
-    add(match, 'v-model arguments and modifiers are not compiled. Use :value and an explicit scope.set(...) handler.');
-  }
+  const scopes = new Set(declarations.filter(item => item.kind === 'scope').map(item => item.name));
   const reactiveNames = new Set(declarations.filter(item => item.kind !== 'scope').map(item => item.name));
-  for (const match of template.matchAll(/v-for\s*=\s*(["'])([A-Za-z_$][\w$]*)\s+(?:in|of)\b/g)) {
-    if (reactiveNames.has(match[2])) {
-      add(match, `v-for alias ${JSON.stringify(match[2])} shadows a Streamix binding; rename the alias.`);
+  const diagnostics: VueSfcDiagnostic[] = [];
+  const add = (start: number, length: number, message: string): void => {
+    diagnostics.push({ category: 'error', message, start: templateOffset + start, length });
+  };
+
+  for (const span of templateExpressionSpans(template)) {
+    const expression = template.slice(span.start, span.end);
+    const { file, prefix } = parseTemplateExpression(expression);
+    const visit = (node: ts.Node): void => {
+      const access = (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+        ts.isIdentifier(node.expression) && scopes.has(node.expression.text)
+        ? node : undefined;
+      if (access && (ts.isElementAccessExpression(access) || access.questionDotToken)) {
+        add(span.start + node.getStart(file) - prefix, node.end - node.getStart(file),
+          `Unsupported dynamic scope access on ${(access.expression as ts.Identifier).text}. Use scope.get(...) in script and bind the returned ref.`);
+      }
+      let write: ts.Expression | undefined;
+      if (ts.isBinaryExpression(node) && isAssignmentKind(node.operatorToken.kind) &&
+          node.operatorToken.kind !== ts.SyntaxKind.EqualsToken) write = node.left;
+      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+          (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) write = node.operand;
+      if (write && ts.isPropertyAccessExpression(write) && ts.isIdentifier(write.expression) &&
+          scopes.has(write.expression.text)) {
+        add(span.start + write.getStart(file) - prefix, write.end - write.getStart(file),
+          `Unsupported compound scope write on ${write.expression.text}. Use an explicit scope.set(...) handler.`);
+      }
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isPropertyAccessExpression(node.left) && ts.isIdentifier(node.left.expression) &&
+          scopes.has(node.left.expression.text)) {
+        const containsNestedWrite = (child: ts.Node): boolean => {
+          if (ts.isBinaryExpression(child) && isAssignmentKind(child.operatorToken.kind) &&
+              ts.isPropertyAccessExpression(child.left) && ts.isIdentifier(child.left.expression) &&
+              scopes.has(child.left.expression.text)) return true;
+          return ts.forEachChild(child, containsNestedWrite) ?? false;
+        };
+        if (containsNestedWrite(node.right)) {
+          add(span.start + node.getStart(file) - prefix, node.end - node.getStart(file),
+            'Nested scope assignments are unsupported. Use separate scope.set(...) statements.');
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+  }
+
+  for (const tag of openingTags(template)) {
+    for (const match of tag.attributes.matchAll(/(?:^|\s)(v-model(?:[:.][\w-]+)+)\s*=\s*(["'])(.*?)\2/g)) {
+      add(tag.attributesStart + match.index!, match[0].length,
+        'v-model arguments and modifiers are not compiled. Use :value and an explicit scope.set(...) handler.');
+    }
+    for (const match of tag.attributes.matchAll(/(?:^|\s)v-for\s*=\s*(["'])([A-Za-z_$][\w$]*)\s+(?:in|of)\b/g)) {
+      if (reactiveNames.has(match[2])) {
+        add(tag.attributesStart + match.index!, match[0].length,
+          `v-for alias ${JSON.stringify(match[2])} shadows a Streamix binding; rename the alias.`);
+      }
     }
   }
   return diagnostics;
+}
+
+/** Vue's setup auto-unwrapping cannot make derived values and flows writable. */
+function readonlyTemplateDiagnostics(
+  template: string,
+  templateOffset: number,
+  declarations: readonly ReactiveDeclaration[],
+): readonly VueSfcDiagnostic[] {
+  const readonlyNames = new Set(declarations.filter(item =>
+    item.kind === 'derived' || item.kind === 'flow').map(item => item.name));
+  const diagnostics: VueSfcDiagnostic[] = [];
+  if (readonlyNames.size === 0) return diagnostics;
+
+  for (const tag of openingTags(template)) {
+    for (const model of tag.attributes.matchAll(/(?:^|\s)v-model\s*=\s*(["'])(.*?)\1/g)) {
+      if (!readonlyNames.has(model[2].trim())) continue;
+      diagnostics.push({ category: 'error', start: templateOffset + tag.attributesStart + model.index!,
+        length: model[0].length, message: `v-model cannot write to read-only Streamix binding ${JSON.stringify(model[2].trim())}.` });
+    }
+  }
+  for (const span of templateExpressionSpans(template)) {
+    const expression = template.slice(span.start, span.end);
+    const { file, prefix } = parseTemplateExpression(expression);
+    const visit = (node: ts.Node): void => {
+      let target: ts.Expression | undefined;
+      if (ts.isBinaryExpression(node) && isAssignmentKind(node.operatorToken.kind)) target = node.left;
+      else if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+          [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)) target = node.operand;
+      if (target && ts.isIdentifier(target) && readonlyNames.has(target.text)) {
+        diagnostics.push({ category: 'error', start: templateOffset + span.start + target.getStart(file) - prefix,
+          length: target.text.length, message: `Cannot assign to read-only Streamix binding ${JSON.stringify(target.text)}.` });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+  }
+  return diagnostics;
+}
+
+/** Prevent a generated setup binding from colliding with an authored one. */
+function generatedNameDiagnostics(
+  script: string,
+  scriptOffset: number,
+  declarations: readonly ReactiveDeclaration[],
+): readonly VueSfcDiagnostic[] {
+  const file = ts.createSourceFile('script.ts', script, ts.ScriptTarget.Latest, true);
+  const existing = new Set<string>();
+  for (const statement of file.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) existing.add(declaration.name.text);
+      }
+    }
+    if (ts.isFunctionDeclaration(statement) && statement.name) existing.add(statement.name.text);
+    if (ts.isClassDeclaration(statement) && statement.name) existing.add(statement.name.text);
+    if (ts.isImportDeclaration(statement)) {
+      const clause = statement.importClause;
+      if (clause?.name) existing.add(clause.name.text);
+      const bindings = clause?.namedBindings;
+      if (bindings && ts.isNamespaceImport(bindings)) existing.add(bindings.name.text);
+      else if (bindings && ts.isNamedImports(bindings)) {
+        for (const item of bindings.elements) existing.add(item.name.text);
+      }
+    }
+  }
+  const generated = declarations.filter(item => item.kind !== 'scope').map(item => reactiveBridgeName(item.name));
+  for (const scope of declarations.filter(item => item.kind === 'scope')) {
+    generated.push(...scope.members.map(member => bridgeName(scope.name, member)));
+  }
+  return [...new Set(generated)].filter(name => existing.has(name)).map(name => ({
+    category: 'error' as const,
+    message: `Generated Streamix Vue binding ${JSON.stringify(name)} collides with an existing setup declaration. Rename the authored declaration.`,
+    start: scriptOffset,
+    length: 0,
+  }));
 }
 
 function bridgeName(scope: string, member: string): string {
@@ -433,29 +548,32 @@ function applyEdits(source: string, edits: readonly SpanEdit[]): string {
   return result;
 }
 
-function withRuntimeImport(
-  source: string,
-  scriptOffset: number,
-  installed: boolean,
-): string {
-  if (!installed) {
-    return source;
-  }
+function withRuntimeImport(source: string, installed: boolean): string {
+  if (!installed) return source;
 
-  const script = source.slice(scriptOffset, source.indexOf('</script>', scriptOffset));
+  // Read the *transformed* SFC descriptor rather than looking for a raw
+  // closing-tag string. Existing imports may move after bridge insertion.
+  const scriptSetup = parseSfc(source).descriptor.scriptSetup;
+  if (!scriptSetup) return source;
+  const script = ts.createSourceFile('script.ts', scriptSetup.content, ts.ScriptTarget.Latest, true);
   const imported = new Set<string>();
-  for (const match of script.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']@epikodelabs\/streamix\/vue["']/g)) {
-    for (const name of match[1].split(',')) imported.add(name.trim().split(/\s+as\s+/)[0]);
+  for (const statement of script.statements) {
+    if (!ts.isImportDeclaration(statement) ||
+        !ts.isStringLiteral(statement.moduleSpecifier) ||
+        statement.moduleSpecifier.text !== '@epikodelabs/streamix/vue') continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings && ts.isNamedImports(bindings)) {
+      for (const binding of bindings.elements) {
+        // An aliased import doesn't provide the generated unaliased binding.
+        if (!binding.propertyName) imported.add(binding.name.text);
+      }
+    }
   }
   const required = ['useIterable', 'useWritable'].filter(name => !imported.has(name));
   if (required.length === 0) return source;
   const statement = `import { ${required.join(', ')} } from "@epikodelabs/streamix/vue";\n`;
-  // `scriptSetup.loc.start.offset` is the content start and remains correct
-  // even when the opening tag contains a generic attribute with `>`.
-  const contentStart = scriptOffset;
-  // The generated import is the first line inside <script setup>, so the
-  // transformed file stays readable and the import stays hoisted.
-  return source.slice(0, contentStart) + `\n` + statement + source.slice(contentStart);
+  const offset = scriptSetup.loc.start.offset;
+  return source.slice(0, offset) + `\n` + statement + source.slice(offset);
 }
 
 function factoryImports(script: string): FactoryImports {
@@ -564,14 +682,10 @@ function collectTemplateReactiveReads(
     const expression = template.slice(span.start, span.end);
     // Wrapping produces a normal expression source file and prevents strings,
     // comments, and object keys from being mistaken for reactive identifiers.
-    const file = ts.createSourceFile('template-expression.ts', `(${expression})`, ts.ScriptTarget.Latest, true);
+    const { file, prefix } = parseTemplateExpression(expression);
     const visit = (node: ts.Node): void => {
-      if (ts.isIdentifier(node) && names.has(node.text)) {
-        const property = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
-        const explicitValue = ts.isPropertyAccessExpression(node.parent) &&
-          node.parent.expression === node && node.parent.name.text === 'value';
-        if (!property && !explicitValue) {
-          const start = span.start + node.getStart(file) - 1;
+      if (ts.isIdentifier(node) && names.has(node.text) && isValueIdentifier(node)) {
+          const start = span.start + node.getStart(file) - prefix;
           const shorthand = ts.isShorthandPropertyAssignment(node.parent);
           reads.push({
             start,
@@ -580,18 +694,19 @@ function collectTemplateReactiveReads(
             replacement: shorthand ? `${node.text}: ${reactiveBridgeName(node.text)}` : undefined,
           });
           return;
-        }
       }
       ts.forEachChild(node, visit);
     };
     visit(file);
   }
 
-  for (const match of template.matchAll(/\bv-model="([A-Za-z_$][\w$]*)"/g)) {
-    const name = match[1];
-    if (!names.has(name)) continue;
-    const start = match.index! + match[0].indexOf(name);
-    reads.push({ start, end: start + name.length, name });
+  for (const tag of openingTags(template)) {
+    for (const match of tag.attributes.matchAll(/(?:^|\s)v-model\s*=\s*(["'])([A-Za-z_$][\w$]*)\1/g)) {
+      const name = match[2];
+      if (!names.has(name)) continue;
+      const start = tag.attributesStart + match.index! + match[0].lastIndexOf(name);
+      reads.push({ start, end: start + name.length, name });
+    }
   }
 
   return reads;
@@ -606,36 +721,79 @@ function derivedAtomValueReadEdits(
   script: string,
   declarations: readonly ReactiveDeclaration[],
 ): readonly SpanEdit[] {
-  const atomNames = new Set(
-    declarations
-      .filter(declaration => declaration.kind === 'atom')
-      .map(declaration => declaration.name),
-  );
+  const atoms = new Set(declarations.filter(item => item.kind === 'atom').map(item => item.name));
+  if (atoms.size === 0) return [];
+  const file = ts.createSourceFile('script.ts', script, ts.ScriptTarget.Latest, true);
   const edits: SpanEdit[] = [];
+  const bodies = declarations.filter(item => item.kind === 'derived' &&
+    item.derivedBodyStart !== undefined && item.derivedBodyEnd !== undefined);
 
-  for (const declaration of declarations) {
-    if (
-      declaration.kind !== 'derived' ||
-      declaration.derivedBodyStart === undefined ||
-      declaration.derivedBodyEnd === undefined
-    ) {
-      continue;
-    }
-
-    const body = script.slice(declaration.derivedBodyStart, declaration.derivedBodyEnd);
-    for (const match of body.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) {
-      const name = match[1];
-      if (!atomNames.has(name)) continue;
-
-      const start = declaration.derivedBodyStart + match.index!;
-      const before = script[start - 1];
-      const after = script[start + name.length];
-      if (before === '.' || after === '.') continue;
-      edits.push({ start, end: start + name.length, replacement: `${name}.value` });
-    }
+  for (const derived of bodies) {
+    const body = findNodeAt(file, derived.derivedBodyStart!, derived.derivedBodyEnd!);
+    if (!body) continue;
+    const visit = (node: ts.Node): void => {
+      if (ts.isIdentifier(node) && atoms.has(node.text) &&
+          isValueIdentifier(node) && !isShadowedIn(node, body, node.text)) {
+        const start = node.getStart(file);
+        const shorthand = ts.isShorthandPropertyAssignment(node.parent);
+        edits.push({ start, end: node.end,
+          replacement: shorthand ? `${node.text}: ${node.text}.value` : `${node.text}.value` });
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(body);
   }
-
   return edits;
+}
+
+/** Locate a callback body by its source span; its TS nodes retain original offsets. */
+function findNodeAt(root: ts.Node, start: number, end: number): ts.Node | undefined {
+  if (root.getStart() === start && root.end === end) return root;
+  let found: ts.Node | undefined;
+  ts.forEachChild(root, node => {
+    if (!found && node.getStart() <= start && node.end >= end) {
+      found = findNodeAt(node, start, end);
+    }
+  });
+  return found;
+}
+
+/** Only value references are rewritten, never types, declarations or keys. */
+function isValueIdentifier(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
+  if (ts.isPropertyAccessExpression(parent) && parent.expression === node && parent.name.text === 'value') return false;
+  if (ts.isPropertyAssignment(parent) && parent.name === node) return false;
+  if (ts.isShorthandPropertyAssignment(parent)) return true;
+  if (ts.isVariableDeclaration(parent) && parent.name === node) return false;
+  if (ts.isParameter(parent) && parent.name === node) return false;
+  if (ts.isBindingElement(parent) && (parent.name === node || parent.propertyName === node)) return false;
+  if (ts.isImportSpecifier(parent) || ts.isTypeReferenceNode(parent) ||
+      ts.isPropertySignature(parent) || ts.isMethodDeclaration(parent) ||
+      ts.isFunctionDeclaration(parent) || ts.isFunctionExpression(parent) ||
+      ts.isLabeledStatement(parent)) return false;
+  return true;
+}
+
+function containsBinding(name: ts.BindingName, text: string): boolean {
+  if (ts.isIdentifier(name)) return name.text === text;
+  return name.elements.some(element => ts.isBindingElement(element) && containsBinding(element.name, text));
+}
+
+/** Reject local declarations that shadow a top-level atom inside a callback. */
+function isShadowedIn(node: ts.Node, body: ts.Node, name: string): boolean {
+  for (let scope = node.parent; scope; scope = scope.parent) {
+    if (ts.isFunctionLike(scope) && scope.parameters?.some(param => containsBinding(param.name, name))) return true;
+    if (ts.isBlock(scope) || ts.isSourceFile(scope)) {
+      if (scope.statements.some(statement =>
+        ts.isVariableStatement(statement) && statement.declarationList.declarations.some(decl => containsBinding(decl.name, name)) ||
+        ts.isFunctionDeclaration(statement) && statement.name?.text === name ||
+        ts.isClassDeclaration(statement) && statement.name?.text === name)) return true;
+    }
+    if (scope === body) break;
+  }
+  return false;
 }
 
 function scopeMemberNames(call: ts.CallExpression): string[] {
@@ -663,75 +821,72 @@ function collectTemplateUsage(
   template: string,
   declarations: readonly ReactiveDeclaration[],
 ): TemplateUsage {
-  const scopeNames = new Set(
-    declarations.filter(declaration => declaration.kind === 'scope').map(declaration => declaration.name),
-  );
-  const reactiveNames = new Set(
-    declarations.filter(declaration => declaration.kind !== 'scope').map(declaration => declaration.name),
-  );
+  const scopeNames = new Set(declarations.filter(item => item.kind === 'scope').map(item => item.name));
+  const reactiveNames = new Set(declarations.filter(item => item.kind !== 'scope').map(item => item.name));
   const reads: ScopeMemberRead[] = [];
   const writes: ScopeMemberWrite[] = [];
 
   for (const span of templateExpressionSpans(template)) {
     const expression = template.slice(span.start, span.end);
-
-    // Whole `scope.member = rhs` assignments (event handlers) lower to
-    // `scope.set(member, rhs)`. The right-hand side is kept verbatim here and
-    // its own scope reads are rewritten in place below.
-    const assignment =
-      /(^|[^\w$.])([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\s*=(?!=)\s*([\s\S]*?\S)\s*$/.exec(expression);
-
-    if (assignment && scopeNames.has(assignment[2])) {
-      const contentStart = span.start + assignment.index! + assignment[1].length;
-      writes.push({
-        start: contentStart,
-        end: span.end,
-        scope: assignment[2],
-        member: assignment[3],
-        rhs: rewriteReactiveReadsInText(rewriteReadsInText(
-          assignment[4],
-          expression.indexOf(assignment[4]),
-          scopeNames,
-          reads,
-          span.start,
-        ), reactiveNames),
-      });
-    }
-
-    // Every remaining `scope.member` path is a read candidate.
-    for (const match of expression.matchAll(/([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)/g)) {
-      if (!scopeNames.has(match[1])) continue;
-
-      const start = span.start + match.index!;
-      const end = start + match[0].length;
-
-      // Skip the assignment target itself: its write edit replaces the whole
-      // assignment, including this span.
-      if (writes.some(write => start >= write.start && end <= write.end)) {
-        continue;
+    const { file, prefix } = parseTemplateExpression(expression);
+    const visit = (node: ts.Node): void => {
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isPropertyAccessExpression(node.left) && ts.isIdentifier(node.left.expression) &&
+          scopeNames.has(node.left.expression.text)) {
+        const target = node.left;
+        const rhs = expression.slice(node.right.getStart(file) - prefix, node.right.end - prefix);
+        const rewritten = rewriteReactiveReadsInText(
+          rewriteReadsInText(rhs, scopeNames, reads, span.start + node.right.getStart(file) - prefix),
+          reactiveNames,
+        );
+        writes.push({
+          start: span.start + node.getStart(file) - prefix,
+          end: span.start + node.end - prefix,
+          scope: (target.expression as ts.Identifier).text,
+          member: target.name.text,
+          rhs: rewritten,
+        });
+        // Nested assignments require explicit sequencing, not overlapping edits.
+        return;
       }
-
-      reads.push({ start, end, scope: match[1], member: match[2] });
-    }
+      if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) &&
+          scopeNames.has(node.expression.text)) {
+        reads.push({
+          start: span.start + node.getStart(file) - prefix,
+          end: span.start + node.end - prefix,
+          scope: node.expression.text, member: node.name.text,
+        });
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
   }
-
   return { reads, writes };
+}
+
+/** Script events can contain statements; most directive values are expressions. */
+function parseTemplateExpression(expression: string): { file: ts.SourceFile; prefix: number } {
+  const statements = /;/.test(expression);
+  const prefix = statements ? 0 : 1;
+  return {
+    file: ts.createSourceFile('template-expression.ts', statements ? expression : `(${expression})`,
+      ts.ScriptTarget.Latest, true),
+    prefix,
+  };
 }
 
 /** Rewrites raw atom/derived/flow reads inside a replacement expression. */
 function rewriteReactiveReadsInText(fragment: string, reactiveNames: ReadonlySet<string>): string {
   if (reactiveNames.size === 0) return fragment;
-  const file = ts.createSourceFile('template-expression.ts', `(${fragment})`, ts.ScriptTarget.Latest, true);
+  const { file, prefix } = parseTemplateExpression(fragment);
   const edits: SpanEdit[] = [];
   const visit = (node: ts.Node): void => {
-    if (ts.isIdentifier(node) && reactiveNames.has(node.text)) {
-      const property = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
-      const explicitValue = ts.isPropertyAccessExpression(node.parent) &&
-        node.parent.expression === node && node.parent.name.text === 'value';
-      if (!property && !explicitValue) {
-        edits.push({ start: node.getStart(file) - 1, end: node.end - 1, replacement: reactiveBridgeName(node.text) });
-        return;
-      }
+    if (ts.isIdentifier(node) && reactiveNames.has(node.text) && isValueIdentifier(node)) {
+      const shorthand = ts.isShorthandPropertyAssignment(node.parent);
+      edits.push({ start: node.getStart(file) - prefix, end: node.end - prefix,
+        replacement: shorthand ? `${node.text}: ${reactiveBridgeName(node.text)}` : reactiveBridgeName(node.text) });
+      return;
     }
     ts.forEachChild(node, visit);
   };
@@ -743,33 +898,26 @@ function rewriteReactiveReadsInText(fragment: string, reactiveNames: ReadonlySet
 /** Rewrites scope-member reads inside a right-hand-side fragment. */
 function rewriteReadsInText(
   fragment: string,
-  offsetInSpan: number,
-  scopeNames: Set<string>,
+  scopeNames: ReadonlySet<string>,
   reads: ScopeMemberRead[],
-  spanStart: number,
+  absoluteStart: number,
 ): string {
-  let result = '';
-  let cursor = 0;
-
-  for (const match of fragment.matchAll(/([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)/g)) {
-    if (!scopeNames.has(match[1])) continue;
-
-    const start = match.index!;
-    const end = start + match[0].length;
-
-    result += fragment.slice(cursor, start);
-    result += BRIDGE_PREFIX + match[1] + '_' + match[2];
-    cursor = end;
-
-    reads.push({
-      start: spanStart + offsetInSpan + start,
-      end: spanStart + offsetInSpan + end,
-      scope: match[1],
-      member: match[2],
-    });
-  }
-
-  return result + fragment.slice(cursor);
+  const { file, prefix } = parseTemplateExpression(fragment);
+  const edits: SpanEdit[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) &&
+        scopeNames.has(node.expression.text)) {
+      const start = node.getStart(file) - prefix;
+      const end = node.end - prefix;
+      reads.push({ start: absoluteStart + start, end: absoluteStart + end,
+        scope: node.expression.text, member: node.name.text });
+      edits.push({ start, end, replacement: bridgeName(node.expression.text, node.name.text) });
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return applyEdits(fragment, edits.sort((a, b) => b.start - a.start));
 }
 
 interface VModelScopeBinding {
@@ -785,35 +933,48 @@ function collectVModelScopeBindings(
   template: string,
   declarations: readonly ReactiveDeclaration[],
 ): readonly VModelScopeBinding[] {
-  const scopeNames = new Set(
-    declarations.filter(declaration => declaration.kind === 'scope').map(declaration => declaration.name),
-  );
+  const scopeNames = new Set(declarations.filter(item => item.kind === 'scope').map(item => item.name));
   const bindings: VModelScopeBinding[] = [];
 
-  for (const match of template.matchAll(/<([\w-]+)([^>]*?)\sv-model="([^"]*)"/g)) {
-    const expression = match[3];
-    const path = /^([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)$/.exec(expression.trim());
+  for (const tag of openingTags(template)) {
+    for (const model of tag.attributes.matchAll(/(?:^|\s)(v-model)\s*=\s*(["'])(.*?)\2/g)) {
+      const path = /^([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)$/.exec(model[3].trim());
+      if (!path || !scopeNames.has(path[1])) continue;
+      const start = tag.attributesStart + model.index! + model[0].indexOf('v-model');
+      bindings.push({ element: tag.name, attributes: tag.attributes, scope: path[1],
+        member: path[2], start, end: start + model[0].trimStart().length });
+    }
+  }
+  return bindings;
+}
 
-    if (!path || !scopeNames.has(path[1])) {
+/** Find opening tags without confusing `>` inside quoted attribute values for tag ends. */
+function openingTags(template: string): { name: string; attributes: string; attributesStart: number }[] {
+  const result: { name: string; attributes: string; attributesStart: number }[] = [];
+  for (let offset = 0; offset < template.length;) {
+    const open = template.indexOf('<', offset);
+    if (open < 0) break;
+    if (template.startsWith('<!--', open)) {
+      const close = template.indexOf('-->', open + 4);
+      offset = close < 0 ? template.length : close + 3;
       continue;
     }
-
-    // Offset of the v-model attribute within the whole template, taken from
-    // this element's own match rather than a text search that could land on
-    // an identical earlier attribute.
-    const attribute = `v-model="${expression}"`;
-    const attributeStart = match.index! + match[0].indexOf(attribute);
-    bindings.push({
-      element: match[1],
-      attributes: match[2],
-      scope: path[1],
-      member: path[2],
-      start: attributeStart,
-      end: attributeStart + attribute.length,
-    });
+    const tag = /^<([A-Za-z][\w-]*)/.exec(template.slice(open));
+    if (!tag) { offset = open + 1; continue; }
+    const attributesStart = open + tag[0].length;
+    let quote: string | undefined;
+    let end = attributesStart;
+    for (; end < template.length; end++) {
+      const char = template[end];
+      if (quote) { if (char === quote) quote = undefined; }
+      else if (char === '"' || char === "'") quote = char;
+      else if (char === '>') break;
+    }
+    result.push({ name: tag[1].toLowerCase(),
+      attributes: template.slice(attributesStart, end), attributesStart });
+    offset = end + 1;
   }
-
-  return bindings;
+  return result;
 }
 
 interface TemplateExpressionSpan {

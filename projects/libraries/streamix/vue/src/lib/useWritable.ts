@@ -1,12 +1,12 @@
 import {
   customRef,
-  type WritableComputedRef,
+  type Ref,
 } from 'vue';
 import type { Writable } from '@epikodelabs/streamix';
 import { useIterable } from './useIterable';
 
 /**
- * Binds a Streamix {@link Writable} to Vue as a writable computed ref.
+ * Binds a Streamix {@link Writable} to Vue as a writable ref.
  *
  * Reads stay synchronized through {@link useIterable}; writes go directly to
  * the Streamix source. This makes the result work naturally with `v-model`
@@ -22,7 +22,7 @@ import { useIterable } from './useIterable';
  * <input v-model="name">
  * ```
  */
-export function useWritable<T>(source: Writable<T>): WritableComputedRef<T> {
+export function useWritable<T>(source: Writable<T>): Ref<T> {
   const current = useIterable(source);
   // Do not wrap the bridge in `computed()`: computed refs only notify their
   // consumers when their returned value changes by Object.is. Streamix emits
@@ -40,5 +40,5 @@ export function useWritable<T>(source: Writable<T>): WritableComputedRef<T> {
         trigger();
       },
     };
-  }) as WritableComputedRef<T>;
+  });
 }

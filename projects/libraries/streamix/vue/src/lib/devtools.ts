@@ -17,9 +17,10 @@ type Listener = () => void;
 let events: readonly StreamixDevtoolsEvent[] = [];
 const listeners = new Set<Listener>();
 const maxEvents = 250;
-// Keep this as a direct expression so standard production bundlers can fold
-// it away. Indirection through globalThis prevents that replacement.
-const enabled = typeof process === 'undefined' || process.env['NODE_ENV'] !== 'production';
+// Vite replaces import.meta.env.DEV at build time. The Node fallback is
+// intentionally false when process is absent in a non-Vite browser build.
+const enabled = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV ??
+  (typeof process !== 'undefined' && process.env['NODE_ENV'] !== 'production');
 let queued = false;
 
 /** Queues DevTools notifications outside Vue's render and tracking phases. */

@@ -7,7 +7,7 @@
 module.exports = function streamixVueLanguagePlugin(ctx) {
   const ts = ctx.modules.typescript;
 
-  function transformedScript(source, lang) {
+  function transformedScript(lang, source) {
     if (!/^(?:ts|tsx|js|jsx)$/i.test(lang || "ts")) return undefined;
     const kind = /tsx|jsx/i.test(lang || "") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
     const file = ts.createSourceFile("streamix.vue.ts", source, ts.ScriptTarget.Latest, true, kind);
@@ -37,15 +37,38 @@ module.exports = function streamixVueLanguagePlugin(ctx) {
     if (atoms.size === 0 || derivedFactories.size === 0) return undefined;
 
     const edits = [];
-    const isExplicitValue = node => ts.isPropertyAccessExpression(node.parent) &&
-      node.parent.expression === node && node.parent.name.text === "value";
-    const rewriteCallback = node => {
-      if (ts.isIdentifier(node) && atoms.has(node.text) && !isExplicitValue(node) &&
-          !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)) {
-        edits.push({ start: node.getStart(file), end: node.end, text: `${node.text}.value` });
+    const isValueRead = node => {
+      const parent = node.parent;
+      if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
+      if (ts.isPropertyAccessExpression(parent) && parent.expression === node && parent.name.text === "value") return false;
+      if (ts.isPropertyAssignment(parent) && parent.name === node) return false;
+      if (ts.isVariableDeclaration(parent) && parent.name === node) return false;
+      if (ts.isParameter(parent) && parent.name === node) return false;
+      if (ts.isTypeReferenceNode(parent)) return false;
+      return true;
+    };
+    const hasBinding = (binding, name) => ts.isIdentifier(binding)
+      ? binding.text === name
+      : binding.elements.some(element => ts.isBindingElement(element) && hasBinding(element.name, name));
+    const shadowed = (node, body, name) => {
+      for (let scope = node.parent; scope; scope = scope.parent) {
+        if (ts.isFunctionLike(scope) && scope.parameters.some(param => hasBinding(param.name, name))) return true;
+        if (ts.isBlock(scope) && scope.statements.some(statement =>
+          ts.isVariableStatement(statement) && statement.declarationList.declarations.some(decl => hasBinding(decl.name, name)) ||
+          ts.isFunctionDeclaration(statement) && statement.name?.text === name)) return true;
+        if (scope === body) break;
+      }
+      return false;
+    };
+    const rewriteCallback = (body, node = body) => {
+      if (ts.isIdentifier(node) && atoms.has(node.text) &&
+          isValueRead(node) && !shadowed(node, body, node.text)) {
+        const shorthand = ts.isShorthandPropertyAssignment(node.parent);
+        edits.push({ start: node.getStart(file), end: node.end,
+          text: shorthand ? `${node.text}: ${node.text}.value` : `${node.text}.value` });
         return;
       }
-      ts.forEachChild(node, rewriteCallback);
+      ts.forEachChild(node, child => rewriteCallback(body, child));
     };
     const visit = node => {
       if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
