@@ -48,7 +48,6 @@ export function formatVueSfcDiagnostics(
 
 interface FactoryImports {
   aliases: Map<string, FactoryKind>;
-  excluded: Set<string>;
 }
 
 type FactoryKind = 'atom' | 'derived' | 'flow' | 'scope';
@@ -160,17 +159,15 @@ export function transformVueSfc(
     return { code: source, bindingCount: 0, bridgedScopes: {}, diagnostics };
   }
 
+  diagnostics.push(...unsupportedTemplateDiagnostics(templateContent, templateOffset, declarations));
+
   const templateUsage = collectTemplateUsage(templateContent, declarations);
   const vModelBindings = collectVModelScopeBindings(templateContent, declarations);
   const usage: TemplateUsage = {
     reads: [
       ...templateUsage.reads,
-      ...vModelBindings.map(model => ({
-        start: model.start,
-        end: model.end,
-        scope: model.scope,
-        member: model.member,
-      })),
+      // v-model owns its whole attribute span below. Adding it here would
+      // create a second, overlapping replacement.
     ],
     writes: templateUsage.writes,
   };
@@ -201,11 +198,16 @@ export function transformVueSfc(
     scriptEdits.push(edit);
   }
 
+  const writeSpans = templateUsage.writes.map(write => ({ start: write.start, end: write.end }));
   for (const read of collectTemplateReactiveReads(templateContent, reactive)) {
+    // A scope write replaces its complete expression. Its RHS is rewritten as
+    // part of that replacement, so an independent nested edit would shift the
+    // outer span and corrupt the SFC.
+    if (insideAny(read, writeSpans)) continue;
     templateEdits.push({
       start: read.start,
       end: read.end,
-      replacement: reactiveBridgeName(read.name),
+      replacement: read.replacement ?? reactiveBridgeName(read.name),
     });
   }
 
@@ -228,8 +230,10 @@ export function transformVueSfc(
 
       accepted.push(member);
       scriptEdits.push({
-        start: scope.callEnd,
-        end: scope.callEnd,
+        // Insert after the declaration statement, not inside the initializer.
+        // This keeps multi-declarator statements syntactically valid.
+        start: scope.statementEnd,
+        end: scope.statementEnd,
         replacement:
           `\nconst ${bridgeName(scope.name, member)} = useIterable(` +
           `${scope.name}.get('${escapeSingleQuotes(member)}'));`,
@@ -241,10 +245,10 @@ export function transformVueSfc(
 
   // Scope-member reads rewrite to the bridged refs; Vue auto-unwraps
   // top-level setup refs, so the template expression text stays natural.
-  const writeSpans = usage.writes.map(write => ({ start: write.start, end: write.end }));
+  const scopeWriteSpans = usage.writes.map(write => ({ start: write.start, end: write.end }));
 
   for (const read of usage.reads) {
-    if (insideAny(read, writeSpans)) {
+    if (insideAny(read, scopeWriteSpans)) {
       continue;
     }
 
@@ -278,11 +282,11 @@ export function transformVueSfc(
     }
 
     const bridge = bridgeName(model.scope, model.member);
-    const mapping =
-      V_MODEL_NATIVE[model.element] ??
-      (model.element.includes('-')
-        ? undefined
-        : V_MODEL_NATIVE['input']);
+    const inputType = /\btype\s*=\s*(["']?)([^\s"'>]+)\1/i.exec(model.attributes)?.[2]?.toLowerCase();
+    const unsupportedNative =
+      (model.element === 'input' && inputType !== undefined && !['text', 'search', 'email', 'url', 'tel', 'password'].includes(inputType)) ||
+      (model.element === 'select' && /\bmultiple\b/i.test(model.attributes));
+    const mapping = unsupportedNative ? undefined : V_MODEL_NATIVE[model.element];
 
     if (!mapping) {
       diagnostics.push({
@@ -330,8 +334,49 @@ export function transformVueSfc(
   };
 }
 
+/** Reject shapes the compiler cannot lower without changing Vue semantics. */
+function unsupportedTemplateDiagnostics(
+  template: string,
+  templateOffset: number,
+  declarations: readonly ReactiveDeclaration[],
+): readonly VueSfcDiagnostic[] {
+  const scopes = declarations.filter(item => item.kind === 'scope').map(item => item.name);
+  const diagnostics: VueSfcDiagnostic[] = [];
+  const add = (match: RegExpExecArray, message: string): void => {
+    diagnostics.push({
+      category: 'error', message, start: templateOffset + match.index, length: match[0].length,
+    });
+  };
+  for (const scope of scopes) {
+    const escaped = scope.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const match of template.matchAll(new RegExp(`\\b${escaped}(?:\\?\\.|\\[)`, 'g'))) {
+      add(match, `Unsupported dynamic scope access on ${scope}. Use scope.get(...) in script and bind the returned ref.`);
+    }
+    for (const match of template.matchAll(new RegExp(`\\b${escaped}\\.[A-Za-z_$][\\w$]*\\s*(?:\\+\\+|--|[+*/%&|^]?=)`, 'g'))) {
+      add(match, `Unsupported compound scope write on ${scope}. Use an explicit scope.set(...) handler.`);
+    }
+  }
+  for (const match of template.matchAll(/\bv-model(?:[:.]\S+)?\s*=\s*(["'])[^"']*\1/g)) {
+    if (match[0].startsWith('v-model=')) continue;
+    add(match, 'v-model arguments and modifiers are not compiled. Use :value and an explicit scope.set(...) handler.');
+  }
+  const reactiveNames = new Set(declarations.filter(item => item.kind !== 'scope').map(item => item.name));
+  for (const match of template.matchAll(/v-for\s*=\s*(["'])([A-Za-z_$][\w$]*)\s+(?:in|of)\b/g)) {
+    if (reactiveNames.has(match[2])) {
+      add(match, `v-for alias ${JSON.stringify(match[2])} shadows a Streamix binding; rename the alias.`);
+    }
+  }
+  return diagnostics;
+}
+
 function bridgeName(scope: string, member: string): string {
-  return `${BRIDGE_PREFIX}${scope}_${member}`;
+  // Hex encoding is identifier-safe and preserves component boundaries, so
+  // `a_b.c` cannot collide with `a.b_c`, and quoted keys remain valid.
+  return `${BRIDGE_PREFIX}${encodeBridgePart(scope)}_${encodeBridgePart(member)}`;
+}
+
+function encodeBridgePart(value: string): string {
+  return [...value].map(char => char.codePointAt(0)!.toString(16).padStart(6, '0')).join('');
 }
 
 function reactiveBridgeName(name: string): string {
@@ -372,6 +417,13 @@ function escapeSingleQuotes(text: string): string {
 
 /** Applies non-overlapping edits right-to-left so earlier offsets stay valid. */
 function applyEdits(source: string, edits: readonly SpanEdit[]): string {
+  for (let index = 1; index < edits.length; index++) {
+    const previous = edits[index - 1];
+    const current = edits[index];
+    if (current.end > previous.start) {
+      throw new Error(`Streamix Vue compiler produced overlapping edits at ${current.start}.`);
+    }
+  }
   let result = source;
 
   for (const edit of edits) {
@@ -390,15 +442,17 @@ function withRuntimeImport(
     return source;
   }
 
-  const statement =
-    `import { useIterable, useWritable } from "@epikodelabs/streamix/vue";\n`;
-  const openTagEnd = source.indexOf('>', source.lastIndexOf('<script', scriptOffset));
-
-  if (openTagEnd === -1) {
-    return statement + source;
+  const script = source.slice(scriptOffset, source.indexOf('</script>', scriptOffset));
+  const imported = new Set<string>();
+  for (const match of script.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']@epikodelabs\/streamix\/vue["']/g)) {
+    for (const name of match[1].split(',')) imported.add(name.trim().split(/\s+as\s+/)[0]);
   }
-
-  const contentStart = openTagEnd + 1;
+  const required = ['useIterable', 'useWritable'].filter(name => !imported.has(name));
+  if (required.length === 0) return source;
+  const statement = `import { ${required.join(', ')} } from "@epikodelabs/streamix/vue";\n`;
+  // `scriptSetup.loc.start.offset` is the content start and remains correct
+  // even when the opening tag contains a generic attribute with `>`.
+  const contentStart = scriptOffset;
   // The generated import is the first line inside <script setup>, so the
   // transformed file stays readable and the import stays hoisted.
   return source.slice(0, contentStart) + `\n` + statement + source.slice(contentStart);
@@ -406,7 +460,6 @@ function withRuntimeImport(
 
 function factoryImports(script: string): FactoryImports {
   const aliases = new Map<string, FactoryKind>();
-  const excluded = new Set<string>();
   const file = ts.createSourceFile('script.ts', script, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 
   for (const statement of file.statements) {
@@ -423,14 +476,12 @@ function factoryImports(script: string): FactoryImports {
 
         if (isStreamix && FACTORY_NAMES.has(imported as FactoryKind)) {
           aliases.set(item.name.text, imported as FactoryKind);
-        } else if (!isStreamix) {
-          excluded.add(item.name.text);
         }
       }
     }
   }
 
-  return { aliases, excluded };
+  return { aliases };
 }
 
 function collectReactiveDeclarations(
@@ -456,10 +507,9 @@ function collectReactiveDeclarations(
 
       const callee = declaration.initializer.expression.text;
       const aliased = imports.aliases.get(callee);
-      const kind = aliased ??
-        (imports.excluded.has(callee) || !FACTORY_NAMES.has(callee as FactoryKind)
-          ? undefined
-          : callee as FactoryKind);
+      // Adopt only an explicit Streamix import. A same-named local helper is
+      // ordinary application code and must never be silently transformed.
+      const kind = aliased;
 
       if (!kind || !FACTORY_NAMES.has(kind)) continue;
 
@@ -498,6 +548,8 @@ interface TemplateReactiveRead {
   readonly start: number;
   readonly end: number;
   readonly name: string;
+  /** Object shorthand needs to retain the authored object key. */
+  readonly replacement?: string;
 }
 
 /** Finds bare reactive identifiers in template expressions, excluding scope paths. */
@@ -510,17 +562,29 @@ function collectTemplateReactiveReads(
 
   for (const span of templateExpressionSpans(template)) {
     const expression = template.slice(span.start, span.end);
-    for (const match of expression.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) {
-      const name = match[1];
-      if (!names.has(name)) continue;
-
-      const start = span.start + match.index!;
-      const before = template[start - 1];
-      const after = template[start + name.length];
-      // Preserve property names (`state.count`) and explicit `.value` reads.
-      if (before === '.' || after === '.') continue;
-      reads.push({ start, end: start + name.length, name });
-    }
+    // Wrapping produces a normal expression source file and prevents strings,
+    // comments, and object keys from being mistaken for reactive identifiers.
+    const file = ts.createSourceFile('template-expression.ts', `(${expression})`, ts.ScriptTarget.Latest, true);
+    const visit = (node: ts.Node): void => {
+      if (ts.isIdentifier(node) && names.has(node.text)) {
+        const property = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
+        const explicitValue = ts.isPropertyAccessExpression(node.parent) &&
+          node.parent.expression === node && node.parent.name.text === 'value';
+        if (!property && !explicitValue) {
+          const start = span.start + node.getStart(file) - 1;
+          const shorthand = ts.isShorthandPropertyAssignment(node.parent);
+          reads.push({
+            start,
+            end: start + node.text.length,
+            name: node.text,
+            replacement: shorthand ? `${node.text}: ${reactiveBridgeName(node.text)}` : undefined,
+          });
+          return;
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
   }
 
   for (const match of template.matchAll(/\bv-model="([A-Za-z_$][\w$]*)"/g)) {
@@ -602,6 +666,9 @@ function collectTemplateUsage(
   const scopeNames = new Set(
     declarations.filter(declaration => declaration.kind === 'scope').map(declaration => declaration.name),
   );
+  const reactiveNames = new Set(
+    declarations.filter(declaration => declaration.kind !== 'scope').map(declaration => declaration.name),
+  );
   const reads: ScopeMemberRead[] = [];
   const writes: ScopeMemberWrite[] = [];
 
@@ -621,13 +688,13 @@ function collectTemplateUsage(
         end: span.end,
         scope: assignment[2],
         member: assignment[3],
-        rhs: rewriteReadsInText(
+        rhs: rewriteReactiveReadsInText(rewriteReadsInText(
           assignment[4],
           expression.indexOf(assignment[4]),
           scopeNames,
           reads,
           span.start,
-        ),
+        ), reactiveNames),
       });
     }
 
@@ -649,6 +716,28 @@ function collectTemplateUsage(
   }
 
   return { reads, writes };
+}
+
+/** Rewrites raw atom/derived/flow reads inside a replacement expression. */
+function rewriteReactiveReadsInText(fragment: string, reactiveNames: ReadonlySet<string>): string {
+  if (reactiveNames.size === 0) return fragment;
+  const file = ts.createSourceFile('template-expression.ts', `(${fragment})`, ts.ScriptTarget.Latest, true);
+  const edits: SpanEdit[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && reactiveNames.has(node.text)) {
+      const property = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
+      const explicitValue = ts.isPropertyAccessExpression(node.parent) &&
+        node.parent.expression === node && node.parent.name.text === 'value';
+      if (!property && !explicitValue) {
+        edits.push({ start: node.getStart(file) - 1, end: node.end - 1, replacement: reactiveBridgeName(node.text) });
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  if (edits.length === 0) return fragment;
+  return applyEdits(fragment, edits.sort((left, right) => right.start - left.start));
 }
 
 /** Rewrites scope-member reads inside a right-hand-side fragment. */
@@ -685,6 +774,7 @@ function rewriteReadsInText(
 
 interface VModelScopeBinding {
   readonly element: string;
+  readonly attributes: string;
   readonly scope: string;
   readonly member: string;
   readonly start: number;
@@ -700,8 +790,8 @@ function collectVModelScopeBindings(
   );
   const bindings: VModelScopeBinding[] = [];
 
-  for (const match of template.matchAll(/<([\w-]+)[^>]*?\sv-model="([^"]*)"/g)) {
-    const expression = match[2];
+  for (const match of template.matchAll(/<([\w-]+)([^>]*?)\sv-model="([^"]*)"/g)) {
+    const expression = match[3];
     const path = /^([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)$/.exec(expression.trim());
 
     if (!path || !scopeNames.has(path[1])) {
@@ -715,6 +805,7 @@ function collectVModelScopeBindings(
     const attributeStart = match.index! + match[0].indexOf(attribute);
     bindings.push({
       element: match[1],
+      attributes: match[2],
       scope: path[1],
       member: path[2],
       start: attributeStart,

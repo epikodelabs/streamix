@@ -40,19 +40,34 @@ export async function regenerateVueFile(
 
   const origin = join(originalRoot, normalized);
   const destination = join(destRoot, normalized);
+  let content: Buffer;
   try {
-    await readFile(origin);
+    content = await readFile(origin);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    // fs.watch reports directory changes too. They are mirrored by the file
+    // events that follow and must not be treated as failed source files.
+    if (code === 'EISDIR') return;
+    if (code !== 'ENOENT') throw error;
     await rm(destination, { force: true, recursive: true });
     return;
   }
 
-  await mkdir(dirname(destination), { recursive: true });
-  await writeFile(destination, await readFile(origin));
+  let output = content;
   if (normalized.endsWith('.vue')) {
-    await transformFile(destination, relative(workspaceRoot, origin));
+    const input = content.toString('utf8');
+    const transformed = transformVueSfc(input, relative(workspaceRoot, origin));
+    const errors = transformed.diagnostics.filter(diagnostic => diagnostic.category === 'error');
+    if (errors.length > 0) {
+      throw new Error(formatVueSfcDiagnostics(input, relative(workspaceRoot, origin), errors));
+    }
+    output = Buffer.from(transformed.code);
   }
+
+  await mkdir(dirname(destination), { recursive: true });
+  // Write only after a successful transform: a watch failure never leaves a
+  // misleading, untransformed SFC in the delegated project.
+  await writeFile(destination, output);
 }
 
 async function collectVueFiles(directory: string): Promise<string[]> {

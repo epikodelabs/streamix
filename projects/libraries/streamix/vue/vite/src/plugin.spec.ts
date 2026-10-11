@@ -16,7 +16,8 @@ describe('Streamix Vue Vite plugin', () => {
     ) as { code: string; map: null };
 
     expect(transformed.map).toBeNull();
-    expect(transformed.code).toContain('useWritable(atom(0))');
+    expect(transformed.code).toContain('const count = atom(0);');
+    expect(transformed.code).toContain('useWritable(count)');
     expect(transformed.code).toContain('@epikodelabs/streamix/vue');
   });
 
@@ -27,6 +28,16 @@ describe('Streamix Vue Vite plugin', () => {
     expect(transform.call(context(), '<template />', '/workspace/src/Plain.vue')).toBeNull();
     expect(transform.call(context(), '<template />', '/workspace/node_modules/lib/Item.vue')).toBeNull();
     expect(transform.call(context(), '<template />', '/workspace/src/Skipped.vue')).toBeNull();
+  });
+
+  it('recognizes script setup regardless of attribute order', () => {
+    const transformed = transformOf(sxVue()).call(
+      context(),
+      `<script lang="ts" setup>import { atom } from '@epikodelabs/streamix'; const count = atom(0);</script><template>{{ count }}</template>`,
+      '/workspace/src/Counter.vue',
+    ) as { code: string };
+
+    expect(transformed.code).toContain('useWritable(count)');
   });
 
   it('turns compiler errors into Vite errors with source locations', () => {

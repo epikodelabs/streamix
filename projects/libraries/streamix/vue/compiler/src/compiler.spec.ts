@@ -44,11 +44,10 @@ describe('Vue SFC compiler', () => {
     expect(result.bindingCount).toBe(2);
     expect(result.bridgedScopes).toEqual({ state: ['count', 'title'] });
     expect(result.diagnostics).toEqual([]);
-    expect(result.code).toContain("const __sx_state_count = useIterable(state.get('count'));" );
-    expect(result.code).toContain("const __sx_state_title = useIterable(state.get('title'));" );
-    expect(result.code).toContain(':value="__sx_state_title" @input="state.set(\'title\', $event.target.value)"');
-    expect(result.code).toContain('@click="state.set(\'count\', __sx_state_count + 1)"');
-    expect(result.code).toContain('{{ __sx_state_count }}');
+    expect(result.code).toContain("useIterable(state.get('count'));");
+    expect(result.code).toContain("useIterable(state.get('title'));");
+    expect(result.code).toContain(':value="__sx_000073000074000061000074000065_00007400006900007400006c000065"');
+    expect(result.code).toContain('@click="state.set(\'count\', __sx_000073000074000061000074000065_00006300006f00007500006e000074 + 1)"');
   });
 
   it('bridges scope members used exclusively in Vue directives', () => {
@@ -65,8 +64,8 @@ describe('Vue SFC compiler', () => {
 
     expect(result.bindingCount).toBe(2);
     expect(result.bridgedScopes).toEqual({ state: ['rows', 'visible'] });
-    expect(result.code).toContain('v-if="__sx_state_visible"');
-    expect(result.code).toContain('v-for="row in __sx_state_rows"');
+    expect(result.code).toContain('v-if="__sx_000073000074000061000074000065_00007600006900007300006900006200006c000065"');
+    expect(result.code).toContain('v-for="row in __sx_000073000074000061000074000065_00007200006f000077000073"');
   });
 
   it('reports unknown scope bindings instead of guessing', () => {

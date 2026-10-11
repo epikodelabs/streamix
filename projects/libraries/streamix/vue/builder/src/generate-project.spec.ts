@@ -24,7 +24,8 @@ describe('Vue builder project generation', () => {
       const counter = await readFile(join(output, 'Counter.vue'), 'utf8');
 
       expect(output).toBe(join(workspace, '.angular', '.streamix', 'demo/src'));
-      expect(counter).toContain('useWritable(atom(0))');
+      expect(counter).toContain('const count = atom(0);');
+      expect(counter).toContain('useWritable(count)');
       expect(await readFile(join(output, 'plain.txt'), 'utf8')).toBe('copied unchanged');
     } finally {
       await rm(workspace, { recursive: true, force: true });

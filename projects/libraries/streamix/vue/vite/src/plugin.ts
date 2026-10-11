@@ -33,7 +33,9 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
         return null;
       }
 
-      if (!/<script\s+setup\b/.test(source) || !/<template\b/.test(source)) {
+      // Attribute order is intentionally unconstrained: both `<script setup
+      // lang="ts">` and `<script lang="ts" setup>` are standard SFCs.
+      if (!/<script\b[^>]*\bsetup\b[^>]*>/i.test(source) || !/<template\b/i.test(source)) {
         return null;
       }
 
