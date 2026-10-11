@@ -78,8 +78,15 @@ module.exports = function init(modules) {
 
   function rewriteTemplate(template, atoms) {
     return template
+      // Block headers and @let values are compiled positions too: the build
+      // lowers atom reads there, so the editor must see the same value shapes
+      // or every block condition would surface a false type error.
+      .replace(/(@(?:else\s+)?if|@switch|@for)\s*\(([\s\S]*?)\)\s*\{/g,
+        (_, header, expression) => header + " (" + rewriteExpression(expression, atoms) + ") {")
+      .replace(/(@let\s+[\w$]+\s*=\s*)([^;]+);/g,
+        (_, prefix, expression) => prefix + rewriteExpression(expression, atoms) + ";")
       .replace(/\{\{([\s\S]*?)\}\}/g, (_, expression) => "{{" + rewriteExpression(expression, atoms) + "}}")
-      .replace(/((?:\[[\w.-]+\]|\([\w.-]+\))\s*=\s*)(["'])([\s\S]*?)\2/g, (_, prefix, quote, expression) =>
+      .replace(/((?:\[\([\w.-]+\)\]|\[[\w.-]+\]|\([\w.-]+\))\s*=\s*)(["'])([\s\S]*?)\2/g, (_, prefix, quote, expression) =>
         prefix + quote + rewriteExpression(expression, atoms) + quote);
   }
 

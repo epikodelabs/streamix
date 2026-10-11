@@ -23,4 +23,39 @@ describe("Streamix Angular tsserver plugin", () => {
     expect(document.code).toContain("{{ count.value * 2 }}");
     expect(document.code).toContain('(click)="count.next(count.value + (1))"');
   });
+
+  it("virtualizes block headers, @let values, and two-way bindings", () => {
+    const plugin = createPlugin({ typescript: ts }) as ts.server.PluginModule & {
+      __streamixVirtualize(fileName: string, source: string): { code: string };
+    };
+    const source = [
+      'import { Component } from "@angular/core";',
+      'import { atom } from "@epikodelabs/streamix";',
+      "@Component({ template: `",
+      "  @if (count > 0) { <p>{{ count }}</p> } @else if (count < -1) { <s>-</s> }",
+      "  @for (row of rows; track row.id) { <i>{{ row.name }}</i> }",
+      '  @let doubled = count * 2;',
+      '  <input [(value)]="count">',
+      "  <input [value]=\"count\" (input)=\"count = $event.target.value\">",
+      "  <span>{{ count.value }}</span>",
+      "  <ul>@switch (count) { @case (1) { <li>one</li> } }</ul>",
+      "  ` })",
+      'export class Counter { count = atom(1); rows = atom([{ id: "a", name: "A" }]); }',
+    ].join("\n");
+    const document = plugin.__streamixVirtualize("counter.ts", source);
+
+    expect(document.code).toContain("@if (count.value > 0) {");
+    expect(document.code).toContain("@else if (count.value < -1) {");
+    expect(document.code).toContain("@for (row of rows.value; track row.id) {");
+    expect(document.code).toContain("@let doubled = count.value * 2;");
+    // Two-way sugar stays a value read; the write side is compiler-owned.
+    expect(document.code).toContain('[(value)]="count.value"');
+    expect(document.code).toContain('[value]="count.value"');
+    expect(document.code).toContain('(input)="count.next($event.target.value)"');
+    // Explicit .value reads must not be double-wrapped.
+    expect(document.code).not.toContain("count.value.value");
+    // Inside @switch, only the header expression is a compiled position.
+    expect(document.code).toContain("@switch (count.value) {");
+    expect(document.code).toContain("@case (1) {");
+  });
 });
