@@ -2,10 +2,19 @@ import ts from "typescript";
 import { transformReactJsx } from "./compiler";
 
 describe("React production gates", () => {
-  it("rejects class-component implicit reads with a build-breaking error", () => {
-    const source = `import { atom } from '@epikodelabs/streamix'; const count = atom(1); class Counter extends React.Component { render() { return <output>{count}</output>; } }`;
+  it("adopts class-component implicit atom and scope reads through a function boundary", () => {
+    const source = `import { atom, scope } from '@epikodelabs/streamix'; const count = atom(1); const state = scope({ title: "Ready" }); class Counter extends React.Component { render() { return <output>{count} {state.title}</output>; } }`;
     const result = transformReactJsx(source);
-    expect(result.diagnostics.some(d => d.category === "error" && /Class component Counter/.test(d.message))).toBe(true);
+    expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
+    expect(result.bindingCount).toBe(2);
+    expect(result.code).toContain("class __StreamixCounter extends React.Component");
+    expect(result.code).toContain('this.props as any).__streamixBindings["count"]');
+    expect(result.code).toContain('this.props as any).__streamixBindings["state.title"]');
+    expect(result.code).toContain('useStreamixSource(count, "count")');
+    expect(result.code).toContain('useStreamixSource(state.get("title"), "state.title")');
+    expect(result.code).toContain("const __streamixClassBinding0 = useStreamixSource(count");
+    expect(result.code).toContain("__streamixBindings={{ count: __streamixClassBinding0");
+    expect(result.code).toContain("function Counter(props: any)");
   });
 
   it("does not reject classes merely mentioning a reactive name in text or explicit transport", () => {
@@ -23,14 +32,17 @@ describe("React production gates", () => {
     expect(local.code).toContain('useStreamixLocal(() => atom(0))');
   });
 
-  it("adopts named aliases and namespace React memo/forwardRef only", () => {
+  it("adopts React and application higher-order wrappers", () => {
     const named = transformReactJsx(`import { memo as m, forwardRef as ref } from "react";const count=atom(0);export const A=m(()=> <i>{count}</i>);export const B=ref((_props, _r)=> <b>{count}</b>);`);
     expect(named.diagnostics).toEqual([]);
     expect(named.bindingCount).toBe(2);
     const namespace = transformReactJsx(`import * as React from "react";const count=atom(0);export const A=React.memo(()=> <i>{count}</i>);`);
     expect(namespace.bindingCount).toBe(1);
-    const unsupported = transformReactJsx(`const count=atom(0);const foreign={memo:(fn)=>fn};export const A=foreign.memo(()=> <i>{count}</i>);`);
-    expect(unsupported.diagnostics.some(d => d.category === "error" && /unrecognized wrapper/.test(d.message))).toBe(true);
+    const unsupported = transformReactJsx(`const count=atom(0);const state=scope({ title: "Ready" });const foreign={memo:(fn)=>fn};export const A=foreign.memo(()=> <i>{count}</i>);export const B=foreign.memo(()=> <i>{state.title}</i>);`);
+    expect(unsupported.diagnostics.filter(d => d.category === "error")).toEqual([]);
+    expect(unsupported.bindingCount).toBe(2);
+    expect(unsupported.code).toContain('useStreamixSource(count, "count")');
+    expect(unsupported.code).toContain('useStreamixSource(state.get("title"), "state.title")');
   });
 
   it("resolves shadowed Streamix factory calls through a TypeScript Program", () => {

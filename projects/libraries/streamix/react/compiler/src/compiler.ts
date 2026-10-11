@@ -878,17 +878,128 @@ export function transformReactJsx(
 
     const transformInitializer = (expr: ts.Expression, traceName?: string): ts.Expression => {
       if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) return transformFunction(expr, traceName);
-      if (ts.isCallExpression(expr) && expr.arguments.length > 0 && isReactWrapper(expr.expression)) {
+      // A component-shaped callback remains a React render function when it is
+      // passed through an application HOC.  React's built-ins are merely the
+      // common case; restricting this rewrite to their spelling made ordinary
+      // HOCs leave atom objects in JSX.
+      if (ts.isCallExpression(expr) && expr.arguments.length > 0 &&
+          (isReactWrapper(expr.expression) || (!!traceName && /^[A-Z]/.test(traceName)))) {
         const first = transformInitializer(expr.arguments[0], traceName);
         return first === expr.arguments[0] ? expr : factory.updateCallExpression(expr, expr.expression, expr.typeArguments, [first, ...expr.arguments.slice(1)]);
       }
       return expr;
     };
+
+    const transformClassComponent = (node: ts.ClassDeclaration): readonly ts.Statement[] | undefined => {
+      if (!node.name || !/^[A-Z]/.test(node.name.text)) return undefined;
+      const atomSources = new Set<string>();
+      const scopeSources = new Map<string, Set<string>>();
+      // The outer function owns both the subscriptions and their snapshots.
+      // Keeping the snapshots in a private prop gives the class a normal
+      // render input rather than making it re-read mutable sources itself.
+      const snapshot = (key: string): ts.Expression => factory.createElementAccessExpression(
+        factory.createPropertyAccessExpression(
+          asAny(factory.createPropertyAccessExpression(factory.createThis(), "props")),
+          "__streamixBindings",
+        ),
+        factory.createStringLiteral(key),
+      );
+      const recordScope = (scope: string, property: string): void => {
+        let properties = scopeSources.get(scope);
+        if (!properties) scopeSources.set(scope, properties = new Set());
+        properties.add(property);
+      };
+      const rewriteExpression = (expression: ts.Expression): ts.Expression => {
+        const visit: ts.Visitor = value => {
+          if (ts.isPropertyAccessExpression(value) && ts.isIdentifier(value.expression) &&
+              moduleScopes.has(value.expression.text) && !isShadowedName(value.expression.text, value, node)) {
+            recordScope(value.expression.text, value.name.text);
+            return snapshot(`${value.expression.text}.${value.name.text}`);
+          }
+          if (ts.isPropertyAccessExpression(value) && value.name.text === "value" &&
+              ts.isIdentifier(value.expression) && moduleAtoms.has(value.expression.text) &&
+              !isShadowedName(value.expression.text, value, node)) {
+            atomSources.add(value.expression.text);
+            return snapshot(value.expression.text);
+          }
+          if (ts.isIdentifier(value) && moduleAtoms.has(value.text) && !isNamePosition(value) &&
+              !isShadowedName(value.text, value, node)) {
+            atomSources.add(value.text);
+            return snapshot(value.text);
+          }
+          return ts.visitEachChild(value, visit, context);
+        };
+        return ts.visitNode(expression, visit) as ts.Expression;
+      };
+      const visit: ts.Visitor = child => {
+        if (ts.isJsxExpression(child) && child.expression &&
+            !isSharedAtomComponentProp(child, moduleAtoms, moduleAtomMaps))
+          return factory.updateJsxExpression(child, rewriteExpression(child.expression));
+        return ts.visitEachChild(child, visit, context);
+      };
+      const rewritten = ts.visitEachChild(node, visit, context) as ts.ClassDeclaration;
+      if (atomSources.size === 0 && scopeSources.size === 0) return undefined;
+
+      const internalName = factory.createIdentifier(`__Streamix${node.name.text}`);
+      const classModifiers = node.modifiers?.filter(modifier =>
+        modifier.kind !== ts.SyntaxKind.ExportKeyword && modifier.kind !== ts.SyntaxKind.DefaultKeyword);
+      const internal = factory.updateClassDeclaration(rewritten, classModifiers, internalName,
+        rewritten.typeParameters, rewritten.heritageClauses, rewritten.members);
+      const wrapperModifiers = node.modifiers?.filter(modifier =>
+        modifier.kind === ts.SyntaxKind.ExportKeyword || modifier.kind === ts.SyntaxKind.DefaultKeyword);
+      const hookStatements: ts.Statement[] = [];
+      const snapshots: ts.ObjectLiteralElementLike[] = [];
+      for (const atomName of atomSources) {
+        const binding = factory.createIdentifier(`__streamixClassBinding${bindingCount++}`);
+        needsRuntimeImport = true;
+        hookStatements.push(factory.createVariableStatement(undefined, factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(binding, undefined, undefined, factory.createCallExpression(
+            factory.createIdentifier("useStreamixSource"), undefined,
+            [factory.createIdentifier(atomName), factory.createStringLiteral(atomName)],
+          )),
+        ], ts.NodeFlags.Const)));
+        snapshots.push(factory.createPropertyAssignment(atomName, binding));
+      }
+      for (const [scopeName, properties] of scopeSources) for (const property of properties) {
+        const key = `${scopeName}.${property}`;
+        const binding = factory.createIdentifier(`__streamixClassBinding${bindingCount++}`);
+        needsRuntimeImport = true;
+        hookStatements.push(factory.createVariableStatement(undefined, factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(binding, undefined, undefined, factory.createCallExpression(
+            factory.createIdentifier("useStreamixSource"), undefined,
+          [factory.createCallExpression(factory.createPropertyAccessExpression(factory.createIdentifier(scopeName), "get"), undefined,
+            [factory.createStringLiteral(property)]), factory.createStringLiteral(key)],
+          )),
+        ], ts.NodeFlags.Const)));
+        snapshots.push(factory.createPropertyAssignment(factory.createStringLiteral(key), binding));
+      }
+      const props = factory.createIdentifier("props");
+      const parameter = factory.createParameterDeclaration(undefined, undefined, props, undefined,
+        isJavaScript ? undefined : factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword));
+      const wrappedClass = factory.createJsxSelfClosingElement(internalName, undefined,
+        factory.createJsxAttributes([
+          factory.createJsxSpreadAttribute(props),
+          factory.createJsxAttribute(factory.createIdentifier("__streamixBindings"),
+            factory.createJsxExpression(undefined, factory.createObjectLiteralExpression(snapshots, false))),
+        ]));
+      const wrapper = factory.createFunctionDeclaration(wrapperModifiers, undefined, node.name,
+        undefined, [parameter], undefined, factory.createBlock([
+          ...hookStatements,
+          factory.createReturnStatement(wrappedClass),
+        ], true));
+      return [internal, wrapper];
+    };
     return file => {
-      const statements = file.statements.map(statement => {
+      const statements: ts.Statement[] = [];
+      for (const statement of file.statements) {
+        if (ts.isClassDeclaration(statement)) {
+          const adopted = transformClassComponent(statement);
+          if (adopted) { statements.push(...adopted); continue; }
+        }
         if (ts.isFunctionDeclaration(statement)) {
           const isDefault = statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.DefaultKeyword);
-          return transformFunction(statement, isDefault ? "DefaultExport" : statement.name?.text);
+          statements.push(transformFunction(statement, isDefault ? "DefaultExport" : statement.name?.text));
+          continue;
         }
         if (ts.isVariableStatement(statement)) {
           const declarations = statement.declarationList.declarations.map(declaration => {
@@ -900,21 +1011,23 @@ export function transformReactJsx(
             const updated = transformInitializer(init, declaration.name.text);
             return updated === declaration.initializer ? declaration : factory.updateVariableDeclaration(declaration, declaration.name, declaration.exclamationToken, declaration.type, updated);
           });
-          return factory.updateVariableStatement(statement, statement.modifiers,
-            factory.updateVariableDeclarationList(statement.declarationList, declarations));
+          statements.push(factory.updateVariableStatement(statement, statement.modifiers,
+            factory.updateVariableDeclarationList(statement.declarationList, declarations)));
+          continue;
         }
         if (ts.isExportAssignment(statement)) {
           const expr = transformInitializer(statement.expression, statement.isExportEquals ? undefined : "DefaultExport");
-          return expr === statement.expression ? statement : factory.updateExportAssignment(statement, statement.modifiers, expr);
+          statements.push(expr === statement.expression ? statement : factory.updateExportAssignment(statement, statement.modifiers, expr));
+          continue;
         }
-        return statement;
-      });
+        statements.push(statement);
+      }
       return factory.updateSourceFile(file, statements);
     };
   };
 
-  // A class component cannot safely adopt compiler-generated React hooks.
-  // Report it rather than silently leaving live atoms as JSX children.
+  // Nested components need an independent hook lifetime. The top-level class
+  // adapter above provides that lifetime through its generated wrapper.
   const inspectSkipped = (node: ts.Node): void => {
     // Nested components have their own hook lifetime. Transforming only the
     // outer component would leave their implicit reads unbound, while blindly
@@ -940,44 +1053,6 @@ export function transformReactJsx(
       if ([...reactiveAncestors].some(atomName => new RegExp(`\\b${atomName}\\b`).test(node.getText(sourceFile)))) {
         diagnostics.push(diagnostic(node, "error", `Nested component ${name} requires an independent compilation boundary. Move it to module scope or use explicit React hooks.`));
       }
-    }
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && /^[A-Z]/.test(node.name.text) &&
-        node.initializer && ts.isCallExpression(node.initializer) && !isReactWrapper(node.initializer.expression)) {
-      let unsafeJsx = false;
-      const check = (child: ts.Node): void => {
-        if (ts.isJsxExpression(child) && child.expression) {
-          const value = child.expression;
-          if (ts.isIdentifier(value) && moduleAtoms.has(value.text)) unsafeJsx = true;
-          if (ts.isPropertyAccessExpression(value) && ts.isIdentifier(value.expression) && moduleScopes.has(value.expression.text)) unsafeJsx = true;
-        }
-        ts.forEachChild(child, check);
-      };
-      ts.forEachChild(node.initializer, check);
-      if (unsafeJsx) diagnostics.push(diagnostic(node.name, "error",
-        `Component ${node.name.text} uses an unrecognized wrapper around reactive JSX. Use React.memo/forwardRef imports or an explicit hook.`));
-    }
-    if (ts.isClassDeclaration(node) && node.name) {
-      // Inspect JSX syntax, not class source text. A string/comment containing
-      // "count" or a member `this.count` is not an implicit atom read.
-      let unsafeJsx = false;
-      const inspect = (child: ts.Node): void => {
-        if (ts.isJsxExpression(child) && child.expression &&
-            !isSharedAtomComponentProp(child, moduleAtoms, moduleAtomMaps)) {
-          const inspectExpression = (value: ts.Node): void => {
-            if (ts.isIdentifier(value) && !isNamePosition(value) &&
-                !isShadowedName(value.text, value, node) &&
-                (moduleAtoms.has(value.text) || moduleScopes.has(value.text))) {
-              unsafeJsx = true;
-            }
-            ts.forEachChild(value, inspectExpression);
-          };
-          inspectExpression(child.expression);
-        }
-        ts.forEachChild(child, inspect);
-      };
-      ts.forEachChild(node, inspect);
-      if (unsafeJsx) diagnostics.push(diagnostic(node.name, "error",
-        `Class component ${node.name.text} cannot be adopted. Use an explicit useAtomValue hook in a function component.`));
     }
     ts.forEachChild(node, inspectSkipped);
   };

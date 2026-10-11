@@ -85,6 +85,60 @@ idescribe("React JSX compiler client lifecycle", () => {
     expect(module.status!.subscriberCount).toBe(0);
   });
 
+  it("keeps a generated class adapter subscription until its wrapper unmounts", async () => {
+    const module = compileGeneratedModule(`
+      import { atom } from "@epikodelabs/streamix";
+      export const status = atom("Saved");
+      class Status extends React.Component {
+        render() { return <output>{status}</output>; }
+      }
+      export function App() { return <Status />; }
+    `);
+    root = createRoot(container);
+
+    await act(async () => {
+      root!.render(createElement(module.App));
+      await flushMicrotasks();
+    });
+
+    expect(container.textContent).toBe("Saved");
+    expect(module.status!.subscriberCount).toBe(1);
+
+    act(() => module.status!.next("Updated"));
+    expect(container.textContent).toBe("Updated");
+
+    act(() => root?.unmount());
+    root = undefined;
+    await flushMicrotasks();
+    expect(module.status!.subscriberCount).toBe(0);
+  });
+
+  it("keeps a higher-order wrapped function component subscribed until unmount", async () => {
+    const module = compileGeneratedModule(`
+      import { atom } from "@epikodelabs/streamix";
+      export const status = atom("Saved");
+      const withTracking = <T,>(component: T) => component;
+      export const App = withTracking(() => <output>{status}</output>);
+    `);
+    root = createRoot(container);
+
+    await act(async () => {
+      root!.render(createElement(module.App));
+      await flushMicrotasks();
+    });
+
+    expect(container.textContent).toBe("Saved");
+    expect(module.status!.subscriberCount).toBe(1);
+
+    act(() => module.status!.next("Updated"));
+    expect(container.textContent).toBe("Updated");
+
+    act(() => root?.unmount());
+    root = undefined;
+    await flushMicrotasks();
+    expect(module.status!.subscriberCount).toBe(0);
+  });
+
   it("does not subscribe when a render is interrupted by Suspense before commit", async () => {
     const module = compileGeneratedModule(`
       import { atom } from "@epikodelabs/streamix";
