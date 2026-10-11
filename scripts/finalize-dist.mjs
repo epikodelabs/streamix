@@ -30,6 +30,7 @@ try {
 const manifest = JSON.parse(await fs.readFile(packagePath, 'utf8'));
 const builderManifest = './angular/builder/package.json';
 const reactBuilderManifest = './react/builder/package.json';
+const vueBuilderManifest = './vue/builder/package.json';
 
 if (manifest.exports && !manifest.exports[builderManifest]) {
   manifest.exports[builderManifest] = builderManifest;
@@ -37,6 +38,10 @@ if (manifest.exports && !manifest.exports[builderManifest]) {
 }
 if (manifest.exports && !manifest.exports[reactBuilderManifest]) {
   manifest.exports[reactBuilderManifest] = reactBuilderManifest;
+  await fs.writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+if (manifest.exports && !manifest.exports[vueBuilderManifest]) {
+  manifest.exports[vueBuilderManifest] = vueBuilderManifest;
   await fs.writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
@@ -50,6 +55,9 @@ const builderPackagePath = path.resolve(
 );
 const reactBuilderPackagePath = path.resolve(
   'dist/streamix/react/builder/package.json',
+);
+const vueBuilderPackagePath = path.resolve(
+  'dist/streamix/vue/builder/package.json',
 );
 
 try {
@@ -77,6 +85,16 @@ try {
   if (builderPackage.builders !== './builders.json') {
     builderPackage.builders = './builders.json';
     await fs.writeFile(reactBuilderPackagePath, `${JSON.stringify(builderPackage, null, 2)}\n`);
+  }
+} catch (error) {
+  if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
+}
+
+try {
+  const builderPackage = JSON.parse(await fs.readFile(vueBuilderPackagePath, 'utf8'));
+  if (builderPackage.builders !== './builders.json') {
+    builderPackage.builders = './builders.json';
+    await fs.writeFile(vueBuilderPackagePath, `${JSON.stringify(builderPackage, null, 2)}\n`);
   }
 } catch (error) {
   if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;

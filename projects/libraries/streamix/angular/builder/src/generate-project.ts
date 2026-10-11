@@ -80,12 +80,6 @@ export async function generateProject({
   }
 
   /**
-   * Top-level value members of each `scope({ ... })` initializer, keyed by the
-   * class field name. Nested plain-object keys are deliberately not collected:
-   * `refs` only mirrors atom members, so deeper keys would resolve template
-   * paths to reactive sources that do not exist.
-   */
-  /**
    * Fields exposing both `value` and a write method, i.e. atoms a two-way
    * binding can write back.
    */

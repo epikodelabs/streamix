@@ -76,6 +76,15 @@
       "@epikodelabs/streamix/vue": [
         "./projects/libraries/streamix/vue/src/lib/index.ts"
       ],
+      "@epikodelabs/streamix/vue/compiler": [
+        "./projects/libraries/streamix/vue/compiler/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/vue/builder": [
+        "./projects/libraries/streamix/vue/builder/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/vue/vite": [
+        "./projects/libraries/streamix/vue/vite/src/public-api.ts"
+      ],
       "@epikodelabs/streamix": [
         "./projects/libraries/streamix/src/lib/index.ts"
       ]

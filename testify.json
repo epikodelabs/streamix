@@ -10,7 +10,12 @@
     "./projects/libraries/streamix/react/src",
     "./projects/libraries/streamix/react/builder/src",
     "./projects/libraries/streamix/react/vite/src",
-    "./projects/libraries/streamix/react/compiler/src"
+    "./projects/libraries/streamix/react/compiler/src",
+    "./projects/libraries/streamix/vue/src",
+    "./projects/libraries/streamix/vue/tests",
+    "./projects/libraries/streamix/vue/compiler/src",
+    "./projects/libraries/streamix/vue/builder/src",
+    "./projects/libraries/streamix/vue/vite/src"
   ],
   "testDirs": [
     "./projects/libraries/streamix/aggregates/src/tests",
@@ -23,7 +28,12 @@
     "./projects/libraries/streamix/react/src",
     "./projects/libraries/streamix/react/builder/src",
     "./projects/libraries/streamix/react/vite/src",
-    "./projects/libraries/streamix/react/compiler/src"
+    "./projects/libraries/streamix/react/compiler/src",
+    "./projects/libraries/streamix/vue/src",
+    "./projects/libraries/streamix/vue/tests",
+    "./projects/libraries/streamix/vue/compiler/src",
+    "./projects/libraries/streamix/vue/builder/src",
+    "./projects/libraries/streamix/vue/vite/src"
   ],
   "exclude": [
     "**/node_modules/**",

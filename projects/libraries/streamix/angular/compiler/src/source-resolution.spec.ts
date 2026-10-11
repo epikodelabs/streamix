@@ -3,6 +3,7 @@ import {
   createDependencySourcePathResolver,
   createReactiveSourcePathResolver,
   createScopeValuePathResolver,
+  createScopeWritableResolver,
 } from './source-resolution';
 
 describe('sx reactive source resolution', () => {
@@ -13,7 +14,7 @@ describe('sx reactive source resolution', () => {
     expect(resolve('plain')).toBeUndefined();
   });
 
-  it('maps value-first Scope members to their backing atoms', () => {
+  it('maps value-first Scope members to their public atom accessors', () => {
     const resolve = createScopeValuePathResolver({
       model: ['count', 'user.name'],
     });
@@ -37,5 +38,14 @@ describe('sx reactive source resolution', () => {
     expect(resolve('custom.value')).toBe('custom.backing');
     expect(resolve('model.count')).toBe("model.get('count')");
     expect(resolve('count')).toBe('count');
+  });
+
+  it('uses Scope.set for writable template paths', () => {
+    const resolve = createScopeWritableResolver({ model: ['title'] });
+    const target = resolve('model.title');
+
+    expect(target?.source).toBe("model.get('title')");
+    expect(target?.write('nextTitle')).toBe("ctx.model.set('title', nextTitle)");
+    expect(resolve('model.missing')).toBeUndefined();
   });
 });

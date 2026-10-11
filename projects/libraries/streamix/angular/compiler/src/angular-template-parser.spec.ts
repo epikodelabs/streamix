@@ -4,8 +4,8 @@ import {
 
 describe('parseSxTemplate static topology', () => {
   const resolveReactiveSource = (path: string) => ({
-    'model.msg': 'model.refs.msg',
-    'model.ready': 'model.refs.ready',
+    'model.msg': "model.get('msg')",
+    'model.ready': "model.get('ready')",
   } as Record<string, string>)[path];
 
   it('rejects compiled bindings on siblings after a structural block', () => {

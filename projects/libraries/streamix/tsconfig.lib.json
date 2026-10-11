@@ -31,6 +31,18 @@
       ],
       "@epikodelabs/streamix/angular/compiler": [
         "./angular/compiler/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/vue": [
+        "./vue/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/vue/compiler": [
+        "./vue/compiler/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/vue/builder": [
+        "./vue/builder/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/vue/vite": [
+        "./vue/vite/src/public-api.ts"
       ]
     }
   },

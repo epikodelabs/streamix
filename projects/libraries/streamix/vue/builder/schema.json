@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "Streamix Vue application builder",
+  "type": "object",
+  "properties": {
+    "delegateTarget": {
+      "type": "string",
+      "description": "The project:target pair that builds the generated Vue project."
+    },
+    "sourceRoot": {
+      "type": "string",
+      "description": "Vue source directory processed by Streamix, relative to the workspace root."
+    }
+  },
+  "required": ["delegateTarget", "sourceRoot"],
+  "additionalProperties": true
+}

@@ -12,6 +12,9 @@
     "react/builder/builders.json",
     "react/builder/schema.json",
     "react/builder/application.mjs",
+    "vue/builder/builders.json",
+    "vue/builder/schema.json",
+    "vue/builder/application.mjs",
     "react/editor/README.md",
     "react/editor/tsserver.cjs"
   ],

@@ -114,6 +114,66 @@ const doubled = useIterable(state.get('doubled'));
 
 The scope is tied to the component’s lifetime. When the component goes away, its local Streamix work is cleaned up too.
 
+## Compiler-first templates
+
+For conventional Vue components, the Vite plugin can adopt Streamix declarations
+directly from `<script setup>`. Put it before Vue's plugin:
+
+```ts
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+import { sxVue } from '@epikodelabs/streamix/vue/vite';
+
+export default defineConfig({
+  plugins: [sxVue(), vue()],
+});
+```
+
+Then templates can use local atoms, derived values, flows, and declared scope
+members as ordinary Vue bindings. The compiler adds the right bridge while
+Streamix remains the source of truth.
+
+```vue
+<script setup lang="ts">
+import { atom, scope } from '@epikodelabs/streamix';
+
+const count = atom(0);
+const profile = scope({ name: 'Ada' });
+</script>
+
+<template>
+  <button @click="count++">{{ count }}</button>
+  <input v-model="profile.name">
+</template>
+```
+
+Use `@epikodelabs/streamix/vue/compiler` when integrating the transform into a
+non-Vite build. It exports `transformVueSfc(source, fileName)` and returns the
+transformed source plus source-positioned diagnostics.
+
+### Angular-hosted or custom Architect builds
+
+The optional builder mirrors your authored source tree to
+`.angular/.streamix/<app>/src`, transforms every `.vue` file there, and then
+delegates to a Vue-capable Architect target. It does not try to replace Vue's
+bundler — use the target that already owns your Vue/Vite build.
+
+```json
+{
+  "build": {
+    "builder": "@epikodelabs/streamix/vue/builder:application",
+    "options": {
+      "delegateTarget": "my-vue-app:application",
+      "sourceRoot": "projects/apps/my-vue-app/src"
+    }
+  }
+}
+```
+
+Point that delegated target at `.angular/.streamix/my-vue-app/src`. For a
+serve target, the builder watches the authored tree and keeps the virtual copy
+in sync.
+
 ## Which composable should I use?
 
 | When the component needs to… | Use |

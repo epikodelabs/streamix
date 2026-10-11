@@ -1,0 +1,9 @@
+{
+  "builders": {
+    "application": {
+      "implementation": "./application.mjs",
+      "schema": "./schema.json",
+      "description": "Compiles Streamix Vue SFCs before delegating to a Vue-capable application target."
+    }
+  }
+}
