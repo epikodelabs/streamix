@@ -52,6 +52,7 @@ export default defineConfig({
             { text: 'Migration', link: '/MIGRATION' },
             { text: 'Angular', link: '/ANGULAR' },
             { text: 'React', link: '/REACT' },
+            { text: 'Vue', link: '/VUE' },
           ]
         },
         {

@@ -1,174 +1,44 @@
 # React Adoption Layer
 
-`@epikodelabs/streamix/react` is a compiler-first integration for React.
-Write Streamix atoms and scopes directly in TSX; the compiler lowers JSX reads
-to React's concurrent-safe external-store contract.
+`@epikodelabs/streamix/react` is compiler-first: write Streamix sources in TSX or JSX and the compiler lowers JSX reads to React's concurrent-safe external-store contract.
 
 ```tsx
-import { atom, scope } from "@epikodelabs/streamix";
+import { atom } from '@epikodelabs/streamix';
 
-export function Profile() {
-  let name = atom("Ada");
-  const state = scope({ saved: true });
-
-  return (
-    <section>
-      <input value={name} onChange={event => name = event.target.value} />
-      <p>{state.saved ? "Saved" : "Editing"}: {name}</p>
-    </section>
-  );
+export function Counter() {
+  let count = atom(0);
+  return <button onClick={() => count++}>{count}</button>;
 }
 ```
 
-No subscription hook belongs in ordinary application component code.
+The compiler supports atoms, derived values, flows, scope fields, known aliases and atom maps, supported writes, anonymous default components, and imported `memo` / `forwardRef` wrappers. Class components and unknown higher-order wrappers are rejected when they contain implicit reactive JSX.
 
-## What the compiler supports
+## Prop and runtime boundaries
 
-- JSX reads of `atom(...)`, `derived(...)`, `flow(...)`, and scope fields.
-- Stable component-local atom, derived, flow, and scope ownership.
-- Direct, compound, prefix/postfix, and fully-known destructured atom writes.
-- Static aliases, destructuring, literal atom maps, and conditional selection.
-- Atom-reference transport to capitalized React components.
-- Concurrent-safe reads through `useSyncExternalStore`; subscriptions begin only
-  after a render commits.
+An atom is read as a value in native JSX, but remains a reference when passed to a capitalized component. Type the receiving prop as `typeof source`. Use `atomRef()` for custom elements or third-party boundaries. For timers, callbacks, proxies, dynamic paths, and other unproven cases, use explicit `read()`, `write()`, and `useAtomValue()`.
 
-```tsx
-let primary = atom("Primary");
-const secondary = atom("Secondary");
-const choices = { primary, secondary };
+`createResource()` is an explicit abortable Suspense resource: preload it outside render, then call `read()` inside a Suspense boundary. For SSR, render `renderAtomSnapshotScript()` on the server and call `hydrateAtomSnapshotFromDocument()` before `hydrateRoot()`.
 
-function Choice({ alternate }: { alternate: boolean }) {
-  const { primary: selected } = choices;
-  return <button onClick={() => primary++}>
-    {choices[alternate ? "secondary" : "primary"]}: {selected}
-  </button>;
-}
-```
+## Ownership and React Activity
 
-Scope fields are granular:
+Local reactive declarations are stable for a committed component instance. Factories must be render-pure because Strict Mode may abandon an initial render.
 
-```tsx
-const state = scope({ title: "Ready", enabled: true });
+React Activity / Offscreen can clean up effects merely because a tree is hidden. React does not expose a cleanup signal that distinguishes this from permanent unmount. For Activity trees, own sources outside the hidden subtree with `createStreamixLifetime()` and `StreamixLifetimeProvider`, and dispose that lifetime when the feature or route is permanently removed.
 
-return <input
-  checked={state.enabled}
-  onChange={event => state.enabled = event.target.checked}
-  value={state.title}
-/>;
-```
+## Vite, builders, and editor
 
-## Prop boundaries
-
-Atoms are values in JSX and native DOM props, but references when passed to a
-capitalized React component:
-
-```tsx
-const title = atom("Ready");
-
-function Editor({ source }: { source: typeof title }) {
-  return <input value={source} />;
-}
-
-<Editor source={title} />;
-```
-
-For custom elements or third-party components, mark a reference explicitly:
-
-```tsx
-import { atomRef } from "@epikodelabs/streamix/react";
-
-<x-editor source={atomRef(title)} />;
-```
-
-Scopes can be passed by reference too. A destructured prop typed as
-`typeof state` receives granular field subscriptions:
-
-```tsx
-function Summary({ model }: { model: typeof state }) {
-  return <output>{model.title}</output>;
-}
-
-<Summary model={state} />;
-```
-
-## Strict Mode and ownership
-
-Local reactive declarations are stable for a committed component instance and
-dispose after unmount. React development Strict Mode can abandon an initial
-render, so local initialization must be render-pure. The compiler rejects
-obvious render work in a local initializer: unknown calls, `new`, `await`, and
-writes.
-
-Start work from an effect, event handler, route loader, or explicit resource
-preload. A hook cannot retroactively give an abandoned render a committed
-identity.
-
-## Builder setup
-
-Use the Streamix React builder for `build` and `serve`, delegating to a normal
-Angular application target:
-
-```json
-{
-  "build": {
-    "builder": "@epikodelabs/streamix/react/builder:application",
-    "options": {
-      "delegateTarget": "my-app:application",
-      "sourceRoot": "projects/apps/my-app/src"
-    }
-  }
-}
-```
-
-Point the delegated target at preprocessing output:
-
-```json
-{
-  "browser": ".angular/.streamix/my-app/src/main.tsx",
-  "tsConfig": ".angular/.streamix/my-app/tsconfig.app.json"
-}
-```
-
-The builder transforms TSX into `.angular/.streamix/<app>/src`, writes source
-maps beside transformed files, then delegates to the normal application build.
-`app7` is the working example.
-
-## Explicit runtime boundaries
-
-Dynamic paths, re-exports, proxy/getter-backed objects, unknown third-party
-props, and callbacks needing the current value remain explicit:
-
-```tsx
-import { read, write } from "@epikodelabs/streamix/react";
-
-setTimeout(() => console.log(read(status)), 1000);
-write(status, "Saved");
-```
-
-`createResource(loader)` supplies explicit abortable Suspense resources:
-preload outside render, then call `read()` inside a Suspense boundary. For SSR,
-use `renderAtomSnapshotScript()` on the server and
-`hydrateAtomSnapshotFromDocument()` before `hydrateRoot()`.
-
-## Tooling
-
-`StreamixDevtools` is an opt-in panel for reactive reads, subscriptions,
-writes, unsubscriptions, and committed renders. Compiler-added bindings map
-back to their originating JSX expression through generated source maps.
-
-## Hosts
-
-React is supported through both native Vite and Angular Architect hosts. For a
-native Vite app, run the Streamix plugin before the React plugin:
+Install `typescript@^5.5` in applications using compiler tooling. In Vite, put Streamix before the React plugin; it transforms authored `.ts`, `.tsx`, `.js`, and `.jsx` modules and returns a composable source map.
 
 ```ts
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import { sx } from "@epikodelabs/streamix/react/vite";
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { sx } from '@epikodelabs/streamix/react/vite';
 
 export default defineConfig({ plugins: [sx(), react()] });
 ```
 
-The Angular-hosted React builder remains available for workspaces that use
-Angular Architect; it preprocesses into `.angular/.streamix/<app>/src` before
-delegating to the application target.
+The Angular Architect builder mirrors transformed files into `.angular/.streamix/<app>/src` before delegating to the application target.
+
+For atom-aware diagnostics and navigation, add `@epikodelabs/streamix/react/editor/tsserver` to `compilerOptions.plugins` and restart the TypeScript server. The editor is an aid; the production compiler is authoritative for generated output.
+
+`StreamixDevtools` is an opt-in panel. Production builds should prove `NODE_ENV=production`; see [PRODUCTION.md](../projects/libraries/streamix/react/PRODUCTION.md) for release gates and known limitations.

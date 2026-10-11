@@ -1,115 +1,51 @@
 # Angular Adoption Layer
 
-`@epikodelabs/streamix/angular` lets Angular components use Streamix state directly in their templates.
-
-The idea is simple: write ordinary Angular templates, keep state in Streamix, and let the integration keep the view up to date.
+`@epikodelabs/streamix/angular` lets Angular templates read Streamix state as ordinary values while Streamix owns the reactive subscription.
 
 ```ts
-model = scope({
-  count: 0,
-  busy: false,
-  name: '',
-  doubled: self => self.count * 2,
-});
+model = scope({ count: 0, name: '', doubled: self => self.count * 2 });
 ```
 
 ```html
 <button (click)="model.count = model.count + 1">
-  {{ model.count }} → {{ model.doubled }}
+  {{ model.count }} / {{ model.doubled }}
 </button>
-
 <input [(value)]="model.name">
-
-<p [class.active]="model.count > 3">
-  Hello, {{ model.name }}
-</p>
 ```
 
-You work with values in your component and template. Streamix handles the reactive connection behind the scenes.
+## Supported template forms
 
-## What feels natural
+The compiler supports text interpolation, safe native property/class/style and attribute bindings, events, two-way bindings, and compiler-owned `@if` / `@for` blocks. It keeps Angular in control of pipes, URLs, HTML, resource sinks, and other security-sensitive or ambiguous expressions. Unsupported expressions fail the build rather than silently becoming non-reactive.
 
-The Angular adoption layer supports the template patterns most applications use every day:
+## Editor setup
 
-- text such as `{{ model.count }}`;
-- simple expressions such as `{{ count * 2 }}`;
-- native properties such as `[disabled]="model.busy"`;
-- classes, styles, and safe attributes;
-- events such as `(click)="save()"`;
-- two-way input bindings such as `[(value)]="model.name"`;
-- conditions with `@if`;
-- lists with `@for`;
-- nested conditions and lists.
+Install `@angular/language-service` and configure the Streamix language-service plugin:
 
-You do not need a special template language or a manual subscription for each value. If Streamix can safely recognise the reactive state, it keeps that part of the template in sync.
-
-## What your editor shows
-
-Template type-checking runs against exactly what you wrote. Scope members are typed as ordinary values, so scope-based templates stay clean in the editor and in the build.
-
-One case is expected, and worth recognising when you meet it: putting a **bare atom straight into an expression** — `{{ count * 2 }}`, `@if (count > 3)`, `@for (row of rows; …)` — compiles, but your editor will underline it. What you are holding there is the atom, not the number or the list, and the editor is right to say so. A lone `{{ count }}` is fine; interpolation accepts any type.
-
-If you see those squiggles, there are three ways to clear them:
-
-- keep the state in a scope and read it as `model.count` — the recommended shape anyway;
-- or write the value explicitly — `count.value` — which the editor accepts;
-- or wrap the atom read itself in Angular's `$any(...)` cast — `{{ $any(count) * 2 }}`, `@if ($any(count) > 3)`, `@for (row of $any(rows); …)`. The editor stops checking the cast, and the build sees through it and still compiles the expression reactively. Wrap the *read*, not the whole expression: `$any(count * 2)` only silences the outer operation, and the inner `count * 2` is still checked.
-
-The editor also cannot see which scope members are writable, so it stays quiet on a two-way binding to a calculated member, such as `[(value)]="model.doubled"`. The build rejects that one, and the build's error is the authoritative one.
-
-## Keep related state together
-
-`scope(...)` is a useful home for the state that belongs to one feature.
-
-```ts
-user = scope({
-  name: '',
-  email: '',
-  label: self => `${self.name} <${self.email}>`,
-});
+```json
+{
+  "compilerOptions": {
+    "plugins": [
+      { "name": "@epikodelabs/streamix/angular/editor/tsserver" }
+    ]
+  }
+}
 ```
 
-The scope can hold plain state, calculated values, asynchronous work, and cleanup under one owner. In templates, its members read like ordinary values:
+For inline templates, the plugin exposes atom reads as their current values to Angular's language service, so `{{ count * 2 }}` and `@if (count > 3)` type check without `$any()`. Restart the TypeScript server after changing the configuration. External `templateUrl` files are not virtualized yet; use explicit `.value` there or keep the affected template inline.
 
-```html
-<span>{{ user.label }}</span>
-<input [(value)]="user.name">
-```
+The compiler is authoritative for write safety. In particular, a two-way binding to a calculated scope member is rejected even if the editor cannot prove it is read-only.
 
-That means the template stays focused on what the UI should show, rather than on how reactivity is wired.
+## SSR, topology, and lifecycle limits
 
-## Angular still owns the places where it should
+Angular-owned bindings render normally on the server. Lowered Streamix `@if` and `@for` blocks render empty hydration markers on the server and populate in the browser after hydration. Do not use those lowered blocks for SEO-critical or first-paint content.
 
-Streamix is deliberately careful. Angular keeps control of component inputs, pipes, URLs, HTML, and other security-sensitive bindings. That keeps Angular’s normal safety checks in place.
+The direct-DOM compiler requires static topology. A non-reactive Angular `@if`, `@for`, or `*ngIf` before a compiled binding is a build error; projection is also outside its ownership boundary. Keep the binding before the dynamic region, move it inside a compiler-owned Streamix block, or leave it Angular-owned.
 
-If a template expression cannot be handled safely, the build explains why instead of silently rendering something that later stops updating. The usual fix is simple: keep the expression fully reactive, or calculate the value in the component first.
+Updates are frame-coalesced, with a timeout fallback for hidden tabs. List keys in compiled keyed blocks must be unique.
 
-## Built for real application lifecycles
+## Builder setup
 
-The integration cleans up its listeners and reactive work when an Angular component is destroyed. Ordinary Angular-owned bindings render normally on the server. Lowered Streamix `@if` and `@for` blocks deliberately render as empty hydration markers on the server, then populate immediately in the browser after hydration. Do not use those lowered blocks for SEO-critical or first-paint content yet.
-
-For applications using Zone.js, Streamix can schedule its own view updates without turning every state change into unnecessary application-wide work.
-
-## Current compiler boundaries
-
-The direct-DOM compiler requires a stable element path. A compiled binding after
-an Angular-owned dynamic region (`@if`, `@for`, `*ngIf`, projection, and similar
-templates) is rejected at build time rather than risking an update to the wrong
-node. Keep such a binding before the dynamic region, move it inside a lowered
-Streamix block, or leave it Angular-owned.
-
-Projected content is therefore not supported by the direct compiler. The build
-reports it instead of assuming a child index inside another component's view.
-
-Rendering is still frame-coalesced. A timeout fallback now delivers updates
-when a browser pauses `requestAnimationFrame` in a hidden tab; foreground
-updates continue to use animation frames.
-
-## Getting started
-
-To use Streamix-aware template features—direct atom reads, scope members, reactive expressions, compiled conditions, and compiled loops—change your project’s **build** target in `angular.json` to the Streamix builder.
-
-The Streamix builder prepares supported components first, then delegates the rest of the application build to Angular. Your existing Angular build target remains the delegate target:
+Use the Streamix builder to enable compiler-aware templates, while delegating the application build to Angular:
 
 ```json
 {
@@ -123,26 +59,4 @@ The Streamix builder prepares supported components first, then delegates the res
 }
 ```
 
-Without this builder, Streamix still works in Angular code, but templates do not receive the Streamix compiler support described above.
-
-## Benchmarks
-
-The renderer benchmarks run in a real browser. One command runs them headlessly and prints the results:
-
-```bash
-npm run bench:angular
-```
-
-To open the same suite as an interactive page instead:
-
-```bash
-npm run bench:angular:serve
-```
-
-Vite serves the page and prints a URL to open.
-
-## The goal
-
-Streamix for Angular is not a new component model. It is a way to use Streamix atoms, derived values, flows, and scopes in Angular without making template code feel like plumbing.
-
-Write state as state. Write templates as templates. Let the integration connect them.
+Static inline templates and literal `templateUrl` files are compiled in a virtual build tree; authored files are not modified. See the package [README](../projects/libraries/streamix/angular/README.md) for the complete binding matrix and scheduler guidance.
