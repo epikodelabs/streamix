@@ -105,4 +105,64 @@ describe("Streamix React tsserver plugin", () => {
     const diagnostics = diagnose(source);
     expect(diagnostics.filter(diagnostic => /Operator '\*'/.test(messageOf(diagnostic)))).toEqual([]);
   });
+  it("keeps derived and JSX object shorthand keys valid while rewriting their values", () => {
+    const source = `
+      import { atom, derived } from "@epikodelabs/streamix";
+      let count = atom(1);
+      const view = derived(() => ({ count }));
+      export const App = () => <output title={JSON.stringify({ count })}>{view}</output>;
+    `;
+    expect(() => diagnose(source)).not.toThrow();
+    const diagnostics = diagnose(source);
+    expect(diagnostics.some(d => /Debug Failure|Shorthand property/.test(messageOf(d)))).toBe(false);
+  });
+
+  it("lowers shorthand-derived reads in ordinary TypeScript files", () => {
+    const source = `import { atom, derived } from "@epikodelabs/streamix";\nconst count = atom(2);\nexport const total = derived(() => count * 2);`;
+    const fileName = ts.sys.resolvePath(resolve(process.cwd(), "streamix-plain-helper.ts"));
+    const host: ts.LanguageServiceHost = {
+      getCompilationSettings: () => ({ strict: true, noEmit: true }),
+      getScriptFileNames: () => [fileName],
+      getScriptVersion: () => "1",
+      getScriptSnapshot: name => name === fileName ? ts.ScriptSnapshot.fromString(source) : undefined,
+      getCurrentDirectory: () => process.cwd(),
+      getDefaultLibFileName: settings => ts.getDefaultLibFilePath(settings),
+      fileExists: name => name === fileName || ts.sys.fileExists(name),
+      readFile: name => name === fileName ? source : ts.sys.readFile(name),
+    };
+    createPlugin({ typescript: ts }).create({
+      languageService: ts.createLanguageService(host), languageServiceHost: host,
+      project: { projectService: { logger: { info: () => undefined } } }, config: {},
+    } as unknown as ts.server.PluginCreateInfo);
+    const rewritten = host.getScriptSnapshot(fileName)!.getText(0, 10000);
+    expect(rewritten).toContain("count.value * 2");
+  });
+
+  it("does not apply TSX virtual source offsets to ordinary TypeScript files", () => {
+    const source = `const value: number = "not a number";`;
+    const fileName = ts.sys.resolvePath(resolve(process.cwd(), "plain-streamix-editor.ts"));
+    const options: ts.CompilerOptions = { strict: true, noEmit: true, skipLibCheck: true };
+    const host: ts.LanguageServiceHost = {
+      getCompilationSettings: () => options,
+      getScriptFileNames: () => [fileName],
+      getScriptVersion: () => "1",
+      getScriptSnapshot: name => {
+        const value = name === fileName ? source : ts.sys.readFile(name);
+        return value === undefined ? undefined : ts.ScriptSnapshot.fromString(value);
+      },
+      getCurrentDirectory: () => process.cwd(),
+      getDefaultLibFileName: settings => ts.getDefaultLibFilePath(settings),
+      fileExists: name => name === fileName || ts.sys.fileExists(name),
+      readFile: name => name === fileName ? source : ts.sys.readFile(name),
+      readDirectory: ts.sys.readDirectory,
+    };
+    const languageService = ts.createLanguageService(host);
+    const plugin = createPlugin({ typescript: ts }).create({
+      languageService, languageServiceHost: host,
+      project: { projectService: { logger: { info: () => undefined } } }, config: {},
+    } as unknown as ts.server.PluginCreateInfo);
+    const diagnostics = plugin.getSemanticDiagnostics(fileName);
+    expect(diagnostics.some(d => messageOf(d).includes("string"))).toBe(true);
+  });
+
 });

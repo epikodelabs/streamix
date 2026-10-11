@@ -5,6 +5,7 @@ import { build } from "vite";
 import { sx } from "./plugin";
 
 describe("Streamix React Vite fixture", () => {
+  jasmine.DEFAULT_TIMEOUT_INTERVAL = 20_000;
   it("builds authored TSX through Streamix before the React plugin", async () => {
     const root = await mkdtemp(join(tmpdir(), "streamix-vite-"));
     try {
@@ -20,10 +21,23 @@ describe("Streamix React Vite fixture", () => {
         },
         include: ["src/**/*.tsx"],
       }));
+      await writeFile(join(root, "src", "store.ts"), `
+        import { atom, derived } from '@epikodelabs/streamix';
+        let price = atom(1);
+        export const inc = () => price++;
+        export const total = derived(() => price * 2);
+      `);
+      await writeFile(join(root, "src", "Widget.jsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        let quantity = atom(1);
+        export const Widget = () => <span>{quantity}</span>;
+      `);
       await writeFile(entry, `
         import { atom } from "@epikodelabs/streamix";
+        import { inc, total } from './store';
+        import { Widget } from './Widget';
         export const count = atom(0);
-        export function Counter() { return <button>{count}</button>; }
+        export function Counter() { return <button onClick={inc}>{count}<Widget />{total}</button>; }
       `);
 
       const output = await build({
@@ -52,8 +66,10 @@ describe("Streamix React Vite fixture", () => {
         .filter(item => item.type === "chunk")
         .map(item => item.code ?? "")
         .join("\n");
-      expect(code).toContain("__streamixUse");
+      expect(code).toContain("useStreamixSource");
       expect(code).toContain("@epikodelabs/streamix/react");
+      expect(code).toContain("price.value * 2");
+      expect(code).toContain("price.next(");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

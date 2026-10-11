@@ -9,7 +9,7 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.bindingCount).toBe(0);
-    expect(result.code).not.toContain("__streamixUse");
+    expect(result.code).not.toContain("useStreamixSource");
     expect(result.code).toContain("<span>{text}</span>");
     expect(result.sourceMap?.sources.length).toBe(1);
     expect(result.sourceMap?.sourcesContent.join("\n")).toContain("function Label");
@@ -25,7 +25,7 @@ describe("React JSX compiler edge cases", () => {
 
     expect(result.bindingCount).toBe(1);
     expect(result.code).toContain("const status = atom(\"Saved\")");
-    expect(result.code).toContain('__streamixUse(status, "status")');
+    expect(result.code).toContain('useStreamixSource(status, "status")');
     expect(result.code).not.toContain("status.dispose");
   });
 
@@ -37,9 +37,9 @@ describe("React JSX compiler edge cases", () => {
       }
     `);
 
-    expect(result.code).toContain('import { __streamixAfterCommit, __streamixLocal, __streamixTrace, __streamixUse } from "@epikodelabs/streamix/react"');
-    expect(result.code).toContain("let count = __streamixLocal(() => atom(0))");
-    expect(result.code).toContain('__streamixUse(count, "count")');
+    expect(result.code).toContain('import { useStreamixAfterCommit, useStreamixLocal, __streamixTrace, useStreamixSource } from "@epikodelabs/streamix/react"');
+    expect(result.code).toContain("let count = useStreamixLocal(() => atom(0))");
+    expect(result.code).toContain('useStreamixSource(count, "count")');
   });
 
   it("subscribes once when the same atom appears in several JSX expressions", () => {
@@ -51,7 +51,7 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.bindingCount).toBe(1);
-    expect((result.code.match(/__streamixUse\(status, "status"\)/g) ?? []).length).toBe(1);
+    expect((result.code.match(/useStreamixSource\(status, "status"\)/g) ?? []).length).toBe(1);
   });
 
   it("subscribes independently to each directly-read scope field", () => {
@@ -63,8 +63,8 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.bindingCount).toBe(2);
-    expect(result.code).toContain('__streamixUse(state.get("title"), "state.title")');
-    expect(result.code).toContain('__streamixUse(state.get("enabled"), "state.enabled")');
+    expect(result.code).toContain('useStreamixSource(state.get("title"), "state.title")');
+    expect(result.code).toContain('useStreamixSource(state.get("enabled"), "state.enabled")');
   });
 
   it("uses the current atom value for the right hand side of a direct assignment", () => {
@@ -93,8 +93,8 @@ describe("React JSX compiler edge cases", () => {
     expect(result.code).toContain("alias.next(alias.value + 1)");
     // Dynamic selections are type-agnostic at the subscription boundary so a
     // heterogeneous atom union still satisfies the generated call.
-    expect(result.code).toContain('__streamixUse(useAlternate ? alternate : alias as any, "useAlternate ? alternate : alias")');
-    expect(result.code).toContain('__streamixUse(choices[useAlternate ? "alternate" : "count"] as any, "choices[useAlternate ? \\"alternate\\" : \\"count\\"]")');
+    expect(result.code).toContain('useStreamixSource(useAlternate ? alternate : alias as any, "useAlternate ? alternate : alias")');
+    expect(result.code).toContain('useStreamixSource(choices[useAlternate ? "alternate" : "count"] as any, "choices[useAlternate ? \\"alternate\\" : \\"count\\"]")');
   });
 
   it("reports direct assignment to a const atom binding instead of hiding TypeScript's error", () => {
@@ -145,7 +145,7 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.bindingCount).toBe(0);
-    expect(result.code).not.toContain("__streamixUse");
+    expect(result.code).not.toContain("useStreamixSource");
   });
 
   it("tracks module-level aliases and destructuring from a proven atom map", () => {
@@ -157,8 +157,8 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.bindingCount).toBe(2);
-    expect(result.code).toContain('__streamixUse(total, "total")');
-    expect(result.code).toContain('__streamixUse(count, "count")');
+    expect(result.code).toContain('useStreamixSource(total, "total")');
+    expect(result.code).toContain('useStreamixSource(count, "count")');
   });
 
   it("tracks destructured aliases and static object paths from a known atom map", () => {
@@ -172,7 +172,7 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.bindingCount).toBe(2);
-    expect(result.code).toContain('__streamixUse(total, "total")');
+    expect(result.code).toContain('useStreamixSource(total, "total")');
     expect(result.code).toContain("count.next(");
     expect(result.code).toContain("__streamixPrevious");
   });
@@ -210,7 +210,7 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.bindingCount).toBe(1);
-    expect(result.code).toContain('__streamixUse(source, "source")');
+    expect(result.code).toContain('useStreamixSource(source, "source")');
     expect(result.code).toContain("<Editor source={title}/>");
   });
 
@@ -224,8 +224,8 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.bindingCount).toBe(2);
-    expect(result.code).toContain('__streamixUse(model.get("enabled"), "model.enabled")');
-    expect(result.code).toContain('__streamixUse(model.get("title"), "model.title")');
+    expect(result.code).toContain('useStreamixSource(model.get("enabled"), "model.enabled")');
+    expect(result.code).toContain('useStreamixSource(model.get("title"), "model.title")');
     expect(result.code).toContain("<Editor model={state}/>");
   });
 
@@ -291,7 +291,7 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.code).toContain('from "@epikodelabs/streamix/react"');
-    expect(result.code).toContain('__streamixUse(count, "count")');
+    expect(result.code).toContain('useStreamixSource(count, "count")');
     expect(result.code).not.toContain("source.subscribe");
   });
 
@@ -301,7 +301,7 @@ describe("React JSX compiler edge cases", () => {
       function Counter() { return <span>{count}</span>; }
     `);
 
-    expect(result.code).toContain("__streamixUse");
+    expect(result.code).toContain("useStreamixSource");
     expect(result.code).not.toContain("queueMicrotask");
   });
 
@@ -321,7 +321,7 @@ describe("React JSX compiler edge cases", () => {
       function Counter() { return <span>{count}</span>; }
     `);
 
-    expect(result.code).toContain('__streamixUse(count, "count")');
+    expect(result.code).toContain('useStreamixSource(count, "count")');
     expect(result.code).not.toContain("return source.value");
   });
 
@@ -332,6 +332,6 @@ describe("React JSX compiler edge cases", () => {
     `);
 
     expect(result.code).toContain('__streamixTrace("render", "Counter")');
-    expect(result.code).toContain("__streamixAfterCommit(() => {");
+    expect(result.code).toContain("useStreamixAfterCommit(() => {");
   });
 });

@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import { createTokenSourceMap } from './source-map';
 
 export interface ReactJsxTransformResult {
   /** Transformed TypeScript/TSX source. */
@@ -26,11 +27,6 @@ export interface ReactJsxSourceMap {
   readonly mappings: string;
 }
 
-interface SourceMapAnchor {
-  readonly statement: ts.Statement;
-  readonly source: ts.Node;
-}
-
 export interface ReactJsxDiagnostic {
   readonly category: "error" | "warning";
   readonly message: string;
@@ -44,12 +40,15 @@ export function formatReactJsxDiagnostics(
   fileName: string,
   diagnostics: readonly ReactJsxDiagnostic[],
 ): string {
-  const lines = source.split(/\r?\n/);
+  const lines = source.split(/\r\n|\r|\n/);
   return diagnostics.map(diagnostic => {
     let offset = 0;
     let lineIndex = 0;
-    while (lineIndex < lines.length && offset + lines[lineIndex].length + 1 <= diagnostic.start) {
-      offset += lines[lineIndex].length + 1;
+    while (lineIndex < lines.length) {
+      const newline = source.startsWith("\r\n", offset + lines[lineIndex].length) ? 2 :
+        /[\r\n]/.test(source[offset + lines[lineIndex].length] ?? "") ? 1 : 0;
+      if (offset + lines[lineIndex].length + newline > diagnostic.start) break;
+      offset += lines[lineIndex].length + newline;
       lineIndex++;
     }
     const column = diagnostic.start - offset;
@@ -86,6 +85,10 @@ function isNamePosition(node: ts.Identifier): boolean {
   const p = node.parent;
   if (!p) return false;
   if (ts.isPropertyAccessExpression(p) && p.name === node) return true;
+  if (ts.isPropertyAssignment(p) && p.name === node) return true;
+  if (ts.isShorthandPropertyAssignment(p) && p.name === node) return true;
+  if ((ts.isVariableDeclaration(p) || ts.isParameter(p) || ts.isBindingElement(p) ||
+       ts.isFunctionDeclaration(p) || ts.isClassDeclaration(p)) && p.name === node) return true;
   if ((ts.isPropertyAssignment(p) || ts.isMethodDeclaration(p) || ts.isPropertyDeclaration(p) ||
        ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)) && p.name === node) return true;
   return false;
@@ -168,7 +171,27 @@ function factoryKind(
 ): string | undefined {
   if (!ts.isCallExpression(node)) return undefined;
   const callee = node.expression;
-  if (checker) return semanticFactoryKind(callee, checker);
+  // A host Program can be incomplete while a file is being edited.  Retain
+  // explicit Streamix imports as a safe fallback instead of disabling every
+  // transform just because semantic resolution momentarily failed.
+  if (checker) {
+    const semantic = semanticFactoryKind(callee, checker);
+    if (semantic) return semantic;
+    if (ts.isIdentifier(callee)) {
+      const imported = imports.aliases.get(callee.text);
+      if (imported && ["atom", "derived", "flow", "scope"].includes(imported)) return imported;
+      // Standalone/sandbox examples can use unbound global factory names.
+      // A symbol proven to come from a different local/foreign declaration
+      // must never be mistaken for Streamix.
+      if (!imports.excluded.has(callee.text) && ["atom", "derived", "flow", "scope"].includes(callee.text) &&
+          !checker.getSymbolAtLocation(callee)) return callee.text;
+      return undefined;
+    }
+    if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) &&
+        imports.namespaces.has(callee.expression.text) && ["atom", "derived", "flow", "scope"].includes(callee.name.text))
+      return callee.name.text;
+    return undefined;
+  }
   if (ts.isIdentifier(callee)) {
     const name = imports.aliases.get(callee.text) ?? (imports.excluded.has(callee.text) ? undefined : callee.text);
     return name && ["atom", "derived", "flow", "scope"].includes(name) ? name : undefined;
@@ -207,30 +230,75 @@ export function transformReactJsx(
     source,
     ts.ScriptTarget.Latest,
     true,
-    ts.ScriptKind.TSX,
+    /\.[cm]?jsx?$/i.test(fileName) ? (/\.([cm]?jsx)$/i.test(fileName) ? ts.ScriptKind.JSX : ts.ScriptKind.JS) :
+      /\.[cm]?ts$/i.test(fileName) ? ts.ScriptKind.TS : ts.ScriptKind.TSX,
   );
   const checker = programSource?.text === source ? options.program?.getTypeChecker() : undefined;
+  const isJavaScript = /\.[cm]?jsx?$/i.test(fileName);
   const imports = streamixFactoryImports(sourceFile);
   let bindingCount = 0;
   let needsRuntimeImport = false;
   const diagnostics: ReactJsxDiagnostic[] = [];
-  const sourceMapAnchors: SourceMapAnchor[] = [];
   const moduleAtoms = new Set([
     ...collectModuleBindings(sourceFile, "atom", imports, checker),
     ...collectModuleBindings(sourceFile, "derived", imports, checker),
     ...collectModuleBindings(sourceFile, "flow", imports, checker),
   ]);
+  // Resolve shared reactive sources from other modules through the actual
+  // TypeScript program. Plain imports stay untouched; structural proof requires
+  // both a live value and an observable subscription (not an `any` guess).
+  for (const name of collectImportedReactiveSources(sourceFile, checker)) moduleAtoms.add(name);
   const moduleScopes = collectModuleBindings(sourceFile, "scope", imports, checker);
   const moduleWritableAtoms = collectModuleWritableBindings(sourceFile, imports, checker);
   const moduleAtomMaps = collectModuleAtomMaps(sourceFile, moduleAtoms, moduleWritableAtoms);
 
   const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
     const factory = context.factory;
+    const asAny = (expression: ts.Expression): ts.Expression => isJavaScript ? expression :
+      factory.createAsExpression(expression, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword));
+
+    // One AST lowering path for module formulas, local formulas and shorthand
+    // object properties. A regex cannot distinguish names from properties or
+    // from lexically shadowed callback parameters.
+    const lowerDerivedCallback = (
+      call: ts.CallExpression,
+      reactiveNames: ReadonlySet<string>,
+      boundary: ts.Node,
+      hidden: (site: ts.Identifier) => boolean = () => false,
+    ): ts.CallExpression => {
+      if (!call.arguments.length || !(ts.isArrowFunction(call.arguments[0]) || ts.isFunctionExpression(call.arguments[0]))) return call;
+      const callback = call.arguments[0];
+      const callbackParameters = new Set<string>();
+      for (const parameter of callback.parameters) boundNames(parameter.name, callbackParameters);
+      const canRead = (id: ts.Identifier): boolean => reactiveNames.has(id.text) &&
+        !callbackParameters.has(id.text) && !hidden(id) && !isShadowedName(id.text, id, boundary);
+      const lower: ts.Visitor = child => {
+        if (ts.isPropertyAccessExpression(child) && child.name.text === "value" &&
+            ts.isIdentifier(child.expression) && canRead(child.expression)) return child;
+        if (ts.isShorthandPropertyAssignment(child) && canRead(child.name)) {
+          return factory.createPropertyAssignment(child.name, factory.createPropertyAccessExpression(child.name, "value"));
+        }
+        if (ts.isIdentifier(child) && !isNamePosition(child) && canRead(child))
+          return factory.createPropertyAccessExpression(child, "value");
+        return ts.visitEachChild(child, lower, context);
+      };
+      const body = ts.visitNode(callback.body, lower) as ts.ConciseBody;
+      const replacement = ts.isArrowFunction(callback)
+        ? factory.updateArrowFunction(callback, callback.modifiers, callback.typeParameters, callback.parameters, callback.type, callback.equalsGreaterThanToken, body)
+        : factory.updateFunctionExpression(callback, callback.modifiers, callback.asteriskToken, callback.name, callback.typeParameters, callback.parameters, callback.type, body as ts.Block);
+      return factory.updateCallExpression(call, call.expression, call.typeArguments, [replacement, ...call.arguments.slice(1)]);
+    };
+    const lowerModuleFormulas: ts.Visitor = node => {
+      if (ts.isCallExpression(node) && factoryKind(node, imports, checker) === "derived")
+        return lowerDerivedCallback(node, moduleAtoms, sourceFile);
+      return ts.visitEachChild(node, lowerModuleFormulas, context);
+    };
 
     const transformFunction = <T extends ts.FunctionLikeDeclarationBase>(node: T, traceName?: string): T => {
       if (!node.body) return node;
       const functionBody = ts.isBlock(node.body) ? node.body :
         factory.createBlock([factory.createReturnStatement(node.body)], true);
+      const isComponent = !!traceName && /^[A-Z]/.test(traceName);
 
       const atoms = new Set<string>(moduleAtoms);
       const scopes = new Set<string>(moduleScopes);
@@ -280,7 +348,7 @@ export function transformReactJsx(
               }
               atoms.add(declaration.name.text);
               localReactiveDeclarations.add(declaration);
-              reportLocalFactoryImpurity(declaration.initializer, diagnostics);
+              if (isComponent) reportLocalFactoryImpurity(declaration.initializer, diagnostics);
               if ((statement.declarationList.flags & ts.NodeFlags.Let) !== 0) writableBindings.add(declaration.name.text);
               declaresReactive = true;
             }
@@ -295,7 +363,7 @@ export function transformReactJsx(
               }
               scopes.add(declaration.name.text);
               localReactiveDeclarations.add(declaration);
-              reportLocalFactoryImpurity(declaration.initializer, diagnostics);
+              if (isComponent) reportLocalFactoryImpurity(declaration.initializer, diagnostics);
               declaresReactive = true;
             }
           }
@@ -413,12 +481,33 @@ export function transformReactJsx(
         while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) base = base.expression;
         return ts.isIdentifier(base) && isHidden(base);
       };
+      const componentParameters = new Set<string>();
+      for (const parameter of node.parameters) boundNames(parameter.name, componentParameters);
+      // Hook bindings are emitted at component scope. A selection that closes
+      // over a callback-local value (for example `items.map(item => map[item])`)
+      // cannot be hoisted there without producing a temporal-dead-zone or an
+      // undefined identifier. Only component parameters and known reactive
+      // bases are safe to reference from the generated hook statement.
+      const canHoistDynamicSource = (source: ts.Expression): boolean => {
+        let safe = true;
+        const inspect = (part: ts.Node): void => {
+          if (!safe) return;
+          if (ts.isIdentifier(part)) {
+            if (isNamePosition(part)) return;
+            if (!componentParameters.has(part.text) && !atoms.has(part.text) && !atomMaps.has(part.text)) safe = false;
+            return;
+          }
+          ts.forEachChild(part, inspect);
+        };
+        inspect(source);
+        return safe;
+      };
       if (atoms.size === 0 && scopes.size === 0) return node;
 
       const bindings: ts.Statement[] = [];
       const atomBindings = new Map<string, ts.Identifier>();
       const scopeBindings = new Map<string, ts.Identifier>();
-      const bindingForAtom = (atomName: string, source: ts.Node): ts.Identifier => {
+      const bindingForAtom = (atomName: string, _source: ts.Node): ts.Identifier => {
         const existing = atomBindings.get(atomName);
         if (existing) return existing;
         const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
@@ -431,21 +520,19 @@ export function transformReactJsx(
               name,
               undefined,
               undefined,
-              factory.createAsExpression(
-              factory.createCallExpression(factory.createIdentifier("__streamixUse"), undefined, [
+              asAny(
+              factory.createCallExpression(factory.createIdentifier("useStreamixSource"), undefined, [
                   factory.createIdentifier(atomName),
                 factory.createStringLiteral(atomName),
                 ]),
-                factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
               ),
             ),
           ], ts.NodeFlags.Const),
         );
         bindings.push(statement);
-        sourceMapAnchors.push({ statement, source });
         return name;
       };
-      const bindingForSource = (atomSource: ts.Expression, key: string, source: ts.Node = atomSource): ts.Identifier => {
+      const bindingForSource = (atomSource: ts.Expression, key: string, _source: ts.Node = atomSource): ts.Identifier => {
         const existing = atomBindings.get(key);
         if (existing) return existing;
         const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
@@ -458,25 +545,23 @@ export function transformReactJsx(
               name,
               undefined,
               undefined,
-              factory.createAsExpression(
-                factory.createCallExpression(factory.createIdentifier("__streamixUse"), undefined, [
+              asAny(
+                factory.createCallExpression(factory.createIdentifier("useStreamixSource"), undefined, [
                   // Dynamic selections resolve to whatever atom lives at the
                   // key at runtime, so the source is deliberately type-agnostic:
                   // a heterogeneous union (string and number atoms) must still
                   // satisfy the subscription helper's parameter.
-                  factory.createAsExpression(atomSource, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword)),
+                  asAny(atomSource),
                   factory.createStringLiteral(key),
                 ]),
-                factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
               ),
             ),
           ], ts.NodeFlags.Const),
         );
         bindings.push(statement);
-        sourceMapAnchors.push({ statement, source });
         return name;
       };
-      const bindingForScope = (scopeName: string, property: string, source: ts.Node): ts.Identifier => {
+      const bindingForScope = (scopeName: string, property: string, _source: ts.Node): ts.Identifier => {
         const bindingKey = `${scopeName}.${property}`;
         const existing = scopeBindings.get(bindingKey);
         if (existing) return existing;
@@ -490,8 +575,8 @@ export function transformReactJsx(
               name,
               undefined,
               undefined,
-              factory.createAsExpression(
-                factory.createCallExpression(factory.createIdentifier("__streamixUse"), undefined, [
+              asAny(
+                factory.createCallExpression(factory.createIdentifier("useStreamixSource"), undefined, [
                   factory.createCallExpression(
                     factory.createPropertyAccessExpression(factory.createIdentifier(scopeName), "get"),
                     undefined,
@@ -499,13 +584,11 @@ export function transformReactJsx(
                   ),
                   factory.createStringLiteral(`${scopeName}.${property}`),
                 ]),
-                factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
               ),
             ),
           ], ts.NodeFlags.Const),
         );
         bindings.push(statement);
-        sourceMapAnchors.push({ statement, source });
         return name;
       };
       const rewriteJsxValue = (expression: ts.Expression): ts.Expression => {
@@ -526,8 +609,15 @@ export function transformReactJsx(
               ts.isIdentifier(value.expression.expression) &&
               atomMaps.has(value.expression.expression.text)
             ) {
+              if (!canHoistDynamicSource(value.expression)) {
+                diagnostics.push(diagnostic(value, "error", "A dynamic atom selection captures a callback-local value and cannot be compiled into a component hook. Move the selection to component scope or use an explicit subscription."));
+                return value;
+              }
               return bindingForSource(value.expression, value.expression.getText(sourceFile), value);
             }
+          }
+          if (ts.isShorthandPropertyAssignment(value) && atoms.has(value.name.text) && !isHidden(value.name)) {
+            return factory.createPropertyAssignment(value.name, bindingForAtom(value.name.text, value));
           }
           if (ts.isIdentifier(value) && atoms.has(value.text) && !isNamePosition(value) && !isHidden(value)) {
             return bindingForAtom(value.text, value);
@@ -547,6 +637,10 @@ export function transformReactJsx(
             atomMaps.has(value.expression.text) &&
             !isHidden(value.expression)
           ) {
+            if (!canHoistDynamicSource(value)) {
+              diagnostics.push(diagnostic(value, "error", "A dynamic atom selection captures a callback-local value and cannot be compiled into a component hook. Move the selection to component scope or use an explicit subscription."));
+              return value;
+            }
             return bindingForSource(value, value.getText(sourceFile));
           }
           if (
@@ -583,6 +677,10 @@ export function transformReactJsx(
             atoms.has(value.whenTrue.text) && !isHidden(value.whenTrue) &&
             atoms.has(value.whenFalse.text) && !isHidden(value.whenFalse)
           ) {
+            if (!canHoistDynamicSource(value)) {
+              diagnostics.push(diagnostic(value, "error", "A conditional atom selection captures a callback-local value and cannot be compiled into a component hook. Move the selection to component scope or use an explicit subscription."));
+              return value;
+            }
             return bindingForSource(value, value.getText(sourceFile));
           }
           return ts.visitEachChild(value, jsxValueVisitor, context);
@@ -591,44 +689,10 @@ export function transformReactJsx(
       };
 
       const visit: ts.Visitor = (child) => {
-        if (
-          ts.isCallExpression(child) &&
-          factoryKind(child, imports, checker) === "derived" &&
-          child.arguments.length > 0 &&
-          (ts.isArrowFunction(child.arguments[0]) || ts.isFunctionExpression(child.arguments[0]))
-        ) {
-          const callback = child.arguments[0] as ts.ArrowFunction | ts.FunctionExpression;
-          const rewriteDerivedRead: ts.Visitor = value => {
-            if (
-              ts.isIdentifier(value) &&
-              atoms.has(value.text) &&
-              !isNamePosition(value) &&
-              !isHidden(value) &&
-              value.parent &&
-              !(ts.isPropertyAccessExpression(value.parent) && value.parent.name === value)
-            ) {
-              return factory.createPropertyAccessExpression(value, "value");
-            }
-            return ts.visitEachChild(value, rewriteDerivedRead, context);
-          };
-          const body = ts.visitNode(callback.body, rewriteDerivedRead) as ts.ConciseBody;
-          const rewritten = ts.isArrowFunction(callback)
-            ? factory.updateArrowFunction(
-              callback, callback.modifiers, callback.typeParameters,
-              callback.parameters, callback.type, callback.equalsGreaterThanToken, body,
-            )
-            : factory.updateFunctionExpression(
-              callback, callback.modifiers, callback.asteriskToken, callback.name,
-              callback.typeParameters, callback.parameters, callback.type, body as ts.Block,
-            );
-          return factory.updateCallExpression(
-            child,
-            child.expression,
-            child.typeArguments,
-            [rewritten, ...child.arguments.slice(1)],
-          );
+        if (ts.isCallExpression(child) && factoryKind(child, imports, checker) === "derived") {
+          return lowerDerivedCallback(child, atoms, node, isHidden);
         }
-        if (ts.isVariableDeclaration(child) && localReactiveDeclarations.has(child) && child.initializer) {
+        if (isComponent && ts.isVariableDeclaration(child) && localReactiveDeclarations.has(child) && child.initializer) {
           needsRuntimeImport = true;
           const initializer = ts.visitNode(child.initializer, visit) as ts.Expression;
           return factory.updateVariableDeclaration(
@@ -636,7 +700,7 @@ export function transformReactJsx(
             child.name,
             child.exclamationToken,
             child.type,
-            factory.createCallExpression(factory.createIdentifier("__streamixLocal"), undefined, [
+            factory.createCallExpression(factory.createIdentifier("useStreamixLocal"), undefined, [
               factory.createArrowFunction(
                 undefined,
                 undefined,
@@ -695,6 +759,7 @@ export function transformReactJsx(
               atomName,
               child.operatorToken.kind,
               rewriteAtomReads(child.right, atoms, atomMaps, context),
+              isJavaScript,
             );
           }
           // The operator table and the write-operator predicate disagree;
@@ -719,9 +784,10 @@ export function transformReactJsx(
 
         if (ts.isJsxExpression(child) && child.expression) {
           if (ts.isArrowFunction(child.expression) || ts.isFunctionExpression(child.expression)) {
-            return ts.visitEachChild(child, visit, context);
+            const lowered = ts.visitNode(child.expression, visit) as ts.Expression;
+            return factory.updateJsxExpression(child, rewriteAtomReads(lowered, atoms, atomMaps, context, child.expression));
           }
-          if (isSharedAtomComponentProp(child, atoms)) {
+          if (isSharedAtomComponentProp(child, atoms, atomMaps)) {
             return child;
           }
           return factory.updateJsxExpression(child, rewriteJsxValue(child.expression));
@@ -731,8 +797,15 @@ export function transformReactJsx(
       };
 
       const body = ts.visitEachChild(functionBody, visit, context) as ts.Block;
-      if (bindings.length === 0 && localReactiveDeclarations.size === 0) {
+      if (!isComponent && bindings.length > 0) {
+        diagnostics.push(diagnostic(node, "error", "Reactive JSX in a non-component function cannot use generated React hooks. Rename it as a React component or use an explicit component boundary."));
         return node;
+      }
+      if (bindings.length === 0 && (!isComponent || localReactiveDeclarations.size === 0)) {
+        // Write-only helpers still need their lowered bodies. Returning the
+        // original node here discarded `count = value` and `count++` whenever
+        // JSX did not introduce a subscription binding.
+        return body === functionBody ? node : updateFunctionLike(factory, node, body);
       }
 
       // Trace only after React commits. Recording while the function body is
@@ -741,7 +814,7 @@ export function transformReactJsx(
       // components trace under their declared name.
       if (traceName && /^[A-Z]/.test(traceName)) {
         bindings.push(factory.createExpressionStatement(factory.createCallExpression(
-          factory.createIdentifier("__streamixAfterCommit"),
+          factory.createIdentifier("useStreamixAfterCommit"),
           undefined,
           [factory.createArrowFunction(
             undefined,
@@ -784,8 +857,12 @@ export function transformReactJsx(
         if (ts.isFunctionDeclaration(statement)) return transformFunction(statement, statement.name?.text);
         if (ts.isVariableStatement(statement)) {
           const declarations = statement.declarationList.declarations.map(declaration => {
-            if (!ts.isIdentifier(declaration.name) || !/^[A-Z]/.test(declaration.name.text) || !declaration.initializer) return declaration;
-            const updated = transformInitializer(declaration.initializer, declaration.name.text);
+            if (!declaration.initializer) return declaration;
+            const init = ts.visitNode(declaration.initializer, lowerModuleFormulas) as ts.Expression;
+            if (!ts.isIdentifier(declaration.name)) {
+              return init === declaration.initializer ? declaration : factory.updateVariableDeclaration(declaration, declaration.name, declaration.exclamationToken, declaration.type, init);
+            }
+            const updated = transformInitializer(init, declaration.name.text);
             return updated === declaration.initializer ? declaration : factory.updateVariableDeclaration(declaration, declaration.name, declaration.exclamationToken, declaration.type, updated);
           });
           return factory.updateVariableStatement(statement, statement.modifiers,
@@ -804,6 +881,31 @@ export function transformReactJsx(
   // A class component cannot safely adopt compiler-generated React hooks.
   // Report it rather than silently leaving live atoms as JSX children.
   const inspectSkipped = (node: ts.Node): void => {
+    // Nested components have their own hook lifetime. Transforming only the
+    // outer component would leave their implicit reads unbound, while blindly
+    // lifting hooks into the parent would violate React's Rules of Hooks.
+    if (node.parent !== sourceFile && (
+      ts.isFunctionDeclaration(node) && !!node.name && /^[A-Z]/.test(node.name.text) ||
+      ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && /^[A-Z]/.test(node.name.text) &&
+        !!node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+    )) {
+      const name = ts.isFunctionDeclaration(node) ? node.name!.text : (node as ts.VariableDeclaration).name.getText(sourceFile);
+      const reactiveAncestors = new Set([...moduleAtoms, ...moduleScopes]);
+      for (let ancestor = node.parent; ancestor && ancestor !== sourceFile; ancestor = ancestor.parent) {
+        if (!ts.isBlock(ancestor)) continue;
+        for (const statement of ancestor.statements) {
+          if (!ts.isVariableStatement(statement)) continue;
+          for (const declaration of statement.declarationList.declarations) {
+            if (ts.isIdentifier(declaration.name) && declaration.initializer &&
+                ["atom", "derived", "flow", "scope"].includes(factoryKind(declaration.initializer, imports, checker) ?? ""))
+              reactiveAncestors.add(declaration.name.text);
+          }
+        }
+      }
+      if ([...reactiveAncestors].some(atomName => new RegExp(`\\b${atomName}\\b`).test(node.getText(sourceFile)))) {
+        diagnostics.push(diagnostic(node, "error", `Nested component ${name} requires an independent compilation boundary. Move it to module scope or use explicit React hooks.`));
+      }
+    }
     if (ts.isClassDeclaration(node) && node.name) {
       const text = node.getText(sourceFile);
       if ([...moduleAtoms, ...moduleScopes].some(name => new RegExp(`\\b${name}\\b`).test(text))) {
@@ -818,13 +920,13 @@ export function transformReactJsx(
   const printed = printer.printFile(transformed);
   const directive = printed.match(/^(\s*["']use client["'];?\s*\n)/);
   const code = needsRuntimeImport ? (directive
-    ? `${directive[0]}${runtimePrelude}\n${printed.slice(directive[0].length)}`
-    : `${runtimePrelude}\n${printed}`) : printed;
+    ? `${directive[0]}${runtimePreludeFor(printed)}\n${printed.slice(directive[0].length)}`
+    : `${runtimePreludeFor(printed)}\n${printed}`) : printed;
   return {
     code,
     bindingCount,
     diagnostics,
-    sourceMap: createStatementSourceMap(sourceFile, transformed, printer, printed, code, sourceMapAnchors),
+    sourceMap: createTokenSourceMap(sourceFile.text, code, sourceFile.fileName),
   };
 }
 
@@ -834,124 +936,6 @@ export function transformReactJsx(
  * bindings map directly to their JSX source expression. Bundlers can compose
  * this with their normal TSX/JS maps without exposing the virtual source tree.
  */
-function createStatementSourceMap(
-  original: ts.SourceFile,
-  transformed: ts.SourceFile,
-  printer: ts.Printer,
-  printed: string,
-  code: string,
-  compilerAnchors: readonly SourceMapAnchor[],
-): ReactJsxSourceMap {
-  const mapLines = new Map<number, Array<{ generatedColumn: number; line: number; column: number }>>();
-  const addAnchor = (generatedOffset: number, source: ts.Node): void => {
-    if (source.pos < 0) return;
-    const originalPosition = original.getLineAndCharacterOfPosition(source.getStart(original));
-    const generated = lineAndColumnAt(code, generatedOffset);
-    const line = mapLines.get(generated.line) ?? [];
-    line.push({ generatedColumn: generated.column, line: originalPosition.line, column: originalPosition.character });
-    mapLines.set(generated.line, line);
-  };
-  let searchFrom = 0;
-  const printedOffset = Math.max(0, code.lastIndexOf(printed));
-  for (const statement of transformed.statements) {
-    const emitted = printer.printNode(ts.EmitHint.Unspecified, statement, transformed);
-    const position = printed.indexOf(emitted, searchFrom);
-    if (position < 0) continue;
-    searchFrom = position + emitted.length;
-    addAnchor(printedOffset + position, ts.getOriginalNode(statement));
-  }
-  for (const anchor of compilerAnchors) {
-    const emitted = printer.printNode(ts.EmitHint.Unspecified, anchor.statement, transformed);
-    const position = code.indexOf(emitted);
-    if (position >= 0) addAnchor(position, anchor.source);
-  }
-  // TS retains original nodes through the transformation. Anchor preserved
-  // leaf tokens too, which gives composed maps real columns within authored
-  // expressions rather than only their enclosing statement's start column.
-  const leaves: ts.Node[] = [];
-  const collectLeaves = (node: ts.Node): void => {
-    const originalNode = ts.getOriginalNode(node);
-    if (originalNode.pos >= 0 && isMappableSourceLeaf(node)) leaves.push(node);
-    ts.forEachChild(node, collectLeaves);
-  };
-  collectLeaves(transformed);
-  let leafSearchFrom = printedOffset;
-  for (const leaf of leaves) {
-    const emitted = printer.printNode(ts.EmitHint.Unspecified, leaf, transformed);
-    if (!emitted || emitted.includes("\n")) continue;
-    const position = code.indexOf(emitted, leafSearchFrom);
-    if (position < 0) continue;
-    addAnchor(position, ts.getOriginalNode(leaf));
-    leafSearchFrom = position + Math.max(1, emitted.length);
-  }
-  return {
-    version: 3,
-    file: original.fileName,
-    sources: [original.fileName],
-    sourcesContent: [original.text],
-    names: [],
-    mappings: encodeLineMappings(mapLines),
-  };
-}
-
-function isMappableSourceLeaf(node: ts.Node): boolean {
-  return ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node) ||
-    ts.isNoSubstitutionTemplateLiteral(node) || node.kind === ts.SyntaxKind.ThisKeyword ||
-    node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword ||
-    node.kind === ts.SyntaxKind.NullKeyword;
-}
-
-function lineAndColumnAt(text: string, offset: number): { line: number; column: number } {
-  const before = text.slice(0, offset);
-  const line = (before.match(/\n/g) ?? []).length;
-  const lastNewline = before.lastIndexOf("\n");
-  return { line, column: offset - (lastNewline + 1) };
-}
-
-function encodeLineMappings(lines: ReadonlyMap<number, readonly { generatedColumn: number; line: number; column: number }[]>): string {
-  const lastLine = Math.max(-1, ...lines.keys());
-  let previousSourceLine = 0;
-  let previousSourceColumn = 0;
-  const result: string[] = [];
-  for (let generatedLine = 0; generatedLine <= lastLine; generatedLine++) {
-    const sources = lines.get(generatedLine);
-    if (!sources) {
-      result.push("");
-      continue;
-    }
-    let previousGeneratedColumn = 0;
-    result.push([...sources]
-      .sort((left, right) => left.generatedColumn - right.generatedColumn)
-      .map(source => {
-        const segment = [
-          encodeVlq(source.generatedColumn - previousGeneratedColumn),
-          encodeVlq(0),
-          encodeVlq(source.line - previousSourceLine),
-          encodeVlq(source.column - previousSourceColumn),
-        ].join("");
-        previousGeneratedColumn = source.generatedColumn;
-        previousSourceLine = source.line;
-        previousSourceColumn = source.column;
-        return segment;
-      })
-      .join(","));
-  }
-  return result.join(";");
-}
-
-function encodeVlq(value: number): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  let remaining = (Math.abs(value) << 1) | (value < 0 ? 1 : 0);
-  let encoded = "";
-  do {
-    let digit = remaining & 31;
-    remaining >>>= 5;
-    if (remaining > 0) digit |= 32;
-    encoded += alphabet[digit];
-  } while (remaining > 0);
-  return encoded;
-}
-
 /**
  * A bare atom supplied to a user component is a transport of shared state,
  * not a render read. Preserve the reference so the receiving component can
@@ -961,8 +945,9 @@ function encodeVlq(value: number): string {
 function isSharedAtomComponentProp(
   expression: ts.JsxExpression,
   atoms: ReadonlySet<string>,
+  atomMaps: ReadonlyMap<string, ReadonlyMap<string, string>>,
 ): boolean {
-  if (!expression.expression || !isAtomReferenceExpression(expression.expression, atoms)) {
+  if (!expression.expression || !isAtomReferenceExpression(expression.expression, atoms, atomMaps)) {
     return false;
   }
   if (!ts.isJsxAttribute(expression.parent)) return false;
@@ -975,18 +960,55 @@ function isSharedAtomComponentProp(
   const tagName = ts.isJsxOpeningElement(opening) || ts.isJsxSelfClosingElement(opening)
     ? opening.tagName
     : undefined;
-  return tagName !== undefined && ts.isIdentifier(tagName) && /^[A-Z]/.test(tagName.text);
+  return tagName !== undefined && (
+    ts.isIdentifier(tagName) && /^[A-Z]/.test(tagName.text) ||
+    ts.isPropertyAccessExpression(tagName) && ts.isIdentifier(tagName.expression) && /^[A-Z]/.test(tagName.expression.text)
+  );
 }
 
-function isAtomReferenceExpression(expression: ts.Expression, atoms: ReadonlySet<string>): boolean {
+function isAtomReferenceExpression(
+  expression: ts.Expression,
+  atoms: ReadonlySet<string>,
+  atomMaps: ReadonlyMap<string, ReadonlyMap<string, string>>,
+): boolean {
   if (ts.isIdentifier(expression)) return atoms.has(expression.text);
+  if ((ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) && atomFromMapAccess(expression, atomMaps)) return true;
   return ts.isCallExpression(expression) &&
     ts.isIdentifier(expression.expression) && expression.expression.text === "atomRef" &&
     expression.arguments.length === 1 &&
     ts.isIdentifier(expression.arguments[0]) && atoms.has(expression.arguments[0].text);
 }
 
-const runtimePrelude = `import { __streamixAfterCommit, __streamixLocal, __streamixTrace, __streamixUse } from "@epikodelabs/streamix/react";`;
+function runtimePreludeFor(code: string): string {
+  const names = ["useStreamixAfterCommit", "useStreamixLocal", "__streamixTrace", "useStreamixSource"]
+    .filter(name => code.includes(`${name}(`));
+  return `import { ${names.join(", ")} } from "@epikodelabs/streamix/react";`;
+}
+
+function collectImportedReactiveSources(file: ts.SourceFile, checker?: ts.TypeChecker): Set<string> {
+  const names = new Set<string>();
+  if (!checker) return names;
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !statement.importClause ||
+        !ts.isStringLiteral(statement.moduleSpecifier) ||
+        /^@epikodelabs\/streamix(?:\/|$)/.test(statement.moduleSpecifier.text)) continue;
+    const clause = statement.importClause;
+    const candidates: ts.Identifier[] = [];
+    if (clause.name) candidates.push(clause.name);
+    if (clause.namedBindings && ts.isNamedImports(clause.namedBindings))
+      candidates.push(...clause.namedBindings.elements.map(element => element.name));
+    for (const identifier of candidates) {
+      const type = checker.getTypeAtLocation(identifier);
+      if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) continue;
+      const value = type.getProperty("value");
+      const subscribe = type.getProperty("subscribe");
+      if (!value || !subscribe) continue;
+      const subscriptionType = checker.getTypeOfSymbolAtLocation(subscribe, identifier);
+      if (subscriptionType.getCallSignatures().length > 0) names.add(identifier.text);
+    }
+  }
+  return names;
+}
 
 function collectModuleBindings(
   sourceFile: ts.SourceFile,
@@ -1391,6 +1413,7 @@ function writeLogicalAtom(
   atomName: string,
   kind: ts.SyntaxKind,
   right: ts.Expression,
+  isJavaScript: boolean,
 ): ts.CallExpression {
   const atom = factory.createIdentifier(atomName);
   const current = factory.createUniqueName("__streamixCurrent");
@@ -1400,13 +1423,13 @@ function writeLogicalAtom(
       ? factory.createPrefixUnaryExpression(ts.SyntaxKind.ExclamationToken, current as ts.Expression)
       : factory.createBinaryExpression(
           factory.createBinaryExpression(
-            factory.createParenthesizedExpression(factory.createAsExpression(current, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword))),
+            factory.createParenthesizedExpression(isJavaScript ? current : factory.createAsExpression(current, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword))),
             factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
             factory.createNull(),
           ),
           factory.createToken(ts.SyntaxKind.BarBarToken),
           factory.createBinaryExpression(
-            factory.createParenthesizedExpression(factory.createAsExpression(current, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword))),
+            factory.createParenthesizedExpression(isJavaScript ? current : factory.createAsExpression(current, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword))),
             factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
             factory.createIdentifier("undefined"),
           ),
@@ -1444,19 +1467,39 @@ function rewriteAtomReads(
   atoms: ReadonlySet<string>,
   atomMaps: ReadonlyMap<string, ReadonlyMap<string, string>>,
   context: ts.TransformationContext,
+  lexicalOrigin: ts.Node = expression,
 ): ts.Expression {
+  let boundary: ts.Node | undefined = lexicalOrigin.parent;
+  while (boundary && !ts.isFunctionLike(boundary) && !ts.isSourceFile(boundary)) boundary = boundary.parent;
+  const shadowed = (id: ts.Identifier) => isShadowedName(id.text, id, boundary ?? expression);
   const visitor: ts.Visitor = (node) => {
+    // Keep invalid read-only lvalues intact; the original assignment has a
+    // compiler diagnostic and must not be changed into a property write.
+    if (ts.isBinaryExpression(node) && isAtomWriteOperator(node.operatorToken.kind) &&
+        atomReferenceName(node.left, atoms, atomMaps)) return node;
+    if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+        atomReferenceName(node.operand, atoms, atomMaps)) return node;
     // An explicit `.value` read already observes the atom's current value.
     // Leave the whole expression untouched; descending would produce a
     // nonsensical second `.value` on the resolved value.
     if (
       ts.isPropertyAccessExpression(node) &&
-      node.name.text === "value" &&
+      (node.name.text === "value" || node.name.text === "next" || node.name.text === "subscribe" || node.name.text === "dispose") &&
       atomReferenceName(node.expression, atoms, atomMaps)
     ) {
       return node;
     }
-    if (ts.isIdentifier(node) && atoms.has(node.text)) {
+    // Object shorthand is both a value read and a property name. Expanding it
+    // avoids generating the invalid `{ value.value }` form.
+    if (ts.isShorthandPropertyAssignment(node) && atoms.has(node.name.text) &&
+        !shadowed(node.name)) {
+      return context.factory.createPropertyAssignment(
+        node.name,
+        context.factory.createPropertyAccessExpression(node.name, "value"),
+      );
+    }
+    if (ts.isIdentifier(node) && atoms.has(node.text) && !isNamePosition(node) &&
+        !shadowed(node)) {
       return context.factory.createPropertyAccessExpression(node, "value");
     }
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {

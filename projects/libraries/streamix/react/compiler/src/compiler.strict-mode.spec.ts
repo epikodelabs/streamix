@@ -52,8 +52,8 @@ idescribe("React JSX compiler Strict Mode semantics", () => {
       }
     `);
 
-    expect(result.code).toContain("const state = __streamixLocal(() => scope({ title: \"Ready\" }))");
-    expect(result.code).toContain('__streamixUse(state.get("title"), "state.title")');
+    expect(result.code).toContain("const state = useStreamixLocal(() => scope({ title: \"Ready\" }))");
+    expect(result.code).toContain('useStreamixSource(state.get("title"), "state.title")');
   });
 
   it("rejects observable work in local atom and scope initialization", () => {

@@ -4,7 +4,8 @@
   "type": "object",
   "properties": {
     "delegateTarget": { "type": "string" },
-    "sourceRoot": { "type": "string" }
+    "sourceRoot": { "type": "string" },
+    "watch": { "type": "boolean" }
   },
   "required": ["delegateTarget", "sourceRoot"],
   "additionalProperties": true

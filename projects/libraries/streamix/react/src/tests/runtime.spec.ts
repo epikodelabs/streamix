@@ -105,6 +105,31 @@ idescribe("React runtime escape hatches", () => {
     expect(container.textContent).toBe("1");
   });
 
+  it("re-renders explicit reads when a source emits the same object reference", () => {
+    const item = { count: 0 };
+    const model = atom(item);
+    let renders = 0;
+    function View() {
+      const value = useAtomValue(model);
+      renders++;
+      return createElement("output", null, String(value.count));
+    }
+    act(() => root.render(createElement(View)));
+    const before = renders;
+    act(() => { item.count = 7; model.next(item); });
+    expect(container.textContent).toBe("7");
+    expect(renders).toBeGreaterThan(before);
+  });
+
+  it("handles a loader throwing synchronously as a resource error", async () => {
+    const resource = createResource<string>(() => { throw new Error("loader failed"); });
+    expect(() => resource.preload()).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(resource.status).toBe("error");
+    expect(() => resource.read()).toThrowError(/loader failed/);
+  });
+
   it("uses explicitly preloaded resources for Suspense-safe loading and cancellation", async () => {
     let resolve!: (value: string) => void;
     let aborted = false;

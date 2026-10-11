@@ -10,10 +10,10 @@ type Listener = () => void;
 let events: readonly StreamixDevtoolsEvent[] = [];
 const listeners = new Set<Listener>();
 const maxEvents = 250;
-const environment = globalThis as typeof globalThis & {
-  process?: { env?: Record<string, string | undefined> };
-};
-const enabled = environment.process?.env?.["NODE_ENV"] !== "production";
+// Build tools replace `process.env.NODE_ENV` statically. Reading it through
+// `globalThis` defeats that replacement and accidentally enables the panel in
+// production browser bundles.
+const enabled = process.env.NODE_ENV !== "production";
 let queued = false;
 /** Queues DevTools notifications outside React's render and snapshot phases. */
 export function recordStreamixDevtoolsEvent(event: Omit<StreamixDevtoolsEvent, "time">): void {

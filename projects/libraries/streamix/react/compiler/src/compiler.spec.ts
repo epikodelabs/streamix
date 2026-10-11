@@ -11,9 +11,9 @@ describe("React JSX compiler", () => {
     `);
 
     expect(result.bindingCount).toBe(2);
-    expect(result.code).toContain('import { __streamixAfterCommit, __streamixLocal, __streamixTrace, __streamixUse } from "@epikodelabs/streamix/react"');
-    expect(result.code).toContain('__streamixUse(count, "count")');
-    expect(result.code).toContain('__streamixUse(state.get("title"), "state.title")');
+    expect(result.code).toContain('import { useStreamixAfterCommit, useStreamixLocal, __streamixTrace, useStreamixSource } from "@epikodelabs/streamix/react"');
+    expect(result.code).toContain('useStreamixSource(count, "count")');
+    expect(result.code).toContain('useStreamixSource(state.get("title"), "state.title")');
     expect(result.code).toContain('count.next(count.value + 1)');
     expect(result.code).toContain('{__streamixBinding1 + 1}');
   });
@@ -29,6 +29,6 @@ describe("React JSX compiler", () => {
     `);
 
     expect(result.code).toContain('derived(() => price.value * quantity.value)');
-    expect(result.code).toContain('__streamixUse(total, "total")');
+    expect(result.code).toContain('useStreamixSource(total, "total")');
   });
 });

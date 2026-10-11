@@ -9,11 +9,11 @@ describe("Streamix React Vite plugin", () => {
       "/workspace/src/Counter.tsx",
     ) as { code: string; map: { sources: readonly string[] } };
 
-    expect(transformed.code).toContain('__streamixUse(count, "count")');
+    expect(transformed.code).toContain('useStreamixSource(count, "count")');
     expect(transformed.map.sources).toEqual(["/workspace/src/Counter.tsx"]);
   });
 
-  it("skips non-TSX and node_modules modules", () => {
+  it("skips non-JSX and node_modules modules", () => {
     const plugin = sx();
     const context = { error: (message: string): never => { throw new Error(message); } } as any;
 

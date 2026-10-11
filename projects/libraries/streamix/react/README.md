@@ -1,7 +1,7 @@
 # React Adoption Layer
 
 `@epikodelabs/streamix/react` is a compiler-first integration for React.
-Write Streamix atoms and scopes directly in TSX; the compiler lowers JSX reads
+Write Streamix atoms and scopes directly in TSX or JSX; the compiler lowers JSX reads
 to React's concurrent-safe external-store contract.
 
 ```tsx
@@ -91,13 +91,42 @@ function Summary({ model }: { model: typeof state }) {
 <Summary model={state} />;
 ```
 
-## Strict Mode and ownership
+## Strict Mode, Activity, and ownership
 
-Local reactive declarations are stable for a committed component instance and
-dispose after unmount. React development Strict Mode can abandon an initial
-render, so local initialization must be render-pure. The compiler rejects
-obvious render work in a local initializer: unknown calls, `new`, `await`, and
-writes.
+Local reactive declarations are stable for a committed component instance.
+For an ordinary mounted component with no explicit lifetime, they dispose on
+effect cleanup (after a Strict Mode-safe microtask grace period). **React
+Activity / Offscreen can run that cleanup merely because a tree is hidden.**
+React has no effect-cleanup signal that distinguishes hide from permanent
+unmount, so that automatic strategy is not Activity-safe.
+
+For Activity or any tree that may preserve hook state while hidden, explicitly
+own the reactive instances *outside* the hidden subtree:
+
+```tsx
+import { createStreamixLifetime, StreamixLifetimeProvider } from "@epikodelabs/streamix/react";
+
+const lifetime = createStreamixLifetime(); // owned by your feature / route host
+root.render(
+  <StreamixLifetimeProvider lifetime={lifetime}>
+    <Activity mode="visible"><Screen /></Activity>
+  </StreamixLifetimeProvider>
+);
+// When the feature is permanently removed, not when Activity is hidden:
+root.unmount();
+lifetime.dispose();
+```
+
+This lifetime also owns `useResource` resources and cancels them when disposed.
+Resource replacements resulting from dependency changes still cancel the old
+resource. The tradeoff is deliberate: child instances remain retained after a
+child unmount until their parent lifetime is disposed. Choose an appropriately
+short-lived feature/route boundary, never a global lifetime for transient lists.
+
+React development Strict Mode may abandon an initial render, so factory
+initialization must be render-pure. The compiler rejects obvious render work
+in a local initializer: unknown calls, `new`, `await`, and writes. Only
+*committed* instances are registered in an explicit lifetime.
 
 Start work from an effect, event handler, route loader, or explicit resource
 preload. A hook cannot retroactively give an abandoned render a committed
@@ -107,9 +136,12 @@ identity.
 
 ### Native Vite React
 
-Use the Vite plugin before the React JSX plugin. It transforms authored TSX,
-reports source-located compiler diagnostics, and returns a map Vite can compose
-with its normal React build pipeline.
+Use the Vite plugin before the React JSX plugin. It transforms authored
+`.ts`, `.tsx`, `.js`, and `.jsx` modules, reports source-located compiler
+diagnostics, and returns a source map Vite can compose with its usual pipeline.
+Preserved tokens map to their exact authored occurrence; synthetic hook
+bindings are intentionally unmapped. The generated code is a rewritten AST,
+not a formatting-preserving text edit.
 
 ```ts
 import { defineConfig } from "vite";
@@ -147,8 +179,9 @@ Point the delegated target at preprocessing output:
 }
 ```
 
-The builder transforms TSX into `.angular/.streamix/<app>/src`, writes source
-maps beside transformed files, then delegates to the normal application build.
+The builder transforms TS/TSX/JS/JSX into `.angular/.streamix/<app>/src`,
+writes source maps beside transformed files, then delegates to the normal
+application build. Test files and declarations remain unchanged.
 `app7` is the working example.
 
 ## Editor type checking
@@ -171,8 +204,10 @@ Restart the TypeScript server after installing or changing this setting. For
 supported JSX expressions, the editor sees an atom as its current value (for
 example `atom(1)` is a `number` in `{count.toFixed()}`), while assignments are
 checked as `.next(...)` writes. Diagnostics and navigation spans map back to
-the authored TSX. The production compiler remains the authority for emitted
-JavaScript and its broader transform surface.
+the authored source. The editor also supports Streamix-authored `.ts` and
+`.js` helpers. The production compiler remains authoritative for emitted
+JavaScript; editor adoption of arbitrary imported symbols remains more
+limited than compiler adoption through a TypeScript Program.
 
 ## Explicit runtime boundaries
 
@@ -194,8 +229,17 @@ use `renderAtomSnapshotScript()` on the server and
 ## Tooling
 
 `StreamixDevtools` is an opt-in panel for reactive reads, subscriptions,
-writes, unsubscriptions, and committed renders. Compiler-added bindings map
-back to their originating JSX expression through generated source maps.
+writes, unsubscriptions, and committed renders. Source maps preserve positions of unchanged tokens across repeated JSX
+expressions; synthesized hook machinery does not pretend to originate in
+application source.
 
 For the complete semantics and limitations, see the
 [React documentation](../../../../docs/REACT.md).
+
+## Release verification still required
+
+The repository contains regression specs for React Activity, Strict Mode,
+compiler output, Vite, and the Angular-hosted builder. Verify these against
+the project's actual React, TypeScript, Vite, and builder dependencies before
+release. The isolated TypeScript/compiler harness does not replace real React
+Compiler, Fast Refresh, Suspense, hydration, or esbuild map-composition tests.

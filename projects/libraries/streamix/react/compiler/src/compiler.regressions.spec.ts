@@ -5,9 +5,9 @@ describe("Streamix React adoption regressions", () => {
   it("adopts arrow components and preserves local atom ownership without JSX reads", () => {
     const arrow = transformReactJsx(`const status = atom("Ready"); export const App = () => <div>{status}</div>;`);
     expect(arrow.bindingCount).toBe(1);
-    expect(arrow.code).toContain('__streamixUse(status, "status")');
+    expect(arrow.code).toContain('useStreamixSource(status, "status")');
     const owner = transformReactJsx(`function Parent() { let count = atom(0); return <Child source={count}/>; }`);
-    expect(owner.code).toContain("__streamixLocal(() => atom(0))");
+    expect(owner.code).toContain("useStreamixLocal(() => atom(0))");
   });
 
   it("does not corrupt property names, shadowing parameters, or const comparisons", () => {
@@ -49,7 +49,7 @@ describe("Streamix React adoption regressions", () => {
       }
     `);
     expect(result.diagnostics.some(diagnostic => diagnostic.category === "error" && diagnostic.message.includes("after a possible return"))).toBe(true);
-    expect(result.code).not.toContain("__streamixLocal");
+    expect(result.code).not.toContain("useStreamixLocal");
   });
 
   it("uses a host TypeScript program to refuse same-named non-Streamix factories", () => {
@@ -77,7 +77,7 @@ describe("Streamix React adoption regressions", () => {
 
     const result = transformReactJsx(source, fileName, { program });
     expect(result.bindingCount).toBe(0);
-    expect(result.code).not.toContain("__streamixUse");
+    expect(result.code).not.toContain("useStreamixSource");
   });
 
   it("lowers every supported compound write instead of assigning to the atom object", () => {
@@ -126,8 +126,8 @@ describe("Streamix React adoption regressions", () => {
 
     expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
     expect(result.code).toContain("count.next(count.value + 1)");
-    expect(result.code).toContain('__streamixUse(model[k] as any, "model[k]")');
-    expect(result.code).toContain('__streamixUse(count, "count")');
+    expect(result.code).toContain('useStreamixSource(model[k] as any, "model[k]")');
+    expect(result.code).toContain('useStreamixSource(count, "count")');
     expect(result.code).not.toContain(".value.value");
     expect(result.code).toContain(".toFixed(2)");
   });
@@ -144,7 +144,7 @@ describe("Streamix React adoption regressions", () => {
     `);
 
     expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
-    const hookIndex = result.code.indexOf("__streamixUse(count");
+    const hookIndex = result.code.indexOf("useStreamixSource(count");
     const returnIndex = result.code.indexOf("if (!open)");
     expect(hookIndex).toBeGreaterThan(-1);
     expect(returnIndex).toBeGreaterThan(-1);
@@ -175,7 +175,7 @@ describe("Streamix React adoption regressions", () => {
     `);
 
     expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
-    expect(result.code).toContain("__streamixUse(model[key] as any, \"model[key]\")");
+    expect(result.code).toContain("useStreamixSource(model[key] as any, \"model[key]\")");
   });
 
   it("traces committed renders for arrow and memo components under their declared name", () => {

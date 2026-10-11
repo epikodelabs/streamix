@@ -1,6 +1,11 @@
 import {
+  createContext,
+  createElement,
+  useContext,
+  type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useSyncExternalStore,
 } from "react";
@@ -24,8 +29,57 @@ const compilerSubscriptions = new WeakMap<object, {
   listeners: Set<Listener>;
   stop: (() => void) | null;
   generation: number;
+  version: number;
+  value: unknown;
+  snapshot: { readonly version: number; readonly value: unknown };
 }>();
 const compilerLocalDisposals = new WeakMap<object, object>();
+
+/**
+ * Explicit lifetime for compiler-owned atom and scope instances beneath
+ * React Activity/Offscreen. React effect cleanup is not an unmount signal:
+ * hidden trees tear down effects and later reuse the same hook state.
+ *
+ * Create this outside the hidden subtree, place a StreamixLifetimeProvider
+ * around it, and call lifetime.dispose() when the containing feature is
+ * permanently destroyed. Only committed instances are registered.
+ */
+export interface StreamixLifetime {
+  readonly disposed: boolean;
+  retain(value: unknown): void;
+  dispose(): void;
+}
+
+export function createStreamixLifetime(): StreamixLifetime {
+  const owned = new Set<Disposable>();
+  let disposed = false;
+  return {
+    get disposed() { return disposed; },
+    retain(value) {
+      if (disposed) throw new Error("Cannot register a Streamix instance with a disposed lifetime.");
+      if (isDisposable(value)) owned.add(value);
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      const errors: unknown[] = [];
+      for (const instance of owned) {
+        try { instance.dispose(); } catch (error) { errors.push(error); }
+      }
+      owned.clear();
+      if (errors.length) throw new AggregateError(errors, "Streamix lifetime disposal failed.");
+    },
+  };
+}
+
+const StreamixLifetimeContext = createContext<StreamixLifetime | null>(null);
+
+export function StreamixLifetimeProvider(props: {
+  readonly lifetime: StreamixLifetime;
+  readonly children?: ReactNode;
+}): ReturnType<typeof createElement> {
+  return createElement(StreamixLifetimeContext.Provider, { value: props.lifetime }, props.children);
+}
 
 function isDisposable(value: unknown): value is Disposable {
   return (typeof value === "object" || typeof value === "function") && value !== null &&
@@ -41,16 +95,23 @@ export function __streamixTrace(
 }
 
 /** @internal Registers compiler tracing only after a component commits. */
-export function __streamixAfterCommit(effect: () => void): void {
+export function useStreamixAfterCommit(effect: () => void): void {
   useEffect(effect);
 }
 
 /** @internal Stable component-local ownership slot used by compiler output. */
-export function __streamixLocal<T>(factory: () => T): T {
+export function useStreamixLocal<T>(factory: () => T): T {
+  const lifetime = useContext(StreamixLifetimeContext);
   const ref = useRef<T | null>(null);
   if (ref.current === null) ref.current = factory();
 
   useEffect(() => {
+    if (lifetime) {
+      lifetime.retain(ref.current);
+      // A hidden Activity cleans effects up but keeps this React hook slot.
+      // Dispose only at the explicit lifetime boundary, not on hide.
+      return;
+    }
     const instance = ref.current!;
     const token = {};
     if ((typeof instance === "object" || typeof instance === "function") && instance !== null) {
@@ -65,32 +126,43 @@ export function __streamixLocal<T>(factory: () => T): T {
         if (isDisposable(instance)) instance.dispose();
       });
     };
-  }, []);
+  }, [lifetime]);
 
   return ref.current;
 }
 
 /** @internal Concurrent-safe shared subscription used by compiler JSX reads. */
-export function __streamixUse<T>(source: DependencySource<T>, sourceName = "dynamic atom"): T {
-  return useSyncExternalStore(
-    (notify: Listener) => {
+export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "dynamic atom"): T {
+  const entryFor = (): NonNullable<ReturnType<typeof compilerSubscriptions.get>> => {
+    const sourceKey = source as unknown as object;
+    let entry = compilerSubscriptions.get(sourceKey);
+    if (!entry) {
+      entry = { listeners: new Set(), stop: null, generation: 0, version: 0, value: source.value, snapshot: { version: 0, value: source.value } };
+      compilerSubscriptions.set(sourceKey, entry);
+    }
+    return entry;
+  };
+  const subscribe = useCallback((notify: Listener) => {
       __streamixTrace("subscription", sourceName);
       const sourceKey = source as unknown as object;
-      let entry = compilerSubscriptions.get(sourceKey);
-      if (!entry) {
-        entry = { listeners: new Set(), stop: null, generation: 0 };
-        compilerSubscriptions.set(sourceKey, entry);
-      }
+      const entry = entryFor();
       entry.generation++;
       // Subscribe before joining the listener set: stateful atoms replay the
       // current value synchronously during subscribe, and the value a new
       // subscriber will read through getSnapshot is that same replay. Joining
       // afterwards keeps React free of a redundant synchronous store change.
       if (!entry.stop) {
+        let replaying = true;
         entry.stop = source.subscribe(() => {
+          entry!.version++;
+          entry!.value = source.value;
+          entry!.snapshot = { version: entry!.version, value: entry!.value };
+          // The first replay initializes the subscription; it isn't a write.
+          if (replaying) return;
           __streamixTrace("write", sourceName);
           for (const listener of entry!.listeners) listener();
         });
+        replaying = false;
       }
       entry.listeners.add(notify);
       return () => {
@@ -104,11 +176,24 @@ export function __streamixUse<T>(source: DependencySource<T>, sourceName = "dyna
           compilerSubscriptions.delete(sourceKey);
         });
       };
-    },
-    () => source.value,
-    () => source.value,
-  );
+    }, [source, sourceName]);
+  const getSnapshot = useCallback(() => {
+    const entry = entryFor();
+    // Accommodate stores changed before their first subscriber attaches.
+    if (!Object.is(entry.value, source.value)) {
+      entry.version++;
+      entry.value = source.value;
+      entry.snapshot = { version: entry.version, value: entry.value };
+    }
+    return entry.snapshot;
+  }, [source]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).value as T;
 }
+
+// Legacy runtime names remain available for modules generated by older builds.
+export const __streamixAfterCommit = useStreamixAfterCommit;
+export const __streamixLocal = useStreamixLocal;
+export const __streamixUse = useStreamixSource;
 
 /** Reads an atom explicitly, without compiler involvement. */
 export function read<T>(source: DependencySource<T>): T {
@@ -130,20 +215,9 @@ export function atomRef<T extends Atom<any>>(source: T): T {
  * contract. It is the non-compiler equivalent of a direct JSX atom read.
  */
 export function useAtomValue<T>(source: DependencySource<T>): T {
-  const subscribe = useCallback((notify: Listener) => {
-    recordStreamixDevtoolsEvent({ type: "subscription", source: "explicit atom read" });
-    const subscription = source.subscribe(() => {
-      recordStreamixDevtoolsEvent({ type: "write", source: "explicit atom read" });
-      notify();
-    });
-    return () => {
-      recordStreamixDevtoolsEvent({ type: "unsubscribe", source: "explicit atom read" });
-      void subscription();
-    };
-  }, [source]);
-  const getSnapshot = useCallback(() => source.value, [source]);
-  const value = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  return value;
+  // The explicit API and compiler syntax must share revisioned snapshots:
+  // Object.is(value, value) cannot detect same-identity object emissions.
+  return useStreamixSource(source, "explicit atom read");
 }
 
 /** React-style value/setter binding for a writable atom. */
@@ -164,7 +238,7 @@ export function useWritable<T>(source: Writable<T>): [T, (value: T) => void] {
  * atom the committed component still holds.
  */
 export function useAtom<T extends Atom<any>>(factory: () => T): T {
-  return __streamixLocal(factory);
+  return useStreamixLocal(factory);
 }
 
 export type ResourceStatus = "pending" | "ready" | "error";
@@ -206,7 +280,7 @@ export function createResource<T>(loader: (signal: AbortSignal) => Promise<T>): 
     if (disposed || promise) return;
     const active = new AbortController();
     controller = active;
-    promise = loader(active.signal).then(
+    promise = Promise.resolve().then(() => loader(active.signal)).then(
       value => { if (!disposed && controller === active && !active.signal.aborted) { status = "ready"; data = value; notify(); } },
       reason => { if (!disposed && controller === active && !active.signal.aborted) { status = "error"; error = reason; notify(); } },
     );
@@ -279,48 +353,29 @@ export function useResource<T>(
   loader: (signal: AbortSignal) => Promise<T>,
   dependencies: readonly unknown[],
 ): Resource<T> {
-  const resource = useRef<PreloadedResource<T> | null>(null);
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
-  const getResource = useCallback(() => createResource<T>(signal => loaderRef.current(signal)), dependencies);
+  const resource = useMemo(
+    () => createResource<T>(signal => loaderRef.current(signal)),
+    dependencies,
+  );
+  const lifetime = useContext(StreamixLifetimeContext);
+  const previousResource = useRef<PreloadedResource<T> | null>(null);
   useEffect(() => {
-    const next = getResource();
-    resource.current = next;
-    next.preload();
-    return () => { next.dispose(); if (resource.current === next) resource.current = null; };
-  }, [getResource]);
-  const [revisionNotify] = [useRef(new Set<Listener>())];
-  const subscribe = useCallback((notify: Listener) => {
-    revisionNotify.current.add(notify);
-    return () => { revisionNotify.current.delete(notify); };
-  }, []);
-  // React needs a stable primitive snapshot, incremented on resource changes.
-  const revision = useRef(0);
-  const getRevision = useCallback(() => revision.current, []);
-  useSyncExternalStore(subscribe, getRevision, getRevision);
-  useEffect(() => {
-    const item = resource.current;
-    if (!item) return;
-    const stop = item.subscribe(() => { revision.current++; for (const notify of revisionNotify.current) notify(); });
-    revision.current++; for (const notify of revisionNotify.current) notify();
-    return stop;
-  }, [getResource]);
-  // The view is created once so consumers can depend on the resource object
-  // without it being a new identity every render; the getters stay live.
-  const view = useRef<Resource<T> | null>(null);
-  if (!view.current) {
-    view.current = {
-      get status() { return resource.current?.status ?? "pending"; },
-      get data() { return resource.current?.data; },
-      get error() { return resource.current?.error; },
-      read() {
-        if (!resource.current) throw new Error("useResource loads after commit. For first-render Suspense, preload createResource() outside React render.");
-        return resource.current.read();
-      },
-      reload() { resource.current?.reload(); },
-    };
-  }
-  return view.current;
+    if (lifetime) {
+      if (previousResource.current && previousResource.current !== resource) previousResource.current.dispose();
+      previousResource.current = resource;
+      lifetime.retain(resource);
+      resource.preload();
+      // Activity hide is not a cancellation request. The lifetime is managed
+      // outside the hidden subtree; dependency changes still dispose the old
+      // resource in the next effect above.
+      return;
+    }
+    resource.preload();
+    return () => resource.dispose();
+  }, [resource, lifetime]);
+  return usePreloadedResource(resource);
 }
 
 /** Captures named atom values for an SSR payload. */
@@ -334,7 +389,7 @@ export function hydrateAtomSnapshot(
   snapshot: AtomSnapshot,
 ): void {
   for (const [name, value] of Object.entries(snapshot)) {
-    if (!(name in targets)) throw new Error(`Unknown atom snapshot key: ${name}`);
+    if (!Object.prototype.hasOwnProperty.call(targets, name)) throw new Error(`Unknown atom snapshot key: ${name}`);
     targets[name].next(value);
   }
 }

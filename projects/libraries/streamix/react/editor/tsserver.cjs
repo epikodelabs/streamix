@@ -29,12 +29,19 @@ module.exports = function init(modules) {
     [ts.SyntaxKind.QuestionQuestionEqualsToken, "??"],
   ]);
 
-  function isTsx(fileName) { return /\.tsx$/i.test(fileName); }
+  function isAdoptable(fileName, source) {
+    if (!/\.[jt]sx?$/i.test(fileName) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(fileName)) return false;
+    return /\.[jt]sx$/i.test(fileName) || source.includes("@epikodelabs/streamix");
+  }
 
   function virtualize(fileName, source) {
-    const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const kind = /\.tsx$/i.test(fileName) ? ts.ScriptKind.TSX :
+      /\.jsx$/i.test(fileName) ? ts.ScriptKind.JSX :
+      /\.js$/i.test(fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+    const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
     const factories = new Set();
     const derivedFactories = new Set();
+    const flowFactories = new Set();
     for (const statement of file.statements) {
       if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
           !/^@epikodelabs\/streamix(?:\/|$)/.test(statement.moduleSpecifier.text)) continue;
@@ -42,6 +49,7 @@ module.exports = function init(modules) {
       if (bindings && ts.isNamedImports(bindings)) for (const item of bindings.elements) {
         if ((item.propertyName || item.name).text === "atom") factories.add(item.name.text);
         if ((item.propertyName || item.name).text === "derived") derivedFactories.add(item.name.text);
+        if ((item.propertyName || item.name).text === "flow") flowFactories.add(item.name.text);
       }
     }
     const atoms = new Set();
@@ -49,7 +57,8 @@ module.exports = function init(modules) {
     const visit = node => {
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
           ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) &&
-          factories.has(node.initializer.expression.text)) atoms.add(node.name.text);
+          (factories.has(node.initializer.expression.text) || derivedFactories.has(node.initializer.expression.text) ||
+           flowFactories.has(node.initializer.expression.text))) atoms.add(node.name.text);
       ts.forEachChild(node, visit);
     };
     visit(file);
@@ -59,6 +68,42 @@ module.exports = function init(modules) {
     // document.
     const isValueRead = node => ts.isPropertyAccessExpression(node.parent) &&
       node.parent.expression === node && node.parent.name.text === "value";
+    const isNamePosition = node => {
+      const parent = node.parent;
+      return parent && (
+        ts.isPropertyAccessExpression(parent) && parent.name === node ||
+        ts.isPropertyAssignment(parent) && parent.name === node ||
+        ts.isShorthandPropertyAssignment(parent) && parent.name === node ||
+        (ts.isVariableDeclaration(parent) || ts.isParameter(parent) || ts.isBindingElement(parent) ||
+         ts.isFunctionDeclaration(parent) || ts.isPropertyDeclaration(parent)) && parent.name === node
+      );
+    };
+    const boundNames = (binding, names) => {
+      if (ts.isIdentifier(binding)) names.add(binding.text);
+      else if (ts.isBindingPattern(binding)) for (const part of binding.elements)
+        if (!ts.isOmittedExpression(part)) boundNames(part.name, names);
+    };
+    const shadowed = node => {
+      for (let parent = node.parent; parent && !ts.isSourceFile(parent); parent = parent.parent) {
+        if (ts.isFunctionLike(parent)) {
+          const parameters = new Set();
+          for (const parameter of parent.parameters) boundNames(parameter.name, parameters);
+          if (parameters.has(node.text)) return true;
+        }
+      }
+      return false;
+    };
+    const isRead = node => atoms.has(node.text) && !isValueRead(node) &&
+      !isNamePosition(node) && !shadowed(node);
+    const isComponentTransport = node => {
+      if (!ts.isIdentifier(node) || !atoms.has(node.text) || !ts.isJsxExpression(node.parent) ||
+          !ts.isJsxAttribute(node.parent.parent)) return false;
+      const opening = node.parent.parent.parent.parent;
+      if (!opening || !(ts.isJsxOpeningElement(opening) || ts.isJsxSelfClosingElement(opening))) return false;
+      const tag = opening.tagName;
+      return ts.isIdentifier(tag) && /^[A-Z]/.test(tag.text) ||
+        ts.isPropertyAccessExpression(tag) && ts.isIdentifier(tag.expression) && /^[A-Z]/.test(tag.expression.text);
+    };
 
     // The production compiler accepts `derived(() => price * quantity)` and
     // lowers the raw atom reads to `.value`. Give TypeScript that same value
@@ -69,8 +114,11 @@ module.exports = function init(modules) {
           (ts.isArrowFunction(node.arguments[0]) || ts.isFunctionExpression(node.arguments[0]))) {
         const callback = node.arguments[0];
         const visitCallback = child => {
-          if (ts.isIdentifier(child) && atoms.has(child.text) && !isValueRead(child) &&
-              !(ts.isPropertyAccessExpression(child.parent) && child.parent.name === child)) {
+          if (ts.isShorthandPropertyAssignment(child) && atoms.has(child.name.text) && !shadowed(child.name)) {
+            edits.push({ start: child.getStart(file), end: child.end, text: `${child.name.text}: ${child.name.text}.value` });
+            return;
+          }
+          if (ts.isIdentifier(child) && isRead(child)) {
             edits.push({ start: child.getStart(file), end: child.end, text: `${child.text}.value` });
             return;
           }
@@ -87,7 +135,11 @@ module.exports = function init(modules) {
       // virtual file only needs the type shape, so an identifier read becomes
       // `.value`, giving TypeScript the authored value type without injecting
       // runtime behavior into the editor process.
-      if (ts.isIdentifier(node) && atoms.has(node.text) && !isValueRead(node)) {
+      if (ts.isShorthandPropertyAssignment(node) && atoms.has(node.name.text) && !shadowed(node.name)) {
+        edits.push({ start: node.getStart(file), end: node.end, text: `${node.name.text}: ${node.name.text}.value` });
+        return;
+      }
+      if (ts.isIdentifier(node) && isRead(node) && !isComponentTransport(node)) {
         edits.push({ start: node.getStart(file), end: node.end, text: `${node.text}.value` });
         return;
       }
@@ -107,7 +159,11 @@ module.exports = function init(modules) {
     // lowered `.next(...)` argument. Collect them into a private list so the
     // whole-write edit can apply them itself.
     const collectReadEdits = (node, out) => {
-      if (ts.isIdentifier(node) && atoms.has(node.text) && !isValueRead(node)) {
+      if (ts.isShorthandPropertyAssignment(node) && atoms.has(node.name.text) && !shadowed(node.name)) {
+        out.push({ start: node.getStart(file), end: node.end, text: `${node.name.text}: ${node.name.text}.value` });
+        return;
+      }
+      if (ts.isIdentifier(node) && isRead(node)) {
         out.push({ start: node.getStart(file), end: node.end, text: `${node.text}.value` });
         return;
       }
@@ -226,8 +282,10 @@ module.exports = function init(modules) {
       const documents = new Map();
       host.getScriptSnapshot = fileName => {
         const original = snapshot(fileName);
-        if (!original || !isTsx(fileName)) return original;
-        const document = virtualize(fileName, original.getText(0, original.getLength()));
+        if (!original) return original;
+        const text = original.getText(0, original.getLength());
+        if (!isAdoptable(fileName, text)) return original;
+        const document = virtualize(fileName, text);
         documents.set(fileName, document);
         return ts.ScriptSnapshot.fromString(document.code);
       };
@@ -241,7 +299,34 @@ module.exports = function init(modules) {
         const document = documentFor(fileName);
         return !document || !span ? span : { start: document.toOriginal(span.start), length: Math.max(0, document.toOriginal(span.start + span.length) - document.toOriginal(span.start)) };
       };
-      proxy.getSemanticDiagnostics = fileName => service.getSemanticDiagnostics(fileName).map(diagnostic => ({ ...diagnostic, start: diagnostic.start === undefined ? undefined : documentFor(fileName).toOriginal(diagnostic.start), length: diagnostic.start === undefined || diagnostic.length === undefined ? diagnostic.length : Math.max(0, documentFor(fileName).toOriginal(diagnostic.start + diagnostic.length) - documentFor(fileName).toOriginal(diagnostic.start)) }));
+      const mapDiagnostics = (fileName, diagnostics) => diagnostics.map(diagnostic => ({
+        ...diagnostic,
+        ...(!documentFor(fileName) || diagnostic.start === undefined ? {} : {
+          start: documentFor(fileName).toOriginal(diagnostic.start),
+          length: diagnostic.length === undefined ? diagnostic.length :
+            Math.max(0, documentFor(fileName).toOriginal(diagnostic.start + diagnostic.length) -
+              documentFor(fileName).toOriginal(diagnostic.start)),
+        }),
+      }));
+      for (const kind of ["getSemanticDiagnostics", "getSyntacticDiagnostics", "getSuggestionDiagnostics"]) {
+        if (typeof service[kind] === "function")
+          proxy[kind] = fileName => mapDiagnostics(fileName, service[kind](fileName));
+      }
+      proxy.getCompletionsAtPosition = (fileName, position, options, formattingSettings) => {
+        const document = documentFor(fileName);
+        const result = service.getCompletionsAtPosition(fileName, document ? document.toGenerated(position) : position, options, formattingSettings);
+        if (!result) return result;
+        return {
+          ...result,
+          optionalReplacementSpan: mapSpan(fileName, result.optionalReplacementSpan),
+          entries: result.entries.map(entry => ({ ...entry, replacementSpan: mapSpan(fileName, entry.replacementSpan) })),
+        };
+      };
+      if (typeof service.getCompletionEntryDetails === "function")
+        proxy.getCompletionEntryDetails = (fileName, position, ...args) => {
+          const document = documentFor(fileName);
+          return service.getCompletionEntryDetails(fileName, document ? document.toGenerated(position) : position, ...args);
+        };
       proxy.getQuickInfoAtPosition = (fileName, position) => {
         const document = documentFor(fileName);
         const infoAtPosition = service.getQuickInfoAtPosition(fileName, document ? document.toGenerated(position) : position);

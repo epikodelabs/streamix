@@ -28,7 +28,7 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
       if (stopped) return;
       // Watch the actual authored tree; the delegated builder watches only the virtual copy.
       // Queue edits so writes never interleave, and retain the previous virtual copy on errors.
-      if (context.target?.target === "serve" || target === "serve") {
+      if (context.target?.target === "serve" || target === "serve" || options["watch"] === true) {
         watcher = watch(join(context.workspaceRoot, sourceRoot), { recursive: true }, (_event, filename) => {
           if (stopped) return;
           rebuildQueue = rebuildQueue.then(async () => {
