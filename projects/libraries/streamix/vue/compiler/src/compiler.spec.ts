@@ -44,6 +44,24 @@ describe('Vue SFC compiler', () => {
     expect(result.code).toContain('{{ __sx_state_count }}');
   });
 
+  it('bridges scope members used exclusively in Vue directives', () => {
+    const result = transformVueSfc(`
+      <script setup>
+      import { scope } from '@epikodelabs/streamix';
+      const state = scope({ visible: true, rows: [] });
+      </script>
+      <template>
+        <p v-if="state.visible">Visible</p>
+        <span v-for="row in state.rows" :key="row.id">{{ row.name }}</span>
+      </template>
+    `);
+
+    expect(result.bindingCount).toBe(2);
+    expect(result.bridgedScopes).toEqual({ state: ['rows', 'visible'] });
+    expect(result.code).toContain('v-if="__sx_state_visible"');
+    expect(result.code).toContain('v-for="row in __sx_state_rows"');
+  });
+
   it('reports unknown scope bindings instead of guessing', () => {
     const result = transformVueSfc(`
       <script setup>

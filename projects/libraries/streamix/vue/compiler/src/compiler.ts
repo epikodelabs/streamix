@@ -634,7 +634,9 @@ function templateExpressionSpans(template: string): TemplateExpressionSpan[] {
     });
   }
 
-  for (const match of template.matchAll(/(?:[:@#])[\w.:[\]-]+\s*=\s*(["'])([\s\S]*?)\1/g)) {
+  for (const match of template.matchAll(
+    /(?:[:@#][\w.:[\]-]+|v-(?:if|else-if|for|show)(?:\.[\w-]+)?|v-(?:bind|on)(?::[\w.:[\]-]+)?)\s*=\s*(["'])([\s\S]*?)\1/g,
+  )) {
     const valueStart = match.index! + match[0].length - match[2].length - 1;
     spans.push({ start: valueStart, end: valueStart + match[2].length });
   }
