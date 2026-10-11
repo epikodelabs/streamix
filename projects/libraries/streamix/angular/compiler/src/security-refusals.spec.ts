@@ -37,6 +37,21 @@ describe('security-sensitive binding refusals', () => {
     });
   }
 
+  it('rejects a reactive read after a nested call in an Angular-owned block header', () => {
+    // The header scan must run to the balancing parenthesis: stopping at the
+    // first `)` truncates `match(value` and the `model.count` read after the
+    // call would be left Angular-owned, rendering once and never updating.
+    // The body is deliberately static so the header read is the only one.
+    const resolveReactiveSource = (path: string) =>
+      ({ 'model.count': 'model.get("count")' })[path];
+
+    expect(() => transformAngularComponentTemplate(
+      '@if (match(value) && model.count > 0) { <p>static body</p> }',
+      'inline.html',
+      { resolveReactiveSource },
+    )).toThrowError(/"model.count".*Angular evaluates this/);
+  });
+
   it('leaves the explicit .value form to Angular sanitization', () => {
     const template = '<a [href]="url.value">link</a>';
     const result = transformAngularComponentTemplate(

@@ -44,12 +44,76 @@ export function angularExpressionSpans(template: string): SxExpressionSpan[] {
     pushQuoted(match, 3);
   }
 
-  for (const match of template.matchAll(/@(?:else\s+)?(?:if|switch|for|defer)\s*\(([\s\S]*?)\)/g)) {
-    const openParen = match.index! + match[0].indexOf('(') + 1;
-    push(openParen, match.index! + match[0].length - 1);
+  for (const match of template.matchAll(/@(?:else\s+)?(?:if|switch|for|defer)\s*\(/g)) {
+    // A non-greedy scan to the first `)` truncates a header at its first
+    // nested call — `@if (match(value) && model.count > 0)` would scan only
+    // `match(value`, and a reactive read after the call would never be
+    // rejected for an Angular-owned region it cannot update. Scan to the
+    // matching closing parenthesis instead.
+    const openParen = match.index! + match[0].length - 1;
+    const close = matchingParen(template, openParen);
+
+    if (close !== -1) {
+      push(openParen + 1, close);
+    }
   }
 
   return spans;
+}
+
+/** Offset of the parenthesis balancing `open`, or -1 when never balanced. */
+function matchingParen(text: string, open: number): number {
+  let depth = 0;
+
+  for (let index = open; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (char === '"') {
+      index = endQuoted(text, index, '"') - 1;
+      continue;
+    }
+
+    if (char === "'") {
+      index = endQuoted(text, index, "'") - 1;
+      continue;
+    }
+
+    if (char === '`') {
+      index = endQuoted(text, index, '`') - 1;
+      continue;
+    }
+
+    if (char === '(') {
+      depth += 1;
+    } else if (char === ')') {
+      depth -= 1;
+
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
+/** One past the closing quote of a string starting at `start`. */
+function endQuoted(text: string, start: number, quote: string): number {
+  let escaped = false;
+
+  for (let index = start + 1; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (escaped) {
+      escaped = false;
+    } else if (char === '\\') {
+      escaped = true;
+    } else if (char === quote) {
+      return index + 1;
+    }
+  }
+
+  return text.length;
 }
 
 /** A dotted-path read found in an expression, with its source offsets. */
