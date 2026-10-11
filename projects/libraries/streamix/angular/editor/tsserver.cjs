@@ -10,12 +10,14 @@ module.exports = function init(modules) {
     if (!/\.tsx?$/i.test(fileName)) return undefined;
     const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
     const factories = new Set();
+    const derivedFactories = new Set();
     for (const statement of file.statements) {
       if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
           !/^@epikodelabs\/streamix(?:\/|$)/.test(statement.moduleSpecifier.text)) continue;
       const bindings = statement.importClause && statement.importClause.namedBindings;
       if (bindings && ts.isNamedImports(bindings)) for (const item of bindings.elements) {
         if ((item.propertyName || item.name).text === "atom") factories.add(item.name.text);
+        if ((item.propertyName || item.name).text === "derived") derivedFactories.add(item.name.text);
       }
     }
     const edits = [];
@@ -28,6 +30,30 @@ module.exports = function init(modules) {
             factories.has(member.initializer.expression.text)) atoms.add(member.name.text);
       }
       if (atoms.size === 0) continue;
+      const rewriteDerivedCallbacks = node => {
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+            derivedFactories.has(node.expression.text) && node.arguments.length > 0 &&
+            (ts.isArrowFunction(node.arguments[0]) || ts.isFunctionExpression(node.arguments[0]))) {
+          const callback = node.arguments[0];
+          const visitCallback = child => {
+            if (ts.isPropertyAccessExpression(child) && child.expression.kind === ts.SyntaxKind.ThisKeyword &&
+                atoms.has(child.name.text)) {
+              edits.push({ start: child.getStart(file), end: child.end, text: child.getText(file) + ".value" });
+              return;
+            }
+            if (ts.isIdentifier(child) && atoms.has(child.text) &&
+                !(ts.isPropertyAccessExpression(child.parent) && child.parent.name === child) &&
+                !(ts.isPropertyAccessExpression(child.parent) && child.parent.expression === child && child.parent.name.text === "value")) {
+              edits.push({ start: child.getStart(file), end: child.end, text: child.text + ".value" });
+              return;
+            }
+            ts.forEachChild(child, visitCallback);
+          };
+          visitCallback(callback.body);
+        }
+        ts.forEachChild(node, rewriteDerivedCallbacks);
+      };
+      rewriteDerivedCallbacks(declaration);
       for (const decorator of ts.getDecorators(declaration) || []) {
         const call = decorator.expression;
         if (!ts.isCallExpression(call) || !ts.isIdentifier(call.expression) || call.expression.text !== "Component") continue;

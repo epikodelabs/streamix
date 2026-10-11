@@ -58,4 +58,19 @@ describe("Streamix Angular tsserver plugin", () => {
     expect(document.code).toContain("@switch (count.value) {");
     expect(document.code).toContain("@case (1) {");
   });
+
+  it("virtualizes raw class atom reads inside derived callbacks", () => {
+    const plugin = createPlugin({ typescript: ts }) as ts.server.PluginModule & {
+      __streamixVirtualize(fileName: string, source: string): { code: string };
+    };
+    const source = [
+      'import { Component } from "@angular/core";',
+      'import { atom, derived } from "@epikodelabs/streamix";',
+      '@Component({ template: `<p>{{ total }}</p>` })',
+      'export class Counter { price = atom(2); quantity = atom(3); total = derived(() => this.price * this.quantity); }',
+    ].join("\n");
+
+    const document = plugin.__streamixVirtualize("counter.ts", source);
+    expect(document.code).toContain('derived(() => this.price.value * this.quantity.value)');
+  });
 });

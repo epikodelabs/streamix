@@ -92,4 +92,17 @@ describe("Streamix React tsserver plugin", () => {
       /Operator '|read-only|\.value|Cannot find/.test(messageOf(diagnostic)));
     expect(offenders.map(offender => messageOf(offender))).toEqual([]);
   });
+
+  it("treats raw atom reads in derived callbacks as their value type", () => {
+    const source = `
+      import { atom, derived } from "@epikodelabs/streamix";
+      const price = atom(2);
+      const quantity = atom(3);
+      const total = derived(() => price * quantity);
+      export const App = () => <output>{total}</output>;
+    `;
+
+    const diagnostics = diagnose(source);
+    expect(diagnostics.filter(diagnostic => /Operator '\*'/.test(messageOf(diagnostic)))).toEqual([]);
+  });
 });

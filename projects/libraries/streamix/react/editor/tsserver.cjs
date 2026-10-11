@@ -34,12 +34,14 @@ module.exports = function init(modules) {
   function virtualize(fileName, source) {
     const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     const factories = new Set();
+    const derivedFactories = new Set();
     for (const statement of file.statements) {
       if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
           !/^@epikodelabs\/streamix(?:\/|$)/.test(statement.moduleSpecifier.text)) continue;
       const bindings = statement.importClause && statement.importClause.namedBindings;
       if (bindings && ts.isNamedImports(bindings)) for (const item of bindings.elements) {
         if ((item.propertyName || item.name).text === "atom") factories.add(item.name.text);
+        if ((item.propertyName || item.name).text === "derived") derivedFactories.add(item.name.text);
       }
     }
     const atoms = new Set();
@@ -57,6 +59,27 @@ module.exports = function init(modules) {
     // document.
     const isValueRead = node => ts.isPropertyAccessExpression(node.parent) &&
       node.parent.expression === node && node.parent.name.text === "value";
+
+    // The production compiler accepts `derived(() => price * quantity)` and
+    // lowers the raw atom reads to `.value`. Give TypeScript that same value
+    // shape so editor diagnostics do not disagree with the build.
+    const rewriteDerivedCallbacks = node => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+          derivedFactories.has(node.expression.text) && node.arguments.length > 0 &&
+          (ts.isArrowFunction(node.arguments[0]) || ts.isFunctionExpression(node.arguments[0]))) {
+        const callback = node.arguments[0];
+        const visitCallback = child => {
+          if (ts.isIdentifier(child) && atoms.has(child.text) && !isValueRead(child) &&
+              !(ts.isPropertyAccessExpression(child.parent) && child.parent.name === child)) {
+            edits.push({ start: child.getStart(file), end: child.end, text: `${child.text}.value` });
+            return;
+          }
+          ts.forEachChild(child, visitCallback);
+        };
+        visitCallback(callback.body);
+      }
+      ts.forEachChild(node, rewriteDerivedCallbacks);
+    };
 
     const rewriteReads = node => {
       // The emitted compiler lowers reactive values in JSX to their current
@@ -158,6 +181,7 @@ module.exports = function init(modules) {
       }
       ts.forEachChild(node, rewrite);
     };
+    rewriteDerivedCallbacks(file);
     rewrite(file);
     edits.sort((a, b) => a.start - b.start || b.end - a.end);
     const nonOverlapping = edits.filter((edit, index) => index === 0 || edit.start >= edits[index - 1].end);
