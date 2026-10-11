@@ -216,6 +216,13 @@ writes as well as subscriptions, updates, and cleanup from Vue bridge refs.
 For custom tooling, `useStreamixDevtoolsEvents()` exposes the same bounded
 event trace as a Vue ref.
 
+### Editor diagnostics
+
+For Vue Language Tools / Volar diagnostics that match the compiler's derived
+shorthand, add `@epikodelabs/streamix/vue/editor/tsserver` to
+`vueCompilerOptions.plugins`. See its bundled README for the exact tsconfig
+snippet.
+
 ## The goal
 
 The Vue adapter does not replace Vue’s reactivity or component model. It gives Streamix state a natural Vue surface.

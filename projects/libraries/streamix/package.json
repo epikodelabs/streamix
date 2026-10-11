@@ -31,7 +31,8 @@
   "type": "module",
   "exports": {
     "./angular/editor/tsserver": "./angular/editor/tsserver.cjs",
-    "./react/editor/tsserver": "./react/editor/tsserver.cjs"
+    "./react/editor/tsserver": "./react/editor/tsserver.cjs",
+    "./vue/editor/tsserver": "./vue/editor/tsserver.cjs"
   },
   "sideEffects": false,
   "homepage": "https://epikodelabs.github.io/streamix",

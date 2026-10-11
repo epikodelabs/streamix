@@ -43,6 +43,9 @@
       ],
       "@epikodelabs/streamix/vue/vite": [
         "./vue/vite/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/vue/editor": [
+        "./vue/editor/src/public-api.ts"
       ]
     }
   },
