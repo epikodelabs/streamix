@@ -16,7 +16,7 @@ const maxEvents = 250;
 // Runtime-safe for native browser ESM where `process` does not exist.
 // Bundlers can still statically replace `process.env.NODE_ENV` in this form.
 // In unknown environments diagnostics are disabled, not enabled by default.
-const enabled = typeof process !== "undefined" && process.env.NODE_ENV !== "production";
+const enabled = typeof process !== "undefined" && process.env["NODE_ENV"] !== "production";
 let queued = false;
 /** Queues DevTools notifications outside React's render and snapshot phases. */
 export function recordStreamixDevtoolsEvent(event: Omit<StreamixDevtoolsEvent, "time">): void {

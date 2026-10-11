@@ -21,10 +21,11 @@ idescribe("Streamix explicit lifetime across React Activity", () => {
       });
       return createElement("output", null, String(value.value));
     }
-    function render(mode: "visible" | "hidden") {
+    // Arrow (not a hoisted declaration) so TS keeps the `Activity` narrowing above.
+    const render = (mode: "visible" | "hidden") => {
       root.render(createElement(StreamixLifetimeProvider, { lifetime },
         createElement(StrictMode, null, createElement(Activity, { mode }, createElement(Counter)))));
-    }
+    };
     try {
       await act(async () => render("visible"));
       const count = created.filter(value => !value.disposed).length;

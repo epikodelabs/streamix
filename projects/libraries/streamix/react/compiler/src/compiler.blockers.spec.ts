@@ -1,6 +1,10 @@
 import ts from "typescript";
 import { transformReactJsx } from "./compiler";
 
+function parseErrors(file: ts.SourceFile): readonly ts.Diagnostic[] {
+  return (file as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }).parseDiagnostics;
+}
+
 function decodeVlq(segment: string): number[] {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   let value = 0, shift = 0;
@@ -44,14 +48,14 @@ describe("React release-blocker regressions", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("count.next(count.value + step)");
     expect(result.code).toContain("derived(() => count.value * 2)");
-    expect(ts.createSourceFile("store.ts",result.code,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS).parseDiagnostics.length).toBe(0);
+    expect(parseErrors(ts.createSourceFile("store.ts",result.code,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS)).length).toBe(0);
   });
 
   it("emits JavaScript-compatible JSX with no TS `as any` assertions", () => {
     const src = `import { atom } from '@epikodelabs/streamix'; let count = atom(0); const choices = { count }; export function App({ index }) { return <output>{choices[index]}</output>; }`;
     const result = transformReactJsx(src,"Counter.jsx");
     expect(result.code).not.toContain("as any");
-    expect(ts.createSourceFile("Counter.jsx",result.code,ts.ScriptTarget.Latest,true,ts.ScriptKind.JSX).parseDiagnostics.length).toBe(0);
+    expect(parseErrors(ts.createSourceFile("Counter.jsx",result.code,ts.ScriptTarget.Latest,true,ts.ScriptKind.JSX)).length).toBe(0);
   });
 
   it("maps repeated original identifiers by their exact occurrence", () => {

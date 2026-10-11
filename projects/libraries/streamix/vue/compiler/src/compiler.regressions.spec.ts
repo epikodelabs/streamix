@@ -131,7 +131,7 @@ describe('Vue compiler correctness regressions', () => {
     expectNoError(result);
     const body = /<script setup[^>]*>([\s\S]*?)<\/script>/.exec(result.code)![1];
     const file = ts.createSourceFile('result.ts', body, ts.ScriptTarget.Latest, true);
-    expect(file.parseDiagnostics).toEqual([]);
+    expect((file as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }).parseDiagnostics).toEqual([]);
   });
 
   it('bridges a scope member used only by v-model', () => {
