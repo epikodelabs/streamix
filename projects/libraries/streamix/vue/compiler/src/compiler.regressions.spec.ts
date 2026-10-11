@@ -62,7 +62,11 @@ describe('Vue compiler correctness regressions', () => {
       const state = scope({ count: 0 });
     `, '<span :title="\'state.count\'">{{ "state.count" }}</span>');
     expectNoError(result);
-    expect(result.bindingCount).toBe(0);
+    // The only adopted binding is the wrapped scope declaration itself; the
+    // string literals must not gain member bridges.
+    expect(result.bindingCount).toBe(1);
+    expect(result.bridgedScopes).toEqual({});
+    expect(result.code).toContain('{{ "state.count" }}');
   });
 
   it('parses greater-than characters in attributes before a scope v-model', () => {
@@ -124,14 +128,16 @@ describe('Vue compiler correctness regressions', () => {
 
   it('produces parseable script edits after rewriting', () => {
     const result = compile(`
-      import { atom, derived } from '@epikodelabs/streamix';
+      import { atom, derived, scope } from '@epikodelabs/streamix';
       const count = atom(1);
       const squared = derived(() => ({ count, value: count * count }));
-    `, '{{ squared }}');
+      const state = scope({ title: '' });
+    `, '{{ squared }} {{ state.title }}');
     expectNoError(result);
     const body = /<script setup[^>]*>([\s\S]*?)<\/script>/.exec(result.code)![1];
     const file = ts.createSourceFile('result.ts', body, ts.ScriptTarget.Latest, true);
     expect((file as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }).parseDiagnostics).toEqual([]);
+    expect(body).toContain('const state = useScope(() => scope({ title: \'\' }));');
   });
 
   it('bridges a scope member used only by v-model', () => {
@@ -140,7 +146,7 @@ describe('Vue compiler correctness regressions', () => {
       const state = scope({ title: '' });
     `, '<input v-model="state.title">');
     expectNoError(result);
-    expect(result.bindingCount).toBe(1);
+    expect(result.bindingCount).toBe(2);
     expect(result.bridgedScopes).toEqual({ state: ['title'] });
   });
 

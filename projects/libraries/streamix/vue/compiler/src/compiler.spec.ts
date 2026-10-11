@@ -41,9 +41,13 @@ describe('Vue SFC compiler', () => {
       </template>
     `);
 
-    expect(result.bindingCount).toBe(2);
+    expect(result.bindingCount).toBe(3);
     expect(result.bridgedScopes).toEqual({ state: ['count', 'title'] });
     expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain('const state = useScope(() => scope({ title: \'Ready\', count: 0 }));');
+    expect(result.code).toContain(
+      'import { useIterable, useScope } from "@epikodelabs/streamix/vue";',
+    );
     expect(result.code).toContain("useIterable(state.get('count'));");
     expect(result.code).toContain("useIterable(state.get('title'));");
     expect(result.code).toContain(':value="__sx_000073000074000061000074000065_00007400006900007400006c000065"');
@@ -62,10 +66,29 @@ describe('Vue SFC compiler', () => {
       </template>
     `);
 
-    expect(result.bindingCount).toBe(2);
+    expect(result.bindingCount).toBe(3);
     expect(result.bridgedScopes).toEqual({ state: ['rows', 'visible'] });
+    expect(result.code).toContain('const state = useScope(() => scope({ visible: true, rows: [] }));');
     expect(result.code).toContain('v-if="__sx_000073000074000061000074000065_00007600006900007300006900006200006c000065"');
     expect(result.code).toContain('v-for="row in __sx_000073000074000061000074000065_00007200006f000077000073"');
+  });
+
+  it('wraps a scope the template never touches so its lifetime stays component-owned', () => {
+    const result = transformVueSfc(`
+      <script setup>
+      import { scope } from '@epikodelabs/streamix';
+      const state = scope({ total: 0 });
+      setInterval(() => state.set('total', 1));
+      </script>
+      <template><p>Static</p></template>
+    `);
+
+    expect(result.bindingCount).toBe(1);
+    expect(result.bridgedScopes).toEqual({});
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain('const state = useScope(() => scope({ total: 0 }));');
+    expect(result.code).toContain('import { useScope } from "@epikodelabs/streamix/vue";');
+    expect(result.code).toContain('<p>Static</p>');
   });
 
   it('reports unknown scope bindings instead of guessing', () => {
@@ -77,7 +100,8 @@ describe('Vue SFC compiler', () => {
       <template><x-editor v-model="state.missing" /></template>
     `);
 
-    expect(result.bindingCount).toBe(0);
+    expect(result.bindingCount).toBe(1);
+    expect(result.bridgedScopes).toEqual({ state: [] });
     expect(result.diagnostics.length).toBe(1);
     expect(result.diagnostics[0].message).toContain('state.missing');
   });

@@ -13,7 +13,7 @@ export interface VueSfcDiagnostic {
 export interface VueSfcTransformResult {
   /** Transformed SFC source. */
   readonly code: string;
-  /** Number of adopted reactive declarations plus bridged scope members. */
+  /** Number of adopted reactive declarations, wrapped scopes, and bridged scope members. */
   readonly bindingCount: number;
   /** Scope members the compiler bridged, keyed by scope name. */
   readonly bridgedScopes: Readonly<Record<string, readonly string[]>>;
@@ -102,6 +102,8 @@ interface TemplateUsage {
 const STREAMIX_MODULE = /^@epikodelabs\/streamix(?:\/|$)/;
 const FACTORY_NAMES = new Set<FactoryKind>(['atom', 'derived', 'flow', 'scope']);
 const BRIDGE_PREFIX = '__sx_';
+/** Composables the compiler emits; the import inserter only ships used ones. */
+const BRIDGE_COMPOSABLES = new Set(['useIterable', 'useScope', 'useWritable']);
 
 /** v-model element/prop mapping, mirroring the Angular two-way allow-list. */
 const V_MODEL_NATIVE: Readonly<Record<string, { prop: string; event: string; value: string }>> = {
@@ -117,11 +119,13 @@ const V_MODEL_NATIVE: Readonly<Record<string, { prop: string; event: string; val
  * Raw declarations are rewritten onto the Vue bridge composables: writable
  * atoms become `useWritable` (reads track; template assignments and
  * `v-model` emit through the computed setter via Vue's setup-binding proxy),
- * deriveds and flows become `useIterable`, and every scope member the
- * template touches is bridged as its own read-only ref with member writes and
- * `v-model` lowered to `scope.set(...)`. Vue's native setup auto-unwrap then
- * makes templates read and write the atoms as ordinary state — no manual
- * composable calls and no copies of Streamix state into Vue stores.
+ * deriveds and flows become `useIterable`, every scope member the template
+ * touches is bridged as its own read-only ref with member writes and
+ * `v-model` lowered to `scope.set(...)`, and each scope itself is wrapped in
+ * `useScope(...)` so its lifetime is tied to the component. Vue's native
+ * setup auto-unwrap then makes templates read and write the atoms as
+ * ordinary state — no manual composable calls and no copies of Streamix
+ * state into Vue stores.
  */
 export function transformVueSfc(
   source: string,
@@ -214,6 +218,23 @@ export function transformVueSfc(
       start: read.start,
       end: read.end,
       replacement: read.replacement ?? reactiveBridgeName(read.name),
+    });
+  }
+
+  // A scope declared in setup is component-owned, so the compiler wraps the
+  // authored call in `useScope(...)` rather than asking for it by hand: the
+  // scope is disposed with the component's effect scope instead of outliving
+  // the component. Zero-length insertions keep the authored call mapped.
+  for (const scope of scopes) {
+    scriptEdits.push({
+      start: scope.callExpressionStart,
+      end: scope.callExpressionStart,
+      replacement: 'useScope(() => ',
+    });
+    scriptEdits.push({
+      start: scope.callEnd,
+      end: scope.callEnd,
+      replacement: ')',
     });
   }
 
@@ -335,7 +356,7 @@ export function transformVueSfc(
     ? insertMappedText(firstPass, runtimeImport.insertion.offset, runtimeImport.insertion.text)
     : firstPass;
   const bindingCount =
-    reactive.length + Object.values(bridgedScopes).flat().length;
+    reactive.length + scopes.length + Object.values(bridgedScopes).flat().length;
 
   return {
     code: final.code,
@@ -583,13 +604,14 @@ function withRuntimeImport(source: string, installed: boolean): { insertion?: { 
   const used = new Set<string>();
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
-        (node.expression.text === 'useIterable' || node.expression.text === 'useWritable')) {
+        BRIDGE_COMPOSABLES.has(node.expression.text)) {
       used.add(node.expression.text);
     }
     ts.forEachChild(node, visit);
   };
   visit(script);
-  const required = ['useIterable', 'useWritable'].filter(name => used.has(name) && !imported.has(name));
+  // Stable emission order, independent of where the calls appear in the script.
+  const required = [...BRIDGE_COMPOSABLES].filter(name => used.has(name) && !imported.has(name));
   if (required.length === 0) return {};
   const statement = `\nimport { ${required.join(', ')} } from "@epikodelabs/streamix/vue";\n`;
   return { insertion: { offset: scriptSetup.loc.start.offset, text: statement } };
