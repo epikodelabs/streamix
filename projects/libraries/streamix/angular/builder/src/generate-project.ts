@@ -7,7 +7,7 @@ import ts from 'typescript';
 // than folding its sources into this entry.
 import { compileSxComponent } from '@epikodelabs/streamix/angular/compiler';
 import { installSxLifecycleIntoComponentSource } from '@epikodelabs/streamix/angular/compiler';
-import { templateLiteral, virtualRootOf } from './options';
+import { installTransformedTemplate, virtualRootOf } from './options';
 
 /** Input for one generator pass. */
 export interface SxGenerateProjectOptions {
@@ -233,12 +233,14 @@ export async function generateProject({
       sourceReferenceFields: compiled.sourceReferenceFields,
     }).source;
     const outputPath = resolve(outputDirectory, relativePath);
-    // Function replacer: a plain string replacement would interpret `$`
-    // sequences inside the template as replacement patterns.
-    const virtual = lifecycle.replace(
-      match[0],
-      () => `template: ${templateLiteral(compiled.transformedTemplate)},\n  styles:`,
-    );
+    let virtual: string;
+    try {
+      virtual = installTransformedTemplate(lifecycle, compiled.transformedTemplate);
+    } catch (error) {
+      throw new Error(
+        `[streamix] ${relativePath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     await mkdir(dirname(outputPath), { recursive: true });
     await writeFileAtomic(outputPath, virtual);
   }

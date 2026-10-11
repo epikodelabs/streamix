@@ -1,5 +1,6 @@
 import {
   buildDelegateOptions,
+  installTransformedTemplate,
   resolveSourceRoot,
   shouldRegenerateOn,
   templateLiteral,
@@ -54,5 +55,51 @@ describe('streamix builder options', () => {
     expect(templateLiteral('say `hi`')).toBe('`say \\`hi\\``');
     expect(templateLiteral('cost: ${x}')).toBe('`cost: \\${x}`');
     expect(templateLiteral('c:\\path')).toBe('`c:\\\\path`');
+  });
+
+  it('installs the transformed template into a reprinted CRLF source', () => {
+    // The lifecycle install reprints the component with LF endings; the raw
+    // source uses CRLF. The old source-anchored replacement silently no-op'd
+    // on this exact shape, leaving Angular's own control flow in the virtual
+    // template while the compiled setup walked marker paths that do not exist.
+    const crlfSource = [
+      '@Component({',
+      '  template: `',
+      '    <p>{{ model.label }}</p>',
+      '    @if (model.ready) {',
+      '      <span>ready</span>',
+      '    }',
+      '  `,',
+      '  styles: [`:host { display: block; }`],',
+      '})',
+      'class Fixture {}',
+    ].join('\r\n');
+    const reprinted = crlfSource
+      .replace(/\r\n/g, '\n')
+      .replace('class Fixture', 'class ReprintedFixture');
+    const transformed = crlfSource.replace(
+      /@if \(model\.ready\) \{[\s\S]*?\}/,
+      '<span data-sx-block="0"></span>',
+    );
+
+    const installed = installTransformedTemplate(reprinted, transformed);
+
+    expect(installed).toContain('data-sx-block="0"');
+    expect(installed).not.toContain('@if (model.ready)');
+    expect(installed).toContain('class ReprintedFixture');
+  });
+
+  it('refuses to install when the reprinted source lost its inline template', () => {
+    expect(() => installTransformedTemplate('export class Fixture {}', '<p></p>'))
+      .toThrowError(/no longer contains an inline template/);
+  });
+
+  it('keeps `$` sequences in the transformed template literal intact', () => {
+    const installed = installTransformedTemplate(
+      'template: `<p>old</p>`,\n  styles: [`x`]',
+      '<p>${spring} $& $1</p>',
+    );
+
+    expect(installed).toContain('`<p>\\${spring} $& $1</p>`');
   });
 });

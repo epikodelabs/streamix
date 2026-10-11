@@ -96,3 +96,37 @@ export function templateLiteral(text: string): string {
     .replace(/`/g, '\\`')
     .replace(/\$\{/g, '\\${') + '`';
 }
+
+/** Matches an inline template immediately followed by a styles literal. */
+const INLINE_TEMPLATE = /template:\s*`([\s\S]*?)`,\s*styles:/;
+
+/**
+ * Installs the transformed template into the reprinted component source.
+ *
+ * The lifecycle install reprints the component, which normalizes line endings
+ * and reindents the decorator, so the template occurrence matched on the raw
+ * source may no longer exist there verbatim. Anchor on the reprinted output —
+ * and refuse to continue silently: a component whose transformed template is
+ * not written back would render Angular's own control flow while the compiled
+ * setup walks marker paths that do not exist, crashing at runtime with no
+ * build-time signal.
+ */
+export function installTransformedTemplate(
+  reprintedSource: string,
+  transformedTemplate: string,
+): string {
+  const match = INLINE_TEMPLATE.exec(reprintedSource);
+
+  if (!match) {
+    throw new Error(
+      'The reprinted component no longer contains an inline template followed by styles; the transformed template cannot be installed.',
+    );
+  }
+
+  // Function replacer: a plain string replacement would interpret `$`
+  // sequences inside the template as replacement patterns.
+  return reprintedSource.replace(
+    match[0],
+    () => `template: ${templateLiteral(transformedTemplate)},\n  styles:`,
+  );
+}
