@@ -18,7 +18,6 @@ export interface StreamixReactViteOptions {
  */
 export function sx(options: StreamixReactViteOptions = {}): Plugin {
   const programs = new Map<string, ts.Program>();
-  const previousPrograms = new Map<string, ts.Program>();
   const programFor = (fileName: string, source: string): ts.Program => {
     const configPath = ts.findConfigFile(dirname(fileName), ts.sys.fileExists, "tsconfig.json");
     const key = configPath ?? `standalone:${fileName}`;
@@ -58,8 +57,7 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
         : getSourceFile(name, languageVersion, onError, shouldCreateNewSourceFile);
     host.readFile = name => name === fileName ? source : readFile?.(name);
     host.fileExists = ((existing) => name => name === fileName || existing(name))(host.fileExists.bind(host));
-    const program = ts.createProgram({ rootNames, options: { ...parsed.options, allowJs: true }, host, oldProgram: cached ?? previousPrograms.get(key) });
-    previousPrograms.delete(key);
+    const program = ts.createProgram({ rootNames, options: { ...parsed.options, allowJs: true }, host, oldProgram: cached });
     programs.set(key, program);
     return program;
   };
@@ -69,7 +67,7 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
     enforce: "pre",
     transform(source, id) {
       const fileName = id.replace(/[?#].*$/, "");
-      if (!/\.[jt]sx$/i.test(fileName) || /\.(?:d|spec|test)\.[jt]sx$/i.test(fileName) ||
+      if (!/\.[jt]sx?$/i.test(fileName) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(fileName) ||
           fileName.replace(/\\/g, "/").includes("/node_modules/")) return null;
       if (options.include && !options.include(fileName)) return null;
 
@@ -94,7 +92,8 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
     watchChange() {
       // Source edits, config edits, and resolved re-exports can all change a
       // symbol's identity. Recreate the project graph on the next transform.
-      for (const [key, program] of programs) previousPrograms.set(key, program);
+      // Drop cached graphs on edits; a second map retained stale programs
+      // indefinitely when the affected project was never transformed again.
       programs.clear();
     },
   };

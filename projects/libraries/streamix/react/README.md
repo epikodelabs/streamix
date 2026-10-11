@@ -31,6 +31,8 @@ No subscription hook belongs in ordinary application component code.
 - Atom-reference transport to capitalized React components.
 - Concurrent-safe reads through `useSyncExternalStore`; subscriptions begin only
   after a render commits.
+- Anonymous `export default` function components and React `memo` / `forwardRef`
+  wrappers (including named import aliases and React namespace imports).
 
 ```tsx
 let primary = atom("Primary");
@@ -56,6 +58,12 @@ return <input
   value={state.title}
 />;
 ```
+
+**Class components:** implicit reactive JSX reads are not supported. The compiler
+raises an error rather than emitting a component that displays an atom object.
+Use a function component or explicitly subscribe through a class-compatible
+external-store adapter. Unrecognized third-party wrapper calls around implicit
+reactive JSX likewise fail the compilation instead of silently skipping it.
 
 ## Prop boundaries
 
@@ -136,6 +144,17 @@ identity.
 
 ### Native Vite React
 
+Install the compiler peer explicitly in consuming projects:
+
+```bash
+npm install --save-dev typescript@^5.5
+```
+
+The published Streamix root manifest already lists `typescript` as an
+**optional peer**, because the vanilla runtime does not need the compiler.
+Using `@epikodelabs/streamix/react/compiler`, `/vite`, or `/builder` makes it a
+required *consumer dependency*. JavaScript-only Vite projects also need it.
+
 Use the Vite plugin before the React JSX plugin. It transforms authored
 `.ts`, `.tsx`, `.js`, and `.jsx` modules, reports source-located compiler
 diagnostics, and returns a source map Vite can compose with its usual pipeline.
@@ -212,7 +231,8 @@ limited than compiler adoption through a TypeScript Program.
 ## Explicit runtime boundaries
 
 Dynamic paths, re-exports, proxy/getter-backed objects, unknown third-party
-props, and callbacks needing the current value remain explicit:
+props, and callbacks needing the current value remain explicit. A local
+function that shadows a Streamix factory import is **not** reactive:
 
 ```tsx
 import { read, write } from "@epikodelabs/streamix/react";
@@ -236,6 +256,16 @@ application source.
 For the complete semantics and limitations, see the
 [React documentation](../../../../docs/REACT.md).
 
+`useResource(loader, dependencies)` deliberately tracks the supplied dependency
+array, not the identity of `loader`; include every prop/state input affecting
+that loader. For initial Suspense, preload outside render and use
+`usePreloadedResource` instead.
+
+DevTools are disabled when production can be proven by `NODE_ENV=production`,
+and also in native/browser ESM environments without a `process` object. This
+prevents a production-side `ReferenceError`; enable a development-only bundle
+replacement if the DevTools panel is needed outside the usual toolchains.
+
 ## Release verification still required
 
 The repository contains regression specs for React Activity, Strict Mode,
@@ -243,3 +273,7 @@ compiler output, Vite, and the Angular-hosted builder. Verify these against
 the project's actual React, TypeScript, Vite, and builder dependencies before
 release. The isolated TypeScript/compiler harness does not replace real React
 Compiler, Fast Refresh, Suspense, hydration, or esbuild map-composition tests.
+
+See [PRODUCTION.md](PRODUCTION.md) for the complete release gate matrix and
+acceptance criteria. Passing isolated TypeScript tests is not proof of React
+Compiler compatibility or production bundler/SSR integration.

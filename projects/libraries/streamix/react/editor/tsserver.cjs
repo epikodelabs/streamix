@@ -52,13 +52,45 @@ module.exports = function init(modules) {
         if ((item.propertyName || item.name).text === "flow") flowFactories.add(item.name.text);
       }
     }
+    // Named imports are not proof that a call resolves to that import: an
+    // inner function/block may shadow `atom` with a perfectly ordinary helper.
+    // Resolve lexical declarations conservatively before virtualizing a call.
+    const localBindings = (name, node) => {
+      if (ts.isIdentifier(name)) return new Set([name.text]);
+      if (!ts.isBindingPattern(name)) return new Set();
+      const result = new Set();
+      for (const entry of name.elements) {
+        if (!ts.isOmittedExpression(entry)) for (const name of localBindings(entry.name)) result.add(name);
+      }
+      return result;
+    };
+    const factoryIsShadowed = callee => {
+      const factoryName = callee.text;
+      for (let parent = callee.parent; parent && parent !== file; parent = parent.parent) {
+        if (ts.isFunctionLike(parent)) {
+          if (parent.name && ts.isIdentifier(parent.name) && parent.name.text === factoryName) return true;
+          if (parent.parameters.some(parameter => localBindings(parameter.name).has(factoryName))) return true;
+        }
+        if (ts.isCatchClause(parent) && parent.variableDeclaration && localBindings(parent.variableDeclaration.name).has(factoryName)) return true;
+        if (ts.isBlock(parent)) for (const statement of parent.statements) {
+          if (ts.isFunctionDeclaration(statement) && statement.name?.text === factoryName) return true;
+          if (ts.isClassDeclaration(statement) && statement.name?.text === factoryName) return true;
+          if (ts.isVariableStatement(statement) && statement.declarationList.declarations.some(declaration => localBindings(declaration.name).has(factoryName))) return true;
+        }
+        if ((ts.isForStatement(parent) || ts.isForOfStatement(parent) || ts.isForInStatement(parent)) &&
+            parent.initializer && ts.isVariableDeclarationList(parent.initializer) &&
+            parent.initializer.declarations.some(declaration => localBindings(declaration.name).has(factoryName))) return true;
+      }
+      return false;
+    };
     const atoms = new Set();
     const edits = [];
     const visit = node => {
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
           ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) &&
           (factories.has(node.initializer.expression.text) || derivedFactories.has(node.initializer.expression.text) ||
-           flowFactories.has(node.initializer.expression.text))) atoms.add(node.name.text);
+           flowFactories.has(node.initializer.expression.text)) &&
+          !factoryIsShadowed(node.initializer.expression)) atoms.add(node.name.text);
       ts.forEachChild(node, visit);
     };
     visit(file);

@@ -143,6 +143,37 @@ function statementMayReturn(statement: ts.Statement): boolean {
 function isShadowed(site: ts.Identifier, component: ts.Node): boolean {
   return isShadowedName(site.text, site, component);
 }
+/** Only an actual imported alias may use the syntactic fallback in a Program.
+ * Local shadowing must not turn an unrelated factory into a Streamix atom. */
+function isImportedSymbol(candidate: ts.Identifier, checker: ts.TypeChecker): boolean {
+  const symbol = checker.getSymbolAtLocation(candidate);
+  // An incomplete program may not yet resolve an authored explicit import.
+  if (!symbol) return true;
+  return !!(symbol.flags & ts.SymbolFlags.Alias) &&
+    (symbol.declarations ?? []).some(declaration =>
+      ts.isImportSpecifier(declaration) || ts.isNamespaceImport(declaration));
+}
+
+/** Recognize wrappers imported from React, not similarly named foreign APIs. */
+function reactWrappers(file: ts.SourceFile): (expression: ts.Expression) => boolean {
+  const named = new Set<string>();
+  const namespaces = new Set<string>();
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+        statement.moduleSpecifier.text !== "react" || !statement.importClause) continue;
+    if (statement.importClause.name) namespaces.add(statement.importClause.name.text);
+    const bindings = statement.importClause.namedBindings;
+    if (bindings && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text);
+    if (bindings && ts.isNamedImports(bindings)) for (const specifier of bindings.elements) {
+      if (["memo", "forwardRef"].includes((specifier.propertyName ?? specifier.name).text))
+        named.add(specifier.name.text);
+    }
+  }
+  return expression => ts.isIdentifier(expression) ? named.has(expression.text) :
+    ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression) &&
+    namespaces.has(expression.expression.text) && ["memo", "forwardRef"].includes(expression.name.text);
+}
+
 type FactoryImports = { aliases: Map<string, string>; namespaces: Set<string>; excluded: Set<string> };
 function streamixFactoryImports(file: ts.SourceFile): FactoryImports {
   const aliases = new Map<string, string>();
@@ -179,7 +210,8 @@ function factoryKind(
     if (semantic) return semantic;
     if (ts.isIdentifier(callee)) {
       const imported = imports.aliases.get(callee.text);
-      if (imported && ["atom", "derived", "flow", "scope"].includes(imported)) return imported;
+      if (imported && ["atom", "derived", "flow", "scope"].includes(imported) &&
+          isImportedSymbol(callee, checker)) return imported;
       // Standalone/sandbox examples can use unbound global factory names.
       // A symbol proven to come from a different local/foreign declaration
       // must never be mistaken for Streamix.
@@ -188,7 +220,8 @@ function factoryKind(
       return undefined;
     }
     if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) &&
-        imports.namespaces.has(callee.expression.text) && ["atom", "derived", "flow", "scope"].includes(callee.name.text))
+        imports.namespaces.has(callee.expression.text) && ["atom", "derived", "flow", "scope"].includes(callee.name.text) &&
+        isImportedSymbol(callee.expression, checker))
       return callee.name.text;
     return undefined;
   }
@@ -236,6 +269,7 @@ export function transformReactJsx(
   const checker = programSource?.text === source ? options.program?.getTypeChecker() : undefined;
   const isJavaScript = /\.[cm]?jsx?$/i.test(fileName);
   const imports = streamixFactoryImports(sourceFile);
+  const isReactWrapper = reactWrappers(sourceFile);
   let bindingCount = 0;
   let needsRuntimeImport = false;
   const diagnostics: ReactJsxDiagnostic[] = [];
@@ -844,9 +878,7 @@ export function transformReactJsx(
 
     const transformInitializer = (expr: ts.Expression, traceName?: string): ts.Expression => {
       if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) return transformFunction(expr, traceName);
-      if (ts.isCallExpression(expr) && expr.arguments.length > 0 &&
-          (ts.isIdentifier(expr.expression) && (expr.expression.text === "memo" || expr.expression.text === "forwardRef") ||
-          ts.isPropertyAccessExpression(expr.expression) && (expr.expression.name.text === "memo" || expr.expression.name.text === "forwardRef"))) {
+      if (ts.isCallExpression(expr) && expr.arguments.length > 0 && isReactWrapper(expr.expression)) {
         const first = transformInitializer(expr.arguments[0], traceName);
         return first === expr.arguments[0] ? expr : factory.updateCallExpression(expr, expr.expression, expr.typeArguments, [first, ...expr.arguments.slice(1)]);
       }
@@ -854,7 +886,10 @@ export function transformReactJsx(
     };
     return file => {
       const statements = file.statements.map(statement => {
-        if (ts.isFunctionDeclaration(statement)) return transformFunction(statement, statement.name?.text);
+        if (ts.isFunctionDeclaration(statement)) {
+          const isDefault = statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.DefaultKeyword);
+          return transformFunction(statement, isDefault ? "DefaultExport" : statement.name?.text);
+        }
         if (ts.isVariableStatement(statement)) {
           const declarations = statement.declarationList.declarations.map(declaration => {
             if (!declaration.initializer) return declaration;
@@ -869,7 +904,7 @@ export function transformReactJsx(
             factory.updateVariableDeclarationList(statement.declarationList, declarations));
         }
         if (ts.isExportAssignment(statement)) {
-          const expr = transformInitializer(statement.expression);
+          const expr = transformInitializer(statement.expression, statement.isExportEquals ? undefined : "DefaultExport");
           return expr === statement.expression ? statement : factory.updateExportAssignment(statement, statement.modifiers, expr);
         }
         return statement;
@@ -906,11 +941,43 @@ export function transformReactJsx(
         diagnostics.push(diagnostic(node, "error", `Nested component ${name} requires an independent compilation boundary. Move it to module scope or use explicit React hooks.`));
       }
     }
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && /^[A-Z]/.test(node.name.text) &&
+        node.initializer && ts.isCallExpression(node.initializer) && !isReactWrapper(node.initializer.expression)) {
+      let unsafeJsx = false;
+      const check = (child: ts.Node): void => {
+        if (ts.isJsxExpression(child) && child.expression) {
+          const value = child.expression;
+          if (ts.isIdentifier(value) && moduleAtoms.has(value.text)) unsafeJsx = true;
+          if (ts.isPropertyAccessExpression(value) && ts.isIdentifier(value.expression) && moduleScopes.has(value.expression.text)) unsafeJsx = true;
+        }
+        ts.forEachChild(child, check);
+      };
+      ts.forEachChild(node.initializer, check);
+      if (unsafeJsx) diagnostics.push(diagnostic(node.name, "error",
+        `Component ${node.name.text} uses an unrecognized wrapper around reactive JSX. Use React.memo/forwardRef imports or an explicit hook.`));
+    }
     if (ts.isClassDeclaration(node) && node.name) {
-      const text = node.getText(sourceFile);
-      if ([...moduleAtoms, ...moduleScopes].some(name => new RegExp(`\\b${name}\\b`).test(text))) {
-        diagnostics.push(diagnostic(node.name, "warning", `Class component ${node.name.text} cannot be adopted. Use an explicit useAtomValue hook in a function component.`));
-      }
+      // Inspect JSX syntax, not class source text. A string/comment containing
+      // "count" or a member `this.count` is not an implicit atom read.
+      let unsafeJsx = false;
+      const inspect = (child: ts.Node): void => {
+        if (ts.isJsxExpression(child) && child.expression &&
+            !isSharedAtomComponentProp(child, moduleAtoms, moduleAtomMaps)) {
+          const inspectExpression = (value: ts.Node): void => {
+            if (ts.isIdentifier(value) && !isNamePosition(value) &&
+                !isShadowedName(value.text, value, node) &&
+                (moduleAtoms.has(value.text) || moduleScopes.has(value.text))) {
+              unsafeJsx = true;
+            }
+            ts.forEachChild(value, inspectExpression);
+          };
+          inspectExpression(child.expression);
+        }
+        ts.forEachChild(child, inspect);
+      };
+      ts.forEachChild(node, inspect);
+      if (unsafeJsx) diagnostics.push(diagnostic(node.name, "error",
+        `Class component ${node.name.text} cannot be adopted. Use an explicit useAtomValue hook in a function component.`));
     }
     ts.forEachChild(node, inspectSkipped);
   };
@@ -919,7 +986,7 @@ export function transformReactJsx(
   const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
   const printed = printer.printFile(transformed);
   const directive = printed.match(/^(\s*["']use client["'];?\s*\n)/);
-  const code = needsRuntimeImport ? (directive
+  const code = needsRuntimeImport && /\b(?:useStreamixSource|useStreamixLocal|useStreamixAfterCommit)\s*\(/.test(printed) ? (directive
     ? `${directive[0]}${runtimePreludeFor(printed)}\n${printed.slice(directive[0].length)}`
     : `${runtimePreludeFor(printed)}\n${printed}`) : printed;
   return {
