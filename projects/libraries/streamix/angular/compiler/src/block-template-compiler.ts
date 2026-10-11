@@ -14,6 +14,7 @@ import {
 import {
   isLiteralArgument,
   parseNativeEventBinding,
+  splitArguments,
 } from './event-binding';
 
 import type { SxReactiveSourceResolver } from './source-resolution';
@@ -353,9 +354,7 @@ function compileBlockEvent(
 }
 
 function rewriteEventArguments(argumentText: string, state: EmitState): string {
-  return argumentText
-    .split(',')
-    .map(part => part.trim())
+  return splitArguments(argumentText)
     .filter(part => part.length > 0)
     .map(part => {
       if (part === '$event') {
@@ -397,10 +396,10 @@ function substituteLets(
     let replaced = false;
 
     for (const [name, value] of state.lets) {
-      const pattern = new RegExp(`(?<![\\w$.])${name}(?![\\w$])`, 'g');
+      const next = replaceIdentifier(result, name, `(${value})`);
 
-      if (pattern.test(result)) {
-        result = result.replace(pattern, `(${value})`);
+      if (next !== result) {
+        result = next;
         replaced = true;
       }
     }
@@ -413,6 +412,74 @@ function substituteLets(
   }
 
   return result;
+}
+
+/**
+ * Replaces whole-identifier occurrences outside string literals. The previous
+ * pattern substitution also rewrote `@let` names appearing inside string
+ * content, silently changing the compiled value.
+ */
+function replaceIdentifier(
+  text: string,
+  name: string,
+  replacement: string,
+): string {
+  let result = '';
+  let index = 0;
+
+  while (index < text.length) {
+    const char = text[index];
+
+    if (char === '"' || char === "'" || char === '`') {
+      const end = endQuotedText(text, index);
+      result += text.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (isIdentifierStartChar(char) && !isTokenChar(text[index - 1])) {
+      const match = /^[A-Za-z_$][\w$]*/.exec(text.slice(index));
+
+      if (match && match[0] === name) {
+        result += replacement;
+        index += name.length;
+        continue;
+      }
+    }
+
+    result += char;
+    index += 1;
+  }
+
+  return result;
+}
+
+function isIdentifierStartChar(char: string | undefined): boolean {
+  return !!char && /[A-Za-z_$]/.test(char);
+}
+
+function isTokenChar(char: string | undefined): boolean {
+  return !!char && /[A-Za-z0-9_$.]/.test(char);
+}
+
+/** One past the closing quote of the string starting at `start`. */
+function endQuotedText(text: string, start: number): number {
+  const quote = text[start];
+  let escaped = false;
+
+  for (let index = start + 1; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (escaped) {
+      escaped = false;
+    } else if (char === '\\') {
+      escaped = true;
+    } else if (char === quote) {
+      return index + 1;
+    }
+  }
+
+  return text.length;
 }
 
 /**

@@ -1,6 +1,9 @@
 import {
   transformAngularComponentTemplate,
 } from './build-transform';
+import {
+  compileSxBlockTemplate,
+} from './block-template-compiler';
 
 describe('compiled event bindings', () => {
   it('lowers a native event and removes the Angular binding', () => {
@@ -68,5 +71,18 @@ describe('compiled event bindings', () => {
     const result = transformAngularComponentTemplate(template, 'inline.html');
 
     expect(result.template).toBe(template);
+  });
+
+  it('keeps a string literal containing a comma verbatim in a compiled block', () => {
+    // A plain comma split cut the literal into `'a` and `b'`, and the
+    // rewritten handler silently passed "a, b" instead of "a,b".
+    const result = compileSxBlockTemplate(
+      `<button (click)="select('a,b')">pick</button>`,
+    );
+    const binding = result.bindings[0];
+
+    expect(binding && binding.kind === 'event' ? binding.handler : '').toBe(
+      `ctx.select('a,b')`,
+    );
   });
 });

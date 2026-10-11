@@ -53,6 +53,26 @@ describe('compileSxBlockTemplate', () => {
     expect(result.createBody).not.toContain('createDocumentFragment()');
   });
 
+  it('leaves @let names inside string literals untouched', () => {
+    // The substitution rewrote every occurrence of the name, including the
+    // one inside the string literal, silently changing the compiled value.
+    const result = compileSxBlockTemplate(
+      `@let tag = model.tag;
+       <button (click)="tagged('tag')">go</button>`,
+      'sx-block.html',
+      {
+        resolveReactiveSource: (path: string) =>
+          ({ 'model.tag': 'model.get("tag")' })[path],
+      },
+    );
+
+    expect(
+      result.bindings[0] && result.bindings[0].kind === 'event'
+        ? result.bindings[0].handler
+        : '',
+    ).toBe(`ctx.tagged('tag')`);
+  });
+
   it('fails loudly for inner Angular property bindings', () => {
     expect(() =>
       compileSxBlockTemplate(

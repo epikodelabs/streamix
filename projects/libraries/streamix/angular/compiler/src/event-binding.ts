@@ -59,6 +59,49 @@ const METHOD_CALL =
   /^\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\(([^()]*)\)\s*$/;
 
 /**
+ * Splits a call's argument text on top-level commas only. A plain `split(',')`
+ * cut through string literals — `select('a,b')` became the arguments `'a` and
+ * `b'`, and the rewritten call silently passed `"a, b"` instead of `"a,b"`.
+ */
+export function splitArguments(text: string): readonly string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | '`' | undefined;
+  let escaped = false;
+
+  for (const char of text) {
+    if (quote) {
+      current += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      current += char;
+      continue;
+    }
+
+    if (char === ',') {
+      parts.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  parts.push(current.trim());
+  return parts;
+}
+
+/**
  * Recognizes a native event binding. Returns `undefined` for animations,
  * `window:`/`document:` targets, component/custom-element outputs, unknown
  * event names or modifiers, and handler shapes the generated listener cannot
@@ -97,7 +140,7 @@ export function parseNativeEventBinding(
   const argumentText = call[2];
 
   if (!options.allowValueArguments) {
-    for (const argument of argumentText.split(',').map(part => part.trim())) {
+    for (const argument of splitArguments(argumentText)) {
       if (!argument || argument === '$event') {
         continue;
       }
