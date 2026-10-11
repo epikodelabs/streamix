@@ -193,7 +193,7 @@ export async function generateProject({
   }
 
   for (const sourcePath of await listFiles(sourceDirectory, false)) {
-    const source = await readFile(sourcePath, 'utf8');
+    const source = rewriteDerivedAtomReads(await readFile(sourcePath, 'utf8'));
     if (!source.includes('@Component')) continue;
     const relativePath = relative(sourceDirectory, sourcePath).replace(/\\/g, '/');
     const match = /template:\s*`([\s\S]*?)`,\s*styles:/.exec(source);
@@ -290,4 +290,79 @@ export async function generateProject({
 function configPath(path: string): string {
   const normalized = path.replace(/\\/g, '/');
   return normalized.startsWith('.') ? normalized : `./${normalized}`;
+}
+
+/**
+ * Lets authored formulas use local atoms as values (`price * quantity`) while
+ * preserving raw Streamix atoms as the actual derived dependencies.
+ */
+export function rewriteDerivedAtomReads(source: string): string {
+  const file = ts.createSourceFile('component.ts', source, ts.ScriptTarget.Latest, true);
+  const atomNames = new Set<string>();
+
+  const isFactory = (node: ts.Expression, name: string): boolean =>
+    ts.isIdentifier(node) && node.text === name;
+
+  const collectAtoms = (node: ts.Node): void => {
+    if (
+      (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node)) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isCallExpression(node.initializer) &&
+      isFactory(node.initializer.expression, 'atom')
+    ) {
+      atomNames.add(node.name.text);
+    }
+    ts.forEachChild(node, collectAtoms);
+  };
+  collectAtoms(file);
+
+  const edits: Array<{ start: number; end: number; replacement: string }> = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      isFactory(node.expression, 'derived') &&
+      node.arguments.length > 0
+    ) {
+      const callback = node.arguments[0];
+      if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
+        const read = (child: ts.Node): void => {
+          if (
+            ts.isPropertyAccessExpression(child) &&
+            child.expression.kind === ts.SyntaxKind.ThisKeyword &&
+            atomNames.has(child.name.text)
+          ) {
+            edits.push({
+              start: child.getStart(file),
+              end: child.end,
+              replacement: `${child.getText(file)}.value`,
+            });
+            return;
+          }
+          if (ts.isIdentifier(child) && atomNames.has(child.text)) {
+            const parent = child.parent;
+            const isPropertyName = ts.isPropertyAccessExpression(parent) && parent.name === child;
+            const isExplicitValue = ts.isPropertyAccessExpression(parent) && parent.expression === child;
+            if (!isPropertyName && !isExplicitValue) {
+              edits.push({
+                start: child.getStart(file),
+                end: child.end,
+                replacement: `${child.text}.value`,
+              });
+            }
+          }
+          ts.forEachChild(child, read);
+        };
+        read(callback.body);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+
+  let transformed = source;
+  for (const edit of edits.sort((left, right) => right.start - left.start)) {
+    transformed = transformed.slice(0, edit.start) + edit.replacement + transformed.slice(edit.end);
+  }
+  return transformed;
 }

@@ -61,6 +61,11 @@ interface ReactiveDeclaration {
   readonly callExpressionStart: number;
   /** Offset just past the factory call (the scope-bridge insertion point). */
   readonly callEnd: number;
+  /** Offset just past the containing variable statement. */
+  readonly statementEnd: number;
+  /** Body span of a `derived` callback, when statically available. */
+  readonly derivedBodyStart?: number;
+  readonly derivedBodyEnd?: number;
   /** Scope object-literal member names, for scope declarations. */
   readonly members: readonly string[];
 }
@@ -179,23 +184,28 @@ export function transformVueSfc(
   const scriptEdits: SpanEdit[] = [];
   const templateEdits: SpanEdit[] = [];
 
-  // Raw atom/derived/flow declarations bridge by wrapping the factory call:
-  // `atom(0)` becomes `useWritable(atom(0))`, so the authored factory stays
-  // the constructor of record and the bridge owns reactivity. Scope
-  // declarations stay authored: only the members the template uses are
-  // bridged, one read-only ref per member.
+  // Keep authored declarations as raw Streamix sources. Vue-facing bindings
+  // are separate names, so `derived(() => price * quantity)` still closes
+  // over raw atoms rather than Vue computed refs.
   for (const declaration of reactive) {
     const bridge = declaration.kind === 'atom' ? 'useWritable' : 'useIterable';
 
     scriptEdits.push({
-      start: declaration.callExpressionStart,
-      end: declaration.callExpressionStart,
-      replacement: `${bridge}(`,
+      start: declaration.statementEnd,
+      end: declaration.statementEnd,
+      replacement: `\nconst ${reactiveBridgeName(declaration.name)} = ${bridge}(${declaration.name});`,
     });
-    scriptEdits.push({
-      start: declaration.callEnd,
-      end: declaration.callEnd,
-      replacement: ')',
+  }
+
+  for (const edit of derivedAtomValueReadEdits(scriptContent, reactive)) {
+    scriptEdits.push(edit);
+  }
+
+  for (const read of collectTemplateReactiveReads(templateContent, reactive)) {
+    templateEdits.push({
+      start: read.start,
+      end: read.end,
+      replacement: reactiveBridgeName(read.name),
     });
   }
 
@@ -322,6 +332,10 @@ export function transformVueSfc(
 
 function bridgeName(scope: string, member: string): string {
   return `${BRIDGE_PREFIX}${scope}_${member}`;
+}
+
+function reactiveBridgeName(name: string): string {
+  return `${BRIDGE_PREFIX}${name}`;
 }
 
 function isBridged(
@@ -454,12 +468,110 @@ function collectReactiveDeclarations(
         kind,
         callExpressionStart: declaration.initializer.expression.getStart(file),
         callEnd: declaration.initializer.end,
+        statementEnd: statement.end,
+        ...(kind === 'derived' ? derivedCallbackSpan(declaration.initializer, file) : {}),
         members: kind === 'scope' ? scopeMemberNames(declaration.initializer) : [],
       });
     }
   }
 
   return declarations;
+}
+
+function derivedCallbackSpan(
+  call: ts.CallExpression,
+  file: ts.SourceFile,
+): Pick<ReactiveDeclaration, 'derivedBodyStart' | 'derivedBodyEnd'> {
+  const callback = call.arguments[0];
+
+  if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
+    return {};
+  }
+
+  return {
+    derivedBodyStart: callback.body.getStart(file),
+    derivedBodyEnd: callback.body.end,
+  };
+}
+
+interface TemplateReactiveRead {
+  readonly start: number;
+  readonly end: number;
+  readonly name: string;
+}
+
+/** Finds bare reactive identifiers in template expressions, excluding scope paths. */
+function collectTemplateReactiveReads(
+  template: string,
+  declarations: readonly ReactiveDeclaration[],
+): readonly TemplateReactiveRead[] {
+  const names = new Set(declarations.map(declaration => declaration.name));
+  const reads: TemplateReactiveRead[] = [];
+
+  for (const span of templateExpressionSpans(template)) {
+    const expression = template.slice(span.start, span.end);
+    for (const match of expression.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) {
+      const name = match[1];
+      if (!names.has(name)) continue;
+
+      const start = span.start + match.index!;
+      const before = template[start - 1];
+      const after = template[start + name.length];
+      // Preserve property names (`state.count`) and explicit `.value` reads.
+      if (before === '.' || after === '.') continue;
+      reads.push({ start, end: start + name.length, name });
+    }
+  }
+
+  for (const match of template.matchAll(/\bv-model="([A-Za-z_$][\w$]*)"/g)) {
+    const name = match[1];
+    if (!names.has(name)) continue;
+    const start = match.index! + match[0].indexOf(name);
+    reads.push({ start, end: start + name.length, name });
+  }
+
+  return reads;
+}
+
+/**
+ * Lowers arithmetic-style derived shorthand to raw atom value reads. The raw
+ * atom identifiers remain in scope; generated Vue refs are never captured by
+ * the derived callback.
+ */
+function derivedAtomValueReadEdits(
+  script: string,
+  declarations: readonly ReactiveDeclaration[],
+): readonly SpanEdit[] {
+  const atomNames = new Set(
+    declarations
+      .filter(declaration => declaration.kind === 'atom')
+      .map(declaration => declaration.name),
+  );
+  const edits: SpanEdit[] = [];
+
+  for (const declaration of declarations) {
+    if (
+      declaration.kind !== 'derived' ||
+      declaration.derivedBodyStart === undefined ||
+      declaration.derivedBodyEnd === undefined
+    ) {
+      continue;
+    }
+
+    const body = script.slice(declaration.derivedBodyStart, declaration.derivedBodyEnd);
+    for (const match of body.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) {
+      const name = match[1];
+      if (!atomNames.has(name)) continue;
+
+      const start = declaration.derivedBodyStart + match.index!;
+      const before = script[start - 1];
+      const after = script[start + name.length];
+      if (before === '.' || after === '.') continue;
+      edits.push({ start, end: start + name.length, replacement: `${name}.value` });
+    }
+  }
+
+  return edits;
 }
 
 function scopeMemberNames(call: ts.CallExpression): string[] {

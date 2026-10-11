@@ -17,4 +17,18 @@ describe("React JSX compiler", () => {
     expect(result.code).toContain('count.next(count.value + 1)');
     expect(result.code).toContain('{__streamixBinding1 + 1}');
   });
+
+  it("keeps local atoms raw inside derived shorthand formulas", () => {
+    const result = transformReactJsx(`
+      function Counter() {
+        const price = atom(2);
+        const quantity = atom(3);
+        const total = derived(() => price * quantity);
+        return <output>{total}</output>;
+      }
+    `);
+
+    expect(result.code).toContain('derived(() => price.value * quantity.value)');
+    expect(result.code).toContain('__streamixUse(total, "total")');
+  });
 });

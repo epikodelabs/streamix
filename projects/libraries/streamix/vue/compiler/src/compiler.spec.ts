@@ -6,20 +6,27 @@ describe('Vue SFC compiler', () => {
       <script setup lang="ts">
       import { atom, derived, flow } from '@epikodelabs/streamix';
       const count = atom(0);
-      const doubled = derived(() => count.value * 2);
+      const factor = atom(2);
+      const doubled = derived(() => count * factor);
       const updates = flow(async function* () { yield 1; });
       </script>
       <template><button @click="count++">{{ count }} {{ doubled }} {{ updates }}</button></template>
     `);
 
-    expect(result.bindingCount).toBe(3);
+    expect(result.bindingCount).toBe(4);
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain(
       'import { useIterable, useWritable } from "@epikodelabs/streamix/vue";',
     );
-    expect(result.code).toContain('const count = useWritable(atom(0));');
-    expect(result.code).toContain('const doubled = useIterable(derived(() => count.value * 2));');
-    expect(result.code).toContain('const updates = useIterable(flow(async function* () { yield 1; }));');
+    expect(result.code).toContain('const count = atom(0);');
+    expect(result.code).toContain('const __sx_count = useWritable(count);');
+    expect(result.code).toContain('const factor = atom(2);');
+    expect(result.code).toContain('const __sx_factor = useWritable(factor);');
+    expect(result.code).toContain('const doubled = derived(() => count.value * factor.value);');
+    expect(result.code).toContain('const __sx_doubled = useIterable(doubled);');
+    expect(result.code).toContain('const updates = flow(async function* () { yield 1; });');
+    expect(result.code).toContain('const __sx_updates = useIterable(updates);');
+    expect(result.code).toContain('{{ __sx_count }} {{ __sx_doubled }} {{ __sx_updates }}');
   });
 
   it('bridges scope reads, writes, and native v-model bindings', () => {

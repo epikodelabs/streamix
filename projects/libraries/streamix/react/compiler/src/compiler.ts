@@ -591,8 +591,46 @@ export function transformReactJsx(
       };
 
       const visit: ts.Visitor = (child) => {
+        if (
+          ts.isCallExpression(child) &&
+          factoryKind(child, imports, checker) === "derived" &&
+          child.arguments.length > 0 &&
+          (ts.isArrowFunction(child.arguments[0]) || ts.isFunctionExpression(child.arguments[0]))
+        ) {
+          const callback = child.arguments[0] as ts.ArrowFunction | ts.FunctionExpression;
+          const rewriteDerivedRead: ts.Visitor = value => {
+            if (
+              ts.isIdentifier(value) &&
+              atoms.has(value.text) &&
+              !isNamePosition(value) &&
+              !isHidden(value) &&
+              value.parent &&
+              !(ts.isPropertyAccessExpression(value.parent) && value.parent.name === value)
+            ) {
+              return factory.createPropertyAccessExpression(value, "value");
+            }
+            return ts.visitEachChild(value, rewriteDerivedRead, context);
+          };
+          const body = ts.visitNode(callback.body, rewriteDerivedRead) as ts.ConciseBody;
+          const rewritten = ts.isArrowFunction(callback)
+            ? factory.updateArrowFunction(
+              callback, callback.modifiers, callback.typeParameters,
+              callback.parameters, callback.type, callback.equalsGreaterThanToken, body,
+            )
+            : factory.updateFunctionExpression(
+              callback, callback.modifiers, callback.asteriskToken, callback.name,
+              callback.typeParameters, callback.parameters, callback.type, body as ts.Block,
+            );
+          return factory.updateCallExpression(
+            child,
+            child.expression,
+            child.typeArguments,
+            [rewritten, ...child.arguments.slice(1)],
+          );
+        }
         if (ts.isVariableDeclaration(child) && localReactiveDeclarations.has(child) && child.initializer) {
           needsRuntimeImport = true;
+          const initializer = ts.visitNode(child.initializer, visit) as ts.Expression;
           return factory.updateVariableDeclaration(
             child,
             child.name,
@@ -605,7 +643,7 @@ export function transformReactJsx(
                 [],
                 undefined,
                 factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-                child.initializer,
+                initializer,
               ),
             ]),
           );
