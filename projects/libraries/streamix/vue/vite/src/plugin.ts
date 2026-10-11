@@ -17,6 +17,9 @@ export interface StreamixVueViteOptions {
  * Raw atoms, deriveds, flows, and scopes declared in `<script setup>` are
  * adopted automatically: templates read and write them as ordinary Vue state
  * while Streamix stays the single owner of the values.
+ *
+ * Source maps preserve authored locations, and intentionally leave generated
+ * bridge declarations and imports unmapped. Vite composes this map with Vue's.
  */
 export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
   return {
@@ -55,7 +58,7 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
         return null;
       }
 
-      return { code: result.code, map: null };
+      return { code: result.code, map: result.sourceMap ?? null };
     },
   };
 }

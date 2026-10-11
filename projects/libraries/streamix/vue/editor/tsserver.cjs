@@ -60,21 +60,21 @@ module.exports = function streamixVueLanguagePlugin(ctx) {
       }
       return false;
     };
-    const rewriteCallback = (body, node = body) => {
+    const rewriteCallback = (callback, node = callback.body) => {
       if (ts.isIdentifier(node) && atoms.has(node.text) &&
-          isValueRead(node) && !shadowed(node, body, node.text)) {
+          isValueRead(node) && !shadowed(node, callback, node.text)) {
         const shorthand = ts.isShorthandPropertyAssignment(node.parent);
         edits.push({ start: node.getStart(file), end: node.end,
           text: shorthand ? `${node.text}: ${node.text}.value` : `${node.text}.value` });
         return;
       }
-      ts.forEachChild(node, child => rewriteCallback(body, child));
+      ts.forEachChild(node, child => rewriteCallback(callback, child));
     };
     const visit = node => {
       if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
           derivedFactories.has(node.expression.text) && node.arguments.length > 0 &&
           (ts.isArrowFunction(node.arguments[0]) || ts.isFunctionExpression(node.arguments[0]))) {
-        rewriteCallback(node.arguments[0].body);
+        rewriteCallback(node.arguments[0]);
       }
       ts.forEachChild(node, visit);
     };
@@ -88,7 +88,8 @@ module.exports = function streamixVueLanguagePlugin(ctx) {
   }
 
   return {
-    version: 2.2,
+    // API version 2.1 is supported by Vue Language Tools 2.2+ and newer.
+    version: 2.1,
     name: "streamix-vue",
     compileSFCScript: transformedScript,
   };

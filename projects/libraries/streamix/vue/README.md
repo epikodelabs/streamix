@@ -149,7 +149,10 @@ const profile = scope({ name: 'Ada' });
 
 Use `@epikodelabs/streamix/vue/compiler` when integrating the transform into a
 non-Vite build. It exports `transformVueSfc(source, fileName)` and returns the
-transformed source plus source-positioned diagnostics.
+transformed source, source-positioned diagnostics, and a version-3 source map.
+Vite composes this source map with Vue's output maps. Authored text remains
+mapped to its original SFC coordinates; injected bridge declarations are
+intentionally unmapped.
 
 ### Angular-hosted or custom Architect builds
 
@@ -221,7 +224,8 @@ event trace as a Vue ref.
 For Vue Language Tools / Volar diagnostics that match the compiler's derived
 shorthand, add `@epikodelabs/streamix/vue/editor/tsserver` to
 `vueCompilerOptions.plugins`. See its bundled README for the exact tsconfig
-snippet.
+snippet. The plugin uses the official Vue Language Tools `compileSFCScript(lang,
+script)` hook (language first), and returns the API-compatible plugin version 2.1.
 
 ## The goal
 

@@ -1,5 +1,6 @@
 import ts from 'typescript';
 import { parse as parseSfc } from '@vue/compiler-sfc';
+import { applyMappedEdits, insertMappedText, createVueSourceMap, type VueSourceMap } from './source-map';
 
 export interface VueSfcDiagnostic {
   readonly category: 'error' | 'warning';
@@ -18,6 +19,8 @@ export interface VueSfcTransformResult {
   readonly bridgedScopes: Readonly<Record<string, readonly string[]>>;
   /** Diagnostics for syntax the compiler refuses to rewrite. */
   readonly diagnostics: readonly VueSfcDiagnostic[];
+  /** Accurate mappings for unchanged authored SFC text; inserted code is unmapped. */
+  readonly sourceMap?: VueSourceMap;
 }
 
 /** Formats transform diagnostics with a source location and one-line frame. */
@@ -63,8 +66,9 @@ interface ReactiveDeclaration {
   /** Offset just past the containing variable statement. */
   readonly statementEnd: number;
   /** Body span of a `derived` callback, when statically available. */
-  readonly derivedBodyStart?: number;
-  readonly derivedBodyEnd?: number;
+  /** The function, not only its body, is needed for parameter shadowing. */
+  readonly derivedCallbackStart?: number;
+  readonly derivedCallbackEnd?: number;
   /** Scope object-literal member names, for scope declarations. */
   readonly members: readonly string[];
 }
@@ -325,12 +329,17 @@ export function transformVueSfc(
     })),
   ].sort((left, right) => right.start - left.start);
 
-  const code = applyEdits(source, templateAndScriptEdits);
+  const firstPass = applyMappedEdits(source, templateAndScriptEdits);
+  const runtimeImport = withRuntimeImport(firstPass.code, templateAndScriptEdits.length > 0);
+  const final = runtimeImport.insertion
+    ? insertMappedText(firstPass, runtimeImport.insertion.offset, runtimeImport.insertion.text)
+    : firstPass;
   const bindingCount =
     reactive.length + Object.values(bridgedScopes).flat().length;
 
   return {
-    code: withRuntimeImport(code, templateAndScriptEdits.length > 0),
+    code: final.code,
+    sourceMap: createVueSourceMap(source, final, fileName),
     bindingCount,
     bridgedScopes,
     diagnostics,
@@ -548,13 +557,13 @@ function applyEdits(source: string, edits: readonly SpanEdit[]): string {
   return result;
 }
 
-function withRuntimeImport(source: string, installed: boolean): string {
-  if (!installed) return source;
+function withRuntimeImport(source: string, installed: boolean): { insertion?: { offset: number; text: string } } {
+  if (!installed) return {};
 
   // Read the *transformed* SFC descriptor rather than looking for a raw
   // closing-tag string. Existing imports may move after bridge insertion.
   const scriptSetup = parseSfc(source).descriptor.scriptSetup;
-  if (!scriptSetup) return source;
+  if (!scriptSetup) return {};
   const script = ts.createSourceFile('script.ts', scriptSetup.content, ts.ScriptTarget.Latest, true);
   const imported = new Set<string>();
   for (const statement of script.statements) {
@@ -569,11 +578,21 @@ function withRuntimeImport(source: string, installed: boolean): string {
       }
     }
   }
-  const required = ['useIterable', 'useWritable'].filter(name => !imported.has(name));
-  if (required.length === 0) return source;
-  const statement = `import { ${required.join(', ')} } from "@epikodelabs/streamix/vue";\n`;
-  const offset = scriptSetup.loc.start.offset;
-  return source.slice(0, offset) + `\n` + statement + source.slice(offset);
+  // Generate only imports actually used by generated or authored calls. Importing
+  // both bridges unconditionally fails strict `noUnusedLocals` builds.
+  const used = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+        (node.expression.text === 'useIterable' || node.expression.text === 'useWritable')) {
+      used.add(node.expression.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(script);
+  const required = ['useIterable', 'useWritable'].filter(name => used.has(name) && !imported.has(name));
+  if (required.length === 0) return {};
+  const statement = `\nimport { ${required.join(', ')} } from "@epikodelabs/streamix/vue";\n`;
+  return { insertion: { offset: scriptSetup.loc.start.offset, text: statement } };
 }
 
 function factoryImports(script: string): FactoryImports {
@@ -649,7 +668,7 @@ function collectReactiveDeclarations(
 function derivedCallbackSpan(
   call: ts.CallExpression,
   file: ts.SourceFile,
-): Pick<ReactiveDeclaration, 'derivedBodyStart' | 'derivedBodyEnd'> {
+): Pick<ReactiveDeclaration, 'derivedCallbackStart' | 'derivedCallbackEnd'> {
   const callback = call.arguments[0];
 
   if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
@@ -657,8 +676,8 @@ function derivedCallbackSpan(
   }
 
   return {
-    derivedBodyStart: callback.body.getStart(file),
-    derivedBodyEnd: callback.body.end,
+    derivedCallbackStart: callback.getStart(file),
+    derivedCallbackEnd: callback.end,
   };
 }
 
@@ -726,14 +745,15 @@ function derivedAtomValueReadEdits(
   const file = ts.createSourceFile('script.ts', script, ts.ScriptTarget.Latest, true);
   const edits: SpanEdit[] = [];
   const bodies = declarations.filter(item => item.kind === 'derived' &&
-    item.derivedBodyStart !== undefined && item.derivedBodyEnd !== undefined);
+    item.derivedCallbackStart !== undefined && item.derivedCallbackEnd !== undefined);
 
   for (const derived of bodies) {
-    const body = findNodeAt(file, derived.derivedBodyStart!, derived.derivedBodyEnd!);
-    if (!body) continue;
+    const callback = findNodeAt(file, derived.derivedCallbackStart!, derived.derivedCallbackEnd!);
+    if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) continue;
+    const body = callback.body;
     const visit = (node: ts.Node): void => {
       if (ts.isIdentifier(node) && atoms.has(node.text) &&
-          isValueIdentifier(node) && !isShadowedIn(node, body, node.text)) {
+          isValueIdentifier(node) && !isShadowedIn(node, callback, node.text)) {
         const start = node.getStart(file);
         const shorthand = ts.isShorthandPropertyAssignment(node.parent);
         edits.push({ start, end: node.end,

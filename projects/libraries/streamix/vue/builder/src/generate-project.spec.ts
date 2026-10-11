@@ -37,3 +37,33 @@ describe('Vue builder project generation', () => {
     expect(virtualRootOf('projects/apps/demo/client')).toBe('demo/client');
   });
 });
+
+describe('Vue builder production safety', () => {
+  it('rejects absolute and traversing source roots before modifying generated files', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-root-'));
+    try {
+      for (const invalid of ['', '.', '..', '../outside', '/tmp/source', 'C:\\source', '.angular/source']) {
+        await expectAsync(generateVueProject(workspace, invalid)).toBeRejectedWithError(/sourceRoot/);
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves previously generated project when a later SFC fails compilation', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-rollback-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const source = join(workspace, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'Counter.vue'), `<script setup>import { atom } from '@epikodelabs/streamix'; const count = atom(1);</script><template>{{ count }}</template>`);
+      const output = await generateVueProject(workspace, sourceRoot);
+      const before = await readFile(join(output, 'Counter.vue'), 'utf8');
+      await writeFile(join(source, 'Broken.vue'), `<script setup>import { scope } from '@epikodelabs/streamix'; const state = scope({ name: '' });</script><template><x-control v-model="state.name"/></template>`);
+      await expectAsync(generateVueProject(workspace, sourceRoot)).toBeRejectedWithError(/v-model on <x-control>/);
+      expect(await readFile(join(output, 'Counter.vue'), 'utf8')).toBe(before);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+});

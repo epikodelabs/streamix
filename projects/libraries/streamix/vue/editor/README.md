@@ -17,8 +17,11 @@ npm install @epikodelabs/streamix vue
 npm install -D typescript
 ```
 
-Use a Vue language-tools version compatible with the Vue extension in your
-editor.
+The plugin implements Vue Language Tools' `compileSFCScript(lang, script)`
+hook (**language first**), as declared by its upstream type definitions. It
+advertises API version `2.1` for compatibility with language-tools releases
+accepting versions 2.1 and 2.2. The hook returns a TypeScript SourceFile; it
+cannot be registered as a conventional TypeScript `tsserver` plugin.
 
 ## Configure
 

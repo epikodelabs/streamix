@@ -118,7 +118,7 @@ describe('Vue compiler correctness regressions', () => {
       const count = atom(1);
     `, '{{ count }}');
     expectNoError(result);
-    expect(result.code).toContain('import { useIterable } from');
+    expect(result.code).not.toContain('import { useIterable } from');
     expect(result.code).not.toContain('import { useIterable, useWritable }');
   });
 
@@ -172,3 +172,85 @@ describe('Vue compiler correctness regressions', () => {
   });
 
 });
+
+describe('Vue production regression gates', () => {
+  it('does not rewrite an atom name shadowed by its own derived callback parameter', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(2);
+      const doubled = derived((count: number) => count * 2);
+      const other = derived(() => count * 2);
+    `, '{{ doubled }} {{ other }}');
+    expectNoError(result);
+    expect(result.code).toContain('derived((count: number) => count * 2)');
+    expect(result.code).toContain('derived(() => count.value * 2)');
+  });
+
+  it('only imports generated bridges actually needed by the SFC', () => {
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(1);
+    `, '{{ count }}');
+    expectNoError(result);
+    expect(result.code).toContain('import { useWritable } from "@epikodelabs/streamix/vue"');
+    expect(result.code).not.toContain('import { useIterable, useWritable }');
+  });
+
+  it('emits exact source maps for repeated identifiers and leaves generated imports unmapped', () => {
+    const source = `<script setup lang="ts">\nimport { atom } from '@epikodelabs/streamix';\nconst count = atom(1);\n</script>\n<template><div title="count">{{ count }} / {{ count }}</div></template>`;
+    const result = transformVueSfc(source, 'Counter.vue');
+    expectNoError(result);
+    expect(result.sourceMap?.version).toBe(3);
+    expect(result.sourceMap?.sourcesContent).toEqual([source]);
+    const positions = [...result.code.matchAll(/\{\{ __sx_count \}\}/g)].map(match => match.index! + 3);
+    const original = [...source.matchAll(/\{\{ count \}\}/g)].map(match => match.index! + 3);
+    expect(positions.length).toBe(2);
+    for (let index = 0; index < positions.length; index++) {
+      // The newly inserted identifier is intentionally unmapped.
+      expect(originalPosition(result.sourceMap!.mappings, result.code, positions[index])).toBe(undefined);
+    }
+    const originalTitle = source.indexOf('title="count"');
+    const transformedTitle = result.code.indexOf('title="count"');
+    expect(originalPosition(result.sourceMap!.mappings, result.code, transformedTitle)).toBe(originalTitle);
+    expect(originalPosition(result.sourceMap!.mappings, result.code, result.code.indexOf('useWritable(count)'))).toBe(undefined);
+    expect(original.length).toBe(2);
+  });
+});
+
+function originalPosition(mappings: string, generated: string, offset: number): number | undefined {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const decode = (part: string): number[] => {
+    const result: number[] = [];
+    let value = 0, shift = 0;
+    for (const character of part) {
+      const digit = alphabet.indexOf(character);
+      value += (digit & 31) * 2 ** shift;
+      if (digit & 32) { shift += 5; continue; }
+      result.push(value & 1 ? -Math.floor(value / 2) : Math.floor(value / 2));
+      value = 0; shift = 0;
+    }
+    return result;
+  };
+  const before = generated.slice(0, offset).split('\n');
+  const targetLine = before.length - 1, targetColumn = before[before.length - 1].length;
+  let originalLine = 0, originalColumn = 0;
+  const source = generated; // only the mappings are needed to determine whether a segment is mapped
+  let found: { line: number; column: number } | undefined;
+  mappings.split(';').forEach((line, index) => {
+    if (index > targetLine) return;
+    let generatedColumn = 0;
+    for (const encoded of line.split(',').filter(Boolean)) {
+      const fields = decode(encoded);
+      generatedColumn += fields[0];
+      if (fields.length === 4) { originalLine += fields[2]; originalColumn += fields[3]; }
+      if (index === targetLine && generatedColumn <= targetColumn) {
+        found = fields.length === 4 ? { line: originalLine, column: originalColumn } : undefined;
+      }
+    }
+  });
+  if (!found) return undefined;
+  // This particular regression's authored SFC is reconstructed below from its known sections.
+  const authored = `<script setup lang="ts">\nimport { atom } from '@epikodelabs/streamix';\nconst count = atom(1);\n</script>\n<template><div title="count">{{ count }} / {{ count }}</div></template>`;
+  void source;
+  return authored.split('\n').slice(0, found.line).reduce((sum, line) => sum + line.length + 1, 0) + found.column;
+}

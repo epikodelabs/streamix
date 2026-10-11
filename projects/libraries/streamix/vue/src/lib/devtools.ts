@@ -108,4 +108,7 @@ const globalScope = globalThis as typeof globalThis & {
   __streamixDevtoolsRecord?: (event: Omit<StreamixDevtoolsEvent, 'time'>) => void;
 };
 
-if (enabled) globalScope.__streamixDevtoolsRecord = recordStreamixDevtoolsEvent;
+// Do not replace another framework's recorder in a mixed-framework host.
+if (enabled && !globalScope.__streamixDevtoolsRecord) {
+  globalScope.__streamixDevtoolsRecord = recordStreamixDevtoolsEvent;
+}

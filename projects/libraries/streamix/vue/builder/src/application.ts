@@ -36,7 +36,8 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
       await generateVueProject(context.workspaceRoot, sourceRoot);
       if (stopped) return;
 
-      if (context.target?.target === 'serve' || target === 'serve') {
+      if (['serve', 'dev-server'].includes(context.target?.target ?? '') ||
+          ['serve', 'dev-server'].includes(target) || options['watch'] === true) {
         watcher = watch(join(context.workspaceRoot, sourceRoot), { recursive: true }, (_event, filename) => {
           if (stopped) return;
           rebuildQueue = rebuildQueue.then(async () => {
@@ -45,6 +46,7 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
             else await generateVueProject(context.workspaceRoot, sourceRoot);
           }).catch(error => context.logger.error(`Streamix Vue source update failed: ${String(error)}`));
         });
+        watcher.on('error', error => context.logger.error(`Streamix Vue watcher failed: ${String(error)}`));
       }
 
       const delegate: Target = { project, target };

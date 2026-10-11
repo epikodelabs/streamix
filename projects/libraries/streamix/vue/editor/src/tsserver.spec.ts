@@ -32,10 +32,9 @@ describe('Streamix Vue language plugin', () => {
       const unrelated = derive(() => count);
     `;
 
-    const virtual = plugin.compileSFCScript('ts', source);
-
-    expect(virtual?.text).toContain('derived(() => count.value + 1)');
-    expect(virtual?.text).toContain('derive(() => count)');
+    // With no compiler changes required, Vue Language Tools must use its
+    // normal script parser rather than a fabricated SourceFile.
+    expect(plugin.compileSFCScript('ts', source)).toBeUndefined();
   });
 
   it('does not corrupt derived strings, comments, object literals or local shadows', () => {
@@ -53,4 +52,29 @@ describe('Streamix Vue language plugin', () => {
     expect(code).toContain('/* count */ const count = 4; return count;');
   });
 
+});
+
+describe('Vue editor production compatibility', () => {
+  it('uses the upstream lang-then-script hook and accepted API version', () => {
+    const plugin = createPlugin({ modules: { typescript: ts } }) as ReturnType<typeof createPlugin> & { version: number };
+    expect(plugin.version).toBe(2.1);
+    const source = `import { atom, derived } from '@epikodelabs/streamix'; const count = atom(2); const result = derived(() => count * 2);`;
+    expect(plugin.compileSFCScript('ts', source)?.text).toContain('count.value * 2');
+    expect(plugin.compileSFCScript(source, 'ts')).toBeUndefined();
+  });
+
+  it('preserves both arrow and function callback parameters that shadow atoms', () => {
+    const plugin = createPlugin({ modules: { typescript: ts } });
+    const source = `
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(2);
+      const a = derived((count) => count * 2);
+      const b = derived(function(count) { return count * 2; });
+      const c = derived(() => count * 2);
+    `;
+    const transformed = plugin.compileSFCScript('ts', source)?.text;
+    expect(transformed).toContain('derived((count) => count * 2)');
+    expect(transformed).toContain('derived(function(count) { return count * 2; })');
+    expect(transformed).toContain('derived(() => count.value * 2)');
+  });
 });

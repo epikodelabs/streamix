@@ -13,9 +13,11 @@ describe('Streamix Vue Vite plugin', () => {
         <template><button @click="count++">{{ count }}</button></template>
       `,
       '/workspace/src/Counter.vue',
-    ) as { code: string; map: null };
+    ) as { code: string; map: { version: number; mappings: string; sourcesContent: string[] } };
 
-    expect(transformed.map).toBeNull();
+    expect(transformed.map.version).toBe(3);
+    expect(transformed.map.mappings.length).toBeGreaterThan(0);
+    expect(transformed.map.sourcesContent[0]).toContain('const count = atom(0)');
     expect(transformed.code).toContain('const count = atom(0);');
     expect(transformed.code).toContain('useWritable(count)');
     expect(transformed.code).toContain('@epikodelabs/streamix/vue');

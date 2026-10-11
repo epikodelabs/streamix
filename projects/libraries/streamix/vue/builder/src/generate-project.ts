@@ -1,5 +1,6 @@
-import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
+import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   formatVueSfcDiagnostics,
   transformVueSfc,
@@ -7,17 +8,51 @@ import {
 
 /** Creates a clean virtual Vue project for the delegate target. */
 export async function generateVueProject(workspaceRoot: string, sourceRoot: string): Promise<string> {
-  const source = join(workspaceRoot, sourceRoot);
+  const source = validatedSourceDirectory(workspaceRoot, sourceRoot);
   const output = join(workspaceRoot, '.angular', '.streamix', virtualRootOf(sourceRoot));
-  await rm(output, { recursive: true, force: true });
   await mkdir(dirname(output), { recursive: true });
-  await cp(source, output, { recursive: true });
-
-  for (const file of await collectVueFiles(output)) {
-    await transformFile(file, relative(workspaceRoot, file));
+  const staging = join(dirname(output), `.${basename(output)}-sx-stage-${randomUUID()}`);
+  const backup = join(dirname(output), `.${basename(output)}-sx-backup-${randomUUID()}`);
+  let backedUp = false;
+  let installed = false;
+  try {
+    await cp(source, staging, { recursive: true });
+    for (const file of await collectVueFiles(staging)) {
+      await transformFile(file, relative(workspaceRoot, join(source, relative(staging, file))));
+    }
+    try {
+      await rename(output, backup);
+      backedUp = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await rename(staging, output);
+    installed = true;
+    return output;
+  } catch (error) {
+    if (backedUp && !installed) await rename(backup, output);
+    throw error;
+  } finally {
+    await rm(staging, { force: true, recursive: true });
+    if (installed && backedUp) await rm(backup, { force: true, recursive: true });
   }
+}
 
-  return output;
+/** Prevent traversal, workspace-wide recursion, and arbitrary absolute roots. */
+export function validatedSourceDirectory(workspaceRoot: string, sourceRoot: string): string {
+  const parts = sourceRoot.replace(/\\/g, '/').split('/');
+  if (!sourceRoot || isAbsolute(sourceRoot) || win32.isAbsolute(sourceRoot) ||
+      parts.some(part => part === '..' || part === '.' || part === '.angular') ||
+      !parts.some(Boolean)) {
+    throw new Error('Streamix Vue sourceRoot must be a nonempty workspace-relative source directory.');
+  }
+  const workspace = resolve(workspaceRoot);
+  const source = resolve(workspaceRoot, sourceRoot);
+  const rel = relative(workspace, source);
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error('Streamix Vue sourceRoot must identify a directory inside the workspace.');
+  }
+  return source;
 }
 
 /** Maps an authored source root to its isolated virtual-project location. */
@@ -33,10 +68,11 @@ export async function regenerateVueFile(
   sourceRoot: string,
   changedPath: string,
 ): Promise<void> {
-  const originalRoot = join(workspaceRoot, sourceRoot);
+  const originalRoot = validatedSourceDirectory(workspaceRoot, sourceRoot);
   const destRoot = join(workspaceRoot, '.angular', '.streamix', virtualRootOf(sourceRoot));
   const normalized = changedPath.replace(/\\/g, '/');
-  if (normalized.startsWith('../') || normalized.startsWith('/') || normalized.includes('/../')) return;
+  if (!normalized || isAbsolute(normalized) || win32.isAbsolute(normalized) ||
+      normalized.split('/').some(part => part === '..' || part === '.')) return;
 
   const origin = join(originalRoot, normalized);
   const destination = join(destRoot, normalized);
@@ -67,7 +103,15 @@ export async function regenerateVueFile(
   await mkdir(dirname(destination), { recursive: true });
   // Write only after a successful transform: a watch failure never leaves a
   // misleading, untransformed SFC in the delegated project.
-  await writeFile(destination, output);
+  // Rename a same-directory temporary into place, so the delegate cannot
+  // observe a partially written SFC while Vite recompiles a changed file.
+  const temporary = `${destination}.sx-tmp-${randomUUID()}`;
+  try {
+    await writeFile(temporary, output);
+    await rename(temporary, destination);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 async function collectVueFiles(directory: string): Promise<string[]> {

@@ -108,8 +108,10 @@ function dependencyRef<T>(
   let subscribing = true;
   recordStreamixDevtoolsEvent({ type: 'subscription', source: sourceName });
   const subscription = source.subscribe(() => {
-    if (!subscribing) bridge.invalidate();
-    if (!subscribing) recordStreamixDevtoolsEvent({ type: 'write', source: sourceName });
+    if (!subscribing) {
+      bridge.invalidate();
+      recordStreamixDevtoolsEvent({ type: 'write', source: sourceName });
+    }
   });
   subscribing = false;
   const errorSubscription = isErrorSource(source)
@@ -190,6 +192,9 @@ function asyncIterableRef<T>(
 
 /**
  * Reads a Streamix reactive source or any async iterable from Vue.
+ *
+ * If `source.value` is genuinely `undefined`, a supplied `initialValue` is
+ * displayed instead; omit it when `undefined` itself is meaningful.
  *
  * Streamix atoms, readables, derived values, and flows use their synchronous
  * `.value` + `subscribe(...)` contract. Vue does not mirror that value into its
