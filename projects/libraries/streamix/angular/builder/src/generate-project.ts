@@ -427,7 +427,13 @@ export function rewriteDerivedAtomReads(source: string): string {
     ) {
       const callback = node.arguments[0];
       if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
+        const hasTrackerParameter = callback.parameters.some(parameter =>
+          ts.isIdentifier(parameter.name) && parameter.name.text === '$');
         const read = (child: ts.Node): void => {
+          // `$` receives source references and records derived dependencies.
+          // Rewriting `$(count)` to `$(count.value)` would lose that source.
+          if (hasTrackerParameter && ts.isCallExpression(child) &&
+              ts.isIdentifier(child.expression) && child.expression.text === '$') return;
           if (
             ts.isPropertyAccessExpression(child) &&
             child.expression.kind === ts.SyntaxKind.ThisKeyword &&
