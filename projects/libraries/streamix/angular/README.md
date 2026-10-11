@@ -110,7 +110,7 @@ If a template expression cannot be handled safely, the build explains why instea
 
 ## Built for real application lifecycles
 
-The integration cleans up its listeners and reactive work when an Angular component is destroyed. It also works with server rendering and hydration: Angular renders the initial page, then Streamix takes over the reactive parts in the browser.
+The integration cleans up its listeners and reactive work when an Angular component is destroyed. Angular-owned bindings render normally on the server. Lowered Streamix `@if` and `@for` blocks deliberately render empty hydration markers and populate in the browser after hydration, so do not use those blocks for SEO-critical or first-paint content.
 
 For applications using Zone.js, Streamix can schedule its own view updates without turning every state change into unnecessary application-wide work.
 
