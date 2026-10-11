@@ -223,6 +223,23 @@ async function main() {
   const server = await createServer({
     root: BENCHMARKS_ROOT,
     logLevel: 'warn',
+    resolve: {
+      alias: [
+        {
+          // Vite applies the workspace tsconfig paths, which land the bare
+          // specifier inside the source package whose exports map has no
+          // main entry, so resolution fails before the file is ever read.
+          // Alias it to the same core source the tsconfig path targets.
+          find: '@epikodelabs/streamix',
+          replacement: fileURLToPath(
+            new URL(
+              '../projects/libraries/streamix/src/lib/index.ts',
+              import.meta.url,
+            ),
+          ),
+        },
+      ],
+    },
   });
 
   await server.listen();
