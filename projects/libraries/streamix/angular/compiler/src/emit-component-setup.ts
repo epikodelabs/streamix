@@ -11,7 +11,7 @@ import type {
 import {
   indent,
 } from './codegen';
-import { KEY_MODIFIER_KEYS } from './event-binding';
+import { HELD_KEY_MODIFIERS, KEY_MODIFIER_KEYS } from './event-binding';
 import type {
   SxLoweredBlock,
   SxLoweredValue,
@@ -305,7 +305,7 @@ function emitStructuralBlocks(
       lines.push(`    ${anchor},`);
       lines.push(`    ${loweredValue(block.source)},`);
       lines.push(`    {`);
-      const contextObject = contextLocals(block.item);
+      const contextObject = contextLocals(block.item, block.aliases);
 
       lines.push(`      create(${block.item}, index, count) {`);
       lines.push(`        let currentContext = { ${contextObject} };`);
@@ -393,6 +393,11 @@ function eventHandlerBody(
 
     if (key) {
       guards.push(`if (event.key !== ${JSON.stringify(key)}) return;`);
+    }
+
+    const held = HELD_KEY_MODIFIERS[modifier];
+    if (held) {
+      guards.push(`if (!event.${held}) return;`);
     }
   }
 
@@ -486,9 +491,15 @@ function emitNestedBlock(
       lines.push(`${pad}    factory: () => {`);
       lines.push(indent(branch.body.createBody, spaces + 6));
       lines.push(...emitBodyContent(branch.body, spaces + 6, context));
-      lines.push(
-        ...bodyInstanceLines(branch.body, spaces + 6, roots),
-      );
+      // A conditional nested in a collection closes over `currentContext`.
+      // Return a compiled instance so an item replacement writes local text
+      // before the conditional is refreshed again.
+      lines.push(...compiledBodyInstanceLines(
+        branch.body,
+        spaces + 6,
+        roots,
+        context,
+      ));
       lines.push(`${pad}    },`);
       lines.push(`${pad}  },`);
     }
@@ -531,7 +542,7 @@ function emitNestedBlock(
   lines.push(`${pad}    },`);
   lines.push(`${pad}    update(instance, ${nested.item}, index, count) {`);
   lines.push(
-    `${pad}      instance.update({ ${contextLocals(nested.item)} });`,
+    `${pad}      instance.update({ ${contextLocals(nested.item, nested.aliases)} });`,
   );
   lines.push(`${pad}    },`);
   lines.push(`${pad}  },`);
@@ -553,8 +564,11 @@ function emitNestedBlock(
 }
 
 /** Loop-context entries shared by every compiled collection body. */
-function contextLocals(item: string): string {
-  return [
+function contextLocals(
+  item: string,
+  aliases: readonly { name: string; value: string }[] = [],
+): string {
+  const locals = [
     item,
     'index',
     '$index: index',
@@ -568,7 +582,28 @@ function contextLocals(item: string): string {
     '$even: index % 2 === 0',
     'odd: index % 2 === 1',
     '$odd: index % 2 === 1',
-  ].join(', ');
+  ];
+
+  for (const alias of aliases) {
+    const value = loopContextValue(alias.value);
+    if (value && alias.name !== item) {
+      locals.push(`${alias.name}: ${value}`);
+    }
+  }
+
+  return locals.join(', ');
+}
+
+function loopContextValue(value: string): string | undefined {
+  switch (value) {
+    case '$index': return 'index';
+    case '$count': return 'count';
+    case '$first': return 'index === 0';
+    case '$last': return 'index === count - 1';
+    case '$even': return 'index % 2 === 0';
+    case '$odd': return 'index % 2 === 1';
+    default: return undefined;
+  }
 }
 
 /** The loop context of a nested collection, extending the enclosing one. */
@@ -576,7 +611,7 @@ function nestedContextDeclaration(
   nested: Extract<SxCompiledNestedBlock, { kind: 'collection' }>,
   context?: string,
 ): string {
-  const locals = contextLocals(nested.item);
+  const locals = contextLocals(nested.item, nested.aliases);
 
   return context
     ? `let currentContext = { ...${context}, ${locals} };`
@@ -658,6 +693,39 @@ function bodyInstanceLines(
 
   lines.push(`${pad}  },`);
   lines.push(`${pad}};`);
+  return lines;
+}
+
+/**
+ * Like `bodyInstanceLines`, but preserves a loop-local update callback for a
+ * nested conditional branch. Without this wrapper, branch-local text was
+ * created empty and only the branch selection refreshed on collection edits.
+ */
+function compiledBodyInstanceLines(
+  body: SxCompiledBlockBody,
+  spaces: number,
+  roots: readonly string[],
+  context?: string,
+): readonly string[] {
+  if (!context || (!body.updateBody && body.nested.length === 0)) {
+    return bodyInstanceLines(body, spaces, roots);
+  }
+
+  const pad = ' '.repeat(spaces);
+  const lines: string[] = [];
+  const range = rootsReference(roots, lines, pad);
+  lines.push(`${pad}return ɵcreateSxCompiledBlock(`);
+  lines.push(`${pad}  ${range.first},`);
+  lines.push(`${pad}  ${range.last},`);
+  lines.push(`${pad}  () => {`);
+  lines.push(indent(body.updateBody, spaces + 4));
+  lines.push(...nestedRefreshLines(body, spaces + 4));
+  lines.push(`${pad}  },`);
+  lines.push(`${pad}  ${context},`);
+  if (body.bindings.length > 0) {
+    lines.push(`${pad}  () => blockTable.destroy(),`);
+  }
+  lines.push(`${pad});`);
   return lines;
 }
 

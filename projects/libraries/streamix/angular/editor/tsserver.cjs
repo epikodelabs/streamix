@@ -38,12 +38,15 @@ module.exports = function init(modules) {
           const visitCallback = child => {
             if (ts.isPropertyAccessExpression(child) && child.expression.kind === ts.SyntaxKind.ThisKeyword &&
                 atoms.has(child.name.text)) {
+              if (ts.isPropertyAccessExpression(child.parent) && child.parent.expression === child &&
+                  child.parent.name.text === "value") return;
               edits.push({ start: child.getStart(file), end: child.end, text: child.getText(file) + ".value" });
               return;
             }
             if (ts.isIdentifier(child) && atoms.has(child.text) &&
                 !(ts.isPropertyAccessExpression(child.parent) && child.parent.name === child) &&
-                !(ts.isPropertyAccessExpression(child.parent) && child.parent.expression === child && child.parent.name.text === "value")) {
+                !(ts.isPropertyAccessExpression(child.parent) && child.parent.expression === child && child.parent.name.text === "value") &&
+                !ts.isShorthandPropertyAssignment(child.parent)) {
               edits.push({ start: child.getStart(file), end: child.end, text: child.text + ".value" });
               return;
             }
@@ -120,10 +123,6 @@ module.exports = function init(modules) {
     let result = expression;
     for (const atom of atoms) {
       const escaped = atom.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      result = result.replace(new RegExp("\\b" + escaped + "\\s*\\+=\\s*([^;]+)$"), (_, value) =>
-        atom + ".next(" + atom + ".value + (" + value + "))");
-      result = result.replace(new RegExp("\\b" + escaped + "\\s*=\\s*([^=][^;]*)$"), (_, value) =>
-        atom + ".next(" + value + ")");
       result = result.replace(new RegExp("\\b" + escaped + "\\b(?!\\s*\\.)", "g"), atom + ".value");
     }
     return result;

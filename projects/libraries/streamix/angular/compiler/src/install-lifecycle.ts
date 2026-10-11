@@ -147,6 +147,8 @@ export function installSxLifecycleIntoComponentSource(
 function findComponentClass(
   file: ts.SourceFile,
 ): ts.ClassDeclaration | undefined {
+  let exportedClass: ts.ClassDeclaration | undefined;
+
   for (const statement of file.statements) {
     if (!ts.isClassDeclaration(statement)) {
       continue;
@@ -158,12 +160,26 @@ function findComponentClass(
         modifier.kind === ts.SyntaxKind.DefaultKeyword,
     );
 
-    if (exported) {
+    const component = ts.getDecorators(statement)?.some(decorator => {
+      const expression = decorator.expression;
+      return ts.isCallExpression(expression) &&
+        ts.isIdentifier(expression.expression) &&
+        expression.expression.text === 'Component';
+    });
+
+    if (exported && component) {
       return statement;
+    }
+
+    // Keep the standalone transformation API compatible with its historical
+    // class-only input, but prefer an actual decorated component whenever the
+    // source file contains one.
+    if (exported && !exportedClass) {
+      exportedClass = statement;
     }
   }
 
-  return undefined;
+  return exportedClass;
 }
 
 function memberName(member: ts.ClassElement): string | undefined {

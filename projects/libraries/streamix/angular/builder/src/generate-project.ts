@@ -69,7 +69,15 @@ export async function generateProject({
     const visit = (node: ts.Node): void => {
       if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name)) {
         const type = checker.getTypeAtLocation(node.initializer ?? node.name);
-        if (type.getProperty('value') && type.getProperty('subscribe')) {
+        // Streamix sources intentionally carry the `atom` discriminator. A
+        // `BehaviorSubject` happens to have `value` and `subscribe`, but its
+        // subscription teardown and write API are incompatible with the
+        // generated binding table.
+        if (
+          type.getProperty('type') &&
+          type.getProperty('value') &&
+          type.getProperty('subscribe')
+        ) {
           fields.push(node.name.text);
         }
       }
@@ -91,8 +99,9 @@ export async function generateProject({
       if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name)) {
         const type = checker.getTypeAtLocation(node.initializer ?? node.name);
         if (
+          type.getProperty('type') &&
           type.getProperty('value') &&
-          (type.getProperty('set') || type.getProperty('next'))
+          type.getProperty('set')
         ) {
           fields.push(node.name.text);
         }
@@ -194,8 +203,18 @@ export async function generateProject({
 
   for (const sourcePath of await listFiles(sourceDirectory, false)) {
     const source = rewriteDerivedAtomReads(await readFile(sourcePath, 'utf8'));
-    if (!source.includes('@Component')) continue;
     const relativePath = relative(sourceDirectory, sourcePath).replace(/\\/g, '/');
+    const outputPath = resolve(outputDirectory, relativePath);
+
+    // The virtual copy was made before formula normalization. Always persist
+    // a derived-read rewrite, including stores/services and components that
+    // do not happen to compile a template in this pass.
+    if (source !== await readFile(sourcePath, 'utf8')) {
+      await mkdir(dirname(outputPath), { recursive: true });
+      await writeFileAtomic(outputPath, source);
+    }
+
+    if (!source.includes('@Component')) continue;
     const match = /template:\s*`([\s\S]*?)`,\s*styles:/.exec(source);
     if (!match) {
       console.warn(
@@ -226,7 +245,6 @@ export async function generateProject({
       inlineSetup: compiled.setupCode,
       sourceReferenceFields: compiled.sourceReferenceFields,
     }).source;
-    const outputPath = resolve(outputDirectory, relativePath);
     let virtual: string;
     try {
       virtual = installTransformedTemplate(lifecycle, compiled.transformedTemplate);
@@ -279,9 +297,9 @@ export async function generateProject({
   await writeFile(
     resolve(outputDirectory, '..', 'tsconfig.app.json'),
     `${JSON.stringify({
-      extends: configPath(relative(resolve(outputDirectory, '..'), resolve(workspaceRoot, 'tsconfig.json'))),
-      compilerOptions: { types: [] },
+      extends: configPath(relative(resolve(outputDirectory, '..'), tsconfigPath)),
       include: ['src/**/*.ts'],
+      exclude: ['src/**/*.spec.ts'],
     }, null, 2)}\n`,
   );
 
@@ -332,6 +350,15 @@ export function rewriteDerivedAtomReads(source: string): string {
             child.expression.kind === ts.SyntaxKind.ThisKeyword &&
             atomNames.has(child.name.text)
           ) {
+            // `this.price.value` is already explicit. Rewriting the inner
+            // access would produce `this.price.value.value`.
+            if (
+              ts.isPropertyAccessExpression(child.parent) &&
+              child.parent.expression === child &&
+              child.parent.name.text === 'value'
+            ) {
+              return;
+            }
             edits.push({
               start: child.getStart(file),
               end: child.end,
@@ -343,7 +370,8 @@ export function rewriteDerivedAtomReads(source: string): string {
             const parent = child.parent;
             const isPropertyName = ts.isPropertyAccessExpression(parent) && parent.name === child;
             const isExplicitValue = ts.isPropertyAccessExpression(parent) && parent.expression === child;
-            if (!isPropertyName && !isExplicitValue) {
+            const isShorthand = ts.isShorthandPropertyAssignment(parent);
+            if (!isPropertyName && !isExplicitValue && !isShorthand) {
               edits.push({
                 start: child.getStart(file),
                 end: child.end,

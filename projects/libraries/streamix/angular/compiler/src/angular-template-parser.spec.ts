@@ -49,4 +49,12 @@ describe('parseSxTemplate static topology', () => {
 
     expect(parsed.nodes).toEqual(['node0']);
   });
+
+  it('rejects compiled bindings in projected content', () => {
+    expect(() => parseSxTemplate(
+      `<app-card><p>{{ model.msg }}</p></app-card>`,
+      'inline.html',
+      { resolveReactiveSource },
+    )).toThrowError(/projection|static element topology/i);
+  });
 });

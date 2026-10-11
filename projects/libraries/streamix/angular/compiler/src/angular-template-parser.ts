@@ -239,6 +239,24 @@ function walkStaticChildren(
     const node = siblings[index];
 
     if (node instanceof TmplAstElement) {
+      // Children of a custom element are projected into a component-owned
+      // view. Their eventual DOM position is not the authored child index,
+      // so a direct binding must fail loudly rather than walk into the host's
+      // rendered implementation.
+      if (
+        state.strict &&
+        node.name.includes('-') &&
+        node.children.some(child =>
+          containsCompiledBinding(
+            child,
+            state.template,
+            state.resolveReactiveSource,
+          )
+        )
+      ) {
+        throw new Error(DYNAMIC_TOPOLOGY_ERROR);
+      }
+
       const path = [...parentPath, elementIndex++];
       visitElement(node, state, path);
       walkStaticChildren(node.children, state, path);
@@ -495,6 +513,15 @@ function visitElement(
   for (const output of element.outputs) {
     if (twoWay.has(spanKey(output.sourceSpan))) {
       continue;
+    }
+
+    const handlerSource = sourceText(state.template, output.handlerSpan);
+    const assignment = /^\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*(?:=|\+=|-=|\*=|\/=|%=)/.exec(handlerSource);
+    if (assignment && state.resolveReactiveSource?.(assignment[1])) {
+      throw new Error(
+        `Cannot assign to Streamix source ${JSON.stringify(assignment[1])} in an Angular event expression. ` +
+        'Use a component method or call .set(...) instead.',
+      );
     }
 
     const binding = classifyEventBinding(

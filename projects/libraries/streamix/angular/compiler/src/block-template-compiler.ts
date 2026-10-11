@@ -84,12 +84,18 @@ export type SxCompiledNestedBlock =
       readonly source: SxCompiledValue;
       readonly trackBy: string;
       readonly item: string;
+      readonly aliases: readonly SxLoopAlias[];
       readonly body: SxCompiledBlockBody;
       readonly empty?: SxCompiledBlockBody;
     };
 
 export interface SxCompiledBlockTemplate extends SxCompiledBlockBody {
   readonly bindingCount: number;
+}
+
+export interface SxLoopAlias {
+  readonly name: string;
+  readonly value: string;
 }
 
 export interface SxBlockTemplateOptions {
@@ -610,6 +616,10 @@ function emitNestedCollection(
     source,
     trackBy,
     item,
+    aliases: block.contextVariables.map(variable => ({
+      name: variable.name,
+      value: variable.value,
+    })),
     body,
     empty,
   });
@@ -856,9 +866,15 @@ function emitBoundText(
       }
     }
 
-    // Without a resolver (the context-based compilation mode) only plain
-    // property paths can be resolved against the loop context.
-    if (!state.resolveReactiveSource && !LOCAL_READ.test(expression)) {
+    // Pipes and calls require Angular's template evaluator (and a method call
+    // would lose its `this` receiver after local-path rewriting), so reject
+    // them instead of emitting JavaScript with different semantics. Plain
+    // local arithmetic remains safe and is evaluated during block updates.
+    if (
+      /(^|[^|])\|([^|]|$)/.test(expression) ||
+      /[A-Za-z_$][\w$.]*\s*\(/.test(expression) ||
+      (!state.resolveReactiveSource && !LOCAL_READ.test(expression))
+    ) {
       throw new Error(
         `Unsupported sx structural interpolation: ${JSON.stringify(part.value)}. ` +
         'Only local/property reads are supported in the direct block compiler.',

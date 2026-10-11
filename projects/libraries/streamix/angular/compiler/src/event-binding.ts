@@ -22,7 +22,7 @@ export const EVENT_MODIFIERS = new Set([
   'stop', 'prevent', 'self', 'once', 'capture',
 ]);
 
-/** Keyboard modifiers, mapped to the `KeyboardEvent.key` value they filter. */
+/** Keyboard modifiers that filter `KeyboardEvent.key`. */
 export const KEY_MODIFIER_KEYS: Readonly<Record<string, string>> = {
   enter: 'Enter',
   escape: 'Escape',
@@ -38,10 +38,14 @@ export const KEY_MODIFIER_KEYS: Readonly<Record<string, string>> = {
   end: 'End',
   pageup: 'PageUp',
   pagedown: 'PageDown',
-  alt: 'Alt',
-  shift: 'Shift',
-  control: 'Control',
-  meta: 'Meta',
+};
+
+/** Held keyboard modifiers are flags, not values of `KeyboardEvent.key`. */
+export const HELD_KEY_MODIFIERS: Readonly<Record<string, string>> = {
+  alt: 'altKey',
+  shift: 'shiftKey',
+  control: 'ctrlKey',
+  meta: 'metaKey',
 };
 
 /** A recognized `(event.modifier)="method(...)"` binding. */
@@ -126,7 +130,11 @@ export function parseNativeEventBinding(
   }
 
   for (const modifier of modifiers) {
-    if (!EVENT_MODIFIERS.has(modifier) && !(modifier in KEY_MODIFIER_KEYS)) {
+    if (
+      !EVENT_MODIFIERS.has(modifier) &&
+      !(modifier in KEY_MODIFIER_KEYS) &&
+      !(modifier in HELD_KEY_MODIFIERS)
+    ) {
       return undefined;
     }
   }

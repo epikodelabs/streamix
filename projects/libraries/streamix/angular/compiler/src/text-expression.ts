@@ -227,11 +227,16 @@ export function analyzeSxExpression(
   const expression = normalized.expression;
 
   const direct = SIMPLE_VALUE_READ.exec(expression);
-  if (direct) {
+  // An authored `.value` is ordinary Angular state unless the component
+  // resolver proves that the receiver is a Streamix source.  Treating every
+  // object with a `value` member as subscribable made refs, forms and DTOs
+  // crash setup.
+  const directSource = direct && resolveReactiveSource?.(direct[1]);
+  if (direct && (!resolveReactiveSource || directSource)) {
     return {
       expression,
-      dependencies: [direct[1]],
-      directSource: direct[1],
+      dependencies: [directSource ?? direct[1]],
+      directSource: directSource ?? direct[1],
       mode: 'direct',
       sourceTransparent: normalized.changed,
     };

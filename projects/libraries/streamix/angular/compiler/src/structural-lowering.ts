@@ -13,6 +13,7 @@ import {
 
 import {
   compileSxBlockTemplate,
+  type SxLoopAlias,
   type SxCompiledBlockTemplate,
 } from './block-template-compiler';
 import {
@@ -65,6 +66,7 @@ export interface SxLoweredCollectionBlock {
   readonly trackBy: string;
   /** Loop variable name used by the body. */
   readonly item: string;
+  readonly aliases: readonly SxLoopAlias[];
   readonly compiled: SxCompiledBlockTemplate;
   readonly empty?: SxCompiledBlockTemplate;
   readonly fields: readonly string[];
@@ -510,6 +512,10 @@ function tryLowerTemplateBlock(
       ? `(_index: any, ${item}: any) => ctx.${trackBy}(_index, ${item})`
       : `(_index: any, ${item}: any) => ${item}`,
     item,
+    aliases: node.variables.slice(1).map(variable => ({
+      name: variable.name,
+      value: variable.value,
+    })),
     compiled,
     fields: loweredValueFields(source),
   };
@@ -817,6 +823,10 @@ function tryLowerCollectionBlock(
     source,
     trackBy,
     item,
+    aliases: block.contextVariables.map(variable => ({
+      name: variable.name,
+      value: variable.value,
+    })),
     compiled,
     empty,
     fields: [...new Set(loweredValueFields(source))],
