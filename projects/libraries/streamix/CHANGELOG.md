@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.0.5 - 2026-10-11
+
+- **Framework adoption layers:** hardened every Angular (`angular`,
+  `angular/compiler`, `angular/editor`, `angular/builder`), React (`react`,
+  `react/compiler`, `react/editor`, `react/vite`, `react/builder`), and Vue
+  (`vue`, `vue/compiler`, `vue/editor`, `vue/vite`, `vue/builder`) subpackage.
+  This includes safer compiler lowering and diagnostics, source maps, editor
+  integration, Vite/Architect virtual-project builds, lifecycle and subscription
+  handling, iterable/resource bridges, and production DevTools behavior.
+  Unsupported topology and unsafe framework boundaries now fail explicitly;
+  React Activity uses explicit lifetimes, and Angular lowered `@if` / `@for`
+  server output is documented as hydration markers rather than initial HTML.
+- **Documentation (`docs`, framework READMEs, builders, and editors):**
+  refreshed Angular, React, and Vue adoption, compiler-boundary,
+  SSR/hydration, lifecycle/ownership, editor, and host-builder guidance; added
+  the Vue guide to the documentation navigation.
+
+
 ## 3.0.4 - 2026-10-07
 
 - **Automatic subscription for scoped atoms, documented end to end.😊** A scope
