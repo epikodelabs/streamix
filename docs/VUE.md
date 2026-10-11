@@ -2,22 +2,24 @@
 
 `@epikodelabs/streamix/vue` connects Streamix sources to Vue's Composition API and templates without duplicating state.
 
+Declare Streamix state in `<script setup>` and let the compiler generate the Vue bridges — components never request composables themselves:
+
 ```vue
 <script setup lang="ts">
-import { atom, derived } from '@epikodelabs/streamix';
-import { useIterable, useWritable } from '@epikodelabs/streamix/vue';
+import { atom, derived, scope } from '@epikodelabs/streamix';
 
-const countSource = atom(0);
-const count = useWritable(countSource);
-const doubled = useIterable(derived(() => countSource.value * 2));
+const count = atom(0);
+const doubled = derived(() => count * 2);
+const profile = scope({ name: 'Ada' });
 </script>
 
 <template>
   <button @click="count++">{{ count }} / {{ doubled }}</button>
+  <input v-model="profile.name">
 </template>
 ```
 
-Use `useWritable()` for sources a component reads and updates, `useIterable()` for read-only sources or async iterables, and `useScope(() => scope(...))` for component-owned related state.
+Writable atoms become writable Vue refs, derived values and flows become read-only refs, and every declared scope is wrapped so its lifetime is tied to the component. Atom reads inside `derived` callbacks are transpiled as well — write `count`, not `count.value`. Scope members the template touches are bridged individually, `v-model` included. `useWritable()`, `useIterable()`, and `useScope()` are generated internals: the compiler emits those calls and their imports, so there is nothing to import by hand.
 
 ## Compiler-first SFCs
 
@@ -38,5 +40,3 @@ Templates can then read local atoms, derived values, flows, and declared scope m
 Use `read`, `write`, and `atomRef` in timers, third-party callbacks, and other code outside Vue's tracked render path. For SSR, render `renderAtomSnapshotScript()` on the server and call `hydrateAtomSnapshotFromDocument()` before mounting on the client.
 
 To align Volar diagnostics with compiler shorthand, configure `@epikodelabs/streamix/vue/editor/tsserver` in `vueCompilerOptions.plugins`. The compiler remains authoritative for output and diagnostics.
-
-See the package [README](https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/vue/README.md) for the Angular-hosted builder setup, DevTools, and detailed lifecycle guidance.

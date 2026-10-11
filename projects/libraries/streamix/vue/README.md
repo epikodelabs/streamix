@@ -10,62 +10,53 @@ Vue still renders the interface. Streamix holds state, derived values, and async
 npm install @epikodelabs/streamix vue
 ```
 
-## Read and update state
+## Declare state, use it in templates
 
-Use `useWritable()` when a Vue component needs to display and change a Streamix value.
+Put the Streamix Vite plugin before Vue's plugin:
+
+```ts
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+import { sxVue } from '@epikodelabs/streamix/vue/vite';
+
+export default defineConfig({
+  plugins: [sxVue(), vue()],
+});
+```
+
+Then declare Streamix state in `<script setup>` and use it as ordinary Vue state in the template. You never request composables yourself — the compiler generates the bridges and their imports:
 
 ```vue
 <script setup lang="ts">
-import { atom } from '@epikodelabs/streamix';
-import { useWritable } from '@epikodelabs/streamix/vue';
+import { atom, derived, scope } from '@epikodelabs/streamix';
 
-const counter = atom(0);
-const count = useWritable(counter);
+const count = atom(0);
+const doubled = derived(() => count * 2);
+const profile = scope({ name: 'Ada' });
 </script>
 
 <template>
-  <button @click="count++">{{ count }}</button>
+  <button @click="count++">{{ count }} / {{ doubled }}</button>
+  <input v-model="profile.name">
 </template>
 ```
 
-The returned value behaves like a writable Vue ref, so it also works with `v-model`.
-
-```vue
-<script setup lang="ts">
-import { atom } from '@epikodelabs/streamix';
-import { useWritable } from '@epikodelabs/streamix/vue';
-
-const name = useWritable(atom('Ada'));
-</script>
-
-<template>
-  <input v-model="name">
-</template>
-```
+Atom reads inside `derived` callbacks are transpiled as well — write `count`, not `count.value`.
 
 The value is not copied into a second store. Vue reads and writes the same Streamix source.
 
-## Read derived values and flows
+## What the compiler generates
 
-Use `useIterable()` when a component only needs to observe a Streamix atom, derived value, or flow.
+Every local Streamix declaration is adopted automatically:
 
-```vue
-<script setup lang="ts">
-import { atom, derived } from '@epikodelabs/streamix';
-import { useIterable } from '@epikodelabs/streamix/vue';
+| Declared in `<script setup>` | Generated bridge |
+| --- | --- |
+| `atom(...)` the template reads and updates | `useWritable(source)` — a writable ref that works with `v-model` |
+| `derived(...)` or `flow(...)` | `useIterable(source)` — a read-only ref |
+| `scope({ ... })` | `useScope(() => scope({ ... }))` — the scope is disposed with the component, so its local Streamix work is cleaned up on unmount |
+| Scope members the template touches | `useIterable(scope.get('member'))` per member, with writes and `v-model` lowered to `scope.set(...)` |
 
-const count = atom(2);
-const doubled = useIterable(
-  derived(() => count.value * 2),
-);
-</script>
-
-<template>
-  <strong>{{ doubled }}</strong>
-</template>
-```
-
-`useIterable()` can also read a regular `AsyncIterable`. Give Vue an initial value to show before the first result arrives.
+`useWritable()`, `useIterable()`, and `useScope()` are generated internals: the compiler emits those calls and their imports, and Vue's setup auto-unwrap makes the templates read and write them as ordinary state. Call them by hand only in code the compiler cannot reach — for example, a plain `AsyncIterable` is not a Streamix declaration, so give it an initial value yourself:
 
 ```vue
 <script setup lang="ts">
@@ -83,69 +74,9 @@ const message = useIterable(messages(), 'Waiting…');
 </template>
 ```
 
-## Keep feature state together
+Outside compiled SFCs, the same question guides a manual bridge: does the component need to **change** this value (`useWritable`) or only **observe** it (`useIterable`)? There is no `useAtom` composable because the useful question is not "is this an atom?"
 
-Use `useScope()` when a component owns a group of related Streamix state.
-
-```vue
-<script setup lang="ts">
-import { scope } from '@epikodelabs/streamix';
-import {
-  useIterable,
-  useScope,
-  useWritable,
-} from '@epikodelabs/streamix/vue';
-
-const state = useScope(() => scope({
-  count: 0,
-  doubled: self => self.count * 2,
-}));
-
-const count = useWritable(state.get('count'));
-const doubled = useIterable(state.get('doubled'));
-</script>
-
-<template>
-  <button @click="count++">
-    {{ count }} (doubled: {{ doubled }})
-  </button>
-</template>
-```
-
-The scope is tied to the component’s lifetime. When the component goes away, its local Streamix work is cleaned up too.
-
-## Compiler-first templates
-
-For conventional Vue components, the Vite plugin can adopt Streamix declarations
-directly from `<script setup>`. Put it before Vue's plugin:
-
-```ts
-import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-import { sxVue } from '@epikodelabs/streamix/vue/vite';
-
-export default defineConfig({
-  plugins: [sxVue(), vue()],
-});
-```
-
-Then templates can use local atoms, derived values, flows, and declared scope
-members as ordinary Vue bindings. The compiler adds the right bridge while
-Streamix remains the source of truth.
-
-```vue
-<script setup lang="ts">
-import { atom, scope } from '@epikodelabs/streamix';
-
-const count = atom(0);
-const profile = scope({ name: 'Ada' });
-</script>
-
-<template>
-  <button @click="count++">{{ count }}</button>
-  <input v-model="profile.name">
-</template>
-```
+## Custom pipelines
 
 Use `@epikodelabs/streamix/vue/compiler` when integrating the transform into a
 non-Vite build. It exports `transformVueSfc(source, fileName)` and returns the
@@ -176,17 +107,6 @@ bundler — use the target that already owns your Vue/Vite build.
 Point that delegated target at `.angular/.streamix/my-vue-app/src`. For a
 serve target, the builder watches the authored tree and keeps the virtual copy
 in sync.
-
-## Which composable should I use?
-
-| When the component needs to… | Use |
-| --- | --- |
-| Read and update a Streamix value | `useWritable(source)` |
-| Read an atom, derived value, or flow | `useIterable(source)` |
-| Read a plain async iterable | `useIterable(source, initialValue)` |
-| Own related Streamix state for the component lifetime | `useScope(() => scope(...))` |
-
-There is no `useAtom` composable because the useful question is not “is this an atom?” It is: does the component need to **change** this value, or only **observe** it?
 
 ## Explicit runtime boundaries
 
