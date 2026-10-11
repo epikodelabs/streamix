@@ -54,7 +54,15 @@ describe('compiled view under server rendering', () => {
 
     // Line endings are normalized: a Windows checkout reports CRLF where the
     // generator writes LF, which says nothing about the rendered markup.
-    const normalize = (text: string) => text.replace(/\r\n/g, '\n');
+    // Angular's own `ng-version` stamp changes with every framework patch and
+    // equally says nothing about the rendered contract, so it is normalized
+    // away instead of failing this spec on each dependency bump. The fixture
+    // embeds the HTML as a JSON string literal, so the escaped form is matched
+    // too.
+    const normalize = (text: string) =>
+      text
+        .replace(/\r\n/g, '\n')
+        .replace(/(ng-version=\\?")[^"\\]*(\\?")/g, '$1normalized$2');
 
     expect(normalize(readFileSync(FIXTURE_PATH, 'utf8'))).toBe(
       normalize(contents),
