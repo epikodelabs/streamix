@@ -1,4 +1,5 @@
 import {
+  animationFrameRenderScheduler,
   RendererScheduler,
   type CancelRender,
   type RenderScheduler,
@@ -25,6 +26,24 @@ class ManualFrameScheduler implements RenderScheduler {
 }
 
 idescribe('RendererScheduler', () => {
+  it('falls back when requestAnimationFrame is paused', () => {
+    jasmine.clock().install();
+    const request = spyOn(window, 'requestAnimationFrame').and.returnValue(1);
+    const cancel = spyOn(window, 'cancelAnimationFrame');
+    const callback = jasmine.createSpy('callback');
+
+    try {
+      animationFrameRenderScheduler.schedule(callback);
+      jasmine.clock().tick(100);
+
+      expect(request).toHaveBeenCalled();
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(cancel).toHaveBeenCalledWith(1);
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
+
   it('uses one scheduled frame for many dirty bindings', () => {
     const frame = new ManualFrameScheduler();
     const scheduler = new RendererScheduler(frame);

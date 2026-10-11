@@ -10,8 +10,28 @@ export interface RenderScheduler {
 export const animationFrameRenderScheduler: RenderScheduler = {
   schedule(callback: () => void): CancelRender {
     if (typeof requestAnimationFrame === 'function') {
-      const id = requestAnimationFrame(() => callback());
-      return () => cancelAnimationFrame(id);
+      // Browsers pause rAF in hidden documents. Keep frame coalescing in the
+      // foreground, but guarantee eventual delivery for live state in a
+      // background tab as well. Whichever callback wins cancels the other.
+      let complete = false;
+      let frame = 0;
+      let fallback: ReturnType<typeof setTimeout> | undefined;
+      const run = () => {
+        if (complete) return;
+        complete = true;
+        cancelAnimationFrame(frame);
+        if (fallback !== undefined) clearTimeout(fallback);
+        callback();
+      };
+
+      frame = requestAnimationFrame(run);
+      fallback = setTimeout(run, 100);
+
+      return () => {
+        complete = true;
+        cancelAnimationFrame(frame);
+        if (fallback !== undefined) clearTimeout(fallback);
+      };
     }
 
     const id = setTimeout(callback, 16);

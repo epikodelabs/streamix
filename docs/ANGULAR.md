@@ -86,9 +86,24 @@ If a template expression cannot be handled safely, the build explains why instea
 
 ## Built for real application lifecycles
 
-The integration cleans up its listeners and reactive work when an Angular component is destroyed. It also works with server rendering and hydration: Angular renders the initial page, then Streamix takes over the reactive parts in the browser.
+The integration cleans up its listeners and reactive work when an Angular component is destroyed. Ordinary Angular-owned bindings render normally on the server. Lowered Streamix `@if` and `@for` blocks deliberately render as empty hydration markers on the server, then populate immediately in the browser after hydration. Do not use those lowered blocks for SEO-critical or first-paint content yet.
 
 For applications using Zone.js, Streamix can schedule its own view updates without turning every state change into unnecessary application-wide work.
+
+## Current compiler boundaries
+
+The direct-DOM compiler requires a stable element path. A compiled binding after
+an Angular-owned dynamic region (`@if`, `@for`, `*ngIf`, projection, and similar
+templates) is rejected at build time rather than risking an update to the wrong
+node. Keep such a binding before the dynamic region, move it inside a lowered
+Streamix block, or leave it Angular-owned.
+
+Projected content is therefore not supported by the direct compiler. The build
+reports it instead of assuming a child index inside another component's view.
+
+Rendering is still frame-coalesced. A timeout fallback now delivers updates
+when a browser pauses `requestAnimationFrame` in a hidden tab; foreground
+updates continue to use animation frames.
 
 ## Getting started
 
