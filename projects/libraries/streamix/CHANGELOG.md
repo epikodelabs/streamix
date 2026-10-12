@@ -5,6 +5,11 @@
 - **Angular DevTools:** added the exported `StreamixDevtools` in-app panel for
   inspecting the shared reactive trace. Compiled binding tables now record
   subscriptions, writes, and teardowns with stable binding labels.
+- **Framework adoption:** expanded React support for class, HOC, and anonymous
+  default components, and added ownership-aware Vue scope bridging plus its
+  editor and build tooling.
+- Hardened Angular, React, and Vue compiler and runtime bindings across SSR,
+  lifecycle, and reactive update paths.
 
 
 ## 3.0.5 - 2026-10-11
