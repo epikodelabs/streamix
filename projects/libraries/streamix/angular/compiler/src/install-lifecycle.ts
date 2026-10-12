@@ -113,7 +113,7 @@ export function installSxLifecycleIntoComponentSource(
         members[hookIndex] as ts.MethodDeclaration,
       );
     } else {
-      members.push(createMountHook());
+      members.push(createMountHook(hasBaseClass(classNode)));
     }
   }
 
@@ -252,7 +252,36 @@ function withMountCall(method: ts.MethodDeclaration): ts.MethodDeclaration {
   );
 }
 
-function createMountHook(): ts.MethodDeclaration {
+function createMountHook(hasBaseClass: boolean): ts.MethodDeclaration {
+  const statements: ts.Statement[] = [];
+  if (hasBaseClass) {
+    // A base component need not declare Angular's lifecycle interface in its
+    // TypeScript type. Resolve the hook dynamically, but invoke it with this
+    // component as its receiver just as a normal super call would.
+    const baseHook = ts.factory.createIdentifier('__streamixBaseAfterViewInit');
+    statements.push(ts.factory.createVariableStatement(undefined, ts.factory.createVariableDeclarationList([
+      ts.factory.createVariableDeclaration(baseHook, undefined, undefined,
+        ts.factory.createPropertyAccessExpression(
+          ts.factory.createCallExpression(
+            ts.factory.createPropertyAccessExpression(ts.factory.createIdentifier('Object'), 'getPrototypeOf'),
+            undefined,
+            [ts.factory.createCallExpression(
+              ts.factory.createPropertyAccessExpression(ts.factory.createIdentifier('Object'), 'getPrototypeOf'),
+              undefined,
+              [ts.factory.createThis()],
+            )],
+          ),
+          'ngAfterViewInit',
+        )),
+    ], ts.NodeFlags.Const)));
+    statements.push(ts.factory.createExpressionStatement(ts.factory.createCallChain(
+      ts.factory.createPropertyAccessChain(baseHook, ts.factory.createToken(ts.SyntaxKind.QuestionDotToken), 'call'),
+      ts.factory.createToken(ts.SyntaxKind.QuestionDotToken),
+      undefined,
+      [ts.factory.createThis()],
+    )));
+  }
+  statements.push(mountCall());
   return ts.factory.createMethodDeclaration(
     undefined,
     undefined,
@@ -261,8 +290,12 @@ function createMountHook(): ts.MethodDeclaration {
     undefined,
     [],
     ts.factory.createKeywordTypeNode(ts.SyntaxKind.VoidKeyword),
-    ts.factory.createBlock([mountCall()], true),
+    ts.factory.createBlock(statements, true),
   );
+}
+
+function hasBaseClass(node: ts.ClassDeclaration): boolean {
+  return node.heritageClauses?.some(clause => clause.token === ts.SyntaxKind.ExtendsKeyword) ?? false;
 }
 
 /** Parses emitter-produced member text into class element declarations. */

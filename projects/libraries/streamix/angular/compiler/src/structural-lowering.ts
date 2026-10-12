@@ -494,7 +494,10 @@ function tryLowerTemplateBlock(
     return undefined;
   }
 
-  const compiled = compileBody(body, resolveReactiveSource, true);
+  // Unlike block syntax, microsyntax aliases are not carried by the body AST.
+  // Pass the declared row local explicitly so arbitrary identifiers cannot be
+  // mistaken for locals and silently render as undefined.
+  const compiled = compileBody(body, resolveReactiveSource, true, [item]);
 
   if (!compiled) {
     return undefined;
@@ -581,12 +584,14 @@ function compileBody(
   body: string,
   resolveReactiveSource: SxReactiveSourceResolver,
   allowLocals: boolean,
+  localNames?: readonly string[],
 ): SxCompiledBlockTemplate | undefined {
   try {
     const compiled = compileSxBlockTemplate(body, 'sx-block.html', {
       documentExpression: 'doc',
       resolveReactiveSource,
       allowLocals,
+      localNames,
     });
 
     return compiled.rootNodes.length > 0 ? compiled : undefined;

@@ -952,6 +952,8 @@ function compileBlockInput(
     }
     state.bindings.push({ kind, node: variable, name, source: mixed.expression,
       dependencies: mixed.dependencies, contextual: true });
+  } else if (state.allowLocals && !isProvenLocalExpression(expanded, state.localNames)) {
+    throw new Error(`Unknown loop-local in compiled block binding ${JSON.stringify(expression)}.`);
   } else if (state.allowLocals &&
       !/[|;`]/.test(expanded) &&
       !/[A-Za-z_$][\w$.]*\s*\(/.test(expanded)) {
@@ -1116,6 +1118,9 @@ function emitBoundText(
 
     // Anything left is a loop-local expression, resolved against the
     // collection context at update time.
+    if (!isProvenLocalExpression(expression, state.localNames)) {
+      throw new Error(`Unknown loop-local in compiled structural interpolation: ${JSON.stringify(part.value)}.`);
+    }
     state.updates.push(
       `${variable}.data = ɵsxString(${rewriteLocalReads(expression, 'currentContext')});`,
     );
@@ -1123,6 +1128,30 @@ function emitBoundText(
   }
 
   return variables;
+}
+
+/** Reject misspelled loop locals instead of generating an undefined read. */
+function isProvenLocalExpression(
+  expression: string,
+  localNames: ReadonlySet<string> | undefined,
+): boolean {
+  if (!localNames) return true;
+  const file = ts.createSourceFile('sx-local.ts', `(${expression});`, ts.ScriptTarget.Latest, true);
+  let safe = true;
+  const visit = (node: ts.Node): void => {
+    if (!safe) return;
+    if (ts.isIdentifier(node)) {
+      const parent = node.parent;
+      if (ts.isPropertyAccessExpression(parent) && parent.name === node) return;
+      if (!localNames.has(node.text) && !['undefined', 'NaN', 'Infinity'].includes(node.text)) {
+        safe = false;
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return safe;
 }
 
 

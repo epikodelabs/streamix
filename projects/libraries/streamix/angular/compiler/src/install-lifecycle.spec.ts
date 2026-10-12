@@ -107,6 +107,15 @@ export class CounterComponent {
     );
   });
 
+  it('preserves a base-class lifecycle hook when it creates one', () => {
+    const result = installSxLifecycleIntoComponentSource(
+      'export class HostComponent extends BaseComponent { source = first; }',
+      { inlineSetup: 'function setupBindings() { return undefined; }' },
+    );
+    expect(result.source).toContain('__streamixBaseAfterViewInit?.call(this)');
+    expect(result.source).toContain('this.ɵsx.ɵafterViewInit()');
+  });
+
   it('is idempotent by declaration, not by text', () => {
     const options = {
       inlineSetup: 'function setupBindings() { return undefined; }',

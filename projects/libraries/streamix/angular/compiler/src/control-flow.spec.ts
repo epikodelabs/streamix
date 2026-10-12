@@ -60,6 +60,14 @@ describe('standard Angular atom templates', () => {
     expect(result.setup).toContain('ctx.trackRow(_index, item)');
   });
 
+  it('rejects misspelled *ngFor locals instead of emitting undefined reads', () => {
+    expect(() => transformAngularComponentTemplate(
+      '<li *ngFor="let item of model.items">{{ typo.name }}</li>',
+      'inline.html',
+      { resolveReactiveSource },
+    )).toThrowError(/Angular-owned|Unknown loop-local|Unsupported/);
+  });
+
   it('lowers a pure @switch block with literal cases and a default', () => {
     const result = transformAngularComponentTemplate(
       `@switch (model.status) { @case ('ready') { <p>ready</p> } @case ('waiting') { <p>waiting</p> } @default { <p>unknown</p> } }`,
