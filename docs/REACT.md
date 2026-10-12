@@ -1,6 +1,29 @@
-# React Adoption Layer
+# Getting started with Streamix and React
 
-`@epikodelabs/streamix/react` is compiler-first: write Streamix sources in TSX or JSX and the compiler lowers JSX reads to React's concurrent-safe external-store contract.
+Streamix lets React components use atoms and scopes as ordinary JSX values. The
+React compiler generates concurrent-safe subscriptions; your components do not
+need `useEffect` subscriptions or copied React state.
+
+## 1. Configure Vite
+
+Put Streamix before the React plugin so it sees authored TSX first.
+
+```ts
+// vite.config.ts
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
+import { sx } from '@epikodelabs/streamix/react/vite';
+
+export default defineConfig({ plugins: [sx(), react()] });
+```
+
+The plugin transforms `.ts`, `.tsx`, `.js`, and `.jsx` modules and returns a
+source map that Vite composes with the React transform.
+
+## 2. Create your first atom
+
+Declare a local atom directly in a component body. JSX reads its current value;
+the compiler owns the subscription and removes it when the component unmounts.
 
 ```tsx
 import { atom } from '@epikodelabs/streamix';
@@ -11,121 +34,102 @@ export function Counter() {
 }
 ```
 
-The compiler supports atoms, derived values, flows, scope fields, known aliases and atom maps, supported writes, anonymous default functions and classes, class components, and higher-order wrappers. Class components receive an internal function-component subscription boundary; wrapper callbacks are compiled when assigned to a capitalized component binding, with `memo` and `forwardRef` recognized through named-import aliases and `React.` namespace imports when actually imported from React.
+The source is stable for the committed component lifetime. Keep local reactive
+declarations before conditional returns and outside loops or nested callbacks:
+React hook order must remain static, so unsupported nested declarations fail at
+build time instead of becoming a raw atom in JSX.
 
-## Subscription ownership and cleanup
+## 3. Group fields with a scope
 
-Every implicit reactive JSX read becomes a retained `const` snapshot from
-`useStreamixSource()`. The binding is rendered by a function component (or
-passed to the generated class adapter), so React owns the subscription for the
-mounted component lifetime. On unmount, React runs the external-store cleanup;
-once the final consumer of a shared source has left, Streamix unsubscribes from
-that source and releases the shared subscription.
+Use a scope when several fields belong together. Scope fields are values in
+JSX, and direct field assignments are Streamix writes.
 
-For a class component, the compiler generates a private function wrapper that
-owns the hooks and passes its snapshots through `__streamixBindings`. The
-renamed inner class renders those snapshots. The private prop is generated
-after authored props, so an authored prop cannot replace it.
+```tsx
+import { scope } from '@epikodelabs/streamix';
 
-### What is possible
-
-- Function declarations, arrow/function-expression components, anonymous
-  default exports, and capitalized component bindings can receive generated
-  snapshot bindings.
-- `memo`, `forwardRef`, named aliases of them, and `React.memo` /
-  `React.forwardRef` are recognized when imported from React.
-- A capitalized component assigned from an application wrapper call can have
-  its first callback compiled as a React render function.
-- Named and anonymous `export default class` components receive the wrapper
-  described above. Anonymous default classes are assigned private generated
-  names; their default export remains the subscription-owning wrapper.
-
-### What is not implicit
-
-- A wrapper callback invoked outside React is not safe for generated hooks.
-  Use an explicit subscription boundary unless it is truly a React component
-  render function.
-- Dynamic imports, arbitrary proxy fields, unknown dynamic source selection,
-  and callback-local dynamic selections remain explicit boundaries.
-- Component-local `atom`, `derived`, `flow`, and `scope` declarations must be
-  at component scope. Declarations inside conditional or loop blocks fail at
-  build time because lifting their ownership would make React hook order
-  conditional.
-- React Activity / Offscreen cleanup is not distinguishable from permanent
-  unmount. Use a parent-owned `StreamixLifetime` when a source must outlive a
-  hidden subtree.
-
-## Prop and runtime boundaries
-
-An atom is read as a value in native JSX, but remains a reference when passed to a capitalized component. Type the receiving prop as `typeof source`. Scopes cross a component boundary the same way: type the prop as `typeof state` and read its fields directly. Use `atomRef()` for custom elements or third-party boundaries. For timers, callbacks, proxies, dynamic paths, and other unproven cases, use explicit `read()`, `write()`, and `useAtomValue()`.
-
-`createResource()` is an explicit abortable Suspense resource: preload it outside render, then call `read()` inside a Suspense boundary. `useResource(loader, dependencies)` deliberately tracks the supplied dependency array, not the identity of `loader` — include every prop or state input affecting it — and `usePreloadedResource` covers initial Suspense. For SSR, render `renderAtomSnapshotScript()` on the server and call `hydrateAtomSnapshotFromDocument()` before `hydrateRoot()`.
-
-## Ownership and React Activity
-
-Local reactive declarations are stable for a committed component instance. Factories must be render-pure because Strict Mode may abandon an initial render.
-
-React Activity / Offscreen can clean up effects merely because a tree is hidden. React does not expose a cleanup signal that distinguishes this from permanent unmount. For Activity trees, own sources outside the hidden subtree with `createStreamixLifetime()` and `StreamixLifetimeProvider`, and dispose that lifetime when the feature or route is permanently removed.
-
-## Vite, builders, and editor
-
-Install `typescript@^5.5` in applications using compiler tooling. The root manifest lists `typescript` as an optional peer for the vanilla runtime; importing the React compiler, Vite plugin, or builder makes it a required consumer dependency — including JSX-only apps.
-
-In Vite, put Streamix before the React plugin; it transforms authored `.ts`, `.tsx`, `.js`, and `.jsx` modules and returns a composable source map.
-
-```ts
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { sx } from '@epikodelabs/streamix/react/vite';
-
-export default defineConfig({ plugins: [sx(), react()] });
-```
-
-The Angular-hosted builder transforms TS/TSX/JS/JSX into `.angular/.streamix/<app>/src`, writes source maps beside the transformed files, and delegates `build` and `serve` to a normal Angular application target:
-
-```json
-{
-  "build": {
-    "builder": "@epikodelabs/streamix/react/builder:application",
-    "options": {
-      "delegateTarget": "my-app:application",
-      "sourceRoot": "projects/apps/my-app/src"
-    }
-  }
+export function Profile() {
+  const profile = scope({ name: 'Ada', subscribed: true });
+  return <>
+    <input value={profile.name}
+      onChange={event => profile.name = event.target.value} />
+    <input type="checkbox" checked={profile.subscribed}
+      onChange={event => profile.subscribed = event.target.checked} />
+  </>;
 }
 ```
 
-Point the delegated target at the preprocessing output:
+## 4. Derive values
 
-```json
-{
-  "browser": ".angular/.streamix/my-app/src/main.tsx",
-  "tsConfig": ".angular/.streamix/my-app/tsconfig.app.json"
+Use `derived` for values computed from Streamix sources. `$` receives an atom
+reference, tracks it as a dependency, and returns its current value.
+
+```tsx
+const label = derived($ => `${$(count)} clicks`);
+return <output>{label}</output>;
+```
+
+`$(count)` is intentionally an atom-reference argument. It is not compiled to
+`$(count.value)`.
+
+## 5. Pass a source to a child
+
+Native elements receive value snapshots. Capitalized React components receive
+atom and scope references so that the child can subscribe independently.
+
+```tsx
+function Editor({ title }: { title: typeof pageTitle }) {
+  return <input value={title} onChange={event => title.next(event.target.value)} />;
+}
+
+const pageTitle = atom('Draft');
+
+export function Page() {
+  return <Editor title={pageTitle} />;
 }
 ```
 
-### Builder resolution
+Use `atomRef(source)` when passing an atom to a custom element or third-party
+component whose boundary cannot be proven by the compiler.
 
-Architect resolves `@epikodelabs/streamix/react/builder:application` through
-the installed package's `react/builder/package.json`. In a source checkout,
-run `npm run build` before starting Angular; the build finalizer writes that
-subpackage manifest, exposes it through the package exports map, and links the
-local `dist/streamix` package into `node_modules`. In a consuming application,
-install a package release that contains the builder, then verify resolution
-with:
+## Components and explicit APIs
 
-```sh
-node -p "require.resolve('@epikodelabs/streamix/react/builder/package.json')"
+Function components, `memo`, `forwardRef`, recognized aliases, capitalized
+application wrappers, named classes, and anonymous `export default class`
+components can be adopted. Class adoption creates a private function wrapper
+that owns subscriptions and passes snapshots to a private inner class.
+
+For code outside compiler-recognized JSX, use the runtime APIs:
+
+```tsx
+const [value, setValue] = useWritable(counter);
+setValue(previous => previous + 1);
+
+const current = useAtomValue(counter);
+write(counter, current + 1);
 ```
 
-If this command fails, the installed package is missing the builder manifest;
-reinstall the intended release or replace a source-linked dependency with a
-built package before running `ng serve`.
+Use `read` and `write` in timers, service callbacks, dynamic paths, and other
+non-React code. A wrapper callback that might execute outside React is also an
+explicit boundary.
 
-For atom-aware diagnostics and navigation, add `@epikodelabs/streamix/react/editor/tsserver` to `compilerOptions.plugins` and restart the TypeScript server. The editor sees an atom as its current value, checks assignments as `.next(...)` writes, and also covers Streamix-authored `.ts` and `.js` helpers. The editor is an aid; the production compiler is authoritative for generated output.
+## Activity, resources, and SSR
 
-`StreamixDevtools` is an opt-in panel for reactive reads, subscriptions, writes, unsubscriptions, and committed renders. It is enabled only when the bundler marks the build as development (`import.meta.env.DEV`), so production bundles and bundler-less ESM stay disabled.
+Strict Mode effect replay is handled by the runtime. For React Activity or
+Offscreen trees whose sources must survive hiding, place a
+`StreamixLifetimeProvider` around the hidden tree with a parent-owned
+`createStreamixLifetime()` and dispose that lifetime when the feature ends.
 
-## Release verification
+Use `createResource()` and preload before render for initial Suspense. Use
+`useResource(loader, dependencies)` for post-commit loading, including every
+loader input in `dependencies`. For SSR, render `renderAtomSnapshotScript()`
+on the server and call `hydrateAtomSnapshotFromDocument()` before hydration.
 
-The repository ships regression specs for React Activity, Strict Mode, compiler output, Vite, and the Angular-hosted builder. They do not replace real dependency versions: before publishing, verify React Compiler, Fast Refresh, Suspense and hydration, composed source maps, and a clean `npm pack` install in TSX and JSX apps, in both development and minified production builds. Implicit adoption is not promised for arbitrary dynamic imports, proxy fields, wrappers that do not render their callback through React, or React Activity without a parent-owned `StreamixLifetime`.
+## Editor and Angular-hosted builds
+
+Add `@epikodelabs/streamix/react/editor/tsserver` to TypeScript server plugins
+for atom-aware diagnostics; the production compiler remains authoritative.
+
+For Angular-hosted builds, configure
+`@epikodelabs/streamix/react/builder:application`. It mirrors transformed
+source to `.angular/.streamix/<app>/src` and delegates to an Angular target. In
+a source checkout, run `npm run build` before starting that builder.
