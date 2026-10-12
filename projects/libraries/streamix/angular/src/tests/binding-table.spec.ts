@@ -251,6 +251,25 @@ idescribe('SxBindingTable', () => {
     table.destroy();
   });
 
+  it('releases class-map ownership when a compiled table is replaced', () => {
+    const first = atom<Record<string, unknown>>({ active: true });
+    const second = atom<Record<string, unknown>>({});
+    const div = document.createElement('div');
+    div.classList.add('static');
+    const firstTable = createBindingTable(1);
+
+    ɵsxClassMap(firstTable, 0, div, first);
+    expect(div.classList.contains('active')).toBeTrue();
+
+    firstTable.destroy();
+    const secondTable = createBindingTable(1);
+    ɵsxClassMap(secondTable, 0, div, second);
+
+    expect(div.classList.contains('active')).toBeFalse();
+    expect(div.classList.contains('static')).toBeTrue();
+    secondTable.destroy();
+  });
+
   it('supports a dynamic style-map instruction', () => {
     const frame = new ManualFrameScheduler();
     const scheduler = new RendererScheduler(frame);
@@ -270,6 +289,25 @@ idescribe('SxBindingTable', () => {
     expect(div.style.opacity).toBe('');
 
     table.destroy();
+  });
+
+  it('releases style-map ownership when a compiled table is replaced', () => {
+    const first = atom<Record<string, unknown>>({ opacity: '0.5' });
+    const second = atom<Record<string, unknown>>({});
+    const div = document.createElement('div');
+    div.style.color = 'red';
+    const firstTable = createBindingTable(1);
+
+    ɵsxStyleMap(firstTable, 0, div, first);
+    expect(div.style.opacity).toBe('0.5');
+
+    firstTable.destroy();
+    const secondTable = createBindingTable(1);
+    ɵsxStyleMap(secondTable, 0, div, second);
+
+    expect(div.style.opacity).toBe('');
+    expect(div.style.color).toBe('red');
+    secondTable.destroy();
   });
 
   it('installs listeners and removes them on destroy and unbind', () => {

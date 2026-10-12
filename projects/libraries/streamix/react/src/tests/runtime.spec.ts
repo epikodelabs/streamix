@@ -14,6 +14,7 @@ import {
   renderAtomSnapshotScript,
   useAtom,
   useAtomValue,
+  useResource,
   write,
 } from "../lib/runtime";
 import { recordStreamixDevtoolsEvent, StreamixDevtools } from "../lib/devtools";
@@ -74,6 +75,28 @@ idescribe("React runtime escape hatches", () => {
     act(() => root.unmount());
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(owned.disposed).toBe(true);
+  });
+
+  it("keeps useResource live through Strict Mode's effect replay", async () => {
+    let resolve!: (value: string) => void;
+    let resource!: ReturnType<typeof useResource<string>>;
+
+    function View() {
+      resource = useResource(
+        () => new Promise<string>(complete => { resolve = complete; }),
+        [],
+      );
+      return createElement("output", null, resource.status);
+    }
+
+    await act(async () => {
+      root.render(createElement(StrictMode, null, createElement(View)));
+      await Promise.resolve();
+    });
+    resolve("ready");
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(resource.status).toBe("ready");
   });
 
   it("provides explicit read, write, reference, and SSR snapshot APIs", () => {

@@ -373,7 +373,20 @@ export function useResource<T>(
       return;
     }
     resource.preload();
-    return () => resource.dispose();
+    // React Strict Mode deliberately performs effect setup → cleanup → setup
+    // for the same committed hook state. Resource disposal is terminal, so
+    // defer it by one microtask and let the next setup take ownership again.
+    // A real unmount (or a dependency change) has no matching setup for this
+    // resource and therefore still disposes it promptly.
+    const token = {};
+    compilerLocalDisposals.set(resource, token);
+    return () => {
+      queueMicrotask(() => {
+        if (compilerLocalDisposals.get(resource) !== token) return;
+        compilerLocalDisposals.delete(resource);
+        resource.dispose();
+      });
+    };
   }, [resource, lifetime]);
   return usePreloadedResource(resource);
 }

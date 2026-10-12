@@ -77,4 +77,18 @@ describe('Vue editor production compatibility', () => {
     expect(transformed).toContain('derived(function(count) { return count * 2; })');
     expect(transformed).toContain('derived(() => count.value * 2)');
   });
+
+  it('preserves DerivedScope dependencies and rewrites nested derived callbacks once', () => {
+    const plugin = createPlugin({ modules: { typescript: ts } });
+    const source = `
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(2);
+      const tracked = derived($ => $(count));
+      const nested = derived(() => derived(() => count));
+    `;
+    const transformed = plugin.compileSFCScript('ts', source)?.text;
+    expect(transformed).toContain('derived($ => $(count))');
+    expect(transformed).toContain('derived(() => derived(() => count.value))');
+    expect(transformed).not.toContain('count.value.value');
+  });
 });

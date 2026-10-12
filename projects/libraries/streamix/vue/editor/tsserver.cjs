@@ -61,6 +61,16 @@ module.exports = function streamixVueLanguagePlugin(ctx) {
       return false;
     };
     const rewriteCallback = (callback, node = callback.body) => {
+      // The outer traversal will visit nested derived calls separately. Do not
+      // descend here or their atom reads receive the same edit twice.
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+          derivedFactories.has(node.expression.text)) return;
+      // DerivedScope's `$` receives raw atom references, not their values.
+      // Keep this aligned with the production compiler: `$(count)` must never
+      // become `$(count.value)`.
+      const hasTrackerParameter = callback.parameters.some(parameter => hasBinding(parameter.name, '$'));
+      if (hasTrackerParameter && ts.isCallExpression(node) &&
+          ts.isIdentifier(node.expression) && node.expression.text === '$') return;
       if (ts.isIdentifier(node) && atoms.has(node.text) &&
           isValueRead(node) && !shadowed(node, callback, node.text)) {
         const shorthand = ts.isShorthandPropertyAssignment(node.parent);

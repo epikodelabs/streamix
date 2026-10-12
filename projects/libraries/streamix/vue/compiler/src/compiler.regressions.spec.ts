@@ -150,6 +150,25 @@ describe('Vue compiler correctness regressions', () => {
     expect(result.bridgedScopes).toEqual({ state: ['title'] });
   });
 
+  it('bridges atoms used by v-text and v-html', () => {
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const text = atom('Ready');
+      const html = atom('<strong>Ready</strong>');
+    `, '<p v-text="text"></p><div v-html="html"></div>');
+    expectNoError(result);
+    expect(result.code).toContain('v-text="__sx_text"');
+    expect(result.code).toContain('v-html="__sx_html"');
+  });
+
+  it('rejects v-model member mutation of an object-valued atom', () => {
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const form = atom({ name: '' });
+    `, '<input v-model="form.name">');
+    expect(result.diagnostics.some(item => item.message.includes('cannot mutate a member'))).toBeTrue();
+  });
+
   it('rejects nested scope assignments rather than generating invalid setters', () => {
     const result = compile(`
       import { scope } from '@epikodelabs/streamix';

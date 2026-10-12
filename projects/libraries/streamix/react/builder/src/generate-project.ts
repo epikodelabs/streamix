@@ -81,7 +81,12 @@ export async function regenerateStreamixFile(workspaceRoot: string, sourceRoot: 
   }
   await mkdir(dirname(destination), { recursive: true });
   if (/\.[jt]sx?$/i.test(normalized) && !/\.(?:d|spec|test)\.[jt]sx?$/i.test(normalized)) {
-    const transformed = transformReactJsx(content, origin, { program: createSourceProgram(workspaceRoot, sourceRoot) });
+    // The watcher can invoke us before an editor has flushed the buffer to
+    // disk. Give semantic analysis the exact text being transformed instead
+    // of silently checking an older SourceFile from disk.
+    const transformed = transformReactJsx(content, origin, {
+      program: createSourceProgram(workspaceRoot, sourceRoot, new Map([[origin, content]])),
+    });
     const errors = transformed.diagnostics.filter(item => item.category === "error");
     if (errors.length) throw new Error(formatReactJsxDiagnostics(content, origin, errors));
     await writeFile(destination, `${transformed.code}\n//# sourceMappingURL=${basename(destination)}.map\n`);
@@ -92,7 +97,11 @@ export async function regenerateStreamixFile(workspaceRoot: string, sourceRoot: 
 }
 
 /** Share the semantic source graph with the Vite compiler, including imports. */
-function createSourceProgram(workspaceRoot: string, sourceRoot: string): ts.Program {
+function createSourceProgram(
+  workspaceRoot: string,
+  sourceRoot: string,
+  overlays = new Map<string, string>(),
+): ts.Program {
   const source = join(workspaceRoot, sourceRoot);
   const configPath = ts.findConfigFile(source, ts.sys.fileExists, "tsconfig.json") ??
     ts.findConfigFile(workspaceRoot, ts.sys.fileExists, "tsconfig.json");
@@ -103,5 +112,26 @@ function createSourceProgram(workspaceRoot: string, sourceRoot: string): ts.Prog
         ts.sys, dirname(configPath), { jsx: ts.JsxEmit.Preserve }, configPath,
       )
     : { fileNames: [], options: { jsx: ts.JsxEmit.Preserve, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler } as ts.CompilerOptions };
-  return ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, allowJs: true } });
+  if (overlays.size === 0) {
+    return ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, allowJs: true } });
+  }
+  const host = ts.createCompilerHost({ ...parsed.options, allowJs: true });
+  const getSourceFile = host.getSourceFile.bind(host);
+  const readFile = host.readFile?.bind(host);
+  const fileExists = host.fileExists.bind(host);
+  host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
+    const text = overlays.get(fileName);
+    if (text === undefined) return getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
+    return ts.createSourceFile(fileName, text, languageVersion, true, scriptKindFor(fileName));
+  };
+  host.readFile = fileName => overlays.get(fileName) ?? readFile?.(fileName);
+  host.fileExists = fileName => overlays.has(fileName) || fileExists(fileName);
+  return ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, allowJs: true }, host });
+}
+
+function scriptKindFor(fileName: string): ts.ScriptKind {
+  if (/\.tsx$/i.test(fileName)) return ts.ScriptKind.TSX;
+  if (/\.jsx$/i.test(fileName)) return ts.ScriptKind.JSX;
+  if (/\.js$/i.test(fileName)) return ts.ScriptKind.JS;
+  return ts.ScriptKind.TS;
 }

@@ -29,7 +29,10 @@ export function formatVueSfcDiagnostics(
   fileName: string,
   diagnostics: readonly VueSfcDiagnostic[],
 ): string {
-  const lines = source.split(/\r?\n/);
+  // Keep each line terminator so offsets remain offsets into the original
+  // source. Splitting CRLF as one character made every later column drift by
+  // one on Windows-authored SFCs.
+  const lines = source.match(/.*(?:\r\n|\n|\r)|.+$/g) ?? [''];
 
   return diagnostics.map(diagnostic => {
     if (diagnostic.start < 0) {
@@ -38,12 +41,12 @@ export function formatVueSfcDiagnostics(
 
     let offset = 0;
     let lineIndex = 0;
-    while (lineIndex < lines.length && offset + lines[lineIndex].length + 1 <= diagnostic.start) {
-      offset += lines[lineIndex].length + 1;
+    while (lineIndex < lines.length && offset + lines[lineIndex].length <= diagnostic.start) {
+      offset += lines[lineIndex].length;
       lineIndex++;
     }
     const column = diagnostic.start - offset;
-    const line = lines[lineIndex] ?? '';
+    const line = (lines[lineIndex] ?? '').replace(/[\r\n]+$/, '');
     return `${fileName}:${lineIndex + 1}:${column + 1} - ${diagnostic.category}: ${diagnostic.message}\n` +
       `  ${line}\n  ${' '.repeat(Math.max(0, column))}^`;
   }).join('\n');
@@ -434,6 +437,14 @@ function unsupportedTemplateDiagnostics(
         add(tag.attributesStart + match.index!, match[0].length,
           `v-for alias ${JSON.stringify(match[2])} shadows a Streamix binding; rename the alias.`);
       }
+    }
+    for (const match of tag.attributes.matchAll(/(?:^|\s)v-model\s*=\s*(["'])(.*?)\1/g)) {
+      const expression = match[2].trim();
+      const root = /^([A-Za-z_$][\w$]*)\s*(?:\.|\[)/.exec(expression)?.[1];
+      if (!root || !reactiveNames.has(root)) continue;
+      add(tag.attributesStart + match.index!, match[0].length,
+        `v-model cannot mutate a member of Streamix binding ${JSON.stringify(root)}. ` +
+        'Store the member in a scope, or use an explicit atom.next(...) handler.');
     }
   }
   return diagnostics;
@@ -1050,7 +1061,7 @@ function templateExpressionSpans(template: string): TemplateExpressionSpan[] {
   }
 
   for (const match of template.matchAll(
-    /(?:[:@#][\w.:[\]-]+|v-(?:if|else-if|for|show)(?:\.[\w-]+)?|v-(?:bind|on)(?::[\w.:[\]-]+)?)\s*=\s*(["'])([\s\S]*?)\1/g,
+    /(?:[:@#][\w.:[\]-]+|v-(?:if|else-if|for|show|text|html)(?:\.[\w-]+)?|v-(?:bind|on)(?::[\w.:[\]-]+)?)\s*=\s*(["'])([\s\S]*?)\1/g,
   )) {
     const valueStart = match.index! + match[0].length - match[2].length - 1;
     spans.push({ start: valueStart, end: valueStart + match[2].length });

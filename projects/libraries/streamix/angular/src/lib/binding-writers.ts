@@ -62,6 +62,11 @@ export function equalClass(previous: unknown, next: unknown): boolean {
 /** Reactive class-map value accepted by the generated class-map writer. */
 export type SxClassMap = Readonly<Record<string, unknown>>;
 
+type OwnedMapWriter<T> = ((value: T | null | undefined) => void) & {
+  /** Releases only DOM state previously claimed by this generated writer. */
+  destroy?: () => void;
+};
+
 function assertClassToken(className: string): void {
   if (!className || /\s/.test(className)) {
     throw new Error(
@@ -80,7 +85,7 @@ export function writeClassMap(
 ): (value: SxClassMap | null | undefined) => void {
   let owned = new Set<string>();
 
-  return value => {
+  const write: OwnedMapWriter<SxClassMap> = value => {
     const entries = Object.entries(value ?? {});
 
     for (const [className] of entries) {
@@ -101,6 +106,15 @@ export function writeClassMap(
 
     owned = next;
   };
+
+  // A source-reference rebind creates a new table and therefore a new writer.
+  // Release the old writer's ownership before the replacement is installed;
+  // otherwise keys omitted by the replacement remain stuck in the DOM.
+  write.destroy = () => {
+    for (const className of owned) target.classList.remove(className);
+    owned.clear();
+  };
+  return write;
 }
 
 /** Reactive style-map value accepted by the generated style-map writer. */
@@ -172,7 +186,7 @@ export function writeStyleMap(
 ): (value: SxStyleMap | null | undefined) => void {
   let owned = new Set<string>();
 
-  return value => {
+  const write: OwnedMapWriter<SxStyleMap> = value => {
     const entries = Object.entries(value ?? {}).map(([rawProperty, current]) => {
       const property = normalizeStyleProperty(rawProperty);
       assertSafeStyleProperty(property);
@@ -197,4 +211,10 @@ export function writeStyleMap(
 
     owned = next;
   };
+
+  write.destroy = () => {
+    for (const property of owned) target.style.removeProperty(property);
+    owned.clear();
+  };
+  return write;
 }

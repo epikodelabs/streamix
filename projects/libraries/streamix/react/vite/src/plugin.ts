@@ -53,7 +53,7 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
     const readFile = host.readFile?.bind(host);
     host.getSourceFile = (name, languageVersion, onError, shouldCreateNewSourceFile) =>
       name === fileName
-        ? ts.createSourceFile(name, source, languageVersion, true, name.endsWith(".jsx") ? ts.ScriptKind.JSX : ts.ScriptKind.TSX)
+        ? ts.createSourceFile(name, source, languageVersion, true, scriptKindFor(name))
         : getSourceFile(name, languageVersion, onError, shouldCreateNewSourceFile);
     host.readFile = name => name === fileName ? source : readFile?.(name);
     host.fileExists = ((existing) => name => name === fileName || existing(name))(host.fileExists.bind(host));
@@ -97,4 +97,11 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
       programs.clear();
     },
   };
+}
+
+function scriptKindFor(fileName: string): ts.ScriptKind {
+  if (/\.tsx$/i.test(fileName)) return ts.ScriptKind.TSX;
+  if (/\.jsx$/i.test(fileName)) return ts.ScriptKind.JSX;
+  if (/\.js$/i.test(fileName)) return ts.ScriptKind.JS;
+  return ts.ScriptKind.TS;
 }

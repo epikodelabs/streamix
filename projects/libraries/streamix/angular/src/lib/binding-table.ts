@@ -24,7 +24,7 @@ import {
 
 export type BindingSlot = number;
 
-type BindingWriter = (value: unknown) => void;
+type BindingWriter = ((value: unknown) => void) & { destroy?: () => void };
 type BindingEquals = (previous: unknown, next: unknown) => boolean;
 type BindingReader = () => unknown;
 
@@ -256,6 +256,7 @@ export class SxBindingTable {
   private clearSlot(slot: BindingSlot): void {
     this.teardowns[slot]?.();
     this.teardowns[slot] = undefined;
+    this.writers[slot]?.destroy?.();
     this.writers[slot] = undefined;
     this.equals[slot] = undefined;
     this.readers[slot] = undefined;

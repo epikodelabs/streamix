@@ -1,6 +1,15 @@
-import { transformVueSfc } from './compiler';
+import { formatVueSfcDiagnostics, transformVueSfc } from './compiler';
 
 describe('Vue SFC compiler', () => {
+  it('preserves CRLF source columns in diagnostic frames', () => {
+    const source = '<template>\r\n  {{ count }}\r\n</template>';
+    const formatted = formatVueSfcDiagnostics(source, 'Counter.vue', [{
+      category: 'error', message: 'Example', start: source.indexOf('count'), length: 5,
+    }]);
+    expect(formatted).toContain('Counter.vue:2:6');
+    expect(formatted).toContain('  {{ count }}\n       ^');
+  });
+
   it('adopts atom, derived, and flow declarations in script setup', () => {
     const result = transformVueSfc(`
       <script setup lang="ts">
