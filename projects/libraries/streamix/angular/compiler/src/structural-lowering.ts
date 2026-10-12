@@ -595,7 +595,13 @@ function compileBody(
     });
 
     return compiled.rootNodes.length > 0 ? compiled : undefined;
-  } catch {
+  } catch (error) {
+    // A body that cannot compile keeps its template on the Angular path —
+    // except an unproven loop-local, which must fail the build instead of
+    // silently rendering as undefined (see isProvenLocalExpression).
+    if (error instanceof Error && error.message.includes('Unknown loop-local')) {
+      throw error;
+    }
     return undefined;
   }
 }

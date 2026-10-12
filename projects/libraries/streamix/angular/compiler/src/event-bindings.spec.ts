@@ -24,8 +24,10 @@ describe('compiled event bindings', () => {
       'inline.html',
     );
 
+    // Modifiers are emitted in source order: (click.stop.prevent) stops
+    // propagation before preventing the default.
     expect(result.setup).toContain(
-      '(event) => { event.preventDefault(); event.stopPropagation(); ctx.stop(); }',
+      '(event) => { event.stopPropagation(); event.preventDefault(); ctx.stop(); }',
     );
     expect(result.setup).toContain(
       '(event) => { if (event.key !== "Enter") return; ctx.submit(); }',

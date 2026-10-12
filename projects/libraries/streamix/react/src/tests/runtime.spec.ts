@@ -176,6 +176,9 @@ idescribe("React runtime escape hatches", () => {
 
     expect(() => resource.read()).toThrowError(/has not been preloaded/);
     resource.preload();
+    // The loader starts one microtask after preload(); let it run so the
+    // executor assigns the completion callback used below.
+    await Promise.resolve();
     let pending: Promise<void> | undefined;
     try { resource.read(); } catch (value) { pending = value as Promise<void>; }
     expect(pending instanceof Promise).toBe(true);

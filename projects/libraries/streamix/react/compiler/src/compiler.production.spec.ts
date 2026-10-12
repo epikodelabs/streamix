@@ -58,6 +58,9 @@ describe("React production gates", () => {
   });
 
   it("resolves shadowed Streamix factory calls through a TypeScript Program", () => {
+    // TypeScript's compiler host depends on Node's system interface; the
+    // browser suite exercises the same transform without a Program elsewhere.
+    if (typeof window !== "undefined") return;
     const fileName = "/virtual/App.tsx";
     const source = `import { atom } from '@epikodelabs/streamix'; export function App(){ const atom = (v:number) => ({ value:v }); const fake = atom(2); return <output>{fake.value}</output>; }`;
     const options: ts.CompilerOptions = { noLib: true, jsx: ts.JsxEmit.Preserve, module: ts.ModuleKind.ESNext };

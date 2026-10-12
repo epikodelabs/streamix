@@ -106,12 +106,20 @@ describe('reactive reads the compiler cannot own', () => {
     )).toThrowError(/cannot bind "ready"/);
   });
 
-  it('rejects attribute interpolation when the block stays Angular-owned', () => {
-    expect(() => transformAngularComponentTemplate(
+  it('compiles attribute interpolation in a compiled block reactively', () => {
+    // Interpolated safe-listed attributes now compile inside block bodies, so
+    // the block no longer stays Angular-owned: the title binds reactively and
+    // updates on every count write.
+    const result = transformAngularComponentTemplate(
       `@if (ready) { <span title="{{ count }}"></span> }`,
       'inline.html',
       { resolveReactiveSource },
-    )).toThrowError(/cannot bind/);
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain(
+      'ɵsxAttributeExpression(blockTable, 0, el0, "title", [ctx.count], () => (ctx.count.value));',
+    );
   });
 
   it('rejects atom reads inside a @defer trigger and body', () => {

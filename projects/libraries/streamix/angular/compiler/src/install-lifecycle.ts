@@ -276,7 +276,7 @@ function createMountHook(hasBaseClass: boolean): ts.MethodDeclaration {
     ], ts.NodeFlags.Const)));
     statements.push(ts.factory.createExpressionStatement(ts.factory.createCallChain(
       ts.factory.createPropertyAccessChain(baseHook, ts.factory.createToken(ts.SyntaxKind.QuestionDotToken), 'call'),
-      ts.factory.createToken(ts.SyntaxKind.QuestionDotToken),
+      undefined,
       undefined,
       [ts.factory.createThis()],
     )));

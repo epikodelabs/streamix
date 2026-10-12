@@ -37,7 +37,9 @@ function compileGeneratedModule(
     throw new Error(`Unexpected generated import: ${name}`);
   };
 
-  new Function("require", "module", "exports", javascript)(require, module, module.exports);
+  // Generated adapters extend React.Component, so the eval'd module needs the
+  // React namespace even though JSX itself compiles to the automatic runtime.
+  new Function("React", "require", "module", "exports", javascript)(React, require, module, module.exports);
   return module.exports;
 }
 

@@ -43,7 +43,9 @@ describe("Streamix React adoption regressions", () => {
   it("keeps an authored ts-nocheck pragma effective above the generated import", () => {
     const result = transformReactJsx(`// @ts-nocheck -- compiled by @epikodelabs/streamix/react/builder before TypeScript checks JSX.\nconst status = atom(1); function View() { return <b>{status}</b>; }`);
     expect(result.code.startsWith("// @ts-nocheck")).toBe(true);
-    expect(/^\/\/ @ts-nocheck[^\n]*\nimport \{ useStreamixSource/.test(result.code)).toBe(true);
+    // The generated import's binding list may grow; only its placement above
+    // the pragma matters for TypeScript to honor it.
+    expect(/^\/\/ @ts-nocheck[^\n]*\nimport \{[^}]*useStreamixSource/.test(result.code)).toBe(true);
   });
 
   it("rejects local reactive declarations after a possible early return", () => {

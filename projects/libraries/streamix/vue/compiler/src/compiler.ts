@@ -271,7 +271,12 @@ export function transformVueSfc(
       });
     }
 
-    bridgedScopes[scope.name] = accepted;
+    // Only scopes the template actually reached are reported; an adopted but
+    // untouched scope stays out of the bridge table (an unknown-member report
+    // still records the key with an empty member list).
+    if (used.length > 0) {
+      bridgedScopes[scope.name] = accepted;
+    }
   }
 
   // Scope-member reads rewrite to the bridged refs; Vue auto-unwraps
