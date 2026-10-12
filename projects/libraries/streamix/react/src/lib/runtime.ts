@@ -261,7 +261,7 @@ export interface PreloadedResource<T> extends Resource<T> {
   preload(): void;
   /** Cancels an in-flight request and releases listeners. */
   dispose(): void;
-  subscribe(listener: Listener): () => void;
+  subscribe(listener: () => void): () => void;
 }
 
 /**
