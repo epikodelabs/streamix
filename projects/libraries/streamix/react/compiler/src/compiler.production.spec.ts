@@ -23,6 +23,18 @@ describe("React production gates", () => {
     expect(result.diagnostics).toEqual([]);
   });
 
+  it("adopts anonymous default class components with implicit reactive JSX", () => {
+    const result = transformReactJsx(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(0);
+      export default class extends React.Component { render() { return <output>{count}</output>; } }
+    `);
+    expect(result.diagnostics.filter(item => item.category === "error")).toEqual([]);
+    expect(result.code).toContain('class __StreamixStreamixDefaultExport extends React.Component');
+    expect(result.code).toContain('export default function StreamixDefaultExport(props: any)');
+    expect(result.code).toContain('useStreamixSource(count, "count")');
+  });
+
   it("adopts anonymous default exports with module and component-local sources", () => {
     const shared = transformReactJsx(`import {atom} from '@epikodelabs/streamix';const status=atom('ready');export default () => <output>{status}</output>;`);
     expect(shared.diagnostics.filter(d => d.category === "error")).toEqual([]);

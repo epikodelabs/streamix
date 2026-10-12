@@ -42,6 +42,14 @@ describe("React JSX compiler edge cases", () => {
     expect(result.code).toContain('useStreamixSource(count, "count")');
   });
 
+  it("rejects component-local reactive declarations nested in blocks", () => {
+    const result = transformReactJsx(`
+      import { atom } from '@epikodelabs/streamix';
+      function Counter() { if (true) { const count = atom(0); return <output>{count}</output>; } return null; }
+    `);
+    expect(result.diagnostics.some(item => item.message.includes('nested block'))).toBeTrue();
+  });
+
   it("subscribes once when the same atom appears in several JSX expressions", () => {
     const result = transformReactJsx(`
       const status = atom("Saved");

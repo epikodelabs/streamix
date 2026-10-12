@@ -11,7 +11,7 @@ export function Counter() {
 }
 ```
 
-The compiler supports atoms, derived values, flows, scope fields, known aliases and atom maps, supported writes, anonymous default components, class components, and higher-order wrappers. Class components receive an internal function-component subscription boundary; wrapper callbacks are compiled when assigned to a capitalized component binding, with `memo` and `forwardRef` recognized through named-import aliases and `React.` namespace imports when actually imported from React.
+The compiler supports atoms, derived values, flows, scope fields, known aliases and atom maps, supported writes, anonymous default functions and classes, class components, and higher-order wrappers. Class components receive an internal function-component subscription boundary; wrapper callbacks are compiled when assigned to a capitalized component binding, with `memo` and `forwardRef` recognized through named-import aliases and `React.` namespace imports when actually imported from React.
 
 ## Subscription ownership and cleanup
 
@@ -36,8 +36,9 @@ after authored props, so an authored prop cannot replace it.
   `React.forwardRef` are recognized when imported from React.
 - A capitalized component assigned from an application wrapper call can have
   its first callback compiled as a React render function.
-- Named class components receive the wrapper described above; it owns the
-  external-store hooks while the inner class receives only snapshots.
+- Named and anonymous `export default class` components receive the wrapper
+  described above. Anonymous default classes are assigned private generated
+  names; their default export remains the subscription-owning wrapper.
 
 ### What is not implicit
 
@@ -46,6 +47,10 @@ after authored props, so an authored prop cannot replace it.
   render function.
 - Dynamic imports, arbitrary proxy fields, unknown dynamic source selection,
   and callback-local dynamic selections remain explicit boundaries.
+- Component-local `atom`, `derived`, `flow`, and `scope` declarations must be
+  at component scope. Declarations inside conditional or loop blocks fail at
+  build time because lifting their ownership would make React hook order
+  conditional.
 - React Activity / Offscreen cleanup is not distinguishable from permanent
   unmount. Use a parent-owned `StreamixLifetime` when a source must outlive a
   hidden subtree.

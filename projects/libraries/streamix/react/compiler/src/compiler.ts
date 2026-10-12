@@ -411,6 +411,25 @@ export function transformReactJsx(
         if (statementReturns) hasEarlierReturn = true;
       });
 
+      // The generated ownership hooks must be at component scope. A factory
+      // hidden in a conditional/loop block cannot be lifted without changing
+      // React hook order, so reject it instead of leaving JSX to render the
+      // raw atom object.
+      if (isComponent) {
+        const inspectNestedDeclarations = (node: ts.Node): void => {
+          if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+              node.initializer && ts.isCallExpression(node.initializer) &&
+              ["atom", "derived", "flow", "scope"].includes(factoryKind(node.initializer, imports, checker) ?? "") &&
+              node.parent.parent.parent !== functionBody) {
+            diagnostics.push(diagnostic(node, "error",
+              "A component-local reactive declaration inside a nested block cannot be compiled safely. Move it to component scope or use an explicit React hook."));
+            return;
+          }
+          ts.forEachChild(node, inspectNestedDeclarations);
+        };
+        inspectNestedDeclarations(functionBody);
+      }
+
       // Static aliases retain atom identity. Object maps are supported only
       // when every property is a known atom reference; arbitrary objects stay
       // ordinary JavaScript and are never guessed to be reactive.
@@ -896,7 +915,12 @@ export function transformReactJsx(
     };
 
     const transformClassComponent = (node: ts.ClassDeclaration): readonly ts.Statement[] | undefined => {
-      if (!node.name || !/^[A-Z]/.test(node.name.text)) return undefined;
+      const isDefault = node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.DefaultKeyword) ?? false;
+      // An anonymous class has no module binding to preserve, but a default
+      // export is still a stable component boundary. Give both generated
+      // declarations private names and keep the default export on the wrapper.
+      if ((!node.name && !isDefault) || (node.name && !/^[A-Z]/.test(node.name.text))) return undefined;
+      const publicName = node.name?.text ?? 'StreamixDefaultExport';
       const atomSources = new Set<string>();
       const scopeSources = new Map<string, Set<string>>();
       // The outer function owns both the subscriptions and their snapshots.
@@ -945,7 +969,7 @@ export function transformReactJsx(
       const rewritten = ts.visitEachChild(node, visit, context) as ts.ClassDeclaration;
       if (atomSources.size === 0 && scopeSources.size === 0) return undefined;
 
-      const internalName = factory.createIdentifier(`__Streamix${node.name.text}`);
+      const internalName = factory.createIdentifier(`__Streamix${publicName}`);
       const classModifiers = node.modifiers?.filter(modifier =>
         modifier.kind !== ts.SyntaxKind.ExportKeyword && modifier.kind !== ts.SyntaxKind.DefaultKeyword);
       const internal = factory.updateClassDeclaration(rewritten, classModifiers, internalName,
@@ -987,7 +1011,7 @@ export function transformReactJsx(
           factory.createJsxAttribute(factory.createIdentifier("__streamixBindings"),
             factory.createJsxExpression(undefined, factory.createObjectLiteralExpression(snapshots, false))),
         ]));
-      const wrapper = factory.createFunctionDeclaration(wrapperModifiers, undefined, node.name,
+      const wrapper = factory.createFunctionDeclaration(wrapperModifiers, undefined, factory.createIdentifier(publicName),
         undefined, [parameter], undefined, factory.createBlock([
           ...hookStatements,
           factory.createReturnStatement(wrappedClass),

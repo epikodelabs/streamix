@@ -221,9 +221,12 @@ export function useAtomValue<T>(source: DependencySource<T>): T {
 }
 
 /** React-style value/setter binding for a writable atom. */
-export function useWritable<T>(source: Writable<T>): [T, (value: T) => void] {
+export type WritableUpdate<T> = T | ((previous: T) => T);
+
+export function useWritable<T>(source: Writable<T>): [T, (value: WritableUpdate<T>) => void] {
   const value = useAtomValue(source);
-  const setValue = useCallback((next: T) => source.next(next), [source]);
+  const setValue = useCallback((next: WritableUpdate<T>) =>
+    source.next(typeof next === "function" ? (next as (previous: T) => T)(source.value) : next), [source]);
   return [value, setValue];
 }
 

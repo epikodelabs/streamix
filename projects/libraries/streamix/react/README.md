@@ -31,8 +31,8 @@ No subscription hook belongs in ordinary application component code.
 - Atom-reference transport to capitalized React components.
 - Concurrent-safe reads through `useSyncExternalStore`; subscriptions begin only
   after a render commits.
-- Anonymous `export default` function components and React `memo` / `forwardRef`
-  wrappers (including named import aliases and React namespace imports).
+- Anonymous `export default` function and class components, plus React `memo` /
+  `forwardRef` wrappers (including named import aliases and React namespace imports).
 
 ```tsx
 let primary = atom("Primary");
@@ -60,13 +60,18 @@ return <input
 ```
 
 **Class components and wrappers:** implicit reactive JSX reads are supported in
-class components through an internal function-component subscription boundary.
+named classes and anonymous `export default class` declarations through an
+internal function-component subscription boundary. Anonymous default classes
+receive private generated names; their default export remains the wrapper.
 Callbacks passed to a higher-order wrapper are compiled when they are assigned
 to a capitalized component binding, including application-defined wrappers.
 Generated function bindings retain the `useStreamixSource()` snapshot for the
 whole mounted lifetime. On unmount, the external-store cleanup releases the
 subscription once its final consumer leaves; class adapters pass those retained
 snapshots to their private inner class rather than rereading mutable sources.
+Component-local reactive declarations must be direct component-body statements:
+conditional and loop-local declarations are rejected so generated React hooks
+never become conditional.
 
 ## Prop boundaries
 

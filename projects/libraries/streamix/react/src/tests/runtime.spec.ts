@@ -15,6 +15,7 @@ import {
   useAtom,
   useAtomValue,
   useResource,
+  useWritable,
   write,
 } from "../lib/runtime";
 import { recordStreamixDevtoolsEvent, StreamixDevtools } from "../lib/devtools";
@@ -126,6 +127,18 @@ idescribe("React runtime escape hatches", () => {
     act(() => root.render(createElement(Counter)));
     act(() => count.next(1));
     expect(container.textContent).toBe("1");
+  });
+
+  it("supports functional useWritable updates", () => {
+    const count = atom(1);
+    let update!: (next: number | ((previous: number) => number)) => void;
+    function Counter() {
+      [, update] = useWritable(count);
+      return null;
+    }
+    act(() => root.render(createElement(Counter)));
+    act(() => update(previous => previous + 1));
+    expect(count.value).toBe(2);
   });
 
   it("re-renders explicit reads when a source emits the same object reference", () => {
