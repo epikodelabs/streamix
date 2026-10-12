@@ -58,6 +58,9 @@
   "viteConfig": {
     "server": {
       "open": false
+    },
+    "define": {
+      "import.meta.env.DEV": "true"
     }
   },
   "jasmineConfig": {

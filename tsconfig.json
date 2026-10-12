@@ -73,9 +73,6 @@
       "@epikodelabs/streamix/react": [
         "./projects/libraries/streamix/react/src/public-api.ts"
       ],
-      "@epikodelabs/streamix/vue": [
-        "./projects/libraries/streamix/vue/src/lib/index.ts"
-      ],
       "@epikodelabs/streamix/vue/compiler": [
         "./projects/libraries/streamix/vue/compiler/src/public-api.ts"
       ],
@@ -87,6 +84,9 @@
       ],
       "@epikodelabs/streamix/vue/editor": [
         "./projects/libraries/streamix/vue/editor/src/public-api.ts"
+      ],
+      "@epikodelabs/streamix/vue": [
+        "./projects/libraries/streamix/vue/src/lib/index.ts"
       ],
       "@epikodelabs/streamix": [
         "./projects/libraries/streamix/src/lib/index.ts"
