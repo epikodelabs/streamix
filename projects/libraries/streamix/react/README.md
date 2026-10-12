@@ -261,9 +261,6 @@ writes, unsubscriptions, and committed renders. Source maps preserve positions o
 expressions; synthesized hook machinery does not pretend to originate in
 application source.
 
-For the complete semantics and limitations, see the
-[React documentation](https://epikodelabs.github.io/streamix/REACT).
-
 `useResource(loader, dependencies)` deliberately tracks the supplied dependency
 array, not the identity of `loader`; include every prop/state input affecting
 that loader. For initial Suspense, preload outside render and use
