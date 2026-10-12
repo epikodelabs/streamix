@@ -1,5 +1,6 @@
 export * from './compiled-block-helpers';
 export * from './compiled-block';
+export * from './devtools';
 export * from './structural-block';
 export * from './compiled-view';
 export * from './source-reference';

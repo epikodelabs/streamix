@@ -1,6 +1,7 @@
-import type {
-  DependencySource,
-  Subscription,
+import {
+  recordStreamixDevtoolsEvent,
+  type DependencySource,
+  type Subscription,
 } from '@epikodelabs/streamix';
 
 import {
@@ -40,6 +41,7 @@ export class SxBindingTable {
   private readonly writers: Array<BindingWriter | undefined>;
   private readonly equals: Array<BindingEquals | undefined>;
   private readonly readers: Array<BindingReader | undefined>;
+  private readonly labels: Array<string | undefined>;
   private readonly rendered: unknown[];
   private readonly pending: unknown[];
   private readonly subscriptions: Array<Subscription[] | undefined>;
@@ -62,6 +64,7 @@ export class SxBindingTable {
     this.writers = new Array(size);
     this.equals = new Array(size);
     this.readers = new Array(size);
+    this.labels = new Array(size);
     this.rendered = new Array(size);
     this.pending = new Array(size);
     this.subscriptions = new Array(size);
@@ -78,6 +81,7 @@ export class SxBindingTable {
     source: DependencySource<T>,
     write: (value: T) => void,
     equal: (previous: T, next: T) => boolean = Object.is,
+    name?: string,
   ): void {
     this.assertLiveSlot(slot);
     this.unbind(slot);
@@ -103,6 +107,8 @@ export class SxBindingTable {
     subscribing = false;
 
     this.subscriptions[slot] = [subscription];
+    this.labels[slot] = name;
+    recordStreamixDevtoolsEvent({ type: "subscription", source: this.slotLabel(slot) });
   }
 
   /**
@@ -117,6 +123,7 @@ export class SxBindingTable {
     read: () => T,
     write: (value: T) => void,
     equal: (previous: T, next: T) => boolean = Object.is,
+    name?: string,
   ): void {
     this.assertLiveSlot(slot);
     this.unbind(slot);
@@ -132,6 +139,8 @@ export class SxBindingTable {
     write(initial);
 
     this.subscriptions[slot] = this.subscribeForFlush(slot, sources);
+    this.labels[slot] = name;
+    recordStreamixDevtoolsEvent({ type: "subscription", source: this.slotLabel(slot) });
   }
 
   /**
@@ -154,6 +163,7 @@ export class SxBindingTable {
     target.addEventListener(type, handler, options);
     this.teardowns[slot] = () =>
       target.removeEventListener(type, handler, options);
+    recordStreamixDevtoolsEvent({ type: "subscription", source: this.slotLabel(slot) });
   }
 
   /**
@@ -247,6 +257,9 @@ export class SxBindingTable {
   }
 
   private unsubscribeSlot(slot: BindingSlot): void {
+    if (this.subscriptions[slot] !== undefined || this.teardowns[slot] !== undefined) {
+      recordStreamixDevtoolsEvent({ type: "unsubscribe", source: this.slotLabel(slot) });
+    }
     for (const subscription of this.subscriptions[slot] ?? []) {
       subscription();
     }
@@ -260,6 +273,7 @@ export class SxBindingTable {
     this.writers[slot] = undefined;
     this.equals[slot] = undefined;
     this.readers[slot] = undefined;
+    this.labels[slot] = undefined;
     this.rendered[slot] = undefined;
     this.pending[slot] = undefined;
     this.dirtyFlags[slot] = 0;
@@ -271,6 +285,7 @@ export class SxBindingTable {
     }
 
     let index = 0;
+    let written = 0;
 
     while (index < this.dirtySlots.length) {
       const slot = this.dirtySlots[index++];
@@ -278,27 +293,45 @@ export class SxBindingTable {
       // must enqueue a new slot instead of being silently dropped.
       this.dirtyFlags[slot] = 0;
 
-      this.renderExpressionSlot(slot);
+      if (this.renderExpressionSlot(slot)) {
+        written += 1;
+        recordStreamixDevtoolsEvent({ type: "write", source: this.slotLabel(slot) });
+      }
     }
 
     // All newly enqueued work was consumed by the dynamically sized loop.
     this.dirtySlots.length = 0;
+
+    if (written > 0) {
+      recordStreamixDevtoolsEvent({
+        type: "render",
+        source: `${written} ${written === 1 ? "binding" : "bindings"}`,
+      });
+    }
   }
 
-  private renderExpressionSlot(slot: BindingSlot): void {
+  private renderExpressionSlot(slot: BindingSlot): boolean {
     const write = this.writers[slot];
-    if (!write) return;
+    if (!write) return false;
     const equal = this.equals[slot] ?? Object.is;
     try {
       const next = this.readers[slot] ? this.readers[slot]!() : this.pending[slot];
       if (!equal(this.rendered[slot], next)) {
         write(next);
         this.rendered[slot] = next;
+        return true;
       }
+      return false;
     } catch (error) {
       // Preserve the previous successful value and isolate sibling slots.
       console.error(`sx binding slot ${slot} update failed.`, error);
+      return false;
     }
+  }
+
+  /** DevTools label for a slot: the emitted binding name or a stable slot id. */
+  private slotLabel(slot: BindingSlot): string {
+    return this.labels[slot] ?? `binding ${slot}`;
   }
 
   private assertSlot(slot: BindingSlot): void {
