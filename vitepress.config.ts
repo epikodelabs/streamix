@@ -112,14 +112,14 @@ export default defineConfig({
     ['meta', { name: 'og:locale', content: 'en' }],
     ['meta', { name: 'og:site_name', content: 'streamix' }],
     ['script', { 
-      src: 'https://www.googletagmanager.com/gtag/js?id=G-R225GQFN7D',
+      src: 'https://www.googletagmanager.com/gtag/js?id=G-JS7G60Y9B5',
       async: ''
     }],
     ['script', {}, `
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
       gtag('js', new Date());
-      gtag('config', 'G-R225GQFN7D');
+      gtag('config', 'G-JS7G60Y9B5');
     `]
   ]
 })

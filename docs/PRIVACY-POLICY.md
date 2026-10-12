@@ -40,7 +40,7 @@ Those services operate under their own privacy policies, and we are not responsi
 
 ## 4. Cookies and tracking
 
-The documentation site loads Google Analytics (property `G-R225GQFN7D`), which sets first-party cookies and collects standard usage data — pages viewed, referrer, approximate location, and device and browser information — to measure aggregate traffic. Google's own privacy policy governs how that data is handled.
+The documentation site loads Google Analytics (property `G-JS7G60Y9B5`), which sets first-party cookies and collects standard usage data — pages viewed, referrer, approximate location, and device and browser information — to measure aggregate traffic. Google's own privacy policy governs how that data is handled.
 
 Beyond that, this site does not intentionally use advertising or cross-site tracking cookies beyond what is required for authentication or normal browser and hosting behavior.
 
