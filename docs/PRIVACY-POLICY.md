@@ -35,9 +35,9 @@ Those services operate under their own privacy policies, and we are not responsi
 
 ## 4. Cookies and tracking
 
-This site does not intentionally describe or promise any specific analytics, advertising, or tracking configuration beyond normal browser and hosting behavior.
+The documentation site loads Google Analytics (property `G-JS7G60Y9B5`), which sets first-party cookies and collects standard usage data — pages viewed, referrer, approximate location, and device and browser information — to measure aggregate traffic. Google's own privacy policy governs how that data is handled.
 
-If analytics, cookies, or similar tools are added later, this policy will be updated accordingly.
+Beyond that, this site does not intentionally use advertising or cross-site tracking cookies beyond what is required for normal browser and hosting behavior.
 
 ## 5. Data retention
 

@@ -9,7 +9,7 @@ import {
  * A bidirectional stream built on top of WebSocket.
  *
  * Incoming WebSocket messages are emitted through the stream,
- * while outgoing messages can be sent using {@link WebSocketStream.send}.
+ * while outgoing messages can be sent with its `send` method.
  *
  * @template T Message payload type.
  */

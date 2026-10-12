@@ -109,6 +109,16 @@ export default defineConfig({
     ['meta', { name: 'theme-color', content: '#3c82f6' }],
     ['meta', { name: 'og:type', content: 'website' }],
     ['meta', { name: 'og:locale', content: 'en' }],
-    ['meta', { name: 'og:site_name', content: 'streamix' }]
+    ['meta', { name: 'og:site_name', content: 'streamix' }],
+    ['script', {
+      src: 'https://www.googletagmanager.com/gtag/js?id=G-JS7G60Y9B5',
+      async: ''
+    }],
+    ['script', {}, `
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-JS7G60Y9B5');
+    `]
   ]
 })
