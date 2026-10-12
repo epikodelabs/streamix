@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.0.6 - 2026-10-12
+
+- **Angular DevTools:** added the exported `StreamixDevtools` in-app panel for
+  inspecting the shared reactive trace. Compiled binding tables now record
+  subscriptions, writes, and teardowns with stable binding labels.
+- Improved test coverage across the browser and Node environments after the
+  Testify runner update, including framework-specific environment helpers and
+  compiler/runtime regressions.
+- **Angular:** preserve modifier order for compiled event handlers, compile
+  safe attribute interpolation inside structural blocks, and surface invalid
+  loop-local reads as build errors.
+- **React / Vue:** repair generated React lifecycle test adapters and only
+  report Vue bridge scopes that a template actually uses.
+
 ## 3.0.5 - 2026-10-11
 
 - Hardening **Angular / React / Vue** subpackages: framework bindings that subscribe atoms and update the UI without manual wiring (Angular directives avoiding detectChanges(), React's useStreamixSource on useSyncExternalStore, Vue's customRef-based useWritable).
