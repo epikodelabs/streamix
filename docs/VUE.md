@@ -67,17 +67,18 @@ Use a scope or replace the whole atom value explicitly in script.
 import { atom, derived } from '@epikodelabs/streamix';
 
 const count = atom(2);
-const doubled = derived(() => count * 2);
+const doubled = derived($ => $(count) * 2);
 const label = derived($ => `${$(count)} clicks`);
 </script>
 
 <template>{{ doubled }} — {{ label }}</template>
 ```
 
-Inside a compiler-recognized `derived` callback, ordinary atom reads become
-current values. `$` has a distinct purpose: it receives and tracks an atom
-reference. Therefore `$(count)` is preserved and never rewritten to
-`$(count.value)`.
+`$` receives and tracks an atom reference, then returns its current value.
+Use `$(count)` in authored examples because it is explicit and works without
+framework-specific shorthand. The Vue compiler also supports bare `count` as a
+convenience inside recognized `derived` callbacks, lowering it to a value read.
+It never rewrites `$(count)` to `$(count.value)`.
 
 ## What the compiler adopts
 

@@ -31,7 +31,7 @@ Then declare Streamix state in `<script setup>` and use it as ordinary Vue state
 import { atom, derived, scope } from '@epikodelabs/streamix';
 
 const count = atom(0);
-const doubled = derived(() => count * 2);
+const doubled = derived($ => $(count) * 2);
 const profile = scope({ name: 'Ada' });
 </script>
 
