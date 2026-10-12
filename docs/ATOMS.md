@@ -10,22 +10,27 @@ An atom is a reactive value that you can read from synchronously, subscribe to f
 
 ### The Core Atom Interface
 
-Every atom—whether created via `atom`, `derived`, `flow`, or `pipe`—implements this base interface:
+Every atom—whether created via `atom`, `derived`, `flow`, or `pipe`—implements this interface:
 
 ```ts
 interface Atom<T> {
-  readonly value: T;         // Current value (throws on pending error/disposal)
-  readonly safeValue: T;     // Last successful value (never throws)
-  readonly previous: T | undefined;
+  readonly type: "atom";
+  readonly value: T;         // Current value (throws while the atom is in an error state)
+  readonly safeValue: T;     // Current value; falls back to the last value before an error
+  readonly previous: T;      // Previously emitted value
   readonly disposed: boolean;
-  readonly error?: any;
-  subscribe(callback: (current: T, previous: T) => void): Subscription;
+  readonly dirty: boolean;   // True when reactive work is queued but not flushed yet
+  readonly error?: any;      // Last error captured by this atom, if any
+  subscribe(callback?: (current: T, previous: T) => void): Subscription;
+  onError(handler: (error: any) => void): Subscription;
+  dispose(): void;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
-
 ```
 
-> **Note:** Writable atoms extend this base interface with mutation methods like `.next(value)`, `.set(value)`, and `.fail(error)`.
+`value` throws while the atom is in an error state; `safeValue` never does. Subscriptions can be released by calling the returned `Subscription`, and `dispose()` stops the atom and releases every subscriber and resource it owns.
+
+> **Note:** Writable atoms extend this base interface with mutation methods: `.next(value)`, its alias `.set(value)`, `.fail(error, { terminate?: boolean })` to enter an error state, and optional `.recover()` / `.clearError()` to leave a recoverable error state.
 
 Subscriptions are **stateful**. If an atom already has a current value, `subscribe()` synchronously delivers that value once before future emissions. This applies equally to writable atoms, derived atoms, and flows. An atom or flow that has not produced a value yet stays silent until its first real emission; no placeholder `undefined` is invented. Explicit state is still state, so `atom(undefined)` does replay `undefined`.
 
@@ -37,6 +42,19 @@ const pending = atom<number>();
 pending.subscribe(value => console.log(value)); // nothing yet
 pending.next(4);                                // 4
 ```
+
+Errors surface through `onError` handlers rather than one-off `try/catch` around reads. Creation options tune the error and leak behavior:
+
+```ts
+const status = atom("idle", {
+  onError: handler,          // receives errors raised by the source or subscribers
+  terminateOnError: false,   // true disposes the atom after an error instead of staying recoverable
+  propagateErrors: false,    // true rethrows after handlers run
+  maxSubscribers: 1000,      // soft leak-detection limit; exceeding it still works but may warn
+});
+```
+
+`derived()` always records errors and reports them through `onError` handlers; `propagateErrors` applies to writable atoms and flow-backed sources.
 
 ---
 
@@ -50,10 +68,9 @@ These are your primary state sources, holding a single piece of mutable state.
 const count = atom(0);
 count.next(42);
 console.log(count.value); // 42
-
 ```
 
-Atoms propagate every write immediately. Use `transaction()` when several writes must become one reactive state transition.
+`atom()` without an argument starts with `undefined`; pass a value for an immediate initial state. Atoms propagate every write immediately. Use `transaction()` when several writes must become one reactive state transition (see [Explicit Transactions](#6-explicit-transactions)).
 
 #### B. Derived Atoms (`derived`)
 
@@ -61,19 +78,15 @@ These represent computed values that automatically recalculate when their depend
 
 ```ts
 const fullName = derived($ => `${$(firstName)} ${$(lastName)}`);
-
 ```
 
-The `$` helper tracks dependencies dynamically. Its arguments are atom
-references, not values: `$(firstName)` both reads the current value and records
-`firstName` as a dependency. Framework compilers preserve those tracker
-arguments exactly; they never lower them to `$(firstName.value)`.
+The `$` helper tracks dependencies dynamically. Its arguments are atom references, not values: `$(firstName)` both reads the current value and records `firstName` as a dependency. Framework compilers preserve those tracker arguments exactly; they never lower them to `$(firstName.value)`.
 
-> `derived()` is intentionally synchronous. If the computation needs `await`, cancellation, or restart semantics, move that work into `flow()`.
+`derived()` is intentionally synchronous — the type signature rejects promise-returning callbacks. For sequencing, a generator form may yield atoms or promises before returning the computed value; for full `await`, cancellation, or restart semantics, move that work into `flow()`.
 
 #### C. Flow Atoms (`flow`)
 
-Designed for async generators, standard iterables, or stream factories. Flows respect cooperative cancellation via an `AbortSignal` and tie their cleanup directly to atom disposal.
+Flows wrap async generators, standard iterables, or stream factories. Flows respect cooperative cancellation via an `AbortSignal` and tie their cleanup directly to atom disposal.
 
 ```ts
 const ticks = flow(async function* (signal) {
@@ -82,7 +95,13 @@ const ticks = flow(async function* (signal) {
     await sleep(1000);
   }
 });
+```
 
+The source can also be a plain iterable, or an existing atom (whose last value seeds the flow):
+
+```ts
+const fromIterable = flow([1, 2, 3]);
+const mirrored = flow(someAtom);
 ```
 
 For one-shot async recomputation, model it as a flow explicitly:
@@ -93,9 +112,54 @@ const total = flow(async function* () {
   yield price.value * rates.tax + tax.value;
 });
 ```
+
+Delivery mode is explicit for sequences where the distinction matters:
+
+```ts
+const positions = flow(pointerPositions(), { mode: "analog" }); // latest pending value matters
+const clicks = flow(clickEvents(), { mode: "discrete" });       // every event matters
+```
+
+`mode` defaults to `"discrete"`. All other atom options (`onError`, `terminateOnError`, `propagateErrors`, `maxSubscribers`) apply to flows as well.
+
 ---
 
-## 1. The Standard Scope Blueprint
+## 2. Composing Atoms
+
+`pipe()` combines one source with operators into a new atom, and a factory layer builds multi-source topologies. Operators are plain functions: `map`, `filter`, `scan`, `debounce`, `distinctUntilChanged`, `takeUntil`, `switchMap`, `withLatestFrom`, `catchError`, `retry`, and dozens more.
+
+```ts
+import { atom, pipe, map, filter, scan, merge } from "@epikodelabs/streamix";
+
+const count = atom(1);
+
+const doubledEvens = pipe(
+  count,
+  map((value: number) => value * 2),
+  filter((value: number) => value % 4 === 0),
+);
+
+const total = pipe(count, scan((sum, value) => sum + value, 0));
+
+const either = merge(count, doubledEvens); // one atom fed by both sources
+```
+
+Multi-source factories include `combineLatest`, `zip`, `race`, `concat`, `forkJoin`, `from`, `of`, `interval`, and `timer`. For one-shot reads, `firstValueFrom(atom)` and `lastValueFrom(atom)` return promises.
+
+`pipe([a, b, c])` with an array of sources produces an atom of tuples, and the `AtomValue` helper extracts a piped atom's value type:
+
+```ts
+import { type AtomValue } from "@epikodelabs/streamix";
+
+const combined = pipe([atom(1), atom("hello")]);
+type CombinedValue = AtomValue<typeof combined>; // [number, string]
+```
+
+Atoms are also async iterable, so `for await (const value of count)` consumes emissions until the atom is disposed or the loop breaks.
+
+---
+
+## 3. The Standard Scope Blueprint
 
 In everyday development, almost every scope you build will follow this standard structural layout:
 
@@ -137,19 +201,33 @@ const taskManager = scope({
     self.tasks = [...self.tasks, { id: newId, text, done: false }];
   })
 });
-
 ```
 
-### Understanding the Compiled Output:
+### Understanding the Compiled Output
 
 * **Direct Read/Write (`taskManager.filter`)**: Accessing a property reads the current value; assigning a value pushes it into the backing writable atom. The keyed alternatives are `taskManager.get("filter").value` for the value (`taskManager.get("filter")` on its own hands back the atom) and `taskManager.set("filter", "active")` for the write.
 * **Dependency Tracking (`taskManager.visibleTasks`)**: Whenever the input atoms update, `visibleTasks` automatically recalculates. Read it as `taskManager.visibleTasks`.
 * **Action Execution (`taskManager.addTask("...")`)**: Methods are called as standard imperative functions to safely execute side effects and mutations.
+* **Built-in atoms (`taskManager.loading`, `taskManager.dirty`)**: Every scope owns `loading` and `dirty` atoms — whether any setup work is running, and whether reactive work is queued. These names are reserved; a shorthand definition for them is dropped with a warning, and the scope keeps its own atom.
 * **Typing `self`**: TypeScript cannot infer `self` for you here. `method()` gives its callback's `self` no inference site (it always needs an annotation), and computed properties only infer `self` when the scope declares an explicit shape. Quick samples use `self: any`; for real code, prefer a shape interface — `scope<TaskManagerShape>(...)` infers `self` in computed properties, and `method((self: TaskManagerShape, id: number) => ...)` types your methods end to end.
+
+### Named Scope Accessors
+
+`scope.get("name")` returns the member's underlying atom and `scope.set("name", value)` pushes a value into it. The key and value are inferred from the scope definition, making these helpers useful for generated template bindings without exposing a `.refs` namespace. `scope.subscribeTo("name", callback)` subscribes to a member without touching the proxy:
+
+```ts
+// Subscribing to the underlying reactive atom (for stream operations)
+const subscription = taskManager.subscribeTo("visibleTasks", tasks => {
+  console.log("Tasks updated:", tasks);
+});
+
+// Reading the current value through the atom reference
+console.log(taskManager.get("visibleTasks").value);
+```
 
 ---
 
-## 2. Crucial Best Practices for Daily Development
+## 4. Crucial Best Practices for Daily Development
 
 To keep your scopes predictable, highly performant, and bug-free, follow these core guidelines:
 
@@ -164,7 +242,6 @@ taskManager.tasks.push({ id: 3, text: "New Task", done: false });
 
 // ✅ CORRECT: Always assign a new reference
 taskManager.tasks = [...taskManager.tasks, { id: 3, text: "New Task", done: false }];
-
 ```
 
 ### Rule B: Only Mutate State Inside Methods
@@ -180,27 +257,11 @@ const badScope = scope({
     return self.count * 2;
   }
 });
-
-```
-
-### Rule C: Use Named Scope Accessors in Templates
-
-`scope.get("name")` returns the member's underlying atom and `scope.set("name", value)` pushes a value into it. The key and value are inferred from the scope definition, making these helpers useful for generated template bindings without exposing a `.refs` namespace.
-
-```ts
-// Accessing the underlying reactive Atom (For subscribing / stream operations)
-const subscription = taskManager.subscribeTo("visibleTasks", tasks => {
-  console.log("Tasks updated:", tasks);
-});
-
-// Reading the current value through the atom reference
-console.log(taskManager.get("visibleTasks").value);
-
 ```
 
 ---
 
-## 3. Common Pitfalls & Traps
+## 5. Common Pitfalls & Traps
 
 Beyond losing the execution context with the standard `this` keyword, watch out for these typical scoping mistakes:
 
@@ -216,7 +277,6 @@ const searchScope = scope({
     return runSearch(this.query); 
   }
 });
-
 ```
 
 ```ts
@@ -225,7 +285,6 @@ const searchScope = scope({
   query: "",
   results: (self: any) => runSearch(self.query)
 });
-
 ```
 
 ### Trap #2: Forgetting to Clean Up (Memory Leaks)
@@ -235,16 +294,15 @@ Scopes manage and cache active subscriptions to build their reactive trees. If y
 ```ts
 // In your component unmount or cleanup function:
 taskManager.dispose();
-
 ```
 
 ### Trap #3: Expecting `method()` to Batch Its Writes
 
-`method()` only marks a function as imperative — it does **not** group its assignments into one update. A method that assigns several properties produces one transition per line, so computed properties re-run after each assignment. Wrap multi-write bodies in `transaction()` to commit them as a single update (see [Explicit Transactions](#4-explicit-transactions)).
+`method()` only marks a function as imperative — it does **not** group its assignments into one update. Wrap multi-write bodies in `transaction()`; see [Methods Do Not Auto-Batch](#methods-do-not-auto-batch).
 
 ---
 
-## 4. Explicit Transactions
+## 6. Explicit Transactions
 
 Atoms and scopes have one state propagation model: ordinary writes propagate immediately. When several synchronous writes form one logical state change, wrap them in `transaction()`.
 
@@ -366,11 +424,4 @@ a.subscribe((current, previous) => {
 transaction(() => a.set(1));
 
 console.log(seen); // [[0, 0], [1, 0], [2, 1]] — current state, then both transitions
-```
-
-Analog/discrete semantics belong to sequences, not state containers. For a flow, choose delivery explicitly when needed:
-
-```ts
-const positions = flow(pointerPositions(), { mode: "analog" }); // latest pending value matters
-const clicks = flow(clickEvents(), { mode: "discrete" });       // every event matters
 ```

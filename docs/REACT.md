@@ -15,7 +15,8 @@ npm install -D typescript vite @vitejs/plugin-react
 
 The compiler, Vite plugin, editor plugin, and Angular-hosted builder are
 subpaths of `@epikodelabs/streamix`; importing one makes TypeScript a required
-application dependency.
+application dependency. Streamix requires React 18 or newer and TypeScript
+5.5 or newer — including JSX-only projects.
 
 ## 2. Configure Vite
 
@@ -187,6 +188,20 @@ explicit boundary.
 | Timer, callback, proxy, or dynamic path | `read`, `write`, or a React hook |
 | Conditional ownership | A separate component or an explicit hook |
 
+## DevTools
+
+`StreamixDevtools` is an opt-in panel for reactive reads, subscriptions,
+writes, unsubscriptions, and committed renders:
+
+```tsx
+import { StreamixDevtools } from '@epikodelabs/streamix/react';
+
+<StreamixDevtools />
+```
+
+It renders only when the bundler marks the build as development
+(`import.meta.env.DEV`); production bundles and bundler-less ESM stay clean.
+
 ## Activity, resources, and SSR
 
 Strict Mode effect replay is handled by the runtime. For React Activity or
@@ -223,3 +238,8 @@ a source checkout, run `npm run build` before starting that builder.
   install a package release containing `react/builder/package.json`.
 - The editor disagrees with a build: restart the TypeScript server, then trust
   the production compiler's diagnostic and emitted output.
+
+## Where to go from here
+
+[Atoms and Scopes](./ATOMS.md) covers the core model the compiler consumes:
+derived values, flows, transactions, operators, and the full scope API.

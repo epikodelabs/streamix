@@ -12,7 +12,8 @@ npm install -D typescript vite @vitejs/plugin-vue
 ```
 
 The compiler, Vite plugin, Volar integration, and Angular-hosted builder are
-subpaths of the same Streamix package.
+subpaths of the same Streamix package. Streamix requires Vue 3.4 or newer and
+TypeScript 5.5 or newer.
 
 ## 2. Configure Vite
 
@@ -178,6 +179,24 @@ paths, and other code outside Vue's tracked setup/render path.
 | Outside a Vue effect scope | `createIterableBridge` and `dispose()` |
 | Timer, callback, or dynamic path | `read`, `write`, or `atomRef` |
 
+## DevTools
+
+`StreamixDevtools` is an opt-in panel showing reads, subscriptions, writes,
+unsubscriptions, and cleanup from the generated bridges:
+
+```vue
+<script setup lang="ts">
+import { StreamixDevtools } from '@epikodelabs/streamix/vue';
+</script>
+
+<template>
+  <StreamixDevtools />
+</template>
+```
+
+It renders only in development builds (`import.meta.env.DEV`); production
+bundles stay clean.
+
 ## SSR, editor, and hosted builds
 
 For SSR, render `renderAtomSnapshotScript()` on the server and call
@@ -202,3 +221,8 @@ target. Use it when an Angular workspace hosts the Vue application.
   complete atom value from script.
 - Editor diagnostics differ from a build: restart Volar and trust the SFC
   compiler's output and diagnostics.
+
+## Where to go from here
+
+[Atoms and Scopes](./ATOMS.md) covers the core model the compiler adopts:
+derived values, flows, transactions, operators, and the full scope API.

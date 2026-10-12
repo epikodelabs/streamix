@@ -13,6 +13,10 @@ npm install @epikodelabs/streamix @angular/core @angular/common
 npm install -D typescript @angular/cli @angular/language-service
 ```
 
+Streamix requires Angular 20 or newer and TypeScript 5.5 or newer. The
+compiled-template runtime, the builder, and the editor plugin ship in the same
+package; there is nothing else to install.
+
 ## 2. Configure the builder
 
 The builder creates a virtual compiled source tree and delegates to your normal
@@ -32,6 +36,23 @@ Angular target. Authored files are never modified.
 
 It compiles static inline templates and literal `templateUrl` files. Without
 the builder, Streamix code works normally but templates are not adopted.
+
+### Zone.js applications
+
+If the application uses Zone.js, add the Streamix scheduler provider once so
+compiled bindings update frames outside Angular's zone:
+
+```ts
+import { provideSxZoneScheduling } from '@epikodelabs/streamix/angular';
+
+export const appConfig = {
+  providers: [provideSxZoneScheduling()],
+};
+```
+
+Zoneless applications need no provider. A Zone.js application that skips this
+provider still works; the scheduler warns once at startup so the setting is
+never missed silently.
 
 ## 3. Create an atom
 
@@ -201,3 +222,34 @@ ownership and write safety.
   not rely on an undeclared identifier becoming `undefined`.
 - The editor accepts something the build rejects: restart TypeScript if needed,
   but treat the build compiler as authoritative for ownership and write safety.
+
+## DevTools
+
+`StreamixDevtools` is an opt-in panel showing subscriptions, writes, and
+cleanup from the compiled binding table — the same shared trace the React and
+Vue panels render:
+
+```ts
+import { Component } from '@angular/core';
+import { StreamixDevtools } from '@epikodelabs/streamix/angular';
+
+@Component({
+  selector: 'app-shell',
+  standalone: true,
+  imports: [StreamixDevtools],
+  template: `
+    <streamix-devtools></streamix-devtools>
+    <!-- rest of the application -->
+  `,
+})
+export class AppShellComponent {}
+```
+
+The panel renders outside Angular change detection — it builds its own DOM and
+updates on store notifications — and renders nothing in production builds
+(`import.meta.env.DEV`) or on the server.
+
+## Where to go from here
+
+[Atoms and Scopes](./ATOMS.md) covers the core model these templates consume:
+derived values, flows, transactions, operators, and the full scope API.
