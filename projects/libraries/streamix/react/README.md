@@ -262,7 +262,7 @@ expressions; synthesized hook machinery does not pretend to originate in
 application source.
 
 For the complete semantics and limitations, see the
-[React documentation](../../../../docs/REACT.md).
+[React documentation](https://epikodelabs.github.io/streamix/REACT).
 
 `useResource(loader, dependencies)` deliberately tracks the supplied dependency
 array, not the identity of `loader`; include every prop/state input affecting
