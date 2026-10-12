@@ -95,6 +95,27 @@ for (const entry of fs.readdirSync(repoRoot, { withFileTypes: true })) {
   copyIfMissing(path.join(repoRoot, entry.name), path.join(distRoot, entry.name));
 }
 
+// The site mirrors its sources exactly. Markdown left in dist by an older
+// build — deleted guides, renamed pages — would otherwise be scanned, linked,
+// and published as ghost pages forever, because nothing above ever deletes.
+const sourcedMarkdown = new Set([
+  'index.md',
+  'CHANGELOG.md',
+  ...listMarkdownFiles(docsRoot)
+    .filter((name) => !['readme.md', 'introduction.md'].includes(name.toLowerCase())),
+  ...fs
+    .readdirSync(repoRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
+    .map((entry) => entry.name)
+    .filter((name) => name.toLowerCase() !== 'readme.md'),
+]);
+for (const fileName of listMarkdownFiles(distRoot)) {
+  if (!sourcedMarkdown.has(fileName)) {
+    fs.rmSync(path.join(distRoot, fileName));
+    console.log(`Removed stale dist page: ${fileName}`);
+  }
+}
+
 let indexContent = readText(indexPath);
 if (!indexContent.includes('## API Reference')) {
   indexContent = indexContent.trimEnd() + '\n\n## API Reference\n';
