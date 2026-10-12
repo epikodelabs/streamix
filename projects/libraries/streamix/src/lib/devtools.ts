@@ -14,11 +14,12 @@ export interface StreamixDevtoolsEvent {
   readonly time: number;
 }
 
-type Listener = () => void;
+/** Callback invoked when the bounded trace changes. */
+export type StreamixDevtoolsListener = () => void;
 
 const maxEvents = 250;
 let events: readonly StreamixDevtoolsEvent[] = [];
-const listeners = new Set<Listener>();
+const listeners = new Set<StreamixDevtoolsListener>();
 let queued = false;
 
 /** True only when the bundler marks the build as development. */
@@ -40,7 +41,7 @@ export function recordStreamixDevtoolsEvent(event: Omit<StreamixDevtoolsEvent, "
 }
 
 /** Subscribes to trace changes; the returned function unsubscribes. */
-export function subscribeStreamixDevtools(listener: Listener): () => void {
+export function subscribeStreamixDevtools(listener: StreamixDevtoolsListener): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
