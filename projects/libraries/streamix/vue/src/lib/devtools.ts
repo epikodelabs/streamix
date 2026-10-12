@@ -6,59 +6,24 @@ import {
   shallowRef,
   type Ref,
 } from 'vue';
+import {
+  recordStreamixDevtoolsEvent,
+  streamixDevtoolsSnapshot,
+  subscribeStreamixDevtools,
+  type StreamixDevtoolsEvent,
+} from '@epikodelabs/streamix';
 
-export interface StreamixDevtoolsEvent {
-  readonly type: 'read' | 'subscription' | 'write' | 'unsubscribe' | 'render';
-  readonly source: string;
-  readonly time: number;
-}
-
-type Listener = () => void;
-let events: readonly StreamixDevtoolsEvent[] = [];
-const listeners = new Set<Listener>();
-const maxEvents = 250;
-// Browser-only: Vite replaces import.meta.env.DEV at build time, so a
-// production bundle proves itself at build time. Without a bundler the
-// environment is unknown and diagnostics stay disabled, not enabled.
-const enabled = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
-let queued = false;
-
-/** Queues DevTools notifications outside Vue's render and tracking phases. */
-export function recordStreamixDevtoolsEvent(
-  event: Omit<StreamixDevtoolsEvent, 'time'>,
-): void {
-  if (!enabled) return;
-
-  events = [...events, { ...event, time: Date.now() }].slice(-maxEvents);
-
-  if (!queued) {
-    queued = true;
-    queueMicrotask(() => {
-      queued = false;
-      for (const listener of listeners) listener();
-    });
-  }
-}
-
-function subscribe(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-function snapshot(): readonly StreamixDevtoolsEvent[] {
-  return events;
-}
+export { recordStreamixDevtoolsEvent };
+export type { StreamixDevtoolsEvent };
 
 /** Returns a live, bounded event trace for custom DevTools integrations. */
 export function useStreamixDevtoolsEvents(): Readonly<
   Ref<readonly StreamixDevtoolsEvent[]>
 > {
-  const trace = shallowRef(events) as Ref<readonly StreamixDevtoolsEvent[]>;
+  const trace = shallowRef(streamixDevtoolsSnapshot()) as Ref<readonly StreamixDevtoolsEvent[]>;
 
-  const unsubscribe = subscribe(() => {
-    trace.value = events;
+  const unsubscribe = subscribeStreamixDevtools(() => {
+    trace.value = streamixDevtoolsSnapshot();
   });
 
   if (getCurrentScope()) {
@@ -72,9 +37,9 @@ export function useStreamixDevtoolsEvents(): Readonly<
 export const StreamixDevtools = defineComponent({
   name: 'StreamixDevtools',
   setup() {
-    const trace = shallowRef(snapshot());
-    const unsubscribe = subscribe(() => {
-      trace.value = snapshot();
+    const trace = shallowRef(streamixDevtoolsSnapshot());
+    const unsubscribe = subscribeStreamixDevtools(() => {
+      trace.value = streamixDevtoolsSnapshot();
     });
 
     onScopeDispose(unsubscribe);
@@ -103,12 +68,3 @@ export const StreamixDevtools = defineComponent({
       );
   },
 });
-
-const globalScope = globalThis as typeof globalThis & {
-  __streamixDevtoolsRecord?: (event: Omit<StreamixDevtoolsEvent, 'time'>) => void;
-};
-
-// Do not replace another framework's recorder in a mixed-framework host.
-if (enabled && !globalScope.__streamixDevtoolsRecord) {
-  globalScope.__streamixDevtoolsRecord = recordStreamixDevtoolsEvent;
-}

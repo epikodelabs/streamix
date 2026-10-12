@@ -1,45 +1,20 @@
-import { createElement, useSyncExternalStore } from "react";
+import {
+  createElement,
+  useSyncExternalStore,
+} from "react";
+import {
+  recordStreamixDevtoolsEvent,
+  streamixDevtoolsSnapshot,
+  subscribeStreamixDevtools,
+  type StreamixDevtoolsEvent,
+} from "@epikodelabs/streamix";
 
-export interface StreamixDevtoolsEvent {
-  readonly type: "read" | "subscription" | "write" | "unsubscribe" | "render";
-  readonly source: string;
-  readonly time: number;
-}
-
-type Listener = () => void;
-let events: readonly StreamixDevtoolsEvent[] = [];
-const listeners = new Set<Listener>();
-const maxEvents = 250;
-// Browser-only: Vite statically replaces `import.meta.env.DEV`, so a
-// production bundle proves itself at build time. Without a bundler the
-// environment is unknown and diagnostics stay disabled, not enabled.
-const enabled = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
-let queued = false;
-/** Queues DevTools notifications outside React's render and snapshot phases. */
-export function recordStreamixDevtoolsEvent(event: Omit<StreamixDevtoolsEvent, "time">): void {
-  if (!enabled) return;
-  events = [...events, { ...event, time: Date.now() }].slice(-maxEvents);
-  if (!queued) {
-    queued = true;
-    queueMicrotask(() => {
-      queued = false;
-      for (const listener of listeners) listener();
-    });
-  }
-}
-
-function subscribe(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-function snapshot(): readonly StreamixDevtoolsEvent[] {
-  return events;
-}
+export { recordStreamixDevtoolsEvent };
+export type { StreamixDevtoolsEvent };
 
 /** Returns a live, bounded event trace for custom DevTools integrations. */
 export function useStreamixDevtoolsEvents(): readonly StreamixDevtoolsEvent[] {
-  return useSyncExternalStore(subscribe, snapshot, snapshot);
+  return useSyncExternalStore(subscribeStreamixDevtools, streamixDevtoolsSnapshot, streamixDevtoolsSnapshot);
 }
 
 /** A small opt-in in-app DevTools panel for committed renders and reactive flows. */
@@ -54,8 +29,3 @@ export function StreamixDevtools(): ReturnType<typeof createElement> {
     ),
   );
 }
-
-const globalScope = globalThis as typeof globalThis & {
-  __streamixDevtoolsRecord?: (event: Omit<StreamixDevtoolsEvent, "time">) => void;
-};
-if (enabled) globalScope.__streamixDevtoolsRecord = recordStreamixDevtoolsEvent;
