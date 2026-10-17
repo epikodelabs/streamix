@@ -40,6 +40,12 @@ export function mergeMap<T = any, R = any>(
   concurrent: number = Infinity,
   bufferSize: number = Infinity
 ) {
+  if (!(concurrent === Infinity || (Number.isInteger(concurrent) && concurrent > 0))) {
+    throw new RangeError('mergeMap concurrent must be a positive integer or Infinity');
+  }
+  if (!(bufferSize === Infinity || (Number.isInteger(bufferSize) && bufferSize >= 0))) {
+    throw new RangeError('mergeMap bufferSize must be a non-negative integer or Infinity');
+  }
   return createPushOperator<T, R>('mergeMap', function (source, output) {
     let stopped = false;
     const coordinator = createAsyncCoordinator<T | R>([source as AsyncIterator<T | R>]);
@@ -78,7 +84,7 @@ export function mergeMap<T = any, R = any>(
                 if (bufferSize !== Infinity && queuedSourceValues.length >= bufferSize) {
                   queuedSourceValues.shift();
                 }
-                queuedSourceValues.push(sourceValue);
+                if (bufferSize > 0) queuedSourceValues.push(sourceValue);
               } else {
                 startInner(sourceValue);
               }

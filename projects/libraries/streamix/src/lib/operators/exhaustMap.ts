@@ -2,6 +2,7 @@ import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator 
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { normalizeError } from "../atoms";
+import { SerialInnerExecution } from "../runtime/serial-inner-execution";
 
 /**
  * Maps each value from the source stream to an inner stream, ignoring 
@@ -26,7 +27,7 @@ export const exhaustMap = <T = any, R = any>(
 ) =>
   createOperator<T, R>("exhaustMap", function (this: Operator, source) {
     let outerIndex = 0;
-    let innerIterator: AsyncIterator<R> | null = null;
+    const inner = new SerialInnerExecution<R>();
     let isSourceDone = false;
 
     // Discards outer values that were buffered while an inner stream was
@@ -49,14 +50,13 @@ export const exhaustMap = <T = any, R = any>(
     return {
       async next() {
         while (true) {
-          if (innerIterator) {
-            const result = await innerIterator.next();
+          if (inner.active) {
+            const result = await inner.next();
 
             if (!result.done) {
               return NEXT(result.value);
             }
 
-            innerIterator = null;
             discardBufferedOuterValues();
             if (isSourceDone) return DONE;
             continue;
@@ -85,30 +85,28 @@ export const exhaustMap = <T = any, R = any>(
           }
 
           const innerStream = from<R>(projected as any);
-          innerIterator = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
+          inner.attach(innerStream[Symbol.asyncIterator]() as AsyncIterator<R>);
         }
       },
 
       async return(value?: any) {
         try {
-          await innerIterator?.return?.(value);
+          await inner.close();
         } catch {}
         try {
           await source.return?.();
         } catch {}
-        innerIterator = null;
         return DONE;
       },
 
       async throw(err: any) {
         const error = normalizeError(err);
         try {
-          await innerIterator?.return?.();
+          await inner.close();
         } catch {}
         try {
           await source.return?.();
         } catch {}
-        innerIterator = null;
         throw error;
       }
     };

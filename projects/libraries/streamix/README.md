@@ -1,11 +1,12 @@
-# Batch 9 — SwitchMap inner execution generations
+# Batch 10 — Sequential inner execution lifecycle
 
-Apply on top of batches 1–8.
+Apply over Batches 1–9.
 
-- Introduce internal `SwitchingInnerExecution` as a reusable cancellation and generation boundary.
-- Migrate `switchMap` to invalidate obsolete projections synchronously and cancel superseded iterators.
-- Ignore stale promise fulfillment/rejection and stale inner values.
-- Preserve push-based `__tryNext` / `__onPush` source handling and existing public API.
-- Add a regression test for stale projection rejection.
+- Adds a private `SerialInnerExecution` controller for sequential inner iterator ownership, generation invalidation, and idempotent cancellation.
+- Migrates `concatMap` and `exhaustMap` to use that controller instead of maintaining their own iterator lifecycle fields.
+- Validates `mergeMap` concurrency and buffer limits, and handles zero-sized buffers without accidentally retaining values.
+- Adds focused controller lifecycle tests.
 
-**Not completed:** `mergeMap`, `concatMap`, and `exhaustMap` still use their existing coordination; no claim of a fully unified operator runtime. Full suite not run: reconstructed workspace lacks `/tsconfig.json` and `@types/node`.
+## Validation
+
+A standalone TypeScript compile was attempted. It is blocked by existing errors in `src/lib/atoms/atom.ts` (`DefaultScheduler` and `setScheduler` are unresolved). No full integration tests have been run. This is a partial migration, **not** a completed runtime-managed higher-order execution engine. `mergeMap` still uses `createAsyncCoordinator` and `exhaustMap` still depends on the source's `__tryNext` compatibility hook.
