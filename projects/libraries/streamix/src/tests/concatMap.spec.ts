@@ -1,6 +1,36 @@
 import { concatMap, flow, from, iterate, atom as makeAtom, pipe, type Atom, type Writable } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
+  it('does not project or pull again when cancelled during an outer pull', async () => {
+    let release!: (result: IteratorResult<number>) => void;
+    const next = jasmine.createSpy('next').and.callFake(() =>
+      new Promise<IteratorResult<number>>(resolve => { release = resolve; }));
+    const project = jasmine.createSpy('project').and.returnValue([1]);
+    const iterator = concatMap(project).apply({ next, return: async () => ({ done: true, value: undefined }) });
+    const pending = iterator.next();
+    await iterator.return!();
+    release({ done: false, value: 1 });
+    expect((await pending).done).toBe(true);
+    expect(project).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect((await iterator.next()).done).toBe(true);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not attach a projection resolved after cancellation', async () => {
+    let resolve!: (value: number[]) => void;
+    const started = new Promise<void>(ready => {
+      project = () => { ready(); return new Promise<number[]>(release => { resolve = release; }); };
+    });
+    const next = jasmine.createSpy('next').and.resolveTo({ done: false, value: 1 });
+    const iterator = concatMap(value => project(value)).apply({ next, return: async () => ({ done: true, value: undefined }) });
+    const pending = iterator.next();
+    await started;
+    await iterator.return!();
+    resolve([2]);
+    expect((await pending).done).toBe(true);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
   const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
   let project: (value: any) => any;

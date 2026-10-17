@@ -529,7 +529,7 @@ describe('Atom System', () => {
       doubled.dispose();
     });
 
-    it('should not prune a dependency once read, even after a later run takes a different branch', () => {
+    it('should replace dependencies when a later run takes a different branch', () => {
       const useA = atom(true);
       const a = atom(1);
       const b = atom(2);
@@ -550,19 +550,22 @@ describe('Atom System', () => {
       expect(d.value).toBe(2);
       expect(evaluations).toBe(2);
 
-      // `a` was only read on the *first* run, and is no longer read on the
-      // latest run. A pruning implementation would have unsubscribed from
-      // it after the second run; this implementation keeps it subscribed
-      // for the node's lifetime, so changing it still triggers a recompute
-      // even though the recomputed value is unchanged (still reads `b`).
+      // The inactive branch no longer invalidates this formula.
       a.next(99);
-      expect(evaluations).toBe(3);
+      expect(evaluations).toBe(2);
       expect(d.value).toBe(2); // value unchanged: current run still reads `b`
 
       // `b` remains the live dependency and still drives the value.
       b.next(20);
-      expect(evaluations).toBe(4);
+      expect(evaluations).toBe(3);
       expect(d.value).toBe(20);
+
+      // Switching back restores `a` and removes `b`.
+      useA.next(true);
+      expect(evaluations).toBe(4);
+      expect(d.value).toBe(99);
+      b.next(30);
+      expect(evaluations).toBe(4);
 
       useA.dispose();
       a.dispose();

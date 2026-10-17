@@ -1,8 +1,8 @@
 /** Internal FIFO event buffering and consumer demand for source coordinators. */
 export class RuntimeEventBuffer<T> {
-  private queued: Array<{ sourceIndex: number; result: IteratorResult<T> }> = [];
+  private queued: Array<{ sourceIndex: number; result: IteratorResult<T> } | undefined> = [];
   private queueHead = 0;
-  private waiters: Array<(result: IteratorResult<T>) => void> = [];
+  private waiters: Array<((result: IteratorResult<T>) => void) | undefined> = [];
   private waiterHead = 0;
   private closed = false;
   private terminalResult: IteratorResult<T> | undefined;
@@ -14,20 +14,29 @@ export class RuntimeEventBuffer<T> {
 
   private dequeue(): IteratorResult<T> | undefined {
     if (this.queueHead === this.queued.length) return undefined;
-    const result = this.queued[this.queueHead++].result;
+    const result = this.queued[this.queueHead]!.result;
+    this.queued[this.queueHead++] = undefined;
     if (this.queueHead === this.queued.length) {
       this.queued = [];
+      this.queueHead = 0;
+    } else if (this.queueHead >= 1024 && this.queueHead * 2 >= this.queued.length) {
+      this.queued = this.queued.slice(this.queueHead);
       this.queueHead = 0;
     }
     return result;
   }
 
   private resolveNext(result: IteratorResult<T>): void {
-    this.waiters[this.waiterHead++](result);
+    const resolve = this.waiters[this.waiterHead]!;
+    this.waiters[this.waiterHead++] = undefined;
     if (this.waiterHead === this.waiters.length) {
       this.waiters = [];
       this.waiterHead = 0;
+    } else if (this.waiterHead >= 1024 && this.waiterHead * 2 >= this.waiters.length) {
+      this.waiters = this.waiters.slice(this.waiterHead);
+      this.waiterHead = 0;
     }
+    resolve(result);
   }
 
   /** Deliver queued events to pending consumers without overtaking earlier demand. */
@@ -71,7 +80,7 @@ export class RuntimeEventBuffer<T> {
   removeSource(sourceIndex: number): void {
     // Compact only live entries; never revisit entries already consumed.
     if (!this.hasEvents) return;
-    this.queued = this.queued.slice(this.queueHead).filter(entry => entry.sourceIndex !== sourceIndex);
+    this.queued = this.queued.slice(this.queueHead).filter(entry => entry!.sourceIndex !== sourceIndex);
     this.queueHead = 0;
   }
 

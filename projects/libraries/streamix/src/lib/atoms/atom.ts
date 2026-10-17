@@ -1636,12 +1636,17 @@ export function derived<T>(...args: any[]): Atom<T> {
   };
 
   const processDependencies = (context: FormulaContext) => {
-    // Dependencies are monotonic for a derived node. A value that has been
-    // observed remains an invalidation source even if a later branch does not
-    // read it; this preserves the reactive contract across branch switches.
     const next = context.dependencies;
+    // Validate graph replacement before releasing the previous dependencies.
+    internalRuntime.dependencies(instance, next);
+    for (const [dep, subscription] of depSubscriptions) {
+      if (!next.has(dep)) {
+        subscription();
+        depSubscriptions.delete(dep);
+      }
+    }
+    dependencies.clear();
     for (const dep of next) dependencies.add(dep);
-    internalRuntime.dependencies(instance, dependencies);
 
     let maxDepth = -1;
     for (const dep of dependencies) {

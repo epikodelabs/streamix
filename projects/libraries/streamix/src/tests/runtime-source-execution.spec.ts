@@ -3,6 +3,35 @@ import { RuntimeEventDispatcher } from '../lib/runtime/events';
 import { RuntimeSourceExecution } from '../lib/runtime/source-execution';
 
 describe('runtime source execution', () => {
+  it('releases consumed payloads and bounds storage while a backlog remains', () => {
+    const buffer = new RuntimeEventBuffer<object>();
+    // Inspect retention directly: FIFO assertions alone cannot detect retained payloads.
+    const storage = buffer as unknown as { queued: unknown[]; queueHead: number };
+    buffer.enqueue(0, { done: false, value: {} });
+    buffer.enqueue(0, { done: false, value: {} });
+    buffer.take();
+    expect(storage.queued[0]).toBeUndefined();
+    for (let i = 0; i < 4096; i++) {
+      buffer.enqueue(0, { done: false, value: {} });
+      buffer.take();
+    }
+    expect(buffer.hasEvents).toBe(true);
+    expect(storage.queued.length).toBeLessThan(1026);
+    buffer.close({ done: true, value: undefined });
+  });
+
+  it('releases resolved waiters while later demand remains outstanding', async () => {
+    const buffer = new RuntimeEventBuffer<number>();
+    const first = buffer.wait();
+    const second = buffer.wait();
+    buffer.enqueue(0, { done: false, value: 1 });
+    buffer.flush(false, { done: true, value: undefined });
+    const storage = buffer as unknown as { waiters: unknown[] };
+    expect(storage.waiters[0]).toBeUndefined();
+    expect((await first).value).toBe(1);
+    buffer.close({ done: true, value: undefined });
+    expect((await second).done).toBe(true);
+  });
   const done = { done: true, value: undefined } as IteratorResult<number>;
 
 

@@ -171,7 +171,10 @@ export class StreamixRuntime {
   private emit(kind: RuntimeEvent["kind"], node: RuntimeNode): void {
     if (!this.observers.size) return;
     const event = { kind, node, sequence: ++this.sequence };
-    for (const observer of [...this.observers]) observer(event);
+    for (const observer of [...this.observers]) {
+      if (!this.observers.has(observer)) continue;
+      try { observer(event); } catch { /* diagnostics must not break propagation */ }
+    }
   }
 }
 

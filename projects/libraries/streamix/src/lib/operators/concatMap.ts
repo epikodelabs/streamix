@@ -35,20 +35,24 @@ export const concatMap = <T = any, R = any>(
     const iterator: AsyncIterator<R> = {
       next: async () => {
         while (true) {
+          if (inner.stopped) return DONE;
           // If no active inner iterator, pull the next outer value
           if (!inner.active) {
             result = await source.next();
+            if (inner.stopped) return DONE;
 
             if (result.done) return DONE;
 
             const projected = project(result.value, outerIndex++);
             const normalized = isPromiseLike(projected) ? await projected : projected;
+            if (inner.stopped) return DONE;
             const innerStream = from<R>(normalized);
             inner.attach(innerStream[Symbol.asyncIterator]() as AsyncIterator<R>);
           }
 
           // Pull next value from inner stream
           const innerResult = await inner.next();
+          if (inner.stopped) return DONE;
 
           if (innerResult.done) {
 

@@ -1,8 +1,27 @@
 import { RuntimeEventDispatcher } from '../lib/runtime/events';
-import { internalRuntime } from '../lib/runtime/runtime';
+import { internalRuntime, StreamixRuntime } from '../lib/runtime/runtime';
 import { flow } from '../lib/atoms/atom';
 
 describe('internal runtime execution events', () => {
+  it('isolates graph observer errors without losing invalidation or disposal', () => {
+    const runtime = new StreamixRuntime();
+    const source = {}, dependent = {};
+    const invalidate = jasmine.createSpy('invalidate');
+    const observed: string[] = [];
+    runtime.observe(() => { throw new Error('diagnostic failure'); });
+    runtime.observe(event => observed.push(event.kind));
+    expect(() => {
+      runtime.register(source);
+      runtime.register(dependent);
+      runtime.dependencies(dependent, [source]);
+      runtime.onInvalidate(dependent, invalidate);
+      runtime.changed(source);
+      runtime.dispose(dependent);
+    }).not.toThrow();
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(observed).toEqual(['register', 'register', 'dependencies', 'change', 'dispose']);
+    expect(runtime.graph.has(dependent)).toBe(false);
+  });
   it('delivers reentrant events in FIFO order', () => {
     const events = new RuntimeEventDispatcher();
     const node = {};

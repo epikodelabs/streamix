@@ -127,12 +127,18 @@ describe('runtime graph propagation', () => {
     const choice = atom(true);
     const a = atom(1);
     const b = atom(10);
-    const selected = derived(() => choice.value ? a.value : b.value);
+    let computations = 0;
+    const selected = derived(() => {
+      computations++;
+      return choice.value ? a.value : b.value;
+    });
     const values: number[] = [];
     selected.subscribe(value => values.push(value));
 
     transaction(() => choice.set(false));
+    const afterSwitch = computations;
     transaction(() => a.set(2));
+    expect(computations).toBe(afterSwitch);
     transaction(() => b.set(11));
     expect(values).toEqual([1, 10, 11]);
     selected.dispose(); b.dispose(); a.dispose(); choice.dispose();
