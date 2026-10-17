@@ -41,10 +41,21 @@ export class RuntimeEventBuffer<T> {
     }
   }
 
-  take(): IteratorResult<T> | undefined { return this.dequeue(); }
+  take(): IteratorResult<T> | undefined {
+    // Demand registered earlier owns the oldest buffered values. A direct
+    // take must never jump ahead of an outstanding asynchronous waiter.
+    this.flush(false, this.terminalResult ?? ({ done: true, value: undefined } as IteratorResult<T>));
+    return this.dequeue();
+  }
 
   wait(): Promise<IteratorResult<T>> {
     if (this.closed) throw new Error('Cannot wait on a closed event buffer');
+    // enqueue() may be used before flush() (e.g. inside a source batch).
+    // Satisfy earlier waiters before allowing this newer request to take
+    // an already-buffered value.
+    if (this.waiterHead < this.waiters.length && this.hasEvents) {
+      this.flush(false, this.terminalResult ?? ({ done: true, value: undefined } as IteratorResult<T>));
+    }
     if (this.hasEvents) return Promise.resolve(this.dequeue()!);
     if (this.terminalResult) return Promise.resolve(this.terminalResult);
     return new Promise(resolve => this.waiters.push(resolve));

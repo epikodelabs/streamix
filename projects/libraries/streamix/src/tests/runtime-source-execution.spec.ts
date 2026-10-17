@@ -1,8 +1,22 @@
+import { RuntimeEventBuffer } from '../lib/runtime/event-buffer';
 import { RuntimeEventDispatcher } from '../lib/runtime/events';
 import { RuntimeSourceExecution } from '../lib/runtime/source-execution';
 
 describe('runtime source execution', () => {
   const done = { done: true, value: undefined } as IteratorResult<number>;
+
+
+  it('preserves waiter FIFO priority when queued events are not yet flushed', async () => {
+    const buffer = new RuntimeEventBuffer<number>();
+    const first = buffer.wait();
+    buffer.enqueue(0, { done: false, value: 10 });
+    const second = buffer.wait();
+    buffer.enqueue(0, { done: false, value: 20 });
+    expect(buffer.take()).toBeUndefined();
+    expect((await first).value).toBe(10);
+    expect((await second).value).toBe(20);
+    buffer.close(done);
+  });
 
   it('delivers runtime events in FIFO order across concurrent demand', async () => {
     const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
