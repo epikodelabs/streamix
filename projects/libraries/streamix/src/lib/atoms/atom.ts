@@ -813,10 +813,13 @@ function atomFromIteratorInternal<T>(
   };
 
   const stopIterator = async () => {
-    if (iterator && typeof (iterator as any).return === "function") {
-      try { await (iterator as any).return(); } catch {}
-    }
+    // Claim the iterator before awaiting cleanup: disposeInstance() and the
+    // producer's finally block can otherwise invoke return() concurrently.
+    const closing = iterator;
     iterator = undefined;
+    if (closing && typeof (closing as any).return === "function") {
+      try { await (closing as any).return(); } catch {}
+    }
   };
 
   const disposeInstance = async (): Promise<void> => {

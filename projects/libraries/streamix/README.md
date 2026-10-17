@@ -1,21 +1,32 @@
-# Batch 23 — Scope ownership and switchMap timing verification
+# Batch 24 — Shared Flow Lifecycle and Single Iterator Cleanup
 
-Verification-only patch on top of Batches 1–22. No production files modified.
+This patch applies on top of Batches 1–23.
 
-## Results
-- Targeted TypeScript compilation of atoms, scopes, coordinator, runtime, higher-order operators: PASS.
-- Standalone Node integration harness: 7/7 PASS.
-- Full Jasmine suite, production builds, framework integrations: NOT RUN.
+## Production correction
 
-Tests cover scope-owned atom disposal, borrowed atom preservation, independently created child scope lifetime, idempotent disposal, synchronous switchMap, stale async switchMap projection suppression, and a finite exhaustMap smoke test.
+`atomFromIteratorInternal.stopIterator()` previously cleared the iterator reference **after** awaiting `return()`. Both `disposeInstance()` and the producer's `finally` block can invoke `stopIterator()` while that await is outstanding, causing duplicate `return()` calls. The iterator reference is now claimed and cleared **before** awaiting cleanup, making cancellation idempotent even when concurrent cleanup paths overlap.
 
-Note: a scope passed into another scope as an already-created object is **borrowed**, not newly owned. The tests deliberately preserve that distinction. ExhaustMap timing/races and shared producer cancellation still need deeper verification.
+## Verification
 
-Run from the complete cumulative repository root:
+Targeted TypeScript compilation: PASS.
+Standalone Node integration checks: **6/6 PASS**, covering shared execution, late subscriber replay, legitimate `undefined` emissions, final-subscriber cancellation and runtime metrics, normal completion, and repeated disposal.
+
+New Jasmine tests cover shared producer ownership, late replay, `undefined` availability, and execution accounting. Full Jasmine suite, framework integrations and production builds: **NOT RUN**.
+
+To rerun the standalone harness from the cumulative project root:
 
 ```sh
-mkdir -p /tmp/streamix-verify23/build
-tsc --target es2022 --module commonjs --moduleResolution node --skipLibCheck --esModuleInterop --outDir /tmp/streamix-verify23/build src/lib/atoms/atom.ts src/lib/atoms/scope.ts src/lib/utils/coordinator.ts src/lib/runtime/*.ts src/lib/operators/{switchMap,mergeMap,concatMap,exhaustMap}.ts src/lib/factories/from.ts
-cp verification/scope-flow-integration.cjs /tmp/streamix-verify23/check.cjs
-node /tmp/streamix-verify23/check.cjs
+tsc --target es2022 --module commonjs --moduleResolution node --skipLibCheck --esModuleInterop --outDir /tmp/streamix-verify24/build src/lib/atoms/atom.ts src/lib/atoms/scope.ts src/lib/utils/coordinator.ts src/lib/runtime/*.ts src/lib/operators/{switchMap,mergeMap,concatMap,exhaustMap}.ts src/lib/factories/from.ts
+cp verification/shared-flow-lifecycle.cjs /tmp/streamix-verify24/check.cjs
+node /tmp/streamix-verify24/check.cjs
 ```
+
+## Commit
+
+fix(runtime): make shared flow iterator cleanup idempotent
+
+- Claim iterator ownership before asynchronous return()
+- Prevent duplicate cancellation from disposal and producer finalization
+- Verify multiple subscribers share one producer
+- Cover late replay, final detachment, and execution accounting
+- Add shared-flow lifecycle regression tests
