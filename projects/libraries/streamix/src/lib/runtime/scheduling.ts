@@ -158,8 +158,23 @@ export class RuntimeScheduling {
       if (this.transactionDepth === 0) {
         const finalizers = Array.from(this.transactionFinalizers);
         this.transactionFinalizers.clear();
-        for (const finalize of finalizers) finalize();
-        this.scheduler.flush();
+        // A failing finalizer must not prevent other atoms from releasing
+        // transaction-local state, or strand dirty nodes in the scheduler.
+        let firstError: unknown;
+        let failed = false;
+        for (const finalize of finalizers) {
+          try {
+            finalize();
+          } catch (error) {
+            if (!failed) { firstError = error; failed = true; }
+          }
+        }
+        try {
+          this.scheduler.flush();
+        } catch (error) {
+          if (!failed) { firstError = error; failed = true; }
+        }
+        if (failed) throw firstError;
       }
     }
   }
