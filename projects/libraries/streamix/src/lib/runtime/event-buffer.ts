@@ -1,7 +1,9 @@
 /** Internal FIFO event buffering and consumer demand for source coordinators. */
 export class RuntimeEventBuffer<T> {
-  private readonly queued: Array<{ sourceIndex: number; result: IteratorResult<T> }> = [];
-  private readonly waiters: Array<(result: IteratorResult<T>) => void> = [];
+  private queued: Array<{ sourceIndex: number; result: IteratorResult<T> }> = [];
+  private queueHead = 0;
+  private waiters: Array<(result: IteratorResult<T>) => void> = [];
+  private waiterHead = 0;
   private closed = false;
   private terminalResult: IteratorResult<T> | undefined;
 
@@ -10,44 +12,60 @@ export class RuntimeEventBuffer<T> {
     this.queued.push({ sourceIndex, result });
   }
 
-  /** Deliver queued events to pending consumers without overtaking earlier demand. */
-  flush(done: boolean, terminal: IteratorResult<T>): void {
-    while (this.waiters.length && this.queued.length) {
-      this.waiters.shift()!(this.queued.shift()!.result);
+  private dequeue(): IteratorResult<T> | undefined {
+    if (this.queueHead === this.queued.length) return undefined;
+    const result = this.queued[this.queueHead++].result;
+    if (this.queueHead === this.queued.length) {
+      this.queued = [];
+      this.queueHead = 0;
     }
-    if (done) this.terminalResult = terminal;
-    if (done && this.queued.length === 0) {
-      while (this.waiters.length) this.waiters.shift()!(terminal);
+    return result;
+  }
+
+  private resolveNext(result: IteratorResult<T>): void {
+    this.waiters[this.waiterHead++](result);
+    if (this.waiterHead === this.waiters.length) {
+      this.waiters = [];
+      this.waiterHead = 0;
     }
   }
 
-  take(): IteratorResult<T> | undefined {
-    return this.queued.shift()?.result;
+  /** Deliver queued events to pending consumers without overtaking earlier demand. */
+  flush(done: boolean, terminal: IteratorResult<T>): void {
+    while (this.waiterHead < this.waiters.length && this.hasEvents) {
+      this.resolveNext(this.dequeue()!);
+    }
+    if (done) this.terminalResult = terminal;
+    if (done && !this.hasEvents) {
+      while (this.waiterHead < this.waiters.length) this.resolveNext(terminal);
+    }
   }
+
+  take(): IteratorResult<T> | undefined { return this.dequeue(); }
 
   wait(): Promise<IteratorResult<T>> {
     if (this.closed) throw new Error('Cannot wait on a closed event buffer');
-    // Demand registered after an event was buffered must consume that event,
-    // including when upstream has already completed. Never strand late demand.
-    if (this.queued.length > 0) return Promise.resolve(this.queued.shift()!.result);
+    if (this.hasEvents) return Promise.resolve(this.dequeue()!);
     if (this.terminalResult) return Promise.resolve(this.terminalResult);
     return new Promise(resolve => this.waiters.push(resolve));
   }
 
   removeSource(sourceIndex: number): void {
-    for (let i = this.queued.length - 1; i >= 0; i--) {
-      if (this.queued[i].sourceIndex === sourceIndex) this.queued.splice(i, 1);
-    }
+    // Compact only live entries; never revisit entries already consumed.
+    if (!this.hasEvents) return;
+    this.queued = this.queued.slice(this.queueHead).filter(entry => entry.sourceIndex !== sourceIndex);
+    this.queueHead = 0;
   }
 
-  get hasEvents(): boolean { return this.queued.length > 0; }
+  get hasEvents(): boolean { return this.queueHead < this.queued.length; }
 
   /** Release demand synchronously, even if upstream iterator.return() hangs. */
   close(terminal: IteratorResult<T>): void {
     if (this.closed) return;
     this.closed = true;
     this.terminalResult = terminal;
-    this.queued.length = 0;
-    while (this.waiters.length) this.waiters.shift()!(terminal);
+    this.queued = [];
+    this.queueHead = 0;
+    while (this.waiterHead < this.waiters.length) this.resolveNext(terminal);
   }
 }
