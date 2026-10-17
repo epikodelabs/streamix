@@ -72,6 +72,7 @@ export class RuntimeGraph {
 }
 
 import { runtimeScheduling, type RuntimeScheduling } from "./scheduling";
+import { RuntimeEventDispatcher } from "./events";
 
 /** Execution accounting is internal: a flow has one producer shared by its subscribers. */
 export type FlowExit = "complete" | "cancel" | "error";
@@ -125,6 +126,7 @@ export class RuntimeExecutions {
 export class StreamixRuntime {
   readonly scheduling: RuntimeScheduling = runtimeScheduling;
   readonly graph = new RuntimeGraph();
+  readonly events = new RuntimeEventDispatcher();
   readonly executions = new RuntimeExecutions();
   readonly root = Object.freeze({ type: "root" as const });
   private sequence = 0;

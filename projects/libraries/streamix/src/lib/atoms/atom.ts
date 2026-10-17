@@ -824,6 +824,7 @@ function atomFromIteratorInternal<T>(
     disposed = true;
     if (executionToken !== undefined) {
       internalRuntime.executions.finish(instance, executionToken, executionExit);
+      internalRuntime.events.publish({ node: instance, generation: executionToken, kind: executionExit });
       executionToken = undefined;
     }
     setDirty(false);
@@ -856,6 +857,7 @@ function atomFromIteratorInternal<T>(
           if (disposed || result.done) break;
 
           internalRuntime.executions.next(instance, token);
+          internalRuntime.events.publish({ node: instance, generation: token, kind: "next", value: result.value });
           previous = current;
           current = result.value;
           hasNewValue = true;
@@ -883,8 +885,11 @@ function atomFromIteratorInternal<T>(
           instance.fail(errorValue, { terminate: options?.terminateOnError });
         }
       } finally {
-        internalRuntime.executions.finish(instance, token, executionExit);
-        if (executionToken === token) executionToken = undefined;
+        if (executionToken === token) {
+          internalRuntime.executions.finish(instance, token, executionExit);
+          internalRuntime.events.publish({ node: instance, generation: token, kind: executionExit });
+          executionToken = undefined;
+        }
         await stopIterator();
         runPromise = null;
       }
