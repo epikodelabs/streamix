@@ -135,7 +135,6 @@ export function createAsyncCoordinator<T = any>(
   const sourceList: (AsyncIterator<T> | null)[] = [...sources];
   sources.forEach((source, index) => execution.attach(index, source));
   const completed: boolean[] = sources.map(() => false);
-  const pulling: boolean[] = sources.map(() => false);
   const pendingPulls: boolean[] = sources.map(() => false);
   const originalPushHandlers: Array<(() => void) | undefined> = [];
   const wiredPushHandlers: Array<(() => void) | undefined> = [];
@@ -147,6 +146,7 @@ export function createAsyncCoordinator<T = any>(
 
   let isDraining = false;
   let iteratorReturned = false;
+  let returnPromise: Promise<IteratorResult<RunnerEvent<T>>> | undefined;
   let activeCount = sources.length;
 
 
@@ -209,7 +209,6 @@ export function createAsyncCoordinator<T = any>(
 
     removeSourceKey(source);
     markSourceComplete(index);
-    pulling[index] = false;
     pendingPulls[index] = false;
     sourceList[index] = null;
     execution.detach(index);
@@ -252,11 +251,9 @@ export function createAsyncCoordinator<T = any>(
   function pullAsync(i: number) {
     if (!sourceList[i] || completed[i] || iteratorReturned) return;
     if (execution.isPulling(i)) { pendingPulls[i] = true; return; }
-    pulling[i] = true;
     pendingPulls[i] = false;
     const src = sourceList[i];
     execution.request(i, result => {
-      pulling[i] = false;
       if (sourceList[i] !== src || completed[i] || iteratorReturned) return;
       if (result.done) {
         markSourceComplete(i);
@@ -270,7 +267,6 @@ export function createAsyncCoordinator<T = any>(
         Promise.resolve().then(() => pullAsync(i));
       }
     }, error => {
-      pulling[i] = false;
       if (sourceList[i] !== src || completed[i] || iteratorReturned) return;
       markSourceComplete(i);
       pushEvent({ type: "error", error: normalizeError(error), sourceIndex: i }, i);
@@ -289,7 +285,7 @@ export function createAsyncCoordinator<T = any>(
     // `next()` has already reserved the next source value; draining a later
     // buffered value here would let it overtake that reserved value. Remember
     // that another pull is needed and let `pullAsync()` continue in order.
-    if (pulling[i]) {
+    if (execution.isPulling(i)) {
       pendingPulls[i] = true;
       return;
     }
@@ -322,7 +318,7 @@ export function createAsyncCoordinator<T = any>(
     }
 
     pendingPulls[i] = true;
-    if (!pulling[i] && !completed[i]) {
+    if (!execution.isPulling(i) && !completed[i]) {
       pendingPulls[i] = false;
       pullAsync(i);
     }
@@ -425,31 +421,26 @@ export function createAsyncCoordinator<T = any>(
       return execution.hasEvents || allDone();
     },
 
-    async return() {
+    return() {
+      if (returnPromise) return returnPromise;
       iteratorReturned = true;
       execution.close();
       activeCount = 0;
 
-      // Mark all as completed immediately
-      for (let i = 0; i < completed.length; i++) {
+      const toClose: AsyncIterator<T>[] = [];
+      for (let i = 0; i < sourceList.length; i++) {
         completed[i] = true;
-        pulling[i] = false;
         pendingPulls[i] = false;
         const source = sourceList[i];
-        if (source) {
-          restoreSource(source, i);
-        }
+        if (!source) continue;
+        restoreSource(source, i);
+        toClose.push(source);
+        sourceList[i] = null;
       }
-
       keyToSource.clear();
-      await Promise.all(
-        sourceList
-          .filter((source): source is AsyncIterator<T> => source !== null)
-          .map(source => safeReturnSource(source))
-      );
-
-
-      return DONE;
+      // Release consumers before awaiting potentially non-terminating return().
+      returnPromise = Promise.all(toClose.map(safeReturnSource)).then(() => DONE);
+      return returnPromise;
     },
 
     // ============================================
@@ -474,14 +465,12 @@ export function createAsyncCoordinator<T = any>(
       if (index >= 0) {
         sourceList[index] = source;
         completed[index] = false;
-        pulling[index] = false;
-        pendingPulls[index] = false;
+            pendingPulls[index] = false;
         pushDriven[index] = "__onPush" in (source as any);
       } else {
         index = sourceList.length;
         sourceList.push(source);
         completed.push(false);
-        pulling.push(false);
         pendingPulls.push(false);
         pushDriven.push("__onPush" in (source as any));
       }

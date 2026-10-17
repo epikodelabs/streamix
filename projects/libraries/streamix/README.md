@@ -1,12 +1,17 @@
-# Batch 16 — Source execution consolidation
+# Streamix Runtime — Batch 17: Coordinator ownership cleanup
 
-This incremental patch builds on Batches 1–15.
+Apply over Batches 1–16.
 
-- Add `RuntimeSourceExecution`, an internal lifetime component combining source-pull ownership, runtime event dispatch, FIFO demand buffering, batching, and cancellation.
-- Delegate coordinator source registration, event publication, buffering, and shutdown to this component.
-- Preserve coordinator's dynamic source selection, push hooks, synchronous `__tryNext`, and async `next` behavior.
-- Add targeted regression tests for FIFO delivery, batching, detached-source event removal, and cancellation.
+- Remove the duplicate coordinator `pulling[]` state. `RuntimeSourcePulls` is now the single authority for outstanding source pulls.
+- Use runtime pull ownership to prevent synchronous `__tryNext()` from overtaking an outstanding asynchronous `next()`.
+- Make coordinator `return()` idempotent: concurrent calls share one cleanup promise, and owned sources receive `return()` only once.
+- Release buffered consumers immediately and clear source references before awaiting source cleanup.
+- Add regression tests for pull ordering and concurrent cleanup.
 
-Validation: targeted TypeScript check of `src/lib/utils/coordinator.ts` passed with `tsc --noEmit --target es2022 --module commonjs --moduleResolution node --skipLibCheck`. Full project/Jasmine tests not run.
+## Verification
 
-Remaining: consolidate source-selection state, audit reentrant event delivery and cancellation, verify complete test suite and production builds.
+Targeted TypeScript check passed:
+
+`tsc --noEmit --skipLibCheck --target es2022 --module esnext --moduleResolution bundler src/lib/utils/coordinator.ts`
+
+The full Jasmine suite and production builds have **not** been executed. Runtime-wide verification and remaining coordinator migration are still outstanding.
