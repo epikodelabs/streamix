@@ -69,7 +69,10 @@ export class RuntimeGraph {
   get size(): number { return this.upstream.size; }
 }
 
+import { runtimeScheduling, type RuntimeScheduling } from "./scheduling";
+
 export class StreamixRuntime {
+  readonly scheduling: RuntimeScheduling = runtimeScheduling;
   readonly graph = new RuntimeGraph();
   readonly root = Object.freeze({ type: "root" as const });
   private sequence = 0;
