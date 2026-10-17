@@ -32,7 +32,13 @@ export class RuntimeSourceExecution<S, T> {
     });
   }
 
-  attach(index: number, source: AsyncIterator<S>): void { this.pulls.attach(index, source); }
+  attach(index: number, source: AsyncIterator<S>): void {
+    // Reusing a source slot must invalidate buffered and reentrant events
+    // from the previous iterator, even if the caller did not detach first.
+    // Attach first so a rejected attach (closed execution) changes nothing.
+    this.pulls.attach(index, source);
+    this.dropSourceEvents(index);
+  }
   detach(index: number): void {
     this.pulls.detach(index);
     this.dropSourceEvents(index);

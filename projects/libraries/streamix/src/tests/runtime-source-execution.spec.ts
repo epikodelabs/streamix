@@ -107,4 +107,36 @@ describe('runtime source execution', () => {
     execution.close();
   });
 
+  it('invalidates buffered events when an attached source slot is replaced', () => {
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const source = { next: async () => ({ done: true, value: undefined }) };
+    execution.attach(0, source);
+    execution.publish(0, 1, 'next');
+    execution.publish(1, 9, 'next');
+    execution.attach(0, source);
+    execution.publish(0, 2, 'next');
+    expect(execution.take()!.value).toBe(9);
+    expect(execution.take()!.value).toBe(2);
+    expect(execution.hasEvents).toBe(false);
+    execution.close();
+  });
+
+  it('rejects reentrant events from a previous source after slot replacement', () => {
+    const events = new RuntimeEventDispatcher();
+    const execution = new RuntimeSourceExecution<number, number>(events, done);
+    const source = { next: async () => ({ done: true, value: undefined }) };
+    execution.attach(0, source);
+    events.observe(event => {
+      if (event.kind === 'next' && (event.value as any).payload === 1) {
+        execution.publish(0, 2, 'next');
+        execution.attach(0, source);
+        execution.publish(0, 3, 'next');
+      }
+    });
+    execution.publish(0, 1, 'next');
+    expect(execution.take()!.value).toBe(3);
+    expect(execution.hasEvents).toBe(false);
+    execution.close();
+  });
+
 });
