@@ -88,4 +88,30 @@ describe('runtime execution stress and generation safety', () => {
     expect(values).toEqual([42]);
   });
 
+  it('routes delivery callback exceptions to the error sink without poisoning later pulls', async () => {
+    const pulls = new RuntimeSourcePulls<number>();
+    let count = 0;
+    const failures: unknown[] = [];
+    pulls.attach(0, { next: async () => ({ done: false, value: ++count }) });
+    pulls.request(0, () => { throw new Error('consumer failed'); }, error => failures.push(error));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(failures.length).toBe(1);
+    const received: number[] = [];
+    pulls.request(0, result => received.push(result.value), () => undefined);
+    await Promise.resolve();
+    expect(received).toEqual([2]);
+  });
+
+  it('contains errors thrown by the error sink on source failure', async () => {
+    const pulls = new RuntimeSourcePulls<number>();
+    let calls = 0;
+    pulls.attach(0, { next: () => { calls++; throw new Error('source failed'); } });
+    pulls.request(0, () => undefined, () => { throw new Error('error handler failed'); });
+    await Promise.resolve();
+    await Promise.resolve();
+    pulls.request(0, () => undefined, () => undefined);
+    expect(calls).toBe(1);
+  });
+
 });

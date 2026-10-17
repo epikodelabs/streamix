@@ -25,12 +25,16 @@ export class RuntimeSourcePulls<T> {
       if (this.closed || this.slots.get(index) !== slot || slot.generation !== generation) return;
       slot.pulling = false;
       if (result.done) slot.terminal = true;
-      deliver(result);
+      // A consumer callback must not create an unhandled rejection in the
+      // detached pull promise. Route delivery failures through the error sink.
+      try { deliver(result); } catch (error) {
+        try { fail(error); } catch { /* detached callback boundary */ }
+      }
     }, error => {
       if (this.closed || this.slots.get(index) !== slot || slot.generation !== generation) return;
       slot.pulling = false;
       slot.terminal = true;
-      fail(error);
+      try { fail(error); } catch { /* detached callback boundary */ }
     });
   }
 
