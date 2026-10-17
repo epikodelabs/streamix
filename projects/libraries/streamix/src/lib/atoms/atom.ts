@@ -1629,15 +1629,12 @@ export function derived<T>(...args: any[]): Atom<T> {
   // DependencySource instances continue using observeDependencyChange().
   const invalidate = () => {
     if (disposed) return;
-    if (!isTransactionActive() && !node.flushing && !running) {
-      try { recompute(); } catch (err) {
-        errorValue = normalizeError(err);
-        isErrorState = true;
-        if (terminateOnError) instance.dispose();
-      }
-    } else {
-      instance[MARK_DIRTY]();
-    }
+    // Graph notifications invalidate; they must not evaluate immediately.
+    // Eager evaluation here can publish intermediate diamond results before
+    // sibling dependencies have received the same source update. The runtime
+    // scheduler processes dirty derived nodes in dependency-depth order.
+    // Explicit .value reads can still compute synchronously on demand.
+    instance[MARK_DIRTY]();
   };
   stopGraphInvalidation = internalRuntime.onInvalidate(instance, invalidate);
 
