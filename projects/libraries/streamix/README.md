@@ -1,12 +1,12 @@
-# Batch 15 — Runtime event buffering and demand
+# Batch 16 — Source execution consolidation
 
-- Move coordinator event queue and pending-consumer FIFO into `RuntimeEventBuffer`.
-- Keep synchronous `__tryNext` and async `next()` compatibility.
-- Preserve queued event order and drain buffered events before normal completion.
-- Drop detached source events; immediately release pending consumers on cancellation.
-- Preserve coordinator batching: only `notify()` flushes pending consumers.
-- Add regression tests for FIFO demand, completion, detachment, and cancellation.
+This incremental patch builds on Batches 1–15.
 
-**Scope:** Internal buffering migration only. Full operator execution replacement and end-to-end Jasmine tests remain outstanding.
+- Add `RuntimeSourceExecution`, an internal lifetime component combining source-pull ownership, runtime event dispatch, FIFO demand buffering, batching, and cancellation.
+- Delegate coordinator source registration, event publication, buffering, and shutdown to this component.
+- Preserve coordinator's dynamic source selection, push hooks, synchronous `__tryNext`, and async `next` behavior.
+- Add targeted regression tests for FIFO delivery, batching, detached-source event removal, and cancellation.
 
-Commit: `refactor(runtime): centralize coordinator event buffering and demand`
+Validation: targeted TypeScript check of `src/lib/utils/coordinator.ts` passed with `tsc --noEmit --target es2022 --module commonjs --moduleResolution node --skipLibCheck`. Full project/Jasmine tests not run.
+
+Remaining: consolidate source-selection state, audit reentrant event delivery and cancellation, verify complete test suite and production builds.

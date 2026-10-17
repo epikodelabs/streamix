@@ -9,8 +9,7 @@
 import { DONE, NEXT } from "../atoms";
 import { normalizeError } from "../atoms/atom";
 import { internalRuntime } from "../runtime/runtime";
-import { RuntimeSourcePulls } from "../runtime/source-pulls";
-import { RuntimeEventBuffer } from "../runtime/event-buffer";
+import { RuntimeSourceExecution } from "../runtime/source-execution";
 
 /**
 
@@ -130,26 +129,11 @@ export function createAsyncCoordinator<T = any>(
   sources: AsyncIterator<T>[] = [],
   options?: AsyncCoordinatorOptions
 ): AsyncCoordinator<T> {
-  const eventBuffer = new RuntimeEventBuffer<RunnerEvent<T>>();
-  const sourcePulls = new RuntimeSourcePulls<T>();
-
-  // Source events are delivered by the same reentrancy-safe FIFO dispatcher
-  // used for runtime execution events. Each coordinator has its own identity,
-  // so independent operator executions cannot consume one another's events.
-  const eventNode = {};
-  const eventGeneration = 1;
-  const stopEvents = internalRuntime.events.observe(event => {
-    if (event.node !== eventNode || event.generation !== eventGeneration || iteratorReturned) return;
-    const payload = event.value as RunnerEvent<T> | undefined;
-    if (payload) {
-      eventBuffer.enqueue(payload.sourceIndex, NEXT(payload));
-      notify();
-    }
-  });
+  const execution = new RuntimeSourceExecution<T, RunnerEvent<T>>(internalRuntime.events, DONE);
 
   // Use sparse arrays to support dynamic indices
   const sourceList: (AsyncIterator<T> | null)[] = [...sources];
-  sources.forEach((source, index) => sourcePulls.attach(index, source));
+  sources.forEach((source, index) => execution.attach(index, source));
   const completed: boolean[] = sources.map(() => false);
   const pulling: boolean[] = sources.map(() => false);
   const pendingPulls: boolean[] = sources.map(() => false);
@@ -164,7 +148,7 @@ export function createAsyncCoordinator<T = any>(
   let isDraining = false;
   let iteratorReturned = false;
   let activeCount = sources.length;
-  let batchDepth = 0;
+
 
   // Optional key -> source iterator mapping for reference-based removal.
   const keyToSource = new Map<any, AsyncIterator<T>>();
@@ -178,13 +162,7 @@ export function createAsyncCoordinator<T = any>(
    * @param sourceIndex The index of the source that generated the event.
    */
   function pushEvent(event: RunnerEvent<T>, sourceIndex: number) {
-    internalRuntime.events.publish({
-      node: eventNode,
-      generation: eventGeneration,
-      kind: event.type === "value" ? "next" : event.type === "complete" ? "complete" : "error",
-      value: event,
-      ...(event.type === "error" ? { error: event.error } : {})
-    });
+    execution.publish(sourceIndex, event, event.type === "value" ? "next" : event.type === "complete" ? "complete" : "error", event.type === "error" ? event.error : undefined);
   }
 
   /**
@@ -192,7 +170,7 @@ export function createAsyncCoordinator<T = any>(
    * @param sourceIndex The index of the source whose events should be removed.
    */
   function removeQueuedEvents(sourceIndex: number) {
-    eventBuffer.removeSource(sourceIndex);
+    execution.dropSourceEvents(sourceIndex);
   }
 
   /**
@@ -234,7 +212,7 @@ export function createAsyncCoordinator<T = any>(
     pulling[index] = false;
     pendingPulls[index] = false;
     sourceList[index] = null;
-    sourcePulls.detach(index);
+    execution.detach(index);
     removeQueuedEvents(index);
     restoreSource(source, index);
 
@@ -264,8 +242,7 @@ export function createAsyncCoordinator<T = any>(
    * are complete.
    */
   function notify() {
-    if (batchDepth > 0) return;
-    eventBuffer.flush(allDone(), DONE);
+    execution.notify(allDone());
   }
 
   /**
@@ -274,11 +251,11 @@ export function createAsyncCoordinator<T = any>(
    */
   function pullAsync(i: number) {
     if (!sourceList[i] || completed[i] || iteratorReturned) return;
-    if (sourcePulls.isPulling(i)) { pendingPulls[i] = true; return; }
+    if (execution.isPulling(i)) { pendingPulls[i] = true; return; }
     pulling[i] = true;
     pendingPulls[i] = false;
     const src = sourceList[i];
-    sourcePulls.request(i, result => {
+    execution.request(i, result => {
       pulling[i] = false;
       if (sourceList[i] !== src || completed[i] || iteratorReturned) return;
       if (result.done) {
@@ -427,11 +404,11 @@ export function createAsyncCoordinator<T = any>(
 
       drainSources();
 
-      if (eventBuffer.hasEvents) return Promise.resolve(eventBuffer.take()!);
+      if (execution.hasEvents) return Promise.resolve(execution.take()!);
 
       if (allDone()) return Promise.resolve(DONE);
 
-      return eventBuffer.wait();
+      return execution.wait();
     },
 
     __tryNext() {
@@ -439,21 +416,19 @@ export function createAsyncCoordinator<T = any>(
 
       drainSources();
 
-      if (eventBuffer.hasEvents) return eventBuffer.take()!;
+      if (execution.hasEvents) return execution.take()!;
 
       return allDone() ? DONE : null;
     },
 
     __hasBufferedValues() {
-      return eventBuffer.hasEvents || allDone();
+      return execution.hasEvents || allDone();
     },
 
     async return() {
       iteratorReturned = true;
-      sourcePulls.close();
-      stopEvents();
+      execution.close();
       activeCount = 0;
-      eventBuffer.close(DONE);
 
       // Mark all as completed immediately
       for (let i = 0; i < completed.length; i++) {
@@ -510,7 +485,7 @@ export function createAsyncCoordinator<T = any>(
         pendingPulls.push(false);
         pushDriven.push("__onPush" in (source as any));
       }
-      sourcePulls.attach(index, source);
+      execution.attach(index, source);
       activeCount++;
 
       if (key !== undefined) {
@@ -566,17 +541,7 @@ export function createAsyncCoordinator<T = any>(
      * @param callback Function that performs source changes
      */
     batch(callback: () => void): void {
-      batchDepth++;
-      try {
-        callback();
-      } finally {
-        batchDepth--;
-        if (batchDepth === 0) {
-          // drainSources flushes buffered events and triggers notify() now that
-          // the batch has ended.
-          drainSources();
-        }
-      }
+      execution.batch(() => { callback(); drainSources(); }, allDone);
     },
 
     /**
