@@ -22,6 +22,9 @@ const FLUSH = Symbol("engine.flush");
 
 export const NO_INITIAL_VALUE = Symbol("streamix.noInitialValue");
 
+/** Internal control signal: an evaluated dependency has no current value. */
+const UNAVAILABLE_DEPENDENCY = Symbol("streamix.unavailableDependency");
+
 /**
  * Runtime options shared by writable atoms, derived atoms, and scope-created
  * atoms.
@@ -861,7 +864,10 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
     get value() {
       const value = config.getValue(instance);
       const ctx = getCurrentFormulaContext();
-      if (ctx) ctx.dependencies.add(instance);
+      if (ctx) {
+        ctx.dependencies.add(instance);
+        if (value === NO_INITIAL_VALUE) throw UNAVAILABLE_DEPENDENCY;
+      }
       return value;
     },
 
@@ -903,7 +909,7 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
       // subscriber queue rather than invoking the callback directly so async
       // callbacks keep the same serialization/conflation guarantees as normal
       // emissions.
-      if (callback && !config.getDisposed() && hasAtomEmitted(instance)) {
+      if (callback && !config.getDisposed() && hasAtomEmitted(instance) && instance.safeValue !== NO_INITIAL_VALUE) {
         subs.emit(callback, instance.safeValue, config.getPrevious(instance));
       }
 
@@ -954,7 +960,7 @@ function atomFromIteratorInternal<T>(
 
   const hasInitialValue = options != null
     && Object.prototype.hasOwnProperty.call(options, "initialValue");
-  let current: T = hasInitialValue ? options!.initialValue as T : undefined as T;
+  let current: T = hasInitialValue ? options!.initialValue as T : NO_INITIAL_VALUE as T;
   let previous: T = current;
   let disposed = false;
   let started = false;
@@ -1386,7 +1392,7 @@ export function atom<T = any>(
     current = initialValue as T;
     previous = initialValue as T;
   } else {
-    current = undefined as T;
+    current = NO_INITIAL_VALUE as T;
     previous = current;
   }
   let disposed = false;
@@ -1707,8 +1713,8 @@ export function derived<T>(...args: any[]): Atom<T> {
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   const terminateOnError = options?.terminateOnError ?? false;
 
-  let current!: T;
-  let previous!: T;
+  let current = NO_INITIAL_VALUE as T;
+  let previous = NO_INITIAL_VALUE as T;
   let disposed = false;
   let initialized = false;
   let running = false;
@@ -1750,56 +1756,56 @@ export function derived<T>(...args: any[]): Atom<T> {
     }
     current = next;
     node.version++;
+    if (next !== NO_INITIAL_VALUE) {
+      markAtomAsEmitted(instance as any);
+      notifyEmitHandlers(instance as any);
+    }
 
     notifyChangeHandlers(instance);
 
     if (isTransactionActive() || transactionTouched) {
       notifyPending = true;
-    } else if (subs.size > 0) {
+    } else if (subs.size > 0 && next !== NO_INITIAL_VALUE) {
       broadcast();
     }
   };
 
   const processDependencies = (context: FormulaContext) => {
+    // The formula's actual read set is authoritative. A branch switch must
+    // unsubscribe from the abandoned branch, including when evaluation stops
+    // early because a newly selected dependency is unavailable.
+    const next = context.dependencies;
+    internalRuntime.dependencies(instance, next);
+    for (const dep of [...dependencies]) {
+      if (next.has(dep)) continue;
+      depSubscriptions.get(dep)?.();
+      depSubscriptions.delete(dep);
+      dependencies.delete(dep);
+    }
+
     let maxDepth = -1;
-
-    for (const dep of context.dependencies) {
+    for (const dep of next) {
       dependencies.add(dep);
-
       const depNode = (dep as Partial<InternalAtomContainer> as any)[NODE] as AtomNode | undefined;
-      if (depNode !== undefined && depNode.depth > maxDepth) {
-        maxDepth = depNode.depth;
-      }
-
+      if (depNode !== undefined && depNode.depth > maxDepth) maxDepth = depNode.depth;
       if (depSubscriptions.has(dep)) continue;
 
       const handler = () => {
         if (disposed) return;
-
-        if (!isTransactionActive()) {
-          if (!node.flushing && !running) {
-            try {
-              recompute();
-            } catch (err) {
-              errorValue = normalizeError(err);
-              isErrorState = true;
-              if (terminateOnError) {
-                instance.dispose();
-              }
-            }
-          } else {
-            instance[MARK_DIRTY]();
+        if (!isTransactionActive() && !node.flushing && !running) {
+          try {
+            recompute();
+          } catch (err) {
+            errorValue = normalizeError(err);
+            isErrorState = true;
+            if (terminateOnError) instance.dispose();
           }
-          return;
+        } else {
+          instance[MARK_DIRTY]();
         }
-
-        instance[MARK_DIRTY]();
       };
-
       depSubscriptions.set(dep, observeDependencyChange(dep, handler));
     }
-
-    internalRuntime.dependencies(instance, context.dependencies);
     node.depth = maxDepth + 1;
   };
   const compute = (): { result: T; context: FormulaContext; generation: number } => {
@@ -1818,10 +1824,13 @@ export function derived<T>(...args: any[]): Atom<T> {
       processDependencies(context);
       return { result: result as T, context, generation };
     } catch (err) {
-      // Subscribe the dependencies observed before the failure so a later
-      // change can trigger a recovery recompute instead of leaving the atom
-      // stuck in its initial error state with no subscriptions at all.
+      // An unavailable read is a valid, non-error derived state. The read was
+      // tracked before interruption, so its first emission can wake us up.
       processDependencies(context);
+      if (err === UNAVAILABLE_DEPENDENCY) {
+        initialized = true;
+        return { result: NO_INITIAL_VALUE as T, context, generation };
+      }
       throw err;
     } finally {
       popFormulaContext();
@@ -1845,7 +1854,7 @@ export function derived<T>(...args: any[]): Atom<T> {
     node.flushing = true;
     try {
       if (dirty) recompute();
-      if (notifyPending && subs.size > 0) {
+      if (notifyPending && subs.size > 0 && current !== NO_INITIAL_VALUE) {
         broadcast();
         notifyPending = false;
       }
@@ -1891,8 +1900,10 @@ export function derived<T>(...args: any[]): Atom<T> {
           const { result } = compute();
           current = result;
           previous = current;
-          markAtomAsEmitted(instance as any);
-          notifyEmitHandlers(instance as any);
+          if (result !== NO_INITIAL_VALUE) {
+            markAtomAsEmitted(instance as any);
+            notifyEmitHandlers(instance as any);
+          }
         } catch (err) {
           initialized = true;
           errorValue = normalizeError(err);
