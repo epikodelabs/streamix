@@ -10,6 +10,7 @@ import { DONE, NEXT } from "../atoms";
 import { normalizeError } from "../atoms/atom";
 import { internalRuntime } from "../runtime/runtime";
 import { RuntimeSourcePulls } from "../runtime/source-pulls";
+import { RuntimeEventBuffer } from "../runtime/event-buffer";
 
 /**
 
@@ -129,12 +130,7 @@ export function createAsyncCoordinator<T = any>(
   sources: AsyncIterator<T>[] = [],
   options?: AsyncCoordinatorOptions
 ): AsyncCoordinator<T> {
-  type CoordinatorQueueItem = {
-    result: IteratorResult<RunnerEvent<T>>;
-    sourceIndex: number;
-  };
-
-  const queue: CoordinatorQueueItem[] = [];
+  const eventBuffer = new RuntimeEventBuffer<RunnerEvent<T>>();
   const sourcePulls = new RuntimeSourcePulls<T>();
 
   // Source events are delivered by the same reentrancy-safe FIFO dispatcher
@@ -146,7 +142,7 @@ export function createAsyncCoordinator<T = any>(
     if (event.node !== eventNode || event.generation !== eventGeneration || iteratorReturned) return;
     const payload = event.value as RunnerEvent<T> | undefined;
     if (payload) {
-      queue.push({ result: NEXT(payload), sourceIndex: payload.sourceIndex });
+      eventBuffer.enqueue(payload.sourceIndex, NEXT(payload));
       notify();
     }
   });
@@ -165,7 +161,6 @@ export function createAsyncCoordinator<T = any>(
   // need an ordinary async `next()` fallback (for example a pending Promise).
   const pushDriven: boolean[] = sources.map(source => "__onPush" in (source as any));
 
-  const waitingResolves: Array<(v: IteratorResult<RunnerEvent<T>>) => void> = [];
   let isDraining = false;
   let iteratorReturned = false;
   let activeCount = sources.length;
@@ -197,11 +192,7 @@ export function createAsyncCoordinator<T = any>(
    * @param sourceIndex The index of the source whose events should be removed.
    */
   function removeQueuedEvents(sourceIndex: number) {
-    for (let i = queue.length - 1; i >= 0; i--) {
-      if (queue[i].sourceIndex === sourceIndex) {
-        queue.splice(i, 1);
-      }
-    }
+    eventBuffer.removeSource(sourceIndex);
   }
 
   /**
@@ -274,16 +265,7 @@ export function createAsyncCoordinator<T = any>(
    */
   function notify() {
     if (batchDepth > 0) return;
-
-    // Each pending next() call owns its own resolver. Deliver events FIFO;
-    // completion wakes every outstanding consumer, not just the latest one.
-    while (waitingResolves.length > 0 && queue.length > 0) {
-      const resolve = waitingResolves.shift()!;
-      resolve(queue.shift()!.result);
-    }
-    if (allDone() && queue.length === 0) {
-      while (waitingResolves.length > 0) waitingResolves.shift()!(DONE);
-    }
+    eventBuffer.flush(allDone(), DONE);
   }
 
   /**
@@ -445,16 +427,11 @@ export function createAsyncCoordinator<T = any>(
 
       drainSources();
 
-      if (queue.length > 0) {
-        const item = queue.shift()!;
-        return Promise.resolve(item.result);
-      }
+      if (eventBuffer.hasEvents) return Promise.resolve(eventBuffer.take()!);
 
       if (allDone()) return Promise.resolve(DONE);
 
-      return new Promise(res => {
-        waitingResolves.push(res);
-      });
+      return eventBuffer.wait();
     },
 
     __tryNext() {
@@ -462,16 +439,13 @@ export function createAsyncCoordinator<T = any>(
 
       drainSources();
 
-      if (queue.length > 0) {
-        const item = queue.shift()!;
-        return item.result;
-      }
+      if (eventBuffer.hasEvents) return eventBuffer.take()!;
 
       return allDone() ? DONE : null;
     },
 
     __hasBufferedValues() {
-      return queue.length > 0 || allDone();
+      return eventBuffer.hasEvents || allDone();
     },
 
     async return() {
@@ -479,7 +453,7 @@ export function createAsyncCoordinator<T = any>(
       sourcePulls.close();
       stopEvents();
       activeCount = 0;
-      queue.length = 0;
+      eventBuffer.close(DONE);
 
       // Mark all as completed immediately
       for (let i = 0; i < completed.length; i++) {
@@ -493,14 +467,12 @@ export function createAsyncCoordinator<T = any>(
       }
 
       keyToSource.clear();
-      while (waitingResolves.length > 0) waitingResolves.shift()!(DONE);
       await Promise.all(
         sourceList
           .filter((source): source is AsyncIterator<T> => source !== null)
           .map(source => safeReturnSource(source))
       );
 
-      while (waitingResolves.length > 0) waitingResolves.shift()!(DONE);
 
       return DONE;
     },
