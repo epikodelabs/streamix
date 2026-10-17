@@ -47,14 +47,17 @@ export function trackOperatorExecution<T>(iterator: AsyncIterator<T>): AsyncIter
 
   if (originalReturn) {
     iterator.return = ((...args: any[]) => {
+      // Cancellation is effective as soon as return() is requested. An async
+      // iterator may keep its cleanup promise pending indefinitely; metrics
+      // and late next() results must not remain active while it settles.
+      finish('cancel');
       try {
-        const result = (originalReturn as any)(...args);
-        if (result && typeof result.then === 'function') {
-          return Promise.resolve(result).then((value: IteratorResult<T>) => { finish('cancel'); return value; }, fail);
-        }
-        finish('cancel');
-        return result;
-      } catch (error) { return fail(error); }
+        return (originalReturn as any)(...args);
+      } catch (error) {
+        // The execution has already been cancelled; preserve the original
+        // exception for the caller without recording a second terminal event.
+        throw error;
+      }
     }) as typeof iterator.return;
   }
   if (originalThrow) {
