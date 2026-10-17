@@ -57,4 +57,35 @@ describe('runtime execution stress and generation safety', () => {
     await Promise.resolve();
     expect(calls).toBe(1);
   });
+
+  it('never pulls a completed source again, even after repeated demand', async () => {
+    const pulls = new RuntimeSourcePulls<number>();
+    let calls = 0;
+    const seen: IteratorResult<number>[] = [];
+    pulls.attach(0, { next: async () => { calls++; return { done: true, value: undefined }; } });
+    pulls.request(0, result => seen.push(result), () => undefined);
+    await Promise.resolve();
+    pulls.request(0, result => seen.push(result), () => undefined);
+    expect(calls).toBe(1);
+    expect(seen.length).toBe(1);
+  });
+
+  it('does not retry a failed source without explicitly replacing it', async () => {
+    const pulls = new RuntimeSourcePulls<number>();
+    let calls = 0;
+    const errors: unknown[] = [];
+    pulls.attach(0, { next: () => { calls++; throw new Error('failed'); } });
+    pulls.request(0, () => undefined, error => errors.push(error));
+    await Promise.resolve();
+    await Promise.resolve();
+    pulls.request(0, () => undefined, error => errors.push(error));
+    expect(calls).toBe(1);
+    expect(errors.length).toBe(1);
+    pulls.attach(0, { next: async () => ({ done: false, value: 42 }) });
+    const values: number[] = [];
+    pulls.request(0, result => values.push(result.value), () => undefined);
+    await Promise.resolve();
+    expect(values).toEqual([42]);
+  });
+
 });
