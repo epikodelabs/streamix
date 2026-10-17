@@ -1,10 +1,13 @@
-# Batch 11 — Concurrent inner admission and scheduler compile repair
+# Batch 12 — Coordinator correctness before operator migration
 
-Apply over batches 1–10. Only changed files are included.
+This patch hardens the shared AsyncIterator coordinator used by higher-order operators. It does **not** claim to replace operator coordination with the runtime event engine.
 
-- Adds `ConcurrentInnerExecution`, which owns mergeMap capacity, queued inputs, and drop-oldest overflow behavior.
-- Routes mergeMap source admission and completion through the controller. The existing AsyncCoordinator still owns iterator pulls, cancellation and event ordering; this is NOT a full migration to the event engine.
-- Repairs `DefaultScheduler` visibility and missing atom test-harness imports (previous batch compile blockers).
-- Adds admission-controller regression tests for concurrency, FIFO draining, overflow, zero buffer, failed projection and invalid limits.
+- Multiple concurrent `next()` calls now have FIFO waiter resolution instead of overwriting a single resolver.
+- Completion and `return()` settle all outstanding waiters.
+- `return()` wakes consumers before awaiting iterator cleanup.
+- Synchronous exceptions from source `next()` are converted into normal error events.
+- Source `next()` may return a synchronous result through `Promise.resolve` normalization.
 
-Validation: `tsc --noEmit --target es2022 --module esnext --moduleResolution bundler --skipLibCheck src/lib/operators/mergeMap.ts src/lib/atoms/atom.ts` passed. The Jasmine tests and full project build were not run.
+Includes focused regression specs. Full project test suite has not been run.
+
+Commit: `fix(runtime): preserve concurrent coordinator waiters and source errors`

@@ -147,7 +147,7 @@ export function createAsyncCoordinator<T = any>(
   // need an ordinary async `next()` fallback (for example a pending Promise).
   const pushDriven: boolean[] = sources.map(source => "__onPush" in (source as any));
 
-  let waitingResolve: ((v: any) => void) | null = null;
+  const waitingResolves: Array<(v: IteratorResult<RunnerEvent<T>>) => void> = [];
   let isDraining = false;
   let iteratorReturned = false;
   let activeCount = sources.length;
@@ -251,21 +251,16 @@ export function createAsyncCoordinator<T = any>(
    * are complete.
    */
   function notify() {
-    if (batchDepth > 0) {
-      return;
+    if (batchDepth > 0) return;
+
+    // Each pending next() call owns its own resolver. Deliver events FIFO;
+    // completion wakes every outstanding consumer, not just the latest one.
+    while (waitingResolves.length > 0 && queue.length > 0) {
+      const resolve = waitingResolves.shift()!;
+      resolve(queue.shift()!.result);
     }
-
-    if (!waitingResolve) return;
-
-    if (queue.length > 0) {
-      const item = queue.shift()!;
-      const res = waitingResolve;
-      waitingResolve = null;
-      res(item.result);
-    } else if (allDone()) {
-      const res = waitingResolve;
-      waitingResolve = null;
-      res(DONE);
+    if (allDone() && queue.length === 0) {
+      while (waitingResolves.length > 0) waitingResolves.shift()!(DONE);
     }
   }
 
@@ -281,7 +276,16 @@ export function createAsyncCoordinator<T = any>(
     pendingPulls[i] = false;
     const src = sourceList[i] as AsyncIterator<T>;
 
-    src.next().then(
+    // An AsyncIterator may synchronously throw, and adapter iterators may
+    // return IteratorResult directly. Normalize both without leaving the
+    // coordinator's pulling flag stuck.
+    let pending: Promise<IteratorResult<T>>;
+    try {
+      pending = Promise.resolve(src.next());
+    } catch (error) {
+      pending = Promise.reject(error);
+    }
+    pending.then(
       (r: IteratorResult<T>) => {
         pulling[i] = false;
 
@@ -449,7 +453,7 @@ export function createAsyncCoordinator<T = any>(
       if (allDone()) return Promise.resolve(DONE);
 
       return new Promise(res => {
-        waitingResolve = res;
+        waitingResolves.push(res);
       });
     },
 
@@ -487,16 +491,14 @@ export function createAsyncCoordinator<T = any>(
       }
 
       keyToSource.clear();
+      while (waitingResolves.length > 0) waitingResolves.shift()!(DONE);
       await Promise.all(
         sourceList
           .filter((source): source is AsyncIterator<T> => source !== null)
           .map(source => safeReturnSource(source))
       );
 
-      if (waitingResolve) {
-        waitingResolve(DONE);
-        waitingResolve = null;
-      }
+      while (waitingResolves.length > 0) waitingResolves.shift()!(DONE);
 
       return DONE;
     },
