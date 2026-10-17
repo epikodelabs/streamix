@@ -1,13 +1,13 @@
-# Batch 12 — Coordinator correctness before operator migration
+# Batch 13 — Runtime-routed coordinator events
 
-This patch hardens the shared AsyncIterator coordinator used by higher-order operators. It does **not** claim to replace operator coordination with the runtime event engine.
+The AsyncIterator coordinator now publishes source value, completion and error events through the existing internal `RuntimeEventDispatcher`, and consumes only events tagged with its private coordinator identity. This is an incremental bridge, **not** a replacement of AsyncIterator pull coordination.
 
-- Multiple concurrent `next()` calls now have FIFO waiter resolution instead of overwriting a single resolver.
-- Completion and `return()` settle all outstanding waiters.
-- `return()` wakes consumers before awaiting iterator cleanup.
-- Synchronous exceptions from source `next()` are converted into normal error events.
-- Source `next()` may return a synchronous result through `Promise.resolve` normalization.
+- Preserve FIFO, reentrancy-safe runtime dispatch.
+- Isolate events across independent coordinator instances.
+- Keep existing public iterator and operator APIs unchanged.
+- Detach the coordinator's runtime listener on `return()`; ignore late source resolutions.
+- Add focused integration tests for event routing, isolation, and cancellation.
 
-Includes focused regression specs. Full project test suite has not been run.
+Targeted TypeScript compilation of `src/lib/utils/coordinator.ts` passed. The full test suite was not run.
 
-Commit: `fix(runtime): preserve concurrent coordinator waiters and source errors`
+Commit: `refactor(runtime): route coordinator source events through dispatcher`

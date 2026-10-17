@@ -8,6 +8,7 @@
  */
 import { DONE, NEXT } from "../atoms";
 import { normalizeError } from "../atoms/atom";
+import { internalRuntime } from "../runtime/runtime";
 
 /**
 
@@ -134,6 +135,20 @@ export function createAsyncCoordinator<T = any>(
 
   const queue: CoordinatorQueueItem[] = [];
 
+  // Source events are delivered by the same reentrancy-safe FIFO dispatcher
+  // used for runtime execution events. Each coordinator has its own identity,
+  // so independent operator executions cannot consume one another's events.
+  const eventNode = {};
+  const eventGeneration = 1;
+  const stopEvents = internalRuntime.events.observe(event => {
+    if (event.node !== eventNode || event.generation !== eventGeneration || iteratorReturned) return;
+    const payload = event.value as RunnerEvent<T> | undefined;
+    if (payload) {
+      queue.push({ result: NEXT(payload), sourceIndex: payload.sourceIndex });
+      notify();
+    }
+  });
+
   // Use sparse arrays to support dynamic indices
   const sourceList: (AsyncIterator<T> | null)[] = [...sources];
   const completed: boolean[] = sources.map(() => false);
@@ -165,9 +180,12 @@ export function createAsyncCoordinator<T = any>(
    * @param sourceIndex The index of the source that generated the event.
    */
   function pushEvent(event: RunnerEvent<T>, sourceIndex: number) {
-    queue.push({
-      result: NEXT(event),
-      sourceIndex
+    internalRuntime.events.publish({
+      node: eventNode,
+      generation: eventGeneration,
+      kind: event.type === "value" ? "next" : event.type === "complete" ? "complete" : "error",
+      value: event,
+      ...(event.type === "error" ? { error: event.error } : {})
     });
   }
 
@@ -476,6 +494,7 @@ export function createAsyncCoordinator<T = any>(
 
     async return() {
       iteratorReturned = true;
+      stopEvents();
       activeCount = 0;
       queue.length = 0;
 
