@@ -1,5 +1,5 @@
 import { internalRuntime } from "../runtime/runtime";
-import { getScheduler, isTransactionActive, finalizeAfterTransaction, type Scheduler } from "../runtime/scheduling";
+import { DefaultScheduler, getScheduler, setScheduler, isTransactionActive, finalizeAfterTransaction, type Scheduler } from "../runtime/scheduling";
 export type { Scheduler } from "../runtime/scheduling";
 import { createAsyncCoordinator, getIterator, raceNext, type AsyncCoordinator } from "../utils/coordinator";
 import { isAtom } from "../utils/helpers";

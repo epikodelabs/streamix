@@ -2,6 +2,7 @@ import { createPushOperator, MaybePromise, normalizeError } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from '../factories';
 import { createAsyncCoordinator, type RunnerEvent } from '../utils';
+import { ConcurrentInnerExecution } from '../runtime/concurrent-inner-execution';
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream
@@ -54,21 +55,11 @@ export function mergeMap<T = any, R = any>(
       const SOURCE_INDEX = 0;
       let projectIndex = 0;
       let sourceCompleted = false;
-      let pendingInners = 0;
-      const queuedSourceValues: T[] = [];
-
-      const startInner = (value: T) => {
+      const executions = new ConcurrentInnerExecution<T>(concurrent, bufferSize, value => {
         const projected = project(value, projectIndex++);
         const inner = from(projected as any);
         coordinator.addSource(inner[Symbol.asyncIterator]() as AsyncIterator<T | R>);
-        pendingInners++;
-      };
-
-      const drainQueuedSourceValues = () => {
-        while (queuedSourceValues.length > 0 && pendingInners < concurrent) {
-          startInner(queuedSourceValues.shift()!);
-        }
-      };
+      });
 
       try {
         while (!stopped) {
@@ -80,17 +71,10 @@ export function mergeMap<T = any, R = any>(
           if (event.sourceIndex === SOURCE_INDEX) {
             if (event.type === 'value') {
               const sourceValue = event.value as unknown as T;
-              if (pendingInners >= concurrent) {
-                if (bufferSize !== Infinity && queuedSourceValues.length >= bufferSize) {
-                  queuedSourceValues.shift();
-                }
-                if (bufferSize > 0) queuedSourceValues.push(sourceValue);
-              } else {
-                startInner(sourceValue);
-              }
+              executions.accept(sourceValue);
             } else if (event.type === 'complete') {
               sourceCompleted = true;
-              if (pendingInners === 0 && queuedSourceValues.length === 0) {
+              if (executions.idle) {
                 break;
               }
             } else if (event.type === 'error') {
@@ -100,10 +84,9 @@ export function mergeMap<T = any, R = any>(
             if (event.type === 'value') {
               output.push(event.value);
             } else if (event.type === 'complete') {
-              pendingInners--;
-              drainQueuedSourceValues();
+              executions.complete();
 
-              if (sourceCompleted && pendingInners === 0 && queuedSourceValues.length === 0) {
+              if (sourceCompleted && executions.idle) {
                 break;
               }
             } else if (event.type === 'error') {
@@ -116,6 +99,7 @@ export function mergeMap<T = any, R = any>(
       } catch (err) {
         if (!output.disposed) output.fail(normalizeError(err));
       } finally {
+        executions.close();
         await coordinator.return?.();
       }
     })();

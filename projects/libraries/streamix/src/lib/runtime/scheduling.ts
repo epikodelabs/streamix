@@ -14,7 +14,7 @@ export interface Scheduler {
   get isDirty(): boolean;
 }
 
-class DefaultScheduler implements Scheduler {
+export class DefaultScheduler implements Scheduler {
   private isBatchScheduled = false;
   private isFlushing = false;
   private queuedCount = 0;
