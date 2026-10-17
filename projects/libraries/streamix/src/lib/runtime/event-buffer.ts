@@ -3,9 +3,10 @@ export class RuntimeEventBuffer<T> {
   private readonly queued: Array<{ sourceIndex: number; result: IteratorResult<T> }> = [];
   private readonly waiters: Array<(result: IteratorResult<T>) => void> = [];
   private closed = false;
+  private terminalResult: IteratorResult<T> | undefined;
 
   enqueue(sourceIndex: number, result: IteratorResult<T>): void {
-    if (this.closed) return;
+    if (this.closed || this.terminalResult) return;
     this.queued.push({ sourceIndex, result });
   }
 
@@ -14,6 +15,7 @@ export class RuntimeEventBuffer<T> {
     while (this.waiters.length && this.queued.length) {
       this.waiters.shift()!(this.queued.shift()!.result);
     }
+    if (done) this.terminalResult = terminal;
     if (done && this.queued.length === 0) {
       while (this.waiters.length) this.waiters.shift()!(terminal);
     }
@@ -25,6 +27,7 @@ export class RuntimeEventBuffer<T> {
 
   wait(): Promise<IteratorResult<T>> {
     if (this.closed) throw new Error('Cannot wait on a closed event buffer');
+    if (this.terminalResult && this.queued.length === 0) return Promise.resolve(this.terminalResult);
     // Caller must drain buffered events and check completion before waiting.
     return new Promise(resolve => this.waiters.push(resolve));
   }
@@ -41,6 +44,7 @@ export class RuntimeEventBuffer<T> {
   close(terminal: IteratorResult<T>): void {
     if (this.closed) return;
     this.closed = true;
+    this.terminalResult = terminal;
     this.queued.length = 0;
     while (this.waiters.length) this.waiters.shift()!(terminal);
   }

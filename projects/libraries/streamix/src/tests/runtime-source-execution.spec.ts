@@ -45,6 +45,24 @@ describe('runtime source execution', () => {
     execution.publish(0, 3, 'next');
     expect(execution.hasEvents).toBe(false);
   });
+  it('settles demand registered after terminal completion without hanging', async () => {
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    execution.notify(true);
+    expect((await execution.wait()).done).toBe(true);
+    execution.publish(0, 42, 'next');
+    expect(execution.hasEvents).toBe(false);
+    execution.close();
+  });
+
+  it('drains queued values before returning terminal completion to late demand', async () => {
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    execution.publish(0, 11, 'next');
+    execution.notify(true);
+    expect(execution.take()!.value).toBe(11);
+    expect((await execution.wait()).done).toBe(true);
+    execution.close();
+  });
+
   it('removes only events belonging to a detached source', () => {
     const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
     execution.publish(0, 10, 'next');
