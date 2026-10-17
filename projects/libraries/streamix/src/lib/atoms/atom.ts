@@ -1657,7 +1657,6 @@ export function derived<T>(...args: any[]): Atom<T> {
     // Explicit .value reads can still compute synchronously on demand.
     instance[MARK_DIRTY]();
   };
-  stopGraphInvalidation = internalRuntime.onInvalidate(instance, invalidate);
 
   const compute = (): { result: T; context: FormulaContext; generation: number } => {
     if (running) throw new Error("Circular dependency detected in derived()");
@@ -1829,6 +1828,9 @@ export function derived<T>(...args: any[]): Atom<T> {
 
   const { instance: baseInstance, errorHandlers, subs } = base;
   instance = baseInstance;
+  // Register only after createAtomBase has produced the real derived node.
+  // Registering earlier silently stores the invalidator under `undefined`.
+  stopGraphInvalidation = internalRuntime.onInvalidate(instance, invalidate);
 
   return instance;
 }

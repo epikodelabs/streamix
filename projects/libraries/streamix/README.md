@@ -1,27 +1,24 @@
-# Streamix Runtime — Batch 18: Source Detachment and Demand Safety
+# Streamix Runtime — Batch 19: Integration Verification and Graph Registration Fix
 
-Apply after Batch 17.
+Apply after Batch 18.
 
-## Fix
+## Root cause and fix
 
-When removing a source, the coordinator now updates and notifies pending consumers **before** awaiting the source iterator's `return()`. Previously, if the removed source was the last active source and its cleanup promise never resolved, outstanding `next()` consumers remained stuck indefinitely despite there being no sources left.
+`derived()` registered its runtime invalidation callback *before* `createAtomBase()` assigned `instance`. As a result, the callback was registered under `undefined`, not the derived atom. The graph contained the correct dependency edges, but atom writes could not invalidate the derived atom. This produced stale derived values even for `derived(() => a.value * 2)`.
 
-This preserves the semantics of other active sources: removal of one source does not prematurely complete consumers while another source is still producing events.
+Moved `internalRuntime.onInvalidate(instance, invalidate)` to immediately after `instance = baseInstance`. The existing disposal callback still unregisters it.
 
 ## Tests
 
-Added `runtime-coordinator-detach.spec.ts` covering:
-- Pending consumer settles before a removed source finishes cleanup.
-- Removing one source does not complete the coordinator while another remains active.
+Added `runtime-graph-registration.spec.ts` for direct invalidation, diamond transaction propagation, and conditional branches with `NO_INITIAL_VALUE`.
 
-## Verification
+## Verification actually executed
 
-Targeted library TypeScript check passed:
+- `tsc --skipLibCheck --target es2022 --module commonjs --moduleResolution node --outDir <temporary> src/lib/utils/coordinator.ts`: PASS. This compiled the runtime/atom/coordinator dependency tree.
+- Six Node integration smoke tests against compiled JavaScript: PASS (direct derived invalidation, diamond transaction, conditional branch switching, unavailable-value recovery, coordinator FIFO, cancellation with pending consumers).
+- Jasmine suite: NOT RUN (dependencies/test harness unavailable in this reconstructed workspace).
+- Full production and adapter builds: NOT RUN.
 
-`tsc --noEmit --skipLibCheck --target es2022 --module esnext --moduleResolution bundler src/lib/utils/coordinator.ts`
+## Follow-up
 
-Jasmine tests and full production build have not been run (test runner dependencies are not installed in this reconstructed workspace).
-
-## Next
-
-Run the complete Jasmine suite and adapter builds against the actual monorepo. Resolve any graph propagation and execution lifecycle regressions before declaring the runtime migration complete.
+Run the full monorepo Jasmine suite and production/Angular/React/Vue integration builds. Verify reentrant updates, scope disposal, higher-order operators, backpressure, and dynamic graph depth before declaring the runtime complete.
