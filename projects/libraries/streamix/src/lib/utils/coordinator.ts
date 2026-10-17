@@ -500,10 +500,10 @@ export function createAsyncCoordinator<T = any>(
       const source = detachSource(index);
       if (!source) return;
 
-      await safeReturnSource(source);
-
-      // Notify in case we're waiting and all sources are now done
+      // Detachment changes the completion state synchronously. Wake waiting
+      // consumers before awaiting return(): a source may never settle cleanup.
       notify();
+      await safeReturnSource(source);
     },
 
     /**
