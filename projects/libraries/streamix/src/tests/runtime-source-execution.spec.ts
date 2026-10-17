@@ -6,6 +6,18 @@ describe('runtime source execution', () => {
   const done = { done: true, value: undefined } as IteratorResult<number>;
 
 
+  it('reopens transient completion when a dynamic source is attached', async () => {
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    execution.notify(true);
+    expect((await execution.wait()).done).toBe(true);
+    execution.attach(1, { next: async () => ({ done: true, value: undefined }) });
+    execution.publish(1, 42, 'next');
+    expect((await execution.wait()).value).toBe(42);
+    execution.notify(true);
+    expect((await execution.wait()).done).toBe(true);
+    execution.close();
+  });
+
   it('preserves waiter FIFO priority when queued events are not yet flushed', async () => {
     const buffer = new RuntimeEventBuffer<number>();
     const first = buffer.wait();

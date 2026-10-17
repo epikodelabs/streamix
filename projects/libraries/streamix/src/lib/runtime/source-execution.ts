@@ -37,6 +37,8 @@ export class RuntimeSourceExecution<S, T> {
     // from the previous iterator, even if the caller did not detach first.
     // Attach first so a rejected attach (closed execution) changes nothing.
     this.pulls.attach(index, source);
+    this.buffer.reopen();
+    this.done = false;
     this.dropSourceEvents(index);
   }
   detach(index: number): void {

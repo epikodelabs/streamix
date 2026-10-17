@@ -61,6 +61,13 @@ export class RuntimeEventBuffer<T> {
     return new Promise(resolve => this.waiters.push(resolve));
   }
 
+  /** A dynamic coordinator may attach another source after a transient all-done state.
+   * Completion is final only once the coordinator itself is closed.
+   */
+  reopen(): void {
+    if (!this.closed) this.terminalResult = undefined;
+  }
+
   removeSource(sourceIndex: number): void {
     // Compact only live entries; never revisit entries already consumed.
     if (!this.hasEvents) return;
