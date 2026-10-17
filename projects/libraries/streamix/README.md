@@ -1,13 +1,11 @@
-# Batch 8 — Operator execution instrumentation
+# Batch 9 — SwitchMap inner execution generations
 
-Apply over batches 1–7.
+Apply on top of batches 1–8.
 
-- Instruments operator iterators centrally in `createOperator` (also covers `createPushOperator`).
-- Starts execution on first `next()` rather than composition.
-- Publishes output `next`, `complete`, `cancel`, `error` through the internal event dispatcher, and updates execution metrics.
-- Preserves synchronous iterator results, promise-based results, and existing iterator-specific push hooks by wrapping methods in place.
-- Terminal events are emitted at most once; no public API changes.
+- Introduce internal `SwitchingInnerExecution` as a reusable cancellation and generation boundary.
+- Migrate `switchMap` to invalidate obsolete projections synchronously and cancel superseded iterators.
+- Ignore stale promise fulfillment/rejection and stale inner values.
+- Preserve push-based `__tryNext` / `__onPush` source handling and existing public API.
+- Add a regression test for stale projection rejection.
 
-**Scope:** This is the first operator-runtime integration increment. Higher-order operators still use their existing AsyncIterator coordination and do not yet use the runtime as their execution engine. This patch does not claim backpressure, cancellation, or event-graph unification.
-
-**Validation:** Full tests and project typecheck have not been run. This patch needs integration testing, especially `switchMap`, `mergeMap`, `concatMap`, `exhaustMap`, sync fast paths, and cancellation races.
+**Not completed:** `mergeMap`, `concatMap`, and `exhaustMap` still use their existing coordination; no claim of a fully unified operator runtime. Full suite not run: reconstructed workspace lacks `/tsconfig.json` and `@types/node`.

@@ -143,3 +143,25 @@ describe('switchMap', () => {
     await expectAsync(throwing.throw?.(new Error('stop')) as Promise<any>).toBeRejectedWithError('stop');
   });
 });
+
+describe('switchMap execution generations', () => {
+  it('ignores a rejected projection from an obsolete generation', async () => {
+    const source = atom<number>();
+    const seen: number[] = [];
+    const reader = (async () => {
+      for await (const value of iterate(pipe(source, switchMap(value =>
+        value === 1
+          ? new Promise<number>((_, reject) => setTimeout(() => reject(new Error('stale')), 20))
+          : Promise.resolve(42)
+      )))) seen.push(value);
+    })();
+
+    source.next(1);
+    source.next(2);
+    await wait(35);
+    source.dispose();
+    await reader;
+    expect(seen).toEqual([42]);
+  });
+
+});

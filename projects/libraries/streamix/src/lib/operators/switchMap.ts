@@ -4,6 +4,7 @@ import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { createAsyncPushable } from "../utils";
 import { normalizeError } from "../atoms";
+import { SwitchingInnerExecution } from "../runtime/inner-execution";
 
 /**
  * Transforms each value from the source stream into a new inner stream, promise, or array,
@@ -33,170 +34,130 @@ export function switchMap<T = any, R = any>(
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createAsyncPushable<R>();
-    const outputIterator = output;
-
-    let currentInner: { token: object; it: AsyncIterator<R> } | null = null;
+    const execution = new SwitchingInnerExecution<R>();
     let inputCompleted = false;
-    let currentInnerToken: object | null = null;
-    let pendingProjections = 0;
+    let pendingProjection = false;
     let index = 0;
     let stopped = false;
 
-    /**
-     * Checks if the overall operator should complete.
-     * Only completes if the source is done, no inner stream is active, and no
-     * promise-based projection is still resolving. A pending projection has
-     * not created its inner iterator yet, so it is invisible to `currentInner`.
-     */
     const checkComplete = () => {
-      if (inputCompleted && !currentInner && pendingProjections === 0) {
+      if (!stopped && inputCompleted && !execution.active && !pendingProjection) {
+        stopped = true;
         output.dispose();
       }
     };
 
-    const subscribeToInner = (
-      innerStream: PipeInput<R>,
-      token: object
-    ) => {
-      // Cancel the previous inner immediately so sync inner streams can't
-      // interleave emissions out-of-order via re-entrant scheduler execution.
-      const prev = currentInner;
-      if (prev) {
-        Promise.resolve(prev.it.return?.()).catch(() => {});
+    const fail = (error: unknown) => {
+      if (stopped) return;
+      stopped = true;
+      void execution.close();
+      output.fail(normalizeError(error));
+      void Promise.resolve(source.return?.()).catch(() => {});
+    };
+
+    const consumeInner = (generation: number, inner: PipeInput<R>) => {
+      if (!execution.isCurrent(generation)) return;
+      let iterator: AsyncIterator<R>;
+      try {
+        iterator = from<R>(inner as any)[Symbol.asyncIterator]() as AsyncIterator<R>;
+      } catch (error) {
+        fail(error);
+        return;
       }
-
-      const it = from(innerStream as any)[Symbol.asyncIterator]() as AsyncIterator<R>;
-      currentInner = { token, it };
-
+      if (!execution.attach(generation, iterator)) return;
       void (async () => {
         try {
-          while (!stopped && token === currentInnerToken) {
-            const r = await it.next();
-
-            if (r.done) break;
-            if (stopped || token !== currentInnerToken) break;
-            output.push(r.value);
+          while (execution.isCurrent(generation)) {
+            const item = await iterator.next();
+            if (!execution.isCurrent(generation)) break;
+            if (item.done) break;
+            output.push(item.value);
           }
-        } catch (err) {
-          if (!stopped && token === currentInnerToken) {
-            output.fail(normalizeError(err));
-          }
+        } catch (error) {
+          if (execution.isCurrent(generation)) fail(error);
         } finally {
-          if (currentInner?.token === token) {
-            currentInner = null;
-          }
-          checkComplete();
+          execution.release(generation, iterator);
+          if (execution.isCurrent(generation)) checkComplete();
         }
       })();
     };
 
     const processOuterValue = (value: T) => {
-      const token = {};
-      currentInnerToken = token;
-
-      let projected: any;
+      const generation = execution.advance();
+      pendingProjection = false;
+      let projected: ReturnType<typeof project>;
       try {
         projected = project(value, index++);
-      } catch (err) {
-        output.fail(normalizeError(err));
+      } catch (error) {
+        fail(error);
         return;
       }
-
       if (isPromiseLike(projected)) {
-        const capturedToken = token;
-        pendingProjections++;
+        pendingProjection = true;
         Promise.resolve(projected).then(
-          (normalized) => {
-            pendingProjections--;
-            if (stopped || capturedToken !== currentInnerToken) return;
-            subscribeToInner(from<R>(normalized as any), capturedToken);
+          resolved => {
+            if (!execution.isCurrent(generation)) return;
+            pendingProjection = false;
+            consumeInner(generation, resolved as PipeInput<R>);
+            checkComplete();
           },
-          (err) => {
-            pendingProjections--;
-            if (stopped || capturedToken !== currentInnerToken) return;
-            output.fail(normalizeError(err));
+          error => {
+            if (!execution.isCurrent(generation)) return;
+            pendingProjection = false;
+            fail(error);
           }
         );
       } else {
-        subscribeToInner(from<R>(projected as any), token);
+        consumeInner(generation, projected as PipeInput<R>);
       }
     };
 
     const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
-
-    if (typeof tryNext === "function") {
+    if (typeof tryNext === 'function') {
       const drain = () => {
         while (!stopped) {
-          let result: IteratorResult<T> | null;
-          try {
-            result = tryNext.call(source);
-          } catch (err) {
-            output.fail(normalizeError(err));
-            return;
-          }
-
-          if (!result) return;
-          if (result.done) {
+          let item: IteratorResult<T> | null;
+          try { item = tryNext.call(source); }
+          catch (error) { fail(error); return; }
+          if (!item) return;
+          if (item.done) {
             inputCompleted = true;
             checkComplete();
             return;
           }
-
-          processOuterValue(result.value);
+          processOuterValue(item.value);
         }
       };
-
       (source as any).__onPush = drain;
       drain();
     } else {
       void (async () => {
         try {
           while (!stopped) {
-            const result = await source.next();
-            if (result.done) break;
-            processOuterValue(result.value);
+            const item = await source.next();
+            if (item.done) break;
+            processOuterValue(item.value);
           }
-
-          inputCompleted = true;
-          checkComplete();
-        } catch (err) {
-          output.fail(normalizeError(err));
-        }
+          if (!stopped) { inputCompleted = true; checkComplete(); }
+        } catch (error) { fail(error); }
       })();
     }
 
-    const baseReturn = outputIterator.return?.bind(outputIterator);
-    const baseThrow = outputIterator.throw?.bind(outputIterator);
-
-    (outputIterator as any).return = async () => {
+    const baseReturn = output.return?.bind(output);
+    const baseThrow = output.throw?.bind(output);
+    output.return = async () => {
       stopped = true;
-      try {
-        try {
-          await currentInner?.it.return?.();
-        } catch {}
-      } finally {
-        currentInner = null;
-      }
-      try {
-        await source.return?.();
-      } catch {}
-      return baseReturn ? baseReturn(undefined as any) : DONE;
+      await execution.close();
+      try { await source.return?.(); } catch { /* best effort */ }
+      return baseReturn ? baseReturn() : DONE;
     };
-
-    (outputIterator as any).throw = async (err: any) => {
-      const error = normalizeError(err);
+    output.throw = async (error: unknown) => {
       stopped = true;
-      try {
-        try {
-          await currentInner?.it.return?.();
-        } catch {}
-      } finally {
-        currentInner = null;
-      }
-      if (baseThrow) return baseThrow(error);
-      throw error;
+      await execution.close();
+      try { await source.return?.(); } catch { /* best effort */ }
+      if (baseThrow) return baseThrow(normalizeError(error));
+      throw normalizeError(error);
     };
-
-    return outputIterator;
+    return output;
   });
 }
