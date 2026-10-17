@@ -10,7 +10,8 @@ export interface Scheduler {
   queueFlush(node: SchedulableNode): void;
   flush(): void;
   remove(node: SchedulableNode): void;
-  flushImmediately(node: SchedulableNode): void;
+  /** Optional targeted flush hook; the runtime currently uses flush(). */
+  flushImmediately?(node: SchedulableNode): void;
   get isDirty(): boolean;
 }
 
@@ -147,12 +148,16 @@ export class RuntimeScheduling {
 
   transaction<T>(fn: () => T extends PromiseLike<any> ? never : T): T {
     this.transactionDepth++;
+    let callbackFailed = false;
     try {
       const result = fn() as T;
       if (result !== null && (typeof result === "object" || typeof result === "function") && typeof (result as any).then === "function") {
         throw new TypeError("transaction() callback must be synchronous");
       }
       return result;
+    } catch (error) {
+      callbackFailed = true;
+      throw error;
     } finally {
       this.transactionDepth--;
       if (this.transactionDepth === 0) {
@@ -174,7 +179,8 @@ export class RuntimeScheduling {
         } catch (error) {
           if (!failed) { firstError = error; failed = true; }
         }
-        if (failed) throw firstError;
+        // Cleanup must not mask the callback's original error, even undefined.
+        if (failed && !callbackFailed) throw firstError;
       }
     }
   }

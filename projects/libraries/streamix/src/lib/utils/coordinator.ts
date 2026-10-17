@@ -152,6 +152,10 @@ export function createAsyncCoordinator<T = any>(
 
   // Optional key -> source iterator mapping for reference-based removal.
   const keyToSource = new Map<any, AsyncIterator<T>>();
+  const initialSourceCount = sources.length;
+  const explicitlyRemoved = new Set<number>();
+  const slotTokens = sources.map(() => ({}));
+  const completionTokens = new WeakMap<object, object>();
 
   /** Checks if all sources are completed. */
   const allDone = () => activeCount === 0;
@@ -162,15 +166,8 @@ export function createAsyncCoordinator<T = any>(
    * @param sourceIndex The index of the source that generated the event.
    */
   function pushEvent(event: RunnerEvent<T>, sourceIndex: number) {
+    if (event.type === "complete") completionTokens.set(event, slotTokens[sourceIndex]);
     execution.publish(sourceIndex, event, event.type === "value" ? "next" : event.type === "complete" ? "complete" : "error", event.type === "error" ? event.error : undefined);
-  }
-
-  /**
-   * Removes all queued events from a specific source.
-   * @param sourceIndex The index of the source whose events should be removed.
-   */
-  function removeQueuedEvents(sourceIndex: number) {
-    execution.dropSourceEvents(sourceIndex);
   }
 
   /**
@@ -212,10 +209,19 @@ export function createAsyncCoordinator<T = any>(
     pendingPulls[index] = false;
     sourceList[index] = null;
     execution.detach(index);
-    removeQueuedEvents(index);
     restoreSource(source, index);
 
     return source;
+  }
+
+  function acceptEvent(result: IteratorResult<RunnerEvent<T>>): IteratorResult<RunnerEvent<T>> {
+    // Keep the slot until its completion event is consumed: reusing it earlier
+    // would discard buffered values and completion via the replacement epoch.
+    if (!result.done && result.value.type === "complete" &&
+        completionTokens.get(result.value) === slotTokens[result.value.sourceIndex]) {
+      detachSource(result.value.sourceIndex);
+    }
+    return result;
   }
 
   /**
@@ -400,11 +406,12 @@ export function createAsyncCoordinator<T = any>(
 
       drainSources();
 
-      if (execution.hasEvents) return Promise.resolve(execution.take()!);
+      const event = execution.take();
+      if (event !== undefined) return Promise.resolve(acceptEvent(event));
 
       if (allDone()) return Promise.resolve(DONE);
 
-      return execution.wait();
+      return execution.wait().then(acceptEvent);
     },
 
     __tryNext() {
@@ -412,7 +419,8 @@ export function createAsyncCoordinator<T = any>(
 
       drainSources();
 
-      if (execution.hasEvents) return execution.take()!;
+      const event = execution.take();
+      if (event !== undefined) return acceptEvent(event);
 
       return allDone() ? DONE : null;
     },
@@ -461,11 +469,14 @@ export function createAsyncCoordinator<T = any>(
       }
 
       // Reuse a freed slot to prevent unbounded sparse array growth
-      let index = sourceList.indexOf(null);
+      // Initial indices identify fixed inputs (e.g. mergeMap's outer source).
+      // Natural completion releases their references without reusing those IDs.
+      let index = sourceList.findIndex((item, i) =>
+        item === null && (i >= initialSourceCount || explicitlyRemoved.has(i)));
       if (index >= 0) {
         sourceList[index] = source;
         completed[index] = false;
-            pendingPulls[index] = false;
+        pendingPulls[index] = false;
         pushDriven[index] = "__onPush" in (source as any);
       } else {
         index = sourceList.length;
@@ -475,6 +486,8 @@ export function createAsyncCoordinator<T = any>(
         pushDriven.push("__onPush" in (source as any));
       }
       execution.attach(index, source);
+      slotTokens[index] = {};
+      explicitlyRemoved.delete(index);
       activeCount++;
 
       if (key !== undefined) {
@@ -499,6 +512,7 @@ export function createAsyncCoordinator<T = any>(
     async removeSource(index: number): Promise<void> {
       const source = detachSource(index);
       if (!source) return;
+      explicitlyRemoved.add(index);
 
       // Detachment changes the completion state synchronously. Wake waiting
       // consumers before awaiting return(): a source may never settle cleanup.

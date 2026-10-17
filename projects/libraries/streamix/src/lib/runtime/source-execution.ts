@@ -12,6 +12,8 @@ export class RuntimeSourceExecution<S, T> {
   private readonly buffer = new RuntimeEventBuffer<T>();
   private readonly identity = {};
   private readonly sourceEpochs = new Map<number, number>();
+  // Each instance owns a unique identity and one lifetime. Slot epochs below
+  // handle replacement; this token labels events, rather than tracking restarts.
   private readonly generation = 1;
   private readonly unsubscribe: () => void;
   private closed = false;

@@ -104,6 +104,9 @@ update readable state immediately, but subscribers receive the committed state
 when the outermost transaction exits. Nested transactions do not flush early.
 Transaction finalizers run before the commit flush. Async callbacks are rejected;
 transactions do not roll back writes when the callback throws.
+All finalizers and the commit flush are attempted even if one fails. A callback
+error takes precedence over cleanup errors; otherwise the first cleanup error
+is reported.
 
 The scheduler guards against reentrant flushing. Writes from subscribers during
 a flush queue further work in the same drain, which settles before the outer
@@ -179,6 +182,15 @@ queued event from A ─────────────► discarded
 
 This is the boundary that prevents obsolete async results from reaching a
 current coordinator after a source replacement.
+
+Coordinator reads preserve earlier consumer demand even inside `batch()`.
+When an earlier waiter consumes the available event, a later `next()` waits
+for another event or completion; `__tryNext()` returns `null` while still active.
+
+Once a source's completion event is consumed, the coordinator releases its
+iterator, push hook, key mapping, and pull ownership. Completed dynamic slots
+can then be reused. Naturally completed initial slots retain their index
+reservation so operators can continue identifying their fixed inputs.
 
 ## Higher-order operator lifecycles
 

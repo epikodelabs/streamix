@@ -53,6 +53,91 @@ function createDeferred<T>() {
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 
 describe('createAsyncCoordinator', () => {
+  it('preserves FIFO demand when next is called inside a batch with buffered events', async () => {
+    const source = createPushSource<number>();
+    const coordinator = createAsyncCoordinator([source], { syncDrain: true });
+    try {
+      const first = coordinator.next();
+      let second!: ReturnType<typeof coordinator.next>;
+      coordinator.batch(() => {
+        source.push(1);
+        second = coordinator.next();
+      });
+      expect((await first).value).toEqual({ type: 'value', value: 1, sourceIndex: 0 });
+      source.push(2);
+      expect((await second).value).toEqual({ type: 'value', value: 2, sourceIndex: 0 });
+    } finally {
+      await coordinator.return!();
+    }
+  });
+
+  it('returns null from a batched tryNext when earlier waiters consume the buffer', async () => {
+    const source = createPushSource<number>();
+    const coordinator = createAsyncCoordinator([source], { syncDrain: true });
+    try {
+      const waiting = coordinator.next();
+      coordinator.batch(() => {
+        source.push(1);
+        expect(coordinator.__tryNext!()).toBeNull();
+      });
+      expect((await waiting).value).toEqual({ type: 'value', value: 1, sourceIndex: 0 });
+    } finally {
+      await coordinator.return!();
+    }
+  });
+
+  it('reuses naturally completed dynamic slots after their completion is consumed', async () => {
+    const coordinator = createAsyncCoordinator<number>();
+    try {
+      for (let i = 0; i < 100; i++) {
+        const source = { next: async () => DONE, __onPush: undefined };
+        expect(coordinator.addSource(source, i)).toBe(0);
+        expect((await coordinator.next()).value).toEqual({ type: 'complete', sourceIndex: 0 });
+        expect(coordinator.isSourceComplete(0)).toBe(true);
+        expect(source.__onPush).toBeUndefined();
+      }
+    } finally {
+      await coordinator.return!();
+    }
+  });
+
+  it('reserves naturally completed initial indices for fixed input identities', async () => {
+    const coordinator = createAsyncCoordinator<number>([{ next: async () => DONE }]);
+    try {
+      expect((await coordinator.next()).value).toEqual({ type: 'complete', sourceIndex: 0 });
+      expect(coordinator.addSource({ next: async () => DONE })).toBe(1);
+      expect((await coordinator.next()).value).toEqual({ type: 'complete', sourceIndex: 1 });
+      expect(coordinator.addSource({ next: async () => DONE })).toBe(1);
+    } finally {
+      await coordinator.return!();
+    }
+  });
+
+  it('does not detach a replacement when an older waiter receives completion', async () => {
+    let complete = false;
+    const source = {
+      __onPush: undefined as (() => void) | undefined,
+      __tryNext: () => complete ? DONE : null,
+      next: async () => DONE
+    };
+    const coordinator = createAsyncCoordinator<number>([source], { syncDrain: true });
+    try {
+      const old = coordinator.next();
+      complete = true;
+      source.__onPush!();
+      // Replace synchronously after resolving the waiter, before its continuation.
+      const removing = coordinator.removeSource(0);
+      const replacement = createPushSource<number>();
+      const index = coordinator.addSource(replacement);
+      expect(index).toBe(0);
+      await old;
+      await removing;
+      replacement.push(7);
+      expect((await coordinator.next()).value).toEqual({ type: 'value', value: 7, sourceIndex: index });
+    } finally {
+      await coordinator.return!();
+    }
+  });
   it('restores source push handlers when returned', async () => {
     const originalOnPush = () => {};
     const source: AsyncIterator<number> & { __onPush?: () => void } = {
