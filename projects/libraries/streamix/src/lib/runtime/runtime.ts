@@ -73,9 +73,59 @@ export class RuntimeGraph {
 
 import { runtimeScheduling, type RuntimeScheduling } from "./scheduling";
 
+/** Execution accounting is internal: a flow has one producer shared by its subscribers. */
+export type FlowExit = "complete" | "cancel" | "error";
+export interface FlowExecutionSnapshot {
+  readonly active: number;
+  readonly started: number;
+  readonly completed: number;
+  readonly cancelled: number;
+  readonly failed: number;
+  readonly emitted: number;
+}
+
+export class RuntimeExecutions {
+  private readonly active = new Map<RuntimeNode, number>();
+  private generation = 0;
+  private started = 0;
+  private completed = 0;
+  private cancelled = 0;
+  private failed = 0;
+  private emitted = 0;
+
+  /** A token prevents a late previous execution from closing a newer one. */
+  start(node: RuntimeNode): number {
+    const token = ++this.generation;
+    this.active.set(node, token);
+    this.started++;
+    return token;
+  }
+
+  next(node: RuntimeNode, token: number): void {
+    if (this.active.get(node) === token) this.emitted++;
+  }
+
+  finish(node: RuntimeNode, token: number, exit: FlowExit): void {
+    if (this.active.get(node) !== token) return;
+    this.active.delete(node);
+    if (exit === "complete") this.completed++;
+    else if (exit === "cancel") this.cancelled++;
+    else this.failed++;
+  }
+
+  snapshot(): FlowExecutionSnapshot {
+    return Object.freeze({
+      active: this.active.size, started: this.started,
+      completed: this.completed, cancelled: this.cancelled,
+      failed: this.failed, emitted: this.emitted,
+    });
+  }
+}
+
 export class StreamixRuntime {
   readonly scheduling: RuntimeScheduling = runtimeScheduling;
   readonly graph = new RuntimeGraph();
+  readonly executions = new RuntimeExecutions();
   readonly root = Object.freeze({ type: "root" as const });
   private sequence = 0;
   private readonly invalidators = new Map<RuntimeNode, () => void>();

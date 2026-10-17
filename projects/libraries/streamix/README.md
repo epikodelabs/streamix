@@ -1,12 +1,11 @@
-# Streamix Runtime — Batch 5: Scheduled graph invalidation
+# Batch 6 — Internal flow execution accounting
 
-Apply over Phases 1–4.
+Apply over batches 1–5. Only modified source files are included.
 
-- Registered derived nodes are **invalidated**, not eagerly recomputed, when a graph dependency changes.
-- Existing depth-ordered runtime scheduler processes queued derived evaluations in dependency order.
-- Explicit `.value` reads retain synchronous on-demand evaluation.
-- Add regression specifications for diamond dependencies, multi-source transactions and conditional edge removal.
+- Adds internal RuntimeExecutions, generation tokens and execution counters.
+- Instruments the shared `atomFromIteratorInternal` producer used by `flow()` and iterator-backed atoms.
+- Tracks starts, active executions, emitted values, completion, cancellation and failure.
+- Late completions cannot close a newer execution generation.
+- Does not change the public Streamix API.
 
-## Validation
-
-Full project tests **not run**. The reconstructed Repomix snapshot has no installed dependencies and its TypeScript configuration extends `/tsconfig.json`, which is absent here. These regression tests are added but unverified. This patch does not yet implement an independent flow-event scheduler or prove all reentrant scheduling cases.
+Scope limitation: this is execution lifecycle accounting, **not yet** a unified event engine for operators. The existing AsyncIterator coordinator remains. Metrics are internal and cumulative, not a stable public API. Full project build/tests could not be run because the reconstructed project lacks its parent tsconfig and dependencies.

@@ -789,6 +789,8 @@ function atomFromIteratorInternal<T>(
   const subscriptions = new Set<Subscription>();
   let iterator: AsyncIterator<T> | undefined;
   let runPromise: Promise<void> | null = null;
+  let executionToken: number | undefined;
+  let executionExit: "complete" | "cancel" | "error" = "cancel";
 
   const setDirty = (next: boolean) => {
     if (dirty === next) return;
@@ -820,6 +822,10 @@ function atomFromIteratorInternal<T>(
   const disposeInstance = async (): Promise<void> => {
     if (disposed) return;
     disposed = true;
+    if (executionToken !== undefined) {
+      internalRuntime.executions.finish(instance, executionToken, executionExit);
+      executionToken = undefined;
+    }
     setDirty(false);
     node.version++;
     subs.clear();
@@ -839,13 +845,17 @@ function atomFromIteratorInternal<T>(
 
   const run = async () => {
     if (runPromise) return runPromise;
+    executionExit = "cancel";
+    const token = internalRuntime.executions.start(instance);
+    executionToken = token;
     runPromise = (async () => {
-      iterator = source[Symbol.asyncIterator]();
       try {
+        iterator = source[Symbol.asyncIterator]();
         while (!disposed) {
           const result = await iterator.next();
           if (disposed || result.done) break;
 
+          internalRuntime.executions.next(instance, token);
           previous = current;
           current = result.value;
           hasNewValue = true;
@@ -861,14 +871,20 @@ function atomFromIteratorInternal<T>(
             broadcast(current);
           }
         }
-        if (!disposed) await disposeInstance();
+        if (!disposed) {
+          executionExit = "complete";
+          await disposeInstance();
+        }
       } catch (err) {
+        executionExit = "error";
         if (!disposed) {
           errorValue = normalizeError(err);
           isErrorState = true;
           instance.fail(errorValue, { terminate: options?.terminateOnError });
         }
       } finally {
+        internalRuntime.executions.finish(instance, token, executionExit);
+        if (executionToken === token) executionToken = undefined;
         await stopIterator();
         runPromise = null;
       }
