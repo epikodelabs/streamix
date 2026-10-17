@@ -217,4 +217,3 @@ idescribe('onIntersection', () => {
     expect(true).toBe(true);
   });
 });
-

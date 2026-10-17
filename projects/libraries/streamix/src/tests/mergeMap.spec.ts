@@ -323,4 +323,3 @@ describe('mergeMap', () => {
     expect(completions).toEqual([1, 2, 3]);
   });
 });
-

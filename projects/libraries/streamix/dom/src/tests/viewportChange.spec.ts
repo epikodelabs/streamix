@@ -429,4 +429,3 @@ idescribe('onViewportChange', () => {
     expect(() => unsubscribe()).not.toThrow();
   });
 });
-

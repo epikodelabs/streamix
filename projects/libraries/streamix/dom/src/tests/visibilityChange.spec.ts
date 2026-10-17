@@ -300,5 +300,3 @@ idescribe('onVisibilityChange', () => {
     expect(env.removeEventListener).not.toHaveBeenCalled();
   });
 });
-
-

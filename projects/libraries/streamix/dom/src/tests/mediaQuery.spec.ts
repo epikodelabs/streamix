@@ -228,5 +228,3 @@ idescribe('onMediaQuery', () => {
     expect(() => unsubscribe()).not.toThrow();
   });
 });
-
-

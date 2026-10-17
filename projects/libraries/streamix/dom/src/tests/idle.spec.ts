@@ -398,5 +398,3 @@ idescribe('onIdle', () => {
     expect(() => unsubscribe()).not.toThrow();
   });
 });
-
-

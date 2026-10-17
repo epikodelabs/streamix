@@ -1,3 +1,4 @@
+import { internalRuntime } from "../runtime/runtime";
 import { createAsyncCoordinator, getIterator, raceNext, type AsyncCoordinator } from "../utils/coordinator";
 import { isAtom } from "../utils/helpers";
 import { iterate } from "./iterate";
@@ -637,6 +638,8 @@ function finalizeAtomInstance<T extends Atom<any> & InternalAtomContainer>(insta
     enumerable: false,
   });
   if (conflate) (instance as any)[ANALOG_DELIVERY] = true;
+  internalRuntime.register(instance);
+  instance[META].disposeHandlers.add(() => internalRuntime.dispose(instance));
   registerWithCurrentScope(instance as any);
   return instance;
 }
@@ -1796,6 +1799,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       depSubscriptions.set(dep, observeDependencyChange(dep, handler));
     }
 
+    internalRuntime.dependencies(instance, context.dependencies);
     node.depth = maxDepth + 1;
   };
   const compute = (): { result: T; context: FormulaContext; generation: number } => {

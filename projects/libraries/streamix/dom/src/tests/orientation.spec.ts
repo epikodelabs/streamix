@@ -303,4 +303,3 @@ idescribe('onOrientation', () => {
     expect(didThrow).toBe(false);
   });
 });
-

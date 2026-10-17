@@ -220,4 +220,3 @@ export function bindStyleMap(
 }
 
 export type { SxClassMap, SxStyleMap } from './binding-writers';
-

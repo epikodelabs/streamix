@@ -444,4 +444,3 @@ idescribe('onNetwork', () => {
     }
   });
 });
-

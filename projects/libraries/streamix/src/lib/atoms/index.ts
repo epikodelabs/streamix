@@ -7,4 +7,3 @@ export * from './pipe';
 export * from './root';
 export * from './scope';
 export * from './subscription';
-

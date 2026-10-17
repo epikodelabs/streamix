@@ -1,3 +1,4 @@
+import { internalRuntime } from "../runtime/runtime";
 import type { Scope } from "./scope";
 
 /**
@@ -8,16 +9,11 @@ export interface RootScope {
   readonly type: "root";
 }
 
-let _globalScope: RootScope | null = null;
-
 export function getGlobalScope(): RootScope {
-  if (!_globalScope) {
-    _globalScope = { type: "root" };
-  }
-  return _globalScope;
+  return internalRuntime.root;
 }
 
-export const globalScope = getGlobalScope();
+export const globalScope: RootScope = internalRuntime.root;
 
 /** Type guard to distinguish a real {@link Scope} from a {@link RootScope}. */
 export function isScope(value: Scope | RootScope | null | undefined): value is Scope {
