@@ -45,4 +45,30 @@ describe('runtime source execution', () => {
     execution.publish(0, 3, 'next');
     expect(execution.hasEvents).toBe(false);
   });
+  it('removes only events belonging to a detached source', () => {
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    execution.publish(0, 10, 'next');
+    execution.publish(1, 20, 'next');
+    execution.detach(0);
+    expect(execution.take()!.value).toBe(20);
+    expect(execution.hasEvents).toBe(false);
+    execution.close();
+  });
+
+  it('does not resurrect queued reentrant events after detachment', () => {
+    const events = new RuntimeEventDispatcher();
+    const execution = new RuntimeSourceExecution<number, number>(events, done);
+    // Register after execution's observer: publish reentrantly, then detach
+    // while the dispatcher still holds the nested event in its queue.
+    events.observe(event => {
+      if (event.kind === 'next' && (event.value as any).payload === 1) {
+        execution.publish(0, 2, 'next');
+        execution.detach(0);
+      }
+    });
+    execution.publish(0, 1, 'next');
+    expect(execution.hasEvents).toBe(false);
+    execution.close();
+  });
+
 });
