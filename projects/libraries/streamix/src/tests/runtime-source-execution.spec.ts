@@ -89,4 +89,22 @@ describe('runtime source execution', () => {
     execution.close();
   });
 
+  it('serves late demand from queued events before terminal completion', async () => {
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    execution.publish(0, 7, 'next');
+    execution.publish(0, 8, 'next');
+    execution.notify(true);
+    expect((await execution.wait()).value).toBe(7);
+    expect((await execution.wait()).value).toBe(8);
+    expect((await execution.wait()).done).toBe(true);
+    execution.close();
+  });
+
+  it('serves late demand from buffered events even before completion', async () => {
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    execution.publish(0, 17, 'next');
+    expect((await execution.wait()).value).toBe(17);
+    execution.close();
+  });
+
 });

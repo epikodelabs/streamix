@@ -27,8 +27,10 @@ export class RuntimeEventBuffer<T> {
 
   wait(): Promise<IteratorResult<T>> {
     if (this.closed) throw new Error('Cannot wait on a closed event buffer');
-    if (this.terminalResult && this.queued.length === 0) return Promise.resolve(this.terminalResult);
-    // Caller must drain buffered events and check completion before waiting.
+    // Demand registered after an event was buffered must consume that event,
+    // including when upstream has already completed. Never strand late demand.
+    if (this.queued.length > 0) return Promise.resolve(this.queued.shift()!.result);
+    if (this.terminalResult) return Promise.resolve(this.terminalResult);
     return new Promise(resolve => this.waiters.push(resolve));
   }
 
