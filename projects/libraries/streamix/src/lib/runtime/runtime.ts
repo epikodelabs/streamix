@@ -2,7 +2,7 @@
 export type RuntimeNode = object;
 export type RuntimeEvent = Readonly<{
   sequence: number;
-  kind: "register" | "dependencies" | "dispose";
+  kind: "register" | "dependencies" | "dispose" | "change";
   node: RuntimeNode;
 }>;
 
@@ -13,6 +13,8 @@ export class RuntimeGraph {
   register(node: RuntimeNode): void {
     if (!this.upstream.has(node)) this.upstream.set(node, new Set());
   }
+
+  has(node: RuntimeNode): boolean { return this.upstream.has(node); }
 
   /** Replace dependency edges, including removal of stale dynamic dependencies. */
   replace(node: RuntimeNode, sources: Iterable<RuntimeNode>): void {
@@ -76,6 +78,7 @@ export class StreamixRuntime {
   readonly graph = new RuntimeGraph();
   readonly root = Object.freeze({ type: "root" as const });
   private sequence = 0;
+  private readonly invalidators = new Map<RuntimeNode, () => void>();
   private readonly observers = new Set<(event: RuntimeEvent) => void>();
 
   register(node: RuntimeNode): void {
@@ -86,7 +89,26 @@ export class StreamixRuntime {
     this.graph.replace(node, sources);
     this.emit("dependencies", node);
   }
+  /** Register a graph-managed derived invalidator, not a public subscription. */
+  onInvalidate(node: RuntimeNode, invalidate: () => void): () => void {
+    this.invalidators.set(node, invalidate);
+    return () => {
+      if (this.invalidators.get(node) === invalidate) this.invalidators.delete(node);
+    };
+  }
+
+  /** Publish a committed value change to current graph dependents. */
+  changed(source: RuntimeNode): void {
+    this.emit("change", source);
+    for (const dependent of [...this.graph.dependents(source)]) {
+      // Edges may be replaced during an earlier invalidation.
+      if (!this.graph.dependencies(dependent).has(source)) continue;
+      this.invalidators.get(dependent)?.();
+    }
+  }
+
   dispose(node: RuntimeNode): void {
+    this.invalidators.delete(node);
     this.graph.remove(node);
     this.emit("dispose", node);
   }

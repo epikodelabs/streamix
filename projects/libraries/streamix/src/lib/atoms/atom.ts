@@ -570,6 +570,7 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
 }
 
 function notifyChangeHandlers(atom: Atom<any>): void {
+  internalRuntime.changed(atom);
   const handlers = getAtomRuntimeMeta(atom).changeHandlers;
   for (const h of Array.from(handlers)) {
     try { h(); } catch { /* suppress dependent errors */ }
@@ -1541,6 +1542,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   let instance!: Atom<T> & InternalAtomContainer;
   const dependencies = new Set<DependencySource<any>>();
   const depSubscriptions = new Map<DependencySource<any>, Subscription>();
+  let stopGraphInvalidation: (() => void) | undefined;
 
   const setDirty = (next: boolean) => {
     if (dirty === next) return;
@@ -1602,6 +1604,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       dependencies.add(dep);
       const depNode = (dep as Partial<InternalAtomContainer> as any)[NODE] as AtomNode | undefined;
       if (depNode !== undefined && depNode.depth > maxDepth) maxDepth = depNode.depth;
+      if (internalRuntime.graph.has(dep)) continue;
       if (depSubscriptions.has(dep)) continue;
 
       const handler = () => {
@@ -1622,6 +1625,22 @@ export function derived<T>(...args: any[]): Atom<T> {
     }
     node.depth = maxDepth + 1;
   };
+  // Graph-managed invalidation for Streamix-owned dependencies. Foreign
+  // DependencySource instances continue using observeDependencyChange().
+  const invalidate = () => {
+    if (disposed) return;
+    if (!isTransactionActive() && !node.flushing && !running) {
+      try { recompute(); } catch (err) {
+        errorValue = normalizeError(err);
+        isErrorState = true;
+        if (terminateOnError) instance.dispose();
+      }
+    } else {
+      instance[MARK_DIRTY]();
+    }
+  };
+  stopGraphInvalidation = internalRuntime.onInvalidate(instance, invalidate);
+
   const compute = (): { result: T; context: FormulaContext; generation: number } => {
     if (running) throw new Error("Circular dependency detected in derived()");
 
@@ -1768,6 +1787,7 @@ export function derived<T>(...args: any[]): Atom<T> {
     onDispose: () => {
       if (disposed) return;
       disposed = true;
+      stopGraphInvalidation?.();
       setDirty(false);
       getScheduler().remove(node);
       notifyPending = false;

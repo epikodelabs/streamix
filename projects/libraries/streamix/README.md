@@ -1,16 +1,13 @@
-# Streamix runtime — Batch 3: scheduler and transactions
+# Streamix Runtime — Batch 4 (incremental graph-driven invalidation)
 
-Apply over Phase 1 + Batch 2. This patch moves the existing depth-ordered scheduler, queue and transaction coordination out of `atoms/atom.ts` into `runtime/scheduling.ts` and attaches it to the internal runtime as `internalRuntime.scheduling`. The existing public `transaction`, `getScheduler`, and `setScheduler` exports remain source-compatible. Atom implementations now obtain their scheduler through the runtime scheduling module; no public runtime argument is added.
+Apply over Phase 1 + Batch 2 + Batch 3.
 
-## Behavior preserved
-- Nested synchronous transactions join one outer commit.
-- Writes remain synchronously readable; delivery waits until commit.
-- Finalizers run before flush, including on exceptional exit.
-- Queued work is ordered by depth and insertion sequence.
-- Reentrant scheduling and injected test schedulers remain supported.
+- Internal runtime dispatches committed value-change events along its current dependency graph.
+- Derived atoms register an internal invalidation callback, replacing per-dependency change-handler subscriptions for registered Streamix nodes.
+- Foreign DependencySource objects retain existing subscription-based observation.
+- Conditional dependency replacement immediately affects subsequent event routing.
+- Disposal unregisters the invalidator; no public API changes.
 
-## Scope / next
-This is **scheduler ownership consolidation**, not yet graph-driven propagation. Existing node dirty/flush paths remain intact; next batch will replace them with runtime-driven dependency invalidation and event dispatch, with diamond and conditional-dependency regressions.
+**Scope:** This is an incremental migration, not a completed glitch-free scheduler or flow event engine. In particular, the existing eager derived recomputation and scheduler remain; diamond propagation, nested transaction ordering and flow lifecycle need integration testing before claiming graph-driven consistency.
 
-## Validation
-Run the project's TypeScript build and full test suite after applying. The source snapshot here does not contain installed node_modules. No test-suite success is claimed.
+**Validation:** Full project test suite not executed (repository snapshot has no installed dependencies).
