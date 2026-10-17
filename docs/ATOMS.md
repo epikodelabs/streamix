@@ -74,7 +74,7 @@ count.next(42);
 console.log(count.value); // 42
 ```
 
-`atom()` without an argument starts with `undefined`; pass a value for an immediate initial state. Atoms propagate every write immediately. Use `transaction()` when several writes must become one reactive state transition (see [Explicit Transactions](#6-explicit-transactions)).
+`atom()` without an argument starts at `NO_INITIAL_VALUE`; pass a value for an immediate initial state, including `atom(undefined)` when `undefined` is intentional. Atoms propagate every write immediately. Use `transaction()` when several writes must become one reactive state transition (see [Explicit Transactions](#6-explicit-transactions)).
 
 #### B. Derived Atoms (`derived`)
 
@@ -309,6 +309,14 @@ taskManager.dispose();
 ## 6. Explicit Transactions
 
 Atoms and scopes have one state propagation model: ordinary writes propagate immediately. When several synchronous writes form one logical state change, wrap them in `transaction()`.
+
+With the default scheduler, `next()` and `set()` settle queued derived work
+before returning. Consecutive writes remain separate transitions; diamond
+dependencies publish only their settled result for each write. Iterator-backed
+atoms settle each accepted emission before pulling the next value. Writes made
+by subscribers during a flush join that drain, which finishes before the outer
+write or transaction returns. Async subscriber callbacks are not awaited.
+See [Scheduling and transactions](./RUNTIME.md#scheduling-and-transactions).
 
 ```ts
 import { scope, transaction } from "@epikodelabs/streamix";

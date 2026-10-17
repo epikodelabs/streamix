@@ -891,6 +891,8 @@ function atomFromIteratorInternal<T>(
           } else {
             broadcast(current);
           }
+          // Settle downstream derived nodes synchronously with the emission.
+          getScheduler().flush();
         }
         if (!disposed) {
           executionExit = "complete";
@@ -1373,6 +1375,11 @@ export function atom<T = any>(
         lastNotified = current;
         node.version++;
         broadcast();
+        // Settle invalidated derived nodes synchronously in dependency-depth
+        // order so subscribers observe the write before next() returns, and
+        // diamond graphs publish only their final value. Transactions flush
+        // at commit instead (the scheduler self-guards mid-transaction).
+        getScheduler().flush();
       }
     },
     set(value: T) { this.next(value); },

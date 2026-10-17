@@ -609,19 +609,21 @@ describe('Atom System', () => {
       const unsubscribe = labelledTotal.subscribe(value => values.push(value));
 
       // The two flows start independently. A downstream derived atom must wait
-      // for both values without losing the first flow's emission.
+      // for both values without losing the first flow's emission. While a
+      // dependency is unavailable the chain exposes NO_INITIAL_VALUE and emits
+      // nothing — sentinel states are not broadcast.
       await delay();
       emitLeft(2);
       await delay();
-      expect(values).toEqual(['pending']);
+      expect(values).toEqual([]);
 
       emitRight(3);
       await delay();
-      expect(values).toEqual(['pending', 'total:5']);
+      expect(values).toEqual(['total:5']);
 
       emitLeft(7);
       await delay();
-      expect(values).toEqual(['pending', 'total:5', 'total:10']);
+      expect(values).toEqual(['total:5', 'total:10']);
 
       unsubscribe();
       stopLeft();

@@ -10,6 +10,7 @@ import {
   hasAtomEmitted,
   map,
   method,
+  NO_INITIAL_VALUE,
   pipe,
   pipeExpr,
   scope,
@@ -457,12 +458,14 @@ describe('Scope System', () => {
 
       await delay();
       expect(s.loading).toBe(true);
-      expect(s.label).toBe('pending');
+      // Unavailable flow inputs stop the formula; the member exposes the
+      // NO_INITIAL_VALUE sentinel instead of a computed value.
+      expect(s.label as unknown).toBe(NO_INITIAL_VALUE);
 
       emitLeft(2);
       await delay();
       expect(s.loading).toBe(true);
-      expect(s.label).toBe('pending');
+      expect(s.label as unknown).toBe(NO_INITIAL_VALUE);
 
       emitRight(3);
       await delay();
@@ -1125,7 +1128,7 @@ describe('Scope System', () => {
         user: atomExpr<string>()
       });
 
-      expect(s.user).toBeUndefined();
+      expect(s.user as unknown).toBe(NO_INITIAL_VALUE);
 
       s.user = 'Ada';
       await delay();

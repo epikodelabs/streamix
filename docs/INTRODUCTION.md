@@ -48,6 +48,29 @@ const doubled = pipe(count, map(n => n * 2), take(1));
 for await (const value of doubled) console.log(value);
 ```
 
+### Runtime model
+
+Streamix has one reactive runtime behind atoms, derived values, scopes, and
+flows:
+
+- **Dependency graph:** every derived read records an edge from its input to
+  the derived atom. Changes invalidate downstream nodes in dependency order.
+- **Scheduler:** ordinary writes and iterator emissions flush derived work
+  synchronously in dependency order. Explicit transactions batch multiple
+  writes into one committed state change.
+- **Execution lifecycle:** flows begin only when consumed, share one active
+  producer where applicable, and are cancelled on disposal or when their last
+  consumer leaves. Runtime execution accounting distinguishes completion,
+  cancellation, and errors.
+- **Availability:** atoms and flows created without an initial value expose
+  `NO_INITIAL_VALUE` until their first emission. A derived formula that reads
+  one waits instead of treating it as `undefined`; use `atom(undefined)` when
+  `undefined` is intentional state.
+
+Scopes own their atoms and dispose the complete subtree, including active flow
+executions. This keeps reactive state, async work, and cleanup under the same
+lifecycle boundary.
+
 ### Operators
 
 Operators transform flows. Sync and async callbacks are both supported.
