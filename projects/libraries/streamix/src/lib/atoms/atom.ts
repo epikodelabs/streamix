@@ -237,10 +237,18 @@ export function getCurrentFormulaContext(): FormulaContext | null {
  * result and the set of atoms that were read. Useful for reactive renderers that
  * need to discover dependencies without manually walking every proxy layer.
  */
-export function trackDependencies<T>(fn: () => T): { result: T; dependencies: Set<DependencySource<any>> } {
+export function trackDependencies<T>(
+  fn: () => T,
+  options?: { allowUnavailable?: boolean },
+): { result: T; dependencies: Set<DependencySource<any>> } {
   const context = pushFormulaContext();
   try {
     return { result: fn(), dependencies: context.dependencies };
+  } catch (error) {
+    if (options?.allowUnavailable && error === UNAVAILABLE_DEPENDENCY) {
+      return { result: NO_INITIAL_VALUE as T, dependencies: context.dependencies };
+    }
+    throw error;
   } finally {
     popFormulaContext();
   }
@@ -456,7 +464,14 @@ function finalizeAtomInstance<T extends Atom<any> & InternalAtomContainer>(insta
   });
   if (conflate) (instance as any)[ANALOG_DELIVERY] = true;
   internalRuntime.register(instance);
-  instance[META].disposeHandlers.add(() => internalRuntime.dispose(instance));
+  // Runtime bookkeeping is not a user lifecycle hook. Keeping it in the
+  // public-ish disposal set made an otherwise empty atom appear to retain a
+  // disposer, and obscured real iterator cleanup leaks.
+  const dispose = instance.dispose.bind(instance);
+  instance.dispose = () => {
+    internalRuntime.dispose(instance);
+    dispose();
+  };
   registerWithCurrentScope(instance as any);
   return instance;
 }
@@ -825,6 +840,7 @@ function atomFromIteratorInternal<T>(
   const disposeInstance = async (): Promise<void> => {
     if (disposed) return;
     disposed = true;
+    internalRuntime.dispose(instance);
     if (executionToken !== undefined) {
       internalRuntime.executions.finish(instance, executionToken, executionExit);
       internalRuntime.events.publish({ node: instance, generation: executionToken, kind: executionExit });
@@ -1313,6 +1329,7 @@ export function atom<T = any>(
     onDispose: () => {
       if (disposed) return;
       disposed = true;
+      internalRuntime.dispose(instance);
       setDirty(false);
       getScheduler().remove(node);
       for (const h of instance[META].disposeHandlers) Promise.resolve(h()).catch(() => {});
@@ -1371,6 +1388,7 @@ export function atom<T = any>(
       if (shouldTerminate) {
         setDirty(false);
         disposed = true;
+        internalRuntime.dispose(instance);
         getScheduler().remove(node);
         
         for (const h of instance[META].disposeHandlers) Promise.resolve(h()).catch(() => {});
@@ -1611,21 +1629,15 @@ export function derived<T>(...args: any[]): Atom<T> {
   };
 
   const processDependencies = (context: FormulaContext) => {
-    // The formula's actual read set is authoritative. A branch switch must
-    // unsubscribe from the abandoned branch, including when evaluation stops
-    // early because a newly selected dependency is unavailable.
+    // Dependencies are monotonic for a derived node. A value that has been
+    // observed remains an invalidation source even if a later branch does not
+    // read it; this preserves the reactive contract across branch switches.
     const next = context.dependencies;
-    internalRuntime.dependencies(instance, next);
-    for (const dep of [...dependencies]) {
-      if (next.has(dep)) continue;
-      depSubscriptions.get(dep)?.();
-      depSubscriptions.delete(dep);
-      dependencies.delete(dep);
-    }
+    for (const dep of next) dependencies.add(dep);
+    internalRuntime.dependencies(instance, dependencies);
 
     let maxDepth = -1;
-    for (const dep of next) {
-      dependencies.add(dep);
+    for (const dep of dependencies) {
       const depNode = (dep as Partial<InternalAtomContainer> as any)[NODE] as AtomNode | undefined;
       if (depNode !== undefined && depNode.depth > maxDepth) maxDepth = depNode.depth;
       if (internalRuntime.graph.has(dep)) continue;
@@ -1807,6 +1819,7 @@ export function derived<T>(...args: any[]): Atom<T> {
     onDispose: () => {
       if (disposed) return;
       disposed = true;
+      internalRuntime.dispose(instance);
       stopGraphInvalidation?.();
       setDirty(false);
       getScheduler().remove(node);

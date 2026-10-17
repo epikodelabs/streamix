@@ -135,7 +135,7 @@ describe('runtime source execution', () => {
 
   it('invalidates buffered events when an attached source slot is replaced', () => {
     const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
-    const source = { next: async () => ({ done: true, value: undefined }) };
+    const source: AsyncIterator<number> = { next: async () => ({ done: true, value: undefined as any }) };
     execution.attach(0, source);
     execution.publish(0, 1, 'next');
     execution.publish(1, 9, 'next');
@@ -150,7 +150,7 @@ describe('runtime source execution', () => {
   it('rejects reentrant events from a previous source after slot replacement', () => {
     const events = new RuntimeEventDispatcher();
     const execution = new RuntimeSourceExecution<number, number>(events, done);
-    const source = { next: async () => ({ done: true, value: undefined }) };
+    const source: AsyncIterator<number> = { next: async () => ({ done: true, value: undefined as any }) };
     execution.attach(0, source);
     events.observe(event => {
       if (event.kind === 'next' && (event.value as any).payload === 1) {

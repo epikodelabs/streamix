@@ -4,6 +4,7 @@ import {
   derived,
   flow,
   getScheduler,
+  NO_INITIAL_VALUE,
   trackDependencies,
   transaction,
   type Atom,
@@ -38,8 +39,8 @@ describe('Atom System', () => {
 
       a.subscribe(value => values.push(value));
 
-      expect(a.value).toBeUndefined();
-      expect(a.safeValue).toBeUndefined();
+      expect(a.value).toBe(NO_INITIAL_VALUE as any);
+      expect(a.safeValue).toBe(NO_INITIAL_VALUE as any);
       expect(values).toEqual([]);
 
       a.next(3);

@@ -43,6 +43,10 @@ pending.subscribe(value => console.log(value)); // nothing yet
 pending.next(4);                                // 4
 ```
 
+Until its first emission, an atom created without an initial value reads as
+`NO_INITIAL_VALUE`. Flows use the same sentinel, so derived formulas wait for
+all required inputs instead of treating an absent value as `undefined`.
+
 Errors surface through `onError` handlers rather than one-off `try/catch` around reads. Creation options tune the error and leak behavior:
 
 ```ts

@@ -179,10 +179,15 @@ function evaluateExprMarker(
     const initialDependencies = new Set<DependencySource<any>>();
     const initialScope = createTrackedScope(scopeRef, <T>(atomInstance: Atom<T>) => {
       initialDependencies.add(atomInstance as Atom<any>);
-      return atomInstance.value;
+      // Scope construction may seed from a flow that has not emitted yet.
+      // The derived node installed below still tracks its first emission.
+      return atomInstance.safeValue;
     });
     const evaluateDynamic = (self: any) => marker.fn(self, atoms);
-    const { result: value, dependencies: trackedDependencies } = trackDependencies(() => evaluateDynamic(initialScope));
+    const { result: value, dependencies: trackedDependencies } = trackDependencies(
+      () => evaluateDynamic(initialScope),
+      { allowUnavailable: true },
+    );
     for (const dependency of trackedDependencies) {
       initialDependencies.add(dependency);
     }

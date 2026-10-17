@@ -60,7 +60,7 @@ export const concatMap = <T = any, R = any>(
         }
       },
 
-      async return(value?: any) {
+      async return(_value?: any) {
         try {
           await inner.close();
         } catch {}

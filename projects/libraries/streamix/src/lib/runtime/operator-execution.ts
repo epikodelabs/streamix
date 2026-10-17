@@ -70,7 +70,7 @@ export function trackOperatorExecution<T>(iterator: AsyncIterator<T>): AsyncIter
             return value;
           }, fail);
         }
-        if ((result as IteratorResult<T>).done) finish('complete');
+        if ((result as unknown as IteratorResult<T>).done) finish('complete');
         return result;
       } catch (caught) { return fail(caught); }
     }) as typeof iterator.throw;

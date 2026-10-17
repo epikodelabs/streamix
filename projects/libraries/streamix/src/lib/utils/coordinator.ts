@@ -6,7 +6,7 @@
  *
  * @module coordinator
  */
-import { DONE, NEXT } from "../atoms";
+import { DONE } from "../atoms";
 import { normalizeError } from "../atoms/atom";
 import { internalRuntime } from "../runtime/runtime";
 import { RuntimeSourceExecution } from "../runtime/source-execution";
