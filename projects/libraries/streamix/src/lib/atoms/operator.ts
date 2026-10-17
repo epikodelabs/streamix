@@ -1,3 +1,4 @@
+import { trackOperatorExecution } from "../runtime/operator-execution";
 import { AsyncPushable, createAsyncPushable } from "../utils/pushable";
 import { normalizeError, type Atom } from "./atom";
 
@@ -163,7 +164,7 @@ export function createOperator<T = any, R = T>(
         };
       }
 
-      return iterator;
+      return trackOperatorExecution(iterator);
     }
   };
 

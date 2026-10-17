@@ -1,12 +1,13 @@
-# Batch 7 — Internal flow execution event dispatch
+# Batch 8 — Operator execution instrumentation
 
-Apply over batches 1–6. Contains changed files only.
+Apply over batches 1–7.
 
-- Added an internal, synchronous FIFO event dispatcher that is safe against reentrant publication.
-- Flow producers publish `next` and terminal lifecycle events, tagged with execution generation.
-- Observers cannot interrupt producers; unsubscribe is supported.
-- Added dispatcher ordering and flow integration regression specs.
+- Instruments operator iterators centrally in `createOperator` (also covers `createPushOperator`).
+- Starts execution on first `next()` rather than composition.
+- Publishes output `next`, `complete`, `cancel`, `error` through the internal event dispatcher, and updates execution metrics.
+- Preserves synchronous iterator results, promise-based results, and existing iterator-specific push hooks by wrapping methods in place.
+- Terminal events are emitted at most once; no public API changes.
 
-This is an **incremental instrumentation/event backbone**, not yet a replacement for AsyncIterator coordination in operators. In particular, operators still run through their existing coordinator paths, and full event-engine unification is not complete.
+**Scope:** This is the first operator-runtime integration increment. Higher-order operators still use their existing AsyncIterator coordination and do not yet use the runtime as their execution engine. This patch does not claim backpressure, cancellation, or event-graph unification.
 
-Validation: attempted `tsc -p tsconfig.lib.json --noEmit`; blocked by missing parent `/tsconfig.json` and `@types/node` in the reconstructed repository. Tests were not executed.
+**Validation:** Full tests and project typecheck have not been run. This patch needs integration testing, especially `switchMap`, `mergeMap`, `concatMap`, `exhaustMap`, sync fast paths, and cancellation races.
