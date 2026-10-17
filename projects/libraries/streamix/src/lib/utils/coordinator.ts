@@ -9,6 +9,7 @@
 import { DONE, NEXT } from "../atoms";
 import { normalizeError } from "../atoms/atom";
 import { internalRuntime } from "../runtime/runtime";
+import { RuntimeSourcePulls } from "../runtime/source-pulls";
 
 /**
 
@@ -134,6 +135,7 @@ export function createAsyncCoordinator<T = any>(
   };
 
   const queue: CoordinatorQueueItem[] = [];
+  const sourcePulls = new RuntimeSourcePulls<T>();
 
   // Source events are delivered by the same reentrancy-safe FIFO dispatcher
   // used for runtime execution events. Each coordinator has its own identity,
@@ -151,6 +153,7 @@ export function createAsyncCoordinator<T = any>(
 
   // Use sparse arrays to support dynamic indices
   const sourceList: (AsyncIterator<T> | null)[] = [...sources];
+  sources.forEach((source, index) => sourcePulls.attach(index, source));
   const completed: boolean[] = sources.map(() => false);
   const pulling: boolean[] = sources.map(() => false);
   const pendingPulls: boolean[] = sources.map(() => false);
@@ -240,6 +243,7 @@ export function createAsyncCoordinator<T = any>(
     pulling[index] = false;
     pendingPulls[index] = false;
     sourceList[index] = null;
+    sourcePulls.detach(index);
     removeQueuedEvents(index);
     restoreSource(source, index);
 
@@ -287,54 +291,32 @@ export function createAsyncCoordinator<T = any>(
    * @param i The index of the source to pull from.
    */
   function pullAsync(i: number) {
-    // CRITICAL: Don't start a new pull if already pulling, completed, removed, or returned
-    if (!sourceList[i] || completed[i] || pulling[i] || iteratorReturned) return;
-
+    if (!sourceList[i] || completed[i] || iteratorReturned) return;
+    if (sourcePulls.isPulling(i)) { pendingPulls[i] = true; return; }
     pulling[i] = true;
     pendingPulls[i] = false;
-    const src = sourceList[i] as AsyncIterator<T>;
-
-    // An AsyncIterator may synchronously throw, and adapter iterators may
-    // return IteratorResult directly. Normalize both without leaving the
-    // coordinator's pulling flag stuck.
-    let pending: Promise<IteratorResult<T>>;
-    try {
-      pending = Promise.resolve(src.next());
-    } catch (error) {
-      pending = Promise.reject(error);
-    }
-    pending.then(
-      (r: IteratorResult<T>) => {
-        pulling[i] = false;
-
-        // Don't process if source was completed/removed during the async wait
-        if (sourceList[i] !== src || completed[i] || iteratorReturned) return;
-
-        if (r.done) {
-          markSourceComplete(i);
-          pushEvent({ type: "complete", sourceIndex: i }, i);
-        } else {
-          pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
-        }
-
-        notify();
-
-        // CRITICAL: Only schedule next pull if there are more values AND not already pulling
-        // AND not completed AND there's a pending pull request
-        if (sourceList[i] && !completed[i] && !pulling[i] && pendingPulls[i]) {
-          pendingPulls[i] = false;
-          Promise.resolve().then(() => pullAsync(i));
-        }
-      },
-      (err: any) => {
-        pulling[i] = false;
-        if (sourceList[i] !== src || completed[i] || iteratorReturned) return;
-
+    const src = sourceList[i];
+    sourcePulls.request(i, result => {
+      pulling[i] = false;
+      if (sourceList[i] !== src || completed[i] || iteratorReturned) return;
+      if (result.done) {
         markSourceComplete(i);
-        pushEvent({ type: "error", error: normalizeError(err), sourceIndex: i }, i);
-        notify();
+        pushEvent({ type: "complete", sourceIndex: i }, i);
+      } else {
+        pushEvent({ type: "value", value: result.value, sourceIndex: i }, i);
       }
-    );
+      notify();
+      if (!result.done && sourceList[i] === src && pendingPulls[i]) {
+        pendingPulls[i] = false;
+        Promise.resolve().then(() => pullAsync(i));
+      }
+    }, error => {
+      pulling[i] = false;
+      if (sourceList[i] !== src || completed[i] || iteratorReturned) return;
+      markSourceComplete(i);
+      pushEvent({ type: "error", error: normalizeError(error), sourceIndex: i }, i);
+      notify();
+    });
   }
 
   /**
@@ -494,6 +476,7 @@ export function createAsyncCoordinator<T = any>(
 
     async return() {
       iteratorReturned = true;
+      sourcePulls.close();
       stopEvents();
       activeCount = 0;
       queue.length = 0;
@@ -555,6 +538,7 @@ export function createAsyncCoordinator<T = any>(
         pendingPulls.push(false);
         pushDriven.push("__onPush" in (source as any));
       }
+      sourcePulls.attach(index, source);
       activeCount++;
 
       if (key !== undefined) {

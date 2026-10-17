@@ -1,13 +1,12 @@
-# Batch 13 — Runtime-routed coordinator events
+# Batch 14 — Runtime-owned source pulls
 
-The AsyncIterator coordinator now publishes source value, completion and error events through the existing internal `RuntimeEventDispatcher`, and consumes only events tagged with its private coordinator identity. This is an incremental bridge, **not** a replacement of AsyncIterator pull coordination.
+Move ownership of outstanding source `next()` operations into an internal runtime component (`RuntimeSourcePulls`). The coordinator retains its existing queue and AsyncIterator compatibility while delegating pull lifetimes and stale-result suppression.
 
-- Preserve FIFO, reentrancy-safe runtime dispatch.
-- Isolate events across independent coordinator instances.
-- Keep existing public iterator and operator APIs unchanged.
-- Detach the coordinator's runtime listener on `return()`; ignore late source resolutions.
-- Add focused integration tests for event routing, isolation, and cancellation.
+- One outstanding pull per source slot.
+- Detach invalidates in-flight results, including when sparse indices are reused.
+- Closing a coordinator invalidates all outstanding pulls immediately.
+- Preserve synchronous throws, asynchronous rejections, and event publication.
 
-Targeted TypeScript compilation of `src/lib/utils/coordinator.ts` passed. The full test suite was not run.
+This is a transitional step: the coordinator still owns event buffering and push hooks. Full integration tests have **not** been run.
 
-Commit: `refactor(runtime): route coordinator source events through dispatcher`
+Commit: `refactor(runtime): centralize source pull ownership and stale-result guards`
