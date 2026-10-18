@@ -13,6 +13,10 @@ export interface Scheduler {
   /** Optional targeted flush hook; the runtime currently uses flush(). */
   flushImmediately?(node: SchedulableNode): void;
   get isDirty(): boolean;
+  /** Diagnostics: number of nodes with queued work. Optional for custom schedulers. */
+  readonly pending?: number;
+  /** Diagnostics: true while flushing is paused. Optional for custom schedulers. */
+  readonly isPaused?: boolean;
 }
 
 export class DefaultScheduler implements Scheduler {
@@ -136,6 +140,7 @@ export class DefaultScheduler implements Scheduler {
   }
 
   get isDirty(): boolean { return this.queuedCount > 0; }
+  get pending(): number { return this.queuedCount; }
 }
 
 export class RuntimeScheduling {

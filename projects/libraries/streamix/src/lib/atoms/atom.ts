@@ -463,7 +463,7 @@ function finalizeAtomInstance<T extends Atom<any> & InternalAtomContainer>(insta
     enumerable: false,
   });
   if (conflate) (instance as any)[ANALOG_DELIVERY] = true;
-  internalRuntime.register(instance);
+  internalRuntime.register(instance, instance[NODE]);
   // Runtime bookkeeping is not a user lifecycle hook. Keeping it in the
   // public-ish disposal set made an otherwise empty atom appear to retain a
   // disposer, and obscured real iterator cleanup leaks.
@@ -804,6 +804,7 @@ function atomFromIteratorInternal<T>(
   const subscriptions = new Set<Subscription>();
   let iterator: AsyncIterator<T> | undefined;
   let runPromise: Promise<void> | null = null;
+  let awaitingNext = false;
   let executionToken: number | undefined;
   let executionExit: "complete" | "cancel" | "error" = "cancel";
 
@@ -866,13 +867,16 @@ function atomFromIteratorInternal<T>(
   const run = async () => {
     if (runPromise) return runPromise;
     executionExit = "cancel";
-    const token = internalRuntime.executions.start(instance);
+    const token = internalRuntime.executions.start(instance, instance.name);
     executionToken = token;
     runPromise = (async () => {
       try {
         iterator = source[Symbol.asyncIterator]();
         while (!disposed) {
-          const result = await iterator.next();
+          awaitingNext = true;
+          let result: IteratorResult<T>;
+          try { result = await iterator.next(); }
+          finally { awaitingNext = false; }
           if (disposed || result.done) break;
 
           internalRuntime.executions.next(instance, token);
@@ -907,7 +911,7 @@ function atomFromIteratorInternal<T>(
         }
       } finally {
         if (executionToken === token) {
-          internalRuntime.executions.finish(instance, token, executionExit);
+          internalRuntime.executions.finish(instance, token, executionExit, executionExit === "error" ? errorValue : undefined);
           internalRuntime.events.publish({ node: instance, generation: token, kind: executionExit });
           executionToken = undefined;
         }
@@ -969,6 +973,10 @@ function atomFromIteratorInternal<T>(
 
   const { instance: baseInstance, errorHandlers, subs } = base;
   instance = baseInstance as typeof instance;
+  internalRuntime.registerFlow(instance, () => ({
+    started, awaitingNext, subscribers: activeSubCount,
+    hasValue: current !== NO_INITIAL_VALUE, value: current === NO_INITIAL_VALUE ? undefined : current,
+  }));
   if (hasInitialValue) {
     markAtomAsEmitted(instance as any);
     notifyEmitHandlers(instance as any);

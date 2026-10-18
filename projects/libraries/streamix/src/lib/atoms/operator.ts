@@ -164,7 +164,7 @@ export function createOperator<T = any, R = T>(
         };
       }
 
-      return trackOperatorExecution(iterator);
+      return trackOperatorExecution(iterator, name);
     }
   };
 

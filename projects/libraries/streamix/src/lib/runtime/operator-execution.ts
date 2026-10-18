@@ -4,8 +4,9 @@ import { internalRuntime } from './runtime';
  * Observe an operator iterator without changing its pull/push contract.
  * Execution begins at the first pull, not when the operator is composed.
  * In-place instrumentation preserves __tryNext, __onPush and other iterator hooks.
+ * The optional name labels the execution record for runtime diagnostics.
  */
-export function trackOperatorExecution<T>(iterator: AsyncIterator<T>): AsyncIterator<T> {
+export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: string): AsyncIterator<T> {
   const node = iterator as object;
   const next = iterator.next.bind(iterator);
   const originalReturn = iterator.return?.bind(iterator);
@@ -14,14 +15,16 @@ export function trackOperatorExecution<T>(iterator: AsyncIterator<T>): AsyncIter
   let finished = false;
 
   const start = () => {
-    if (token === undefined && !finished) token = internalRuntime.executions.start(node);
+    if (token === undefined && !finished) token = internalRuntime.executions.start(node, name);
   };
   const finish = (kind: 'complete' | 'cancel' | 'error', error?: unknown) => {
     if (finished) return;
     finished = true;
     if (token === undefined) return;
-    internalRuntime.executions.finish(node, token, kind);
+    internalRuntime.executions.finish(node, token, kind, error);
     internalRuntime.events.publish({ node, generation: token, kind, ...(kind === 'error' ? { error } : {}) });
+    // Operator iterators are one-shot: keep their diagnostics record only while active.
+    internalRuntime.executions.forget(node);
   };
   const accept = (result: IteratorResult<T>): IteratorResult<T> => {
     if (result.done) finish('complete');
