@@ -52,20 +52,24 @@ const STYLE = `
 .sx-chip[hidden]{display:none}
 .sx-hint{margin:0;padding:5px 12px;color:#64748b;font-size:10.5px;border-bottom:1px solid #1f2a3d;background:rgba(148,163,184,.03);flex:none}
 .sx-hint[hidden]{display:none}
-.sx-main{display:flex;flex:1;min-height:0;overflow:hidden}
+.sx-main{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
 .sx-rows,.sx-trace{flex:1;min-width:0;min-height:0;overflow:auto}
 .sx-rows[hidden],.sx-trace[hidden]{display:none}
 .sx-rows.sx-empty{color:#64748b;font-style:italic;padding:16px 12px}
-.sx-detail{flex:none;width:300px;overflow:auto;border-left:1px solid #1f2a3d;background:rgba(2,6,17,.55);padding:10px 12px;margin:0;
+.sx-detail{flex:0 1 42%;min-height:0;width:100%;overflow:auto;border-top:1px solid #1f2a3d;background:rgba(2,6,17,.55);padding:10px 12px;margin:0;
   font:11px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;color:#cbd5e1;white-space:pre-wrap;overflow-wrap:anywhere}
 .sx-detail[hidden]{display:none}
-.sx-row{display:flex;align-items:center;gap:7px;width:100%;text-align:left;cursor:pointer;border:0;border-bottom:1px solid rgba(148,163,184,.07);background:transparent;color:inherit;font:inherit;padding:6px 10px;transition:background .12s}
+.sx-row,.sx-columns{display:grid;grid-template-columns:76px minmax(150px,1.6fr) 42px 110px minmax(90px,1fr) minmax(120px,1fr);align-items:center;gap:7px;width:100%;min-width:680px}
+.sx-columns{position:sticky;top:0;z-index:1;padding:6px 10px;background:#101a2c;border-bottom:1px solid #253044;color:#94a3b8;font-size:10px;font-weight:650;letter-spacing:.3px}
+.sx-row{text-align:left;cursor:pointer;border:0;border-bottom:1px solid rgba(148,163,184,.07);background:transparent;color:inherit;font:inherit;padding:6px 10px;transition:background .12s}
 .sx-row:hover{background:rgba(34,211,238,.06)}
 .sx-row[data-selected="true"]{background:rgba(34,211,238,.1);box-shadow:inset 2px 0 0 #22d3ee}
+.sx-row > *{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sx-row .sx-badge,.sx-row .sx-pill{justify-self:start;max-width:100%}
 .sx-row:focus-visible{outline:1px solid #22d3ee;outline-offset:-1px}
 .sx-badge{flex:none;font-size:9.5px;font-weight:650;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px;border-radius:5px;background:var(--sx-kind-bg,#334155);color:var(--sx-kind-fg,#cbd5e1)}
 .sx-name{font-weight:560;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.sx-id{color:#475569;font-size:10.5px;flex:none}
+.sx-id{font-variant-numeric:tabular-nums;color:#475569;font-size:10.5px;flex:none}
 .sx-pill{flex:none;font-size:10px;padding:1px 7px;border-radius:999px;background:rgba(148,163,184,.12);color:#94a3b8}
 .sx-pill[data-state="running"],.sx-pill[data-state="next"]{background:rgba(52,211,153,.14);color:#34d399}
 .sx-pill[data-state="awaiting source"]{background:rgba(56,189,248,.13);color:#38bdf8}
@@ -288,7 +292,7 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
         : tab === 'Atoms' ? ['atom', 'derived'].includes(row.kind) : row.kind === 'flow')));
     rows.hidden = tab === 'Trace';
     traceRows.hidden = tab !== 'Trace';
-    detail.hidden = tab === 'Trace';
+    detail.hidden = tab === 'Trace' || selected === undefined;
     traceHelp.hidden = operatorLabel.hidden = tab !== 'Trace';
     kind.hidden = relatedLabel.hidden = tab === 'Trace';
     filter.placeholder = tab === 'Trace' ? 'Filter trace by name or event' : 'Filter by name or file';
@@ -302,6 +306,15 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
       rows.replaceChildren();
       rows.classList.toggle('sx-empty', !list.length);
       if (!list.length) rows.textContent = 'No matching live objects.';
+      else {
+        const columns = document.createElement('div');
+        columns.className = 'sx-columns';
+        columns.setAttribute('aria-hidden', 'true');
+        for (const label of ['Kind', 'Name', 'ID', 'State', 'Value', 'Source']) {
+          columns.appendChild(spanOf('', label));
+        }
+        rows.appendChild(columns);
+      }
       for (const row of list) {
         const button = document.createElement('button');
         button.dataset['streamixObjectId'] = String(row.id);
