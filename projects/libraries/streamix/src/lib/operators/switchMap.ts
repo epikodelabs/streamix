@@ -7,7 +7,7 @@ import { normalizeError } from "../atoms";
 import { SwitchingInnerExecution } from "../runtime/inner-execution";
 import { isAsyncIterable } from "../utils/helpers";
 import { trackOperatorExecution } from "../runtime/operator-execution";
-import { __streamixOperatorExecution } from "../runtime/introspection";
+import { __streamixBeginLifetime, type StreamixLifetimeSpan, __streamixOperatorExecution } from "../runtime/introspection";
 
 /**
  * Transforms each value from the source stream into a new inner stream, promise, or array,
@@ -42,6 +42,7 @@ export function switchMap<T = any, R = any>(
     let pendingProjection = false;
     let index = 0;
     let stopped = false;
+    let lifetime: StreamixLifetimeSpan | undefined;
 
     const checkComplete = () => {
       if (!stopped && inputCompleted && !execution.active && !pendingProjection) {
@@ -53,6 +54,7 @@ export function switchMap<T = any, R = any>(
     const fail = (error: unknown) => {
       if (stopped) return;
       stopped = true;
+      lifetime?.finish('error');
       void execution.close();
       output.fail(normalizeError(error));
       void Promise.resolve(source.return?.()).catch(() => {});
@@ -74,12 +76,14 @@ export function switchMap<T = any, R = any>(
         return;
       }
       if (!execution.attach(generation, iterator)) return;
+      const span = lifetime;
       void (async () => {
         try {
           while (execution.isCurrent(generation)) {
             const item = await iterator.next();
             if (!execution.isCurrent(generation)) break;
-            if (item.done) break;
+            if (item.done) { span?.finish('complete'); break; }
+            span?.output();
             output.push(item.value);
           }
         } catch (error) {
@@ -92,6 +96,9 @@ export function switchMap<T = any, R = any>(
     };
 
     const processOuterValue = (value: T) => {
+      lifetime?.finish('cancel');
+      lifetime = __streamixBeginLifetime(this);
+      lifetime?.start();
       const generation = execution.advance();
       pendingProjection = false;
       let projected: ReturnType<typeof project>;
@@ -144,7 +151,7 @@ export function switchMap<T = any, R = any>(
         try {
           while (!stopped) {
             const item = await source.next();
-            if (item.done) break;
+            if (stopped || item.done) break;
             processOuterValue(item.value);
           }
           if (!stopped) { inputCompleted = true; checkComplete(); }
@@ -156,12 +163,14 @@ export function switchMap<T = any, R = any>(
     const baseThrow = output.throw?.bind(output);
     output.return = async () => {
       stopped = true;
+      lifetime?.finish('cancel');
       await execution.close();
       try { await source.return?.(); } catch { /* best effort */ }
       return baseReturn ? baseReturn() : DONE;
     };
     output.throw = async (error: unknown) => {
       stopped = true;
+      lifetime?.finish('error');
       await execution.close();
       try { await source.return?.(); } catch { /* best effort */ }
       if (baseThrow) return baseThrow(normalizeError(error));

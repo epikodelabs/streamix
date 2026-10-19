@@ -28,25 +28,27 @@ export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: str
     // Operator iterators are one-shot: keep their diagnostics record only while active.
     internalRuntime.executions.forget(node);
   };
-  const accept = (result: IteratorResult<T>): IteratorResult<T> => {
+  const accept = (result: IteratorResult<T>, requestedAt?: number): IteratorResult<T> => {
     if (result.done) finish('complete');
     else if (!finished && token !== undefined) {
       internalRuntime.executions.next(node, token);
-      internalRuntime.events.publish({ node, generation: token, kind: 'next', value: result.value });
+      internalRuntime.events.publish({ node, generation: token, kind: 'next', value: result.value,
+        ...(requestedAt === undefined ? {} : { pullMs: Math.max(0, performance.now() - requestedAt) }) });
     }
     return result;
   };
   const fail = (error: unknown): never => { finish('error', error); throw error; };
-  const observe = (result: IteratorResult<T> | PromiseLike<IteratorResult<T>>): any => {
+  const observe = (result: IteratorResult<T> | PromiseLike<IteratorResult<T>>, requestedAt?: number): any => {
     if (result && typeof (result as any).then === 'function') {
-      return Promise.resolve(result).then(accept, fail);
+      return Promise.resolve(result).then(value => accept(value, requestedAt), fail);
     }
-    return accept(result as IteratorResult<T>);
+    return accept(result as IteratorResult<T>, requestedAt);
   };
 
   iterator.next = ((...args: any[]) => {
     start();
-    try { return observe((next as any)(...args)); }
+    const requestedAt = internalRuntime.events.observed ? performance.now() : undefined;
+    try { return observe((next as any)(...args), requestedAt); }
     catch (error) { return fail(error); }
   }) as typeof iterator.next;
 

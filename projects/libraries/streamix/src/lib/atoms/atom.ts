@@ -649,6 +649,8 @@ type AtomSubscriber<T> = (current: T, previous: T) => MaybePromise;
 interface AtomBaseConfig<T> {
   /** Diagnostics-only: read stored state without evaluating or tracking dependencies. */
   getCachedValue: () => T;
+  /** Flow subscriptions include handles without a value callback. */
+  getSubscriberCount?: () => number;
   conflate: boolean;
   maxSubscribers: number;
   node: AtomNode;
@@ -692,7 +694,7 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
     get disposed() { return config.getDisposed(); },
     get dirty() { return config.getDirty(); },
     get error() { return config.getError(); },
-    get subscriberCount() { return subs.size; },
+    get subscriberCount() { return config.getSubscriberCount?.() ?? subs.size; },
 
     get value() {
       const value = config.getValue(instance);
@@ -767,7 +769,7 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
     internalRuntime.registerAtomState(instance, () => {
       const value = config.getCachedValue();
       return { hasValue: value !== NO_INITIAL_VALUE, value: value === NO_INITIAL_VALUE ? undefined : value,
-        subscribers: subs.size, error: config.getError() };
+        subscribers: config.getSubscriberCount?.() ?? subs.size, error: config.getError() };
     });
   }
   return {
@@ -886,13 +888,15 @@ function atomFromIteratorInternal<T>(
         iterator = source[Symbol.asyncIterator]();
         while (!disposed) {
           awaitingNext = true;
+          const requestedAt = internalRuntime.events.observed ? performance.now() : undefined;
           let result: IteratorResult<T>;
           try { result = await iterator.next(); }
           finally { awaitingNext = false; }
           if (disposed || result.done) break;
 
           internalRuntime.executions.next(instance, token);
-          internalRuntime.events.publish({ node: instance, generation: token, kind: "next", value: result.value });
+          internalRuntime.events.publish({ node: instance, generation: token, kind: "next", value: result.value,
+            ...(requestedAt === undefined ? {} : { pullMs: Math.max(0, performance.now() - requestedAt) }) });
           previous = current;
           current = result.value;
           hasNewValue = true;
@@ -951,6 +955,7 @@ function atomFromIteratorInternal<T>(
 
   const base = createAtomBase<T>({
     getCachedValue: () => current,
+    getSubscriberCount: () => activeSubCount,
     conflate,
     maxSubscribers,
     node,
@@ -978,8 +983,9 @@ function atomFromIteratorInternal<T>(
       activeSubCount++;
     },
     onUnsubscribe: async (_callback, unsubscribe) => {
-      subscriptions.delete(unsubscribe);
-      if (--activeSubCount <= 0) await disposeInstance();
+      if (!subscriptions.delete(unsubscribe)) return;
+      activeSubCount = Math.max(0, activeSubCount - 1);
+      if (activeSubCount === 0) await disposeInstance();
     },
     onDispose: () => disposeInstance(),
   });

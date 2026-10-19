@@ -10,7 +10,8 @@ export class ConcurrentInnerExecution<T> {
   constructor(
     readonly concurrency: number,
     readonly bufferSize: number,
-    private readonly start: (value: T) => void
+    private readonly start: (value: T) => void,
+    private readonly discard?: (value: T, reason: 'dropped' | 'cancel') => void
   ) {
     if (!(concurrency === Infinity || (Number.isInteger(concurrency) && concurrency > 0))) {
       throw new RangeError('mergeMap concurrent must be a positive integer or Infinity');
@@ -30,8 +31,13 @@ export class ConcurrentInnerExecution<T> {
       this.launch(value);
     } else if (this.bufferSize > 0) {
       // Preserve the previous mergeMap drop-oldest overflow policy.
-      if (this.pending.length >= this.bufferSize) this.pending.shift();
+      if (this.pending.length >= this.bufferSize) {
+        const dropped = this.pending.shift()!;
+        this.discard?.(dropped, 'dropped');
+      }
       this.pending.push(value);
+    } else {
+      this.discard?.(value, 'dropped');
     }
   }
 
@@ -45,6 +51,7 @@ export class ConcurrentInnerExecution<T> {
 
   close(): void {
     this.closed = true;
+    for (const value of this.pending) this.discard?.(value, 'cancel');
     this.pending.length = 0;
   }
 

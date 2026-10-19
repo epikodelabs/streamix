@@ -1,3 +1,4 @@
+import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection';
 import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
@@ -5,14 +6,14 @@ import { normalizeError } from "../atoms";
 import { SerialInnerExecution } from "../runtime/serial-inner-execution";
 
 /**
- * Maps each value from the source stream to an inner stream, ignoring 
+ * Maps each value from the source stream to an inner stream, ignoring
  * new outer values while the current inner stream is still executing.
  *
- * This operator is useful for preventing overlapping operations (e.g. preventing 
- * multiple simultaneous form submissions or API calls). If a new value arrives 
- * from the source while an earlier projected stream is still active, that 
+ * This operator is useful for preventing overlapping operations (e.g. preventing
+ * multiple simultaneous form submissions or API calls). If a new value arrives
+ * from the source while an earlier projected stream is still active, that
  * new value is silently discarded.
- * * Only after the current inner stream completes will the operator become 
+ * * Only after the current inner stream completes will the operator become
  * "idle" and ready to accept the next value from the source.
  *
  * @template T The type of values emitted by the source stream.
@@ -27,6 +28,8 @@ export const exhaustMap = <T = any, R = any>(
 ) =>
   createOperator<T, R>("exhaustMap", function (this: Operator, source) {
     let outerIndex = 0;
+    const operator = this;
+    let lifetime: StreamixLifetimeSpan | undefined;
     const inner = new SerialInnerExecution<R>();
     let isSourceDone = false;
 
@@ -44,52 +47,63 @@ export const exhaustMap = <T = any, R = any>(
           isSourceDone = true;
           return;
         }
+        __streamixBeginLifetime(operator)?.finish('dropped');
       }
     };
 
     return {
       async next() {
-        while (true) {
-          if (inner.active) {
-            const result = await inner.next();
+        try {
+          while (true) {
+            if (inner.stopped) return DONE;
+            if (inner.active) {
+              const result = await inner.next();
 
-            if (!result.done) {
-              return NEXT(result.value);
+              if (!result.done) {
+                lifetime?.output();
+                return NEXT(result.value);
+              }
+
+              lifetime?.finish('complete');
+              discardBufferedOuterValues();
+              if (isSourceDone) return DONE;
+              continue;
             }
 
-            discardBufferedOuterValues();
-            if (isSourceDone) return DONE;
-            continue;
-          }
+            const result = await source.next();
+            if (inner.stopped) return DONE;
+            if (result.done) {
+              isSourceDone = true;
+              return DONE;
+            }
 
-          const result = await source.next();
-          if (result.done) {
-            isSourceDone = true;
-            return DONE;
-          }
-
-          let projected: any;
-          try {
-            projected = project(result.value, outerIndex++);
-          } catch (err) {
-            isSourceDone = true;
-            throw normalizeError(err);
-          }
-          if (isPromiseLike(projected)) {
+            lifetime = __streamixBeginLifetime(operator);
+            lifetime?.start();
+            let projected: any;
             try {
-              projected = await projected;
+              projected = project(result.value, outerIndex++);
             } catch (err) {
               isSourceDone = true;
               throw normalizeError(err);
             }
-          }
+            if (isPromiseLike(projected)) {
+              try {
+                projected = await projected;
+              } catch (err) {
+                isSourceDone = true;
+                throw normalizeError(err);
+              }
+            }
 
-          const innerStream = from<R>(projected as any);
-          inner.attach(innerStream[Symbol.asyncIterator]() as AsyncIterator<R>);
-        }
+            if (inner.stopped) return DONE;
+            const innerStream = from<R>(projected as any);
+            inner.attach(innerStream[Symbol.asyncIterator]() as AsyncIterator<R>);
+          }
+        } catch (error) { lifetime?.finish('error'); throw error; }
       },
 
       async return(_value?: any) {
+        lifetime?.finish('cancel');
         try {
           await inner.close();
         } catch {}
@@ -100,6 +114,7 @@ export const exhaustMap = <T = any, R = any>(
       },
 
       async throw(err: any) {
+        lifetime?.finish('error');
         const error = normalizeError(err);
         try {
           await inner.close();

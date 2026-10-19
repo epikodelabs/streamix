@@ -1,3 +1,4 @@
+import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection';
 import { createPushOperator, MaybePromise, normalizeError } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from '../factories';
@@ -49,29 +50,41 @@ export function mergeMap<T = any, R = any>(
   }
   return createPushOperator<T, R>('mergeMap', function (source, output) {
     let stopped = false;
+    const operator = this;
+    const lifetimes = new Map<number, StreamixLifetimeSpan>();
+    const finishActive = (outcome: 'cancel' | 'error') => {
+      for (const span of lifetimes.values()) span.finish(outcome);
+      lifetimes.clear();
+    };
+    let cancelPending = () => {};
     const coordinator = createAsyncCoordinator<T | R>([source as AsyncIterator<T | R>]);
 
     void (async () => {
       const SOURCE_INDEX = 0;
       let projectIndex = 0;
       let sourceCompleted = false;
-      const executions = new ConcurrentInnerExecution<T>(concurrent, bufferSize, value => {
-        const projected = project(value, projectIndex++);
-        const inner = from(projected as any);
-        coordinator.addSource(inner[Symbol.asyncIterator]() as AsyncIterator<T | R>);
-      });
+      const executions = new ConcurrentInnerExecution<{ value: T; span?: StreamixLifetimeSpan }>(concurrent, bufferSize, ({ value, span }) => {
+        span?.start();
+        try {
+          const projected = project(value, projectIndex++);
+          const inner = from(projected as any);
+          const sourceIndex = coordinator.addSource(inner[Symbol.asyncIterator]() as AsyncIterator<T | R>);
+          if (span) lifetimes.set(sourceIndex, span);
+        } catch (error) { span?.finish('error'); throw error; }
+      }, (job, reason) => job.span?.finish(reason));
+      cancelPending = () => executions.close();
 
       try {
         while (!stopped) {
           const nextEvent = await coordinator.next();
-          if (nextEvent.done) break;
+          if (stopped || nextEvent.done) break;
 
           const event = nextEvent.value as RunnerEvent<R>;
 
           if (event.sourceIndex === SOURCE_INDEX) {
             if (event.type === 'value') {
               const sourceValue = event.value as unknown as T;
-              executions.accept(sourceValue);
+              executions.accept({ value: sourceValue, span: __streamixBeginLifetime(operator) });
             } else if (event.type === 'complete') {
               sourceCompleted = true;
               if (executions.idle) {
@@ -81,15 +94,21 @@ export function mergeMap<T = any, R = any>(
               throw normalizeError(event.error);
             }
           } else {
+            const span = lifetimes.get(event.sourceIndex);
             if (event.type === 'value') {
+              span?.output();
               output.push(event.value);
             } else if (event.type === 'complete') {
+              span?.finish('complete');
+              lifetimes.delete(event.sourceIndex);
               executions.complete();
 
               if (sourceCompleted && executions.idle) {
                 break;
               }
             } else if (event.type === 'error') {
+              span?.finish('error');
+              lifetimes.delete(event.sourceIndex);
               throw normalizeError(event.error);
             }
           }
@@ -99,6 +118,7 @@ export function mergeMap<T = any, R = any>(
       } catch (err) {
         if (!output.disposed) output.fail(normalizeError(err));
       } finally {
+        finishActive('cancel');
         executions.close();
         await coordinator.return?.();
       }
@@ -106,6 +126,8 @@ export function mergeMap<T = any, R = any>(
 
     return async () => {
       stopped = true;
+      finishActive('cancel');
+      cancelPending();
       await coordinator.return?.();
     };
   });

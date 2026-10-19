@@ -13,6 +13,13 @@ export interface StreamixSourceMetadata {
   readonly members?: Readonly<Record<string, StreamixSourceMetadata>>;
 }
 export interface StreamixInspectionFilter { name?: string; file?: string; kind?: string; }
+/** Constant-space counters for events observed since this object was instrumented. */
+export interface StreamixEmissionMetrics {
+  readonly total: number;
+  readonly errors: number;
+  readonly completed: number;
+  readonly cancelled: number;
+}
 export interface StreamixObjectDetails {
   readonly id: number;
   readonly name: string;
@@ -22,6 +29,8 @@ export interface StreamixObjectDetails {
   readonly value: string;
   readonly subscribers: number;
   readonly emitted: number;
+  readonly innerLifetimes: readonly StreamixOperatorLifetime[];
+  readonly metrics: StreamixEmissionMetrics;
   readonly owner?: number;
   readonly target?: number;
   readonly dependencies: readonly number[];
@@ -30,7 +39,32 @@ export interface StreamixObjectDetails {
   readonly members: readonly { name: string; id?: number; state: string }[];
   readonly error?: string;
 }
-export interface StreamixInspectionEvent { readonly id: number; readonly name: string; readonly kind: string; readonly time: number; readonly value?: string; readonly error?: string; }
+export interface StreamixEmissionLifetime {
+  readonly id: number;
+  readonly emission: number;
+  readonly durationMs: number;
+  readonly queueMs: number;
+  readonly firstOutputMs?: number;
+  readonly outputs: number;
+  readonly outcome: 'complete' | 'cancel' | 'error' | 'dropped';
+}
+export interface StreamixLifetimeOperator {
+  readonly id: number;
+  readonly name: string;
+  readonly file: string;
+  readonly line: number;
+  readonly column: number;
+}
+export interface StreamixOperatorLifetime {
+  readonly operator: StreamixLifetimeOperator;
+  readonly lifetime: StreamixEmissionLifetime;
+}
+export interface StreamixLifetimeSpan {
+  start(): void;
+  output(): void;
+  finish(outcome: StreamixEmissionLifetime['outcome']): void;
+}
+export interface StreamixInspectionEvent { readonly id: number; readonly name: string; readonly kind: string; readonly time: number; readonly objectKind?: StreamixSourceMetadata['kind']; readonly ownerName?: string; readonly emission?: number; readonly lifetime?: StreamixEmissionLifetime; readonly operator?: StreamixLifetimeOperator; readonly pullMs?: number; readonly value?: string; readonly error?: string; }
 export interface StreamixInspectorAPI {
   inspect(filter?: StreamixInspectionFilter): readonly StreamixObjectDetails[];
   details(id: number): StreamixObjectDetails | undefined;
@@ -39,7 +73,7 @@ export interface StreamixInspectorAPI {
 }
 declare global { interface Window { __streamix?: StreamixInspectorAPI; } }
 
-type Entry = { id: number; ref: WeakRef<object>; source: StreamixSourceMetadata; owner?: number; composition: number[]; latest?: string; state?: string; emitted?: number; target?: number; subscriptions?: Set<number> };
+type Entry = { id: number; ref: WeakRef<object>; source: StreamixSourceMetadata; owner?: number; composition: number[]; innerLifetimes?: Map<number, StreamixOperatorLifetime>; inputs?: number; metrics: { total: number; errors: number; completed: number; cancelled: number }; latest?: string; state?: string; emitted?: number; target?: number; subscriptions?: Set<number> };
 const identities = new WeakMap<object, Entry>();
 const entries = new Map<number, Entry>();
 // Finalization releases metadata without retaining the inspected object. The
@@ -84,8 +118,10 @@ export function streamixPreview(value: unknown): string {
   try { return (typeof value === 'string' ? value : JSON.stringify(summarize(value, 2)) ?? String(value)).slice(0, 240); }
   catch { return '[unavailable]'; }
 }
-function publish(entry: Entry, kind: string, value?: unknown, error?: unknown): void {
-  const event = Object.freeze({ id: entry.id, name: entry.source.name, kind, time: Date.now(),
+function publish(entry: Entry, kind: string, value?: unknown, error?: unknown, pullMs?: number): void {
+  const event = Object.freeze({ id: entry.id, name: entry.source.name, kind, time: Date.now(), objectKind: entry.source.kind,
+    ...(pullMs === undefined ? {} : { pullMs }),
+    ...((kind === 'next' || kind === 'change') && entry.metrics.total > 0 ? { emission: entry.metrics.total } : {}),
     ...(value !== undefined ? { value: streamixPreview(value) } : {}),
     ...(error !== undefined ? { error: error instanceof Error ? error.message.slice(0, 240) : streamixPreview(error) } : {}) });
   appendEvent(event);
@@ -103,6 +139,10 @@ function immutableMetadata(source: StreamixSourceMetadata): StreamixSourceMetada
 }
 function idOf(node: object): number | undefined { return identities.get(node)?.id; }
 function ids(nodes: Iterable<object>): number[] { return [...nodes].map(idOf).filter((id): id is number => id !== undefined); }
+function recordEmission(entry: Entry): void { entry.metrics.total++; }
+function emissionMetrics(entry: Entry): StreamixEmissionMetrics {
+  return Object.freeze({ ...entry.metrics });
+}
 function details(id: number): StreamixObjectDetails | undefined {
   const entry = entries.get(id);
   const node = entry?.ref.deref() as any;
@@ -116,7 +156,11 @@ function details(id: number): StreamixObjectDetails | undefined {
     state: entry.source.kind === 'subscription' ? 'subscribed' : execution?.active ? (flow?.awaitingNext ? 'awaiting source' : 'running')
       : execution?.lastExit ?? entry.state ?? (flow?.started === false ? 'idle' : cached?.hasValue ? 'ready' : 'unevaluated'),
     value: entry.source.kind === 'subscription' ? 'subscription handle' : cached?.hasValue ? streamixPreview(cached.value) : entry.latest ?? (entry.source.kind === 'scope' ? 'scope' : 'unevaluated'),
-    subscribers: cached?.subscribers ?? flow?.subscribers ?? 0, emitted: execution?.emitted ?? entry.emitted ?? 0,
+    subscribers: flow?.subscribers ?? cached?.subscribers ?? 0, emitted: entry.metrics.total,
+    metrics: emissionMetrics(entry),
+    innerLifetimes: Object.freeze([...(entry.innerLifetimes?.values() ?? [])].sort((a, b) =>
+      a.operator.file.localeCompare(b.operator.file) || a.operator.line - b.operator.line ||
+      a.operator.column - b.operator.column || a.operator.id - b.operator.id)),
     target: entry.target,
     owner: entry.owner ?? (object(node.parent) ? idOf(node.parent) : undefined),
     dependencies: Object.freeze(ids(internalRuntime.graph.dependencies(node))),
@@ -153,6 +197,9 @@ export function enableStreamixIntrospection(): void {
   internalRuntime.observe(event => {
     const entry = identities.get(event.node);
     if (!entry) return;
+    if (event.kind === 'change' && (entry.source.kind === 'atom' || entry.source.kind === 'derived') && !internalRuntime.flowState(event.node)) {
+      recordEmission(entry);
+    }
     if (event.kind === 'dispose') {
       __streamixDebugDispose(event.node);
       pipelines.delete(event.node);
@@ -164,22 +211,84 @@ export function enableStreamixIntrospection(): void {
           else entries.delete(id);
         }
       }
-    } else publish(entry, event.kind);
+    } else if (event.kind !== 'change' || (entry.source.kind !== 'flow' && entry.source.kind !== 'source')) {
+      // Flow and source entries publish every emission through the execution
+      // dispatcher (next/complete/... with the value). Their valueless graph
+      // 'change' would duplicate each event and let an always-ticking source
+      // flood the trace with counter lines.
+      publish(entry, event.kind);
+    }
   });
   internalRuntime.events.observe(event => {
     const entry = identities.get(event.node);
     if (!entry) return;
     entry.state = event.kind;
+    if (event.kind === 'next') recordEmission(entry);
+    else if (event.kind === 'error') entry.metrics.errors++;
+    else if (event.kind === 'complete') entry.metrics.completed++;
+    else if (event.kind === 'cancel') entry.metrics.cancelled++;
     if (event.kind === 'next') { entry.latest = streamixPreview(event.value); entry.emitted = (entry.emitted ?? 0) + 1; }
     const definition = definitions.get(event.node);
     if (definition) {
+      if (event.kind === 'next') recordEmission(definition);
+      else if (event.kind === 'error') definition.metrics.errors++;
+      else if (event.kind === 'complete') definition.metrics.completed++;
+      else if (event.kind === 'cancel') definition.metrics.cancelled++;
       definition.state = event.kind === 'next' ? 'running' : event.kind;
       definition.latest = entry.latest;
       if (event.kind === 'next') definition.emitted = (definition.emitted ?? 0) + 1;
     }
-    publish(entry, event.kind, event.value, event.error ?? internalRuntime.executions.describe(event.node)?.error);
+    publish(entry, event.kind, event.value, event.error ?? internalRuntime.executions.describe(event.node)?.error, event.pullMs);
     if (event.kind !== 'next' && entry.source.kind === 'operator') entries.delete(entry.id);
   });
+}
+
+let lifetimeSequence = 0;
+/**
+ * One terminal snapshot per outer emission; no payloads or unbounded history.
+ * Measures wall-clock time from operator receipt, including projection and
+ * downstream pull waits. Upstream buffering before receipt is not observable.
+ * Dropped values have no inner execution; queueMs is time awaiting admission.
+ */
+export function __streamixBeginLifetime(operator: object): StreamixLifetimeSpan | undefined {
+  if (!enabled) return undefined;
+  const entry = identities.get(operator);
+  if (!entry) return undefined;
+  const name = Object.getOwnPropertyDescriptor(operator, 'name')?.value;
+  const operatorInfo: StreamixLifetimeOperator = Object.freeze({ id: entry.id,
+    name: typeof name === 'string' ? name : entry.source.name,
+    file: entry.source.file, line: entry.source.line, column: entry.source.column });
+  const id = ++lifetimeSequence;
+  const emission = entry.inputs = (entry.inputs ?? 0) + 1;
+  const received = performance.now();
+  let started: number | undefined, firstOutputMs: number | undefined;
+  let outputs = 0, finished = false;
+  return {
+    start() { if (!finished) started ??= performance.now(); },
+    output() {
+      if (finished) return;
+      firstOutputMs ??= Math.max(0, performance.now() - received);
+      outputs++;
+    },
+    finish(outcome) {
+      if (finished) return;
+      finished = true;
+      const end = performance.now();
+      const lifetime = Object.freeze({ id, emission, durationMs: Math.max(0, end - received),
+        queueMs: Math.max(0, (started ?? end) - received), firstOutputMs, outputs, outcome });
+      const summary = Object.freeze({ operator: operatorInfo, lifetime });
+      (entry.innerLifetimes ??= new Map()).set(entry.id, summary);
+      const seen = new Set<number>([entry.id]);
+      let owner = entry.owner === undefined ? undefined : entries.get(entry.owner);
+      while (owner && !seen.has(owner.id)) {
+        (owner.innerLifetimes ??= new Map()).set(entry.id, summary);
+        seen.add(owner.id);
+        owner = owner.owner === undefined ? undefined : entries.get(owner.owner);
+      }
+      appendEvent(Object.freeze({ id: entry.id, name: entry.source.name, kind: 'lifetime', time: Date.now(), objectKind: entry.source.kind,
+        ownerName: entry.owner === undefined ? undefined : entries.get(entry.owner)?.source.name, emission, lifetime, operator: operatorInfo }));
+    },
+  };
 }
 
 /** Compiler helper: returns the exact input, preserving overloads and lazy semantics. */
@@ -188,7 +297,8 @@ export function __streamixDebug<T>(value: T, metadata: StreamixSourceMetadata): 
   if (!enabled || !object(value)) return value;
   let entry = identities.get(value);
   if (!entry) {
-    entry = { id: ++sequence, ref: new WeakRef(value), source: immutableMetadata(metadata), composition: [] };
+    entry = { id: ++sequence, ref: new WeakRef(value), source: immutableMetadata(metadata), composition: [],
+      metrics: { total: 0, errors: 0, completed: 0, cancelled: 0 } };
     identities.set(value, entry);
     finalized.register(value, entry.id);
     entries.set(entry.id, entry);

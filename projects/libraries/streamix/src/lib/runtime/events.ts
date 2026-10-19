@@ -5,6 +5,8 @@ export interface ExecutionEvent {
   readonly node: object;
   readonly generation: number;
   readonly kind: ExecutionEventKind;
+  /** Wall-clock time from next() call to its result, including source waiting. */
+  readonly pullMs?: number;
   readonly value?: unknown;
   readonly error?: unknown;
 }

@@ -1,3 +1,4 @@
+import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection';
 import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
@@ -29,42 +30,51 @@ export const concatMap = <T = any, R = any>(
 ) =>
   createOperator<T, R>("concatMap", function (this : Operator, source) {
     let outerIndex = 0;
+    const operator = this;
+    let lifetime: StreamixLifetimeSpan | undefined;
     const inner = new SerialInnerExecution<R>();
     let result: IteratorResult<T> | null = null;
 
     const iterator: AsyncIterator<R> = {
       next: async () => {
-        while (true) {
-          if (inner.stopped) return DONE;
-          // If no active inner iterator, pull the next outer value
-          if (!inner.active) {
-            result = await source.next();
+        try {
+          while (true) {
+            if (inner.stopped) return DONE;
+            // If no active inner iterator, pull the next outer value
+            if (!inner.active) {
+              result = await source.next();
+              if (inner.stopped) return DONE;
+
+              if (result.done) return DONE;
+
+              lifetime = __streamixBeginLifetime(operator);
+              lifetime?.start();
+              const projected = project(result.value, outerIndex++);
+              const normalized = isPromiseLike(projected) ? await projected : projected;
+              if (inner.stopped) return DONE;
+              const innerStream = from<R>(normalized);
+              inner.attach(innerStream[Symbol.asyncIterator]() as AsyncIterator<R>);
+            }
+
+            // Pull next value from inner stream
+            const innerResult = await inner.next();
             if (inner.stopped) return DONE;
 
-            if (result.done) return DONE;
+            if (innerResult.done) {
+              lifetime?.finish('complete');
 
-            const projected = project(result.value, outerIndex++);
-            const normalized = isPromiseLike(projected) ? await projected : projected;
-            if (inner.stopped) return DONE;
-            const innerStream = from<R>(normalized);
-            inner.attach(innerStream[Symbol.asyncIterator]() as AsyncIterator<R>);
+              // Otherwise continue to next outer value
+              continue;
+            }
+
+            lifetime?.output();
+            return NEXT(innerResult.value);
           }
-
-          // Pull next value from inner stream
-          const innerResult = await inner.next();
-          if (inner.stopped) return DONE;
-
-          if (innerResult.done) {
-
-            // Otherwise continue to next outer value
-            continue;
-          }
-
-          return NEXT(innerResult.value);
-        }
+        } catch (error) { lifetime?.finish('error'); throw error; }
       },
 
       async return(_value?: any) {
+        lifetime?.finish('cancel');
         try {
           await inner.close();
         } catch {}
@@ -75,6 +85,7 @@ export const concatMap = <T = any, R = any>(
       },
 
       async throw(err: any) {
+        lifetime?.finish('error');
         const error = normalizeError(err);
         try {
           await inner.close();

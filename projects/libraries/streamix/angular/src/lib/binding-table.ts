@@ -331,7 +331,7 @@ export class SxBindingTable {
 
   /** DevTools label for a slot: the emitted binding name or a stable slot id. */
   private slotLabel(slot: BindingSlot): string {
-    return this.labels[slot] ?? `binding ${slot}`;
+    return `template binding ${this.labels[slot] ?? slot}`;
   }
 
   private assertSlot(slot: BindingSlot): void {

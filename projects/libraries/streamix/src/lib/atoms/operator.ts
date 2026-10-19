@@ -191,7 +191,7 @@ export function createOperator<T = any, R = T>(
  */
 export function createPushOperator<T, R = T>(
   name: string,
-  setup: (source: AsyncIterator<T>, output: AsyncPushable<R>) => (() => MaybePromise<void>) | void
+  setup: (this: Operator<T, R>, source: AsyncIterator<T>, output: AsyncPushable<R>) => (() => MaybePromise<void>) | void
 ): Operator<T, R> {
   return createOperator<T, R>(name, function (this: Operator<T, R>, source) {
     const output = createAsyncPushable<R>();
@@ -203,7 +203,7 @@ export function createPushOperator<T, R = T>(
       return originalPush(value);
     };
 
-    let cleanup = setup(source, output);
+    let cleanup = setup.call(this, source, output);
     let cleanupCalled = false;
     const runCleanup = async () => {
       if (cleanupCalled) return;

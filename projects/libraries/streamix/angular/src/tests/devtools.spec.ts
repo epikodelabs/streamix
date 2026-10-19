@@ -44,14 +44,14 @@ describe('Angular devtools', () => {
     await flushMicrotasks();
 
     const trace = streamixDevtoolsSnapshot().map(event => `${event.type}: ${event.source}`);
-    expect(trace).toContain('subscription: status');
-    expect(trace).toContain('write: status');
+    expect(trace).toContain('subscription: template binding status');
+    expect(trace).toContain('write: template binding status');
     expect(trace).toContain('render: 1 binding');
 
     table.destroy();
     await flushMicrotasks();
     expect(streamixDevtoolsSnapshot().map(event => `${event.type}: ${event.source}`))
-      .toContain('unsubscribe: status');
+      .toContain('unsubscribe: template binding status');
   });
 
   it('renders an opt-in panel outside change detection', async () => {

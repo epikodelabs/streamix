@@ -129,6 +129,37 @@ describe('debug runtime introspection', () => {
     try { expect(() => node.set(2)).not.toThrow(); }
     finally { stop(); node.dispose(); }
   });
+  it('counts callback-free flow subscriptions and keeps the producer alive until the last handle closes', async () => {
+    const source = atom(1);
+    const node = __streamixDebug(flow(source), metadata('callback-free-flow', 'flow'));
+    const id = streamixInspector.inspect({ name: 'callback-free-flow' })[0].id;
+    const keepAlive = node.subscribe();
+    const callback = node.subscribe(() => {});
+    try {
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(node.subscriberCount).toBe(2);
+      expect(streamixInspector.details(id)?.subscribers).toBe(2);
+      expect(node.disposed).toBeFalse();
+      await callback();
+      expect(node.subscriberCount).toBe(1);
+      expect(streamixInspector.details(id)?.subscribers).toBe(1);
+      expect(node.disposed).toBeFalse();
+      await keepAlive();
+      expect(node.subscriberCount).toBe(0);
+      expect(node.disposed).toBeTrue();
+      expect(streamixInspector.details(id)).toBeUndefined();
+    } finally { await keepAlive(); await callback(); node.dispose(); source.dispose(); }
+  });
+  it('keeps the flow subscriber count at zero after explicit disposal and repeated unsubscribe', async () => {
+    const source = atom(1);
+    const node = flow(source);
+    const first = node.subscribe(), second = node.subscribe();
+    try {
+      node.dispose();
+      await first(); await second(); await first();
+      expect(node.subscriberCount).toBe(0);
+    } finally { node.dispose(); source.dispose(); }
+  });
   it('reports recoverable failures and releases their live records on unsubscribe', async () => {
     const node = __streamixDebug(flow(async function* () { yield 1; throw new Error('offline'); }), metadata('failed', 'flow'));
     node.onError(() => {});
