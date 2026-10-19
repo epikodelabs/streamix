@@ -6,6 +6,7 @@ import {
   inject,
 } from '@angular/core';
 import {
+  mountStreamixInspector,
   recordStreamixDevtoolsEvent,
   streamixDevtoolsEnabled,
   streamixDevtoolsSnapshot,
@@ -36,11 +37,13 @@ export type { StreamixDevtoolsEvent };
 export class StreamixDevtools {
   private readonly unsubscribe = subscribeStreamixDevtools(() => this.scheduleRender());
   private panel: HTMLElement | undefined;
+  private stopInspector: (() => void) | undefined;
   private renderQueued = false;
 
   constructor() {
     inject(DestroyRef).onDestroy(() => {
       this.unsubscribe();
+      this.stopInspector?.();
       this.panel?.remove();
       this.panel = undefined;
     });
@@ -49,6 +52,10 @@ export class StreamixDevtools {
       return;
     }
 
+    if (typeof window !== 'undefined' && window.__streamix) {
+      this.stopInspector = mountStreamixInspector(inject<ElementRef<HTMLElement>>(ElementRef).nativeElement);
+      return;
+    }
     const panel = document.createElement('aside');
     panel.setAttribute('data-streamix-devtools', '');
     const style = panel.style;

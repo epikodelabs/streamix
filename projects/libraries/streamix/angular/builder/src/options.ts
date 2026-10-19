@@ -7,6 +7,7 @@ import ts from 'typescript';
 export interface SxBuilderOptions {
   readonly delegateTarget: string;
   readonly sourceRoot: string;
+  readonly introspection?: boolean;
   readonly [key: string]: unknown;
 }
 
@@ -43,7 +44,7 @@ export function buildDelegateOptions(
   const delegateOptions: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(options ?? {})) {
-    if (key === 'delegateTarget' || key === 'sourceRoot') {
+    if (key === 'delegateTarget' || key === 'sourceRoot' || key === 'introspection') {
       continue;
     }
 
@@ -62,6 +63,9 @@ export function buildDelegateOptions(
     delegateOptions[key] = value;
   }
 
+  if (options?.['introspection'] === true) {
+    delegateOptions['define'] = { ...(delegateOptions['define'] as Record<string, string> ?? {}), 'import.meta.env.DEV': 'true' };
+  }
   return delegateOptions;
 }
 

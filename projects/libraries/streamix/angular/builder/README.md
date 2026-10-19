@@ -14,10 +14,11 @@ application build or dev server.
    `.angular/.streamix/<app>/src`, compiles every component with an inline
    `template` through the Streamix compiler, and writes the transformed
    component — with the compiled setup inlined — back into the virtual tree.
-2. The builder then schedules the `delegateTarget` (e.g. `app6:application`
-   or `app6:dev-server`). The delegate's `fileReplacements` entry points
-   `main.ts` at the virtual copy, so the whole application compiles from the
-   virtual tree.
+2. The builder schedules `delegateTarget` (e.g. `app6:application` or
+   `app6:dev-server`). Application delegates receive the generated `browser`
+   and `tsConfig` roots. For dev-server delegates, configure the application
+   target referenced by `buildTarget` with those virtual roots, as app6 does;
+   application-only options are not forwarded to the dev-server schema.
 3. For `serve` or `watch: true` targets, the builder watches the source root
    (recursively) and re-runs the generator on save; the delegate rebuilds on
    its own once the virtual files are rewritten. One-shot builds do not open watchers.
@@ -26,6 +27,11 @@ application build or dev server.
 
 - `delegateTarget` (required): `"project:target"` pair that receives the
   generated component.
+- `introspection`: boolean, default `false`. Development builds can opt in to
+  automatic source metadata, live object inspection, and a browser panel. The
+  option is consumed by this builder, preserved across regeneration, and enables
+  the shared `import.meta.env.DEV` gate through Angular's `define` option. Set it
+  to `false` in production configurations.
 - `sourceRoot`: application source directory, relative to the workspace
   root. **Required.** No workspace-specific demo path is used as a fallback.
 

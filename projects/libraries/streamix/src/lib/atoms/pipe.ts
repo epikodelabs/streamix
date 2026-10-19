@@ -1,3 +1,4 @@
+import { __streamixPipeline } from '../runtime/introspection';
 import { isAsyncIterable, isAtomLike, isIterable } from "../utils/helpers";
 import { flow, trackDependencies, type Atom } from "./atom";
 import { isPromiseLike, type MaybePromise, type Operator } from "./operator";
@@ -188,7 +189,9 @@ export function pipe(
       },
     };
 
-    return flow(resultIterable);
+    const result = flow(resultIterable);
+    __streamixPipeline(result, [source, ...ops]);
+    return result;
   } finally {
     setCurrentScope(previousScope);
   }

@@ -146,3 +146,13 @@ describe('streamix builder options', () => {
   });
 
 });
+
+
+describe('introspection builder configuration', () => {
+  it('consumes introspection and enables the shared development gate for the delegate', () => {
+    expect(buildDelegateOptions({ introspection: true, define: { VERSION: '\"test\"' } }))
+      .toEqual({ define: { VERSION: '\"test\"', 'import.meta.env.DEV': 'true' } });
+    expect(buildDelegateOptions({ introspection: false })).toEqual({});
+    expect(buildDelegateOptions({})).toEqual({});
+  });
+});

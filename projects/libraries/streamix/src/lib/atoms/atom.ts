@@ -1,4 +1,5 @@
 import { internalRuntime } from "../runtime/runtime";
+import { captureOrigin } from "../runtime/origin";
 import { DefaultScheduler, getScheduler, setScheduler, isTransactionActive, finalizeAfterTransaction, type Scheduler } from "../runtime/scheduling";
 export type { Scheduler } from "../runtime/scheduling";
 import { createAsyncCoordinator, getIterator, raceNext, type AsyncCoordinator } from "../utils/coordinator";
@@ -463,7 +464,7 @@ function finalizeAtomInstance<T extends Atom<any> & InternalAtomContainer>(insta
     enumerable: false,
   });
   if (conflate) (instance as any)[ANALOG_DELIVERY] = true;
-  internalRuntime.register(instance, instance[NODE]);
+  internalRuntime.register(instance, instance[NODE], captureOrigin());
   // Runtime bookkeeping is not a user lifecycle hook. Keeping it in the
   // public-ish disposal set made an otherwise empty atom appear to retain a
   // disposer, and obscured real iterator cleanup leaks.
@@ -646,6 +647,8 @@ function observeDependencyChange(dep: DependencySource<any>, handler: () => void
 type AtomSubscriber<T> = (current: T, previous: T) => MaybePromise;
 
 interface AtomBaseConfig<T> {
+  /** Diagnostics-only: read stored state without evaluating or tracking dependencies. */
+  getCachedValue: () => T;
   conflate: boolean;
   maxSubscribers: number;
   node: AtomNode;
@@ -758,6 +761,11 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
     dispose() { void config.onDispose(instance); },
   };
 
+  internalRuntime.registerAtomState(instance, () => {
+    const value = config.getCachedValue();
+    return { hasValue: value !== NO_INITIAL_VALUE, value: value === NO_INITIAL_VALUE ? undefined : value,
+      subscribers: subs.size, error: config.getError() };
+  });
   return {
     instance: finalizeAtomInstance(instance, config.conflate),
     meta,
@@ -844,7 +852,7 @@ function atomFromIteratorInternal<T>(
     internalRuntime.dispose(instance);
     if (executionToken !== undefined) {
       internalRuntime.executions.finish(instance, executionToken, executionExit);
-      internalRuntime.events.publish({ node: instance, generation: executionToken, kind: executionExit });
+      internalRuntime.events.publish({ node: instance, generation: executionToken, kind: executionExit, ...(executionExit === "error" ? { error: errorValue } : {}) });
       executionToken = undefined;
     }
     setDirty(false);
@@ -867,7 +875,7 @@ function atomFromIteratorInternal<T>(
   const run = async () => {
     if (runPromise) return runPromise;
     executionExit = "cancel";
-    const token = internalRuntime.executions.start(instance, instance.name);
+    const token = internalRuntime.executions.start(instance, instance.name, internalRuntime.originOf(instance));
     executionToken = token;
     runPromise = (async () => {
       try {
@@ -912,7 +920,7 @@ function atomFromIteratorInternal<T>(
       } finally {
         if (executionToken === token) {
           internalRuntime.executions.finish(instance, token, executionExit, executionExit === "error" ? errorValue : undefined);
-          internalRuntime.events.publish({ node: instance, generation: token, kind: executionExit });
+          internalRuntime.events.publish({ node: instance, generation: token, kind: executionExit, ...(executionExit === "error" ? { error: errorValue } : {}) });
           executionToken = undefined;
         }
         await stopIterator();
@@ -938,6 +946,7 @@ function atomFromIteratorInternal<T>(
   };
 
   const base = createAtomBase<T>({
+    getCachedValue: () => current,
     conflate,
     maxSubscribers,
     node,
@@ -1312,6 +1321,7 @@ export function atom<T = any>(
   };
 
   const base = createAtomBase<T>({
+    getCachedValue: () => current,
     conflate: false,
     maxSubscribers,
     node,
@@ -1770,6 +1780,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   };
 
   const base = createAtomBase<T>({
+    getCachedValue: () => current,
     conflate: false,
     maxSubscribers,
     node,

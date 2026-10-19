@@ -1,12 +1,13 @@
 import { internalRuntime } from './runtime';
+import type { RuntimeOrigin } from './origin';
 
 /**
  * Observe an operator iterator without changing its pull/push contract.
  * Execution begins at the first pull, not when the operator is composed.
  * In-place instrumentation preserves __tryNext, __onPush and other iterator hooks.
- * The optional name labels the execution record for runtime diagnostics.
+ * The optional name and origin label the execution record for runtime diagnostics.
  */
-export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: string): AsyncIterator<T> {
+export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: string, origin?: RuntimeOrigin): AsyncIterator<T> {
   const node = iterator as object;
   const next = iterator.next.bind(iterator);
   const originalReturn = iterator.return?.bind(iterator);
@@ -15,7 +16,7 @@ export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: str
   let finished = false;
 
   const start = () => {
-    if (token === undefined && !finished) token = internalRuntime.executions.start(node, name);
+    if (token === undefined && !finished) token = internalRuntime.executions.start(node, name, origin);
   };
   const finish = (kind: 'complete' | 'cancel' | 'error', error?: unknown) => {
     if (finished) return;

@@ -1,5 +1,6 @@
 /** Internal runtime inspection types and the snapshot builder. Not exported from the package API. */
 import type { FlowExecutionSnapshot, FlowExit, RuntimeNode, StreamixRuntime } from "./runtime";
+import type { RuntimeOrigin } from "./origin";
 
 /** Per-node diagnostics merged from the graph, the scheduler, and execution records. */
 export interface NodeDiagnostics {
@@ -7,6 +8,8 @@ export interface NodeDiagnostics {
   readonly node: RuntimeNode;
   /** Label captured at execution start (operator name) or read from the node's `name` property. */
   readonly name?: string;
+  /** Creation site of the node, captured automatically in dev builds. */
+  readonly origin?: RuntimeOrigin;
   /** Scheduler depth (shallow dependencies first). Present only for schedulable nodes. */
   readonly depth?: number;
   /** True when invalidation work is queued but not flushed yet. */
@@ -57,6 +60,7 @@ export function collectInspection(runtime: StreamixRuntime): RuntimeInspection {
     nodes.push(Object.freeze({
       node,
       name: record?.name ?? nodeName(node),
+      origin: record?.origin ?? runtime.originOf(node),
       depth: schedulable?.depth,
       queued: schedulable?.queued === true,
       active: record?.active ?? false,

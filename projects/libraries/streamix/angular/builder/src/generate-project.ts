@@ -5,6 +5,7 @@ import ts from 'typescript';
 // The compiler is a sibling entry point of the same package, imported by its
 // published subpath so ng-packagr treats it as an external dependency rather
 // than folding its sources into this entry.
+import { instrumentStreamixSource } from '@epikodelabs/streamix/angular/compiler';
 import { compileSxComponent } from '@epikodelabs/streamix/angular/compiler';
 import { installSxLifecycleIntoComponentSource } from '@epikodelabs/streamix/angular/compiler';
 import { findSxComponentTemplate, installSxComponentTemplate, virtualRootOf } from './options';
@@ -13,6 +14,7 @@ import { findSxComponentTemplate, installSxComponentTemplate, virtualRootOf } fr
 export interface SxGenerateProjectOptions {
   readonly sourceRoot: string;
   readonly workspaceRoot: string;
+  readonly introspection?: boolean;
 }
 
 /**
@@ -25,6 +27,7 @@ export interface SxGenerateProjectOptions {
 export async function generateProject({
   sourceRoot,
   workspaceRoot,
+  introspection = false,
 }: SxGenerateProjectOptions): Promise<void> {
   const virtualRoot = virtualRootOf(sourceRoot);
   const sourceDirectory = resolve(workspaceRoot, sourceRoot);
@@ -256,7 +259,14 @@ export async function generateProject({
   }
 
   for (const sourcePath of await listFiles(sourceDirectory, false)) {
-    const source = rewriteDerivedAtomReads(await readFile(sourcePath, 'utf8'));
+    const original = program.getSourceFile(sourcePath) ?? ts.createSourceFile(sourcePath, await readFile(sourcePath, 'utf8'), ts.ScriptTarget.Latest, true);
+    const instrumented = instrumentStreamixSource({ file: original, checker,
+      sourcePath: relative(workspaceRoot, sourcePath), enabled: introspection });
+    let source = rewriteDerivedAtomReads(instrumented);
+    if (introspection && relative(sourceDirectory, sourcePath).replace(/\\/g, '/') === 'main.ts') {
+      // Enable before bootstrapApplication constructs any component instances.
+      source = `import { enableStreamixIntrospection as __sxEnable, mountStreamixInspector as __sxMount } from '@epikodelabs/streamix';\n__sxEnable();\n` + source + '\n__sxMount();\n';
+    }
     const relativePath = relative(sourceDirectory, sourcePath).replace(/\\/g, '/');
     const outputPath = resolve(outputDirectory, relativePath);
 
@@ -404,13 +414,15 @@ export function rewriteDerivedAtomReads(source: string): string {
   const isFactory = (node: ts.Expression, name: string): boolean =>
     ts.isIdentifier(node) && node.text === name;
 
+  const unwrapDebug = (node: ts.Expression): ts.Expression => ts.isCallExpression(node) &&
+    ts.isIdentifier(node.expression) && node.expression.text.startsWith('__sxDebug') ? node.arguments[0] : node;
   const collectAtoms = (node: ts.Node): void => {
     if (
       (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node)) &&
       ts.isIdentifier(node.name) &&
       node.initializer &&
-      ts.isCallExpression(node.initializer) &&
-      isFactory(node.initializer.expression, 'atom')
+      ts.isCallExpression(unwrapDebug(node.initializer)) &&
+      isFactory((unwrapDebug(node.initializer) as ts.CallExpression).expression, 'atom')
     ) {
       atomNames.add(node.name.text);
     }

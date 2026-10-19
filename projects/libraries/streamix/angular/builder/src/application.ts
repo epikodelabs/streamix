@@ -86,6 +86,7 @@ interface RegeneratorContext {
 function createRegenerator(
   context: RegeneratorContext,
   sourceRoot: string,
+  introspection: boolean,
 ): { trigger(): void; stop(): void } {
   let running = false;
   let queued = false;
@@ -97,6 +98,7 @@ function createRegenerator(
     try {
       await generateProject({
         sourceRoot,
+        introspection,
         workspaceRoot: context.workspaceRoot,
       });
     } catch (error) {
@@ -248,6 +250,7 @@ const applicationBuilder = createBuilder(async function* (options, context) {
 
   await generateProject({
     sourceRoot,
+    introspection: options['introspection'] === true,
     workspaceRoot: context.workspaceRoot,
   });
 
@@ -256,8 +259,11 @@ const applicationBuilder = createBuilder(async function* (options, context) {
   // workspace therefore never needs to add `.angular/.streamix` to its own
   // tsconfig or configure a file replacement by hand.
   const virtualRoot = virtualRootOf(sourceRoot);
-  delegateOptions['browser'] = `${virtualRoot}/main.ts`;
-  delegateOptions['tsConfig'] = virtualTsconfigOf(sourceRoot);
+  // Dev-server validates a different schema; its buildTarget supplies these roots.
+  if (target !== 'serve' && target !== 'dev-server') {
+    delegateOptions['browser'] = `${virtualRoot}/main.ts`;
+    delegateOptions['tsConfig'] = virtualTsconfigOf(sourceRoot);
+  }
 
   const delegate: Target = { project, target };
 
@@ -276,7 +282,7 @@ const applicationBuilder = createBuilder(async function* (options, context) {
   // delegate (dev-server or watch build) rebuilds on its own once the
   // regenerated virtual component is rewritten.
   const shouldWatch = shouldWatchSources(target, context.target?.target, delegateOptions['watch']);
-  const regenerator = shouldWatch ? createRegenerator(context, sourceRoot) : undefined;
+  const regenerator = shouldWatch ? createRegenerator(context, sourceRoot, options['introspection'] === true) : undefined;
   const stopWatcher = regenerator
     ? startSourceWatcher(context, sourceRoot, regenerator.trigger)
     : () => undefined;

@@ -1,9 +1,12 @@
 import { internalRuntime, RuntimeExecutions, type RuntimeNode } from '../lib/runtime/runtime';
 import { getScheduler } from '../lib/runtime/scheduling';
+import { setOriginCapture } from '../lib/runtime/origin';
 import { atom, derived, flow } from '../lib/atoms/atom';
 import { pipe } from '../lib/atoms/pipe';
 import { map } from '../lib/operators/map';
 import { from } from '../lib/factories';
+
+function tick(): Promise<void> { return new Promise(resolve => setTimeout(resolve, 0)); }
 
 describe('runtime execution diagnostics records', () => {
   it('keeps a per-node record across start, emission, and finish', () => {
@@ -208,5 +211,70 @@ describe('automatic flow discovery', () => {
       await stop();
     }
     expect(inspect()).toBeUndefined();
+  });
+});
+
+describe('runtime self-description', () => {
+  it('captures the creation site of atoms without build tooling', () => {
+    const first = atom(1);
+    const second = atom(2);
+    const origin = internalRuntime.originOf(first);
+    expect(origin).toBeDefined();
+    expect(origin!.file.length).toBeGreaterThan(0);
+    expect(origin!.line).toBeGreaterThan(0);
+    // Distinct creation sites produce distinct origins.
+    expect([origin!.line, origin!.column]).not.toEqual(
+      [internalRuntime.originOf(second)!.line, internalRuntime.originOf(second)!.column]);
+    // inspect() rows carry the origin too.
+    const row = internalRuntime.inspect().nodes.find(node => node.node === first);
+    expect(row?.origin).toBeDefined();
+  });
+
+  it('labels operator executions with their pipeline creation site', async () => {
+    const operator = map((value: number) => value);
+    const source: AsyncIterator<number> = { next: async () => ({ done: false, value: 1 }) };
+    const iterator = operator.apply(source);
+    try {
+      const pull = iterator.next();
+      await tick();
+      const record = internalRuntime.executions.snapshotEntries().find(entry => entry.name === 'map');
+      expect(record?.origin).toBeDefined();
+      expect(record!.origin!.line).toBeGreaterThan(0);
+      await pull;
+    } finally {
+      await iterator.return?.();
+    }
+  });
+
+  it('threads origins through flow execution records', async () => {
+    let release!: (value: IteratorResult<number>) => void;
+    // Stay mid-flight so the record and flow entry remain observable.
+    const source = flow<number>(async function* () {
+      yield 1;
+      yield await new Promise<number>(resolve => { release = value => resolve(value.value!); });
+    });
+    const seen: number[] = [];
+    const stop = source.subscribe(value => seen.push(value));
+    try {
+      for (let i = 0; i < 20 && seen.length === 0; i++) await tick();
+      expect(internalRuntime.executions.describe(source)?.origin).toBeDefined();
+      expect(internalRuntime.flows().find(state => state.node === source)?.origin).toBeDefined();
+    } finally {
+      release({ value: 2, done: false });
+      for (let i = 0; i < 20 && !source.disposed; i++) await tick();
+      await stop();
+    }
+  });
+
+  it('capture can be disabled for production parity', () => {
+    setOriginCapture(false);
+    try {
+      const source = atom(1);
+      expect(internalRuntime.originOf(source)).toBeUndefined();
+      const row = internalRuntime.inspect().nodes.find(node => node.node === source);
+      expect(row?.origin).toBeUndefined();
+    } finally {
+      setOriginCapture(true);
+    }
   });
 });

@@ -3,6 +3,30 @@ import { atom, DONE, flow, from, iterate, NEXT, pipe, switchMap } from '@epikode
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 describe('switchMap', () => {
+  it('cancels a pending inner pull immediately without disposing the outer flow', async () => {
+    const source = atom(false);
+    let pulled = false;
+    let returned = false;
+    let settle: ((result: IteratorResult<number>) => void) | undefined;
+    const inner: AsyncIterable<number> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => { pulled = true; return new Promise(resolve => { settle = resolve; }); },
+        return: async () => { returned = true; settle?.(DONE); return DONE; },
+      }),
+    };
+    const result = pipe(source, switchMap(active => active ? inner : []));
+    const subscription = result.subscribe();
+    source.set(true);
+    await wait(10);
+    expect(pulled).toBeTrue();
+    source.set(false);
+    await wait(10);
+    expect(returned).toBeTrue();
+    expect(result.disposed).toBeFalse();
+    await subscription();
+    source.dispose();
+  });
+
   it('emits values from the latest inner source for a synchronous source burst', async () => {
     const values: number[] = [];
 

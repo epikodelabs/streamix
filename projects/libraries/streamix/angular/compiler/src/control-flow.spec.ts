@@ -360,3 +360,17 @@ describe('standard Angular atom templates', () => {
     expect(result.setup).toContain('let currentContext = { ...currentContext,');
   });
 });
+
+
+describe('compiled loop context aliases', () => {
+  it('does not emit the built-in aliases twice', () => {
+    const result = transformAngularComponentTemplate(
+      '@for (item of items; track item.id) { <p>{{ item.name }}</p> }', 'inline.html',
+      { resolveReactiveSource: path => path === 'items' ? 'items' : undefined });
+    const contexts = [...result.setup.matchAll(/(?:currentContext = \{|instance\.update\(\{)[^\n]+/g)];
+    expect(contexts.length).toBeGreaterThan(0);
+    for (const match of contexts) {
+      expect((match[0].match(/\$index:/g) ?? []).length).toBeLessThanOrEqual(1);
+    }
+  });
+});

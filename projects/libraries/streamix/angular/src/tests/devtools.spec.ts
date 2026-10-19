@@ -1,5 +1,6 @@
+import { useAngularTestEnvironment } from './angular-test-environment';
 import { TestBed } from '@angular/core/testing';
-import { atom } from '@epikodelabs/streamix';
+import { atom, derived, __streamixDebug, enableStreamixIntrospection } from '@epikodelabs/streamix';
 import { SxBindingTable } from '../lib/binding-table';
 import {
   recordStreamixDevtoolsEvent,
@@ -13,6 +14,26 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('Angular devtools', () => {
+  useAngularTestEnvironment();
+  it('renders live introspection without evaluating unused formulas and updates on animation frames', async () => {
+    enableStreamixIntrospection();
+    let evaluations = 0;
+    const count = __streamixDebug(atom(0), { name: 'inspector.count', kind: 'atom', file: 'src/panel.ts', line: 1, column: 1 });
+    const lazy = __streamixDebug(derived(() => { evaluations++; return 7; }),
+      { name: 'inspector.lazy', kind: 'derived', file: 'src/panel.ts', line: 2, column: 1 });
+    const fixture = TestBed.createComponent(StreamixDevtools);
+    try {
+      const panel = (fixture.nativeElement as HTMLElement).querySelector('[data-streamix-inspector]')!;
+      Array.from(panel.querySelectorAll('button')).find(button => button.textContent === 'Atoms')!.click();
+      expect(panel.textContent).toContain('inspector.lazy');
+      expect(evaluations).toBe(0);
+      count.set(2);
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      expect(panel.textContent).toContain('inspector.count');
+      expect(panel.textContent).toContain('ready | 2');
+      expect(evaluations).toBe(0);
+    } finally { fixture.destroy(); count.dispose(); lazy.dispose(); }
+  });
   it('records subscription, write, and unsubscribe for table bindings', async () => {
     const source = atom('Ready');
     const table = new SxBindingTable(1);
@@ -44,6 +65,10 @@ describe('Angular devtools', () => {
 
     const panel = (fixture.nativeElement as HTMLElement).querySelector('[data-streamix-devtools]');
     expect(panel).not.toBeNull();
+    if (typeof window !== 'undefined' && window.__streamix) {
+      const trace = Array.from(panel!.querySelectorAll('button')).find(button => button.textContent === 'Trace');
+      trace!.click();
+    }
     expect(panel!.textContent).toContain('write: panel');
   });
 });

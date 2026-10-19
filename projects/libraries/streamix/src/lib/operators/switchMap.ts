@@ -5,6 +5,9 @@ import { from } from "../factories";
 import { createAsyncPushable } from "../utils";
 import { normalizeError } from "../atoms";
 import { SwitchingInnerExecution } from "../runtime/inner-execution";
+import { isAsyncIterable } from "../utils/helpers";
+import { trackOperatorExecution } from "../runtime/operator-execution";
+import { __streamixOperatorExecution } from "../runtime/introspection";
 
 /**
  * Transforms each value from the source stream into a new inner stream, promise, or array,
@@ -59,7 +62,13 @@ export function switchMap<T = any, R = any>(
       if (!execution.isCurrent(generation)) return;
       let iterator: AsyncIterator<R>;
       try {
-        iterator = from<R>(inner as any)[Symbol.asyncIterator]() as AsyncIterator<R>;
+        // Preserve a cancellable iterable's return() directly: wrapping it in an
+        // async generator can defer cancellation until its pending next() settles.
+        iterator = isAsyncIterable(inner)
+          ? inner[Symbol.asyncIterator]() as AsyncIterator<R>
+          : from<R>(inner as any)[Symbol.asyncIterator]() as AsyncIterator<R>;
+        __streamixOperatorExecution(this, iterator);
+        iterator = trackOperatorExecution(iterator, `${this.name ?? 'switchMap'}.inner`);
       } catch (error) {
         fail(error);
         return;

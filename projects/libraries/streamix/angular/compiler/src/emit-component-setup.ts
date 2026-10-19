@@ -610,9 +610,11 @@ function contextLocals(
     '$odd: index % 2 === 1',
   ];
 
+  const emitted = new Set(locals.map(local => local.split(':')[0]));
   for (const alias of aliases) {
     const value = loopContextValue(alias.value);
-    if (value && alias.name !== item) {
+    if (value && !emitted.has(alias.name)) {
+      emitted.add(alias.name);
       locals.push(`${alias.name}: ${value}`);
     }
   }

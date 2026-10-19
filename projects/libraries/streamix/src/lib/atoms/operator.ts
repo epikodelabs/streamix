@@ -1,3 +1,5 @@
+import { __streamixOperatorExecution } from '../runtime/introspection';
+import { captureOrigin } from '../runtime/origin';
 import { trackOperatorExecution } from "../runtime/operator-execution";
 import { AsyncPushable, createAsyncPushable } from "../utils/pushable";
 import { normalizeError, type Atom } from "./atom";
@@ -164,7 +166,8 @@ export function createOperator<T = any, R = T>(
         };
       }
 
-      return trackOperatorExecution(iterator, name);
+      __streamixOperatorExecution(op, iterator);
+      return trackOperatorExecution(iterator, name, captureOrigin());
     }
   };
 

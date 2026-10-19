@@ -75,6 +75,7 @@ export class RuntimeGraph {
 import { runtimeScheduling, type RuntimeScheduling, type SchedulableNode } from "./scheduling";
 import { RuntimeEventDispatcher } from "./events";
 import { collectInspection, type RuntimeInspection } from "./diagnostics";
+import type { RuntimeOrigin } from "./origin";
 
 /** Execution accounting is internal: a flow has one producer shared by its subscribers. */
 export type FlowExit = "complete" | "cancel" | "error";
@@ -91,6 +92,7 @@ export interface FlowExecutionSnapshot {
 export interface ExecutionRecordSnapshot {
   readonly node: RuntimeNode;
   readonly name?: string;
+  readonly origin?: RuntimeOrigin;
   readonly active: boolean;
   readonly runs: number;
   readonly emitted: number;
@@ -100,6 +102,7 @@ export interface ExecutionRecordSnapshot {
 
 interface ExecutionRecord {
   name?: string;
+  origin?: RuntimeOrigin;
   runs: number;
   emitted: number;
   lastExit?: FlowExit;
@@ -117,7 +120,7 @@ export class RuntimeExecutions {
   private emitted = 0;
 
   /** A token prevents a late previous execution from closing a newer one. */
-  start(node: RuntimeNode, name?: string): number {
+  start(node: RuntimeNode, name?: string, origin?: RuntimeOrigin): number {
     const token = ++this.generation;
     this.active.set(node, token);
     let record = this.records.get(node);
@@ -126,6 +129,7 @@ export class RuntimeExecutions {
       this.records.set(node, record);
     }
     if (name !== undefined) record.name = name;
+    if (origin !== undefined) record.origin = origin;
     record.runs++;
     this.started++;
     return token;
@@ -171,6 +175,7 @@ export class RuntimeExecutions {
     return Object.freeze({
       node,
       name: record.name,
+      ...(record.origin ? { origin: record.origin } : {}),
       active: this.active.has(node),
       runs: record.runs,
       emitted: record.emitted,
@@ -198,6 +203,11 @@ export interface FlowDiagnosticsState {
 }
 
 export class StreamixRuntime {
+  private readonly atomStates = new WeakMap<RuntimeNode, () => { hasValue: boolean; value: unknown; subscribers: number; error: unknown }>();
+  registerAtomState(node: RuntimeNode, read: () => { hasValue: boolean; value: unknown; subscribers: number; error: unknown }): void {
+    this.atomStates.set(node, read);
+  }
+  atomState(node: RuntimeNode) { return this.atomStates.get(node)?.(); }
   readonly scheduling: RuntimeScheduling = runtimeScheduling;
   readonly graph = new RuntimeGraph();
   readonly events = new RuntimeEventDispatcher();
@@ -207,13 +217,20 @@ export class StreamixRuntime {
   private sequence = 0;
   private readonly invalidators = new Map<RuntimeNode, () => void>();
   private readonly schedulables = new WeakMap<RuntimeNode, SchedulableNode>();
+  private readonly origins = new WeakMap<RuntimeNode, RuntimeOrigin>();
   private readonly observers = new Set<(event: RuntimeEvent) => void>();
 
-  /** Register a node, optionally linking its scheduler-owned state for diagnostics. */
-  register(node: RuntimeNode, schedulable?: SchedulableNode): void {
+  /** Register a node, optionally linking its scheduler state and creation site for diagnostics. */
+  register(node: RuntimeNode, schedulable?: SchedulableNode, origin?: RuntimeOrigin): void {
     this.graph.register(node);
     if (schedulable) this.schedulables.set(node, schedulable);
+    if (origin) this.origins.set(node, origin);
     this.emit("register", node);
+  }
+
+  /** The creation-site position of a node, when captured in a dev build. */
+  originOf(node: RuntimeNode): RuntimeOrigin | undefined {
+    return this.origins.get(node);
   }
 
   /** Register a flow-backed atom independently of its execution starting. */
@@ -222,10 +239,15 @@ export class StreamixRuntime {
     this.emit("flow", node);
   }
 
+  flowState(node: RuntimeNode): FlowDiagnosticsState | undefined {
+    const state = this.flowStates.get(node)?.();
+    return state ? Object.freeze({ ...state }) : undefined;
+  }
+
   /** Live flows, including idle and recoverably failed producers; disposed flows are removed. */
   flows() {
     return Object.freeze(Array.from(this.flowStates, ([node, read]) => Object.freeze({
-      node, ...read(), execution: this.executions.describe(node),
+      node, ...read(), origin: this.origins.get(node), execution: this.executions.describe(node),
       dependencies: Object.freeze([...this.graph.dependencies(node)]),
       dependents: Object.freeze([...this.graph.dependents(node)]),
     })));

@@ -1,3 +1,4 @@
+import { __streamixDebugDispose } from '../runtime/introspection';
 import type { MaybePromise } from "./operator";
 
 /**
@@ -49,6 +50,7 @@ export function createSubscription(
   const unsubscribe = (): MaybePromise => {
     if (!_unsubscribed) {
       _unsubscribed = true;
+      __streamixDebugDispose(subscription, 'unsubscribe');
       try {
         return teardown?.();
       } catch (err) {

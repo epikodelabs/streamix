@@ -1,3 +1,4 @@
+import { __streamixScopeMember, __streamixDebugDispose } from '../runtime/introspection';
 import { isAtom, isAtomLike } from "../utils/helpers";
 import {
   atom,
@@ -705,6 +706,7 @@ function createScopeInternal<T extends Record<string, any>>(
         try {
           current = evaluateExprMarker(current, newScope, atomsAccessor);
           newScope._rawState[key] = current;
+          __streamixScopeMember(newScope, key, current);
           defineScopeStateProperty(newScope, key, getScopeItem);
         } finally {
           evaluating.delete(key);
@@ -970,6 +972,7 @@ function updateDirtyHierarchy(startNode: Scope | RootScope | null, dynamicDelta:
 export function disposeScope(sc: Scope): void {
   if (sc._disposed) return;
   sc._disposed = true;
+  __streamixDebugDispose(sc);
 
   for (const hook of sc.cleanups) {
     try {

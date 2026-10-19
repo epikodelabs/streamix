@@ -9,3 +9,5 @@ export * from './template-transform';
 export * from './block-template-compiler';
 
 export * from './source-resolution';
+
+export * from './introspection-transform';

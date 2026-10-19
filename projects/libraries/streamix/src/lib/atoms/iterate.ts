@@ -80,7 +80,10 @@ export function iterate<T>(
       } else {
         buffer.push(value);
       }
-      notifyPush();
+      // Initial replay happens inside subscribe(), before error and disposal
+      // handlers are installed. Let the initiating pull drain that replay;
+      // reentering __tryNext here would observe a partially initialized iterator.
+      if (!subscribing) notifyPush();
     });
     subscribing = false;
 
