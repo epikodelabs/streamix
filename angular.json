@@ -486,7 +486,7 @@
             "index": "projects/apps/app6/src/index.html",
             "browser": "projects/apps/app6/src/main.ts",
             "polyfills": [],
-            "tsConfig": "projects/apps/app6/tsconfig.app.json",
+            "tsConfig": ".angular/.streamix/app6/tsconfig.app.json",
             "fileReplacements": [
               {
                 "replace": "projects/apps/app6/src/main.ts",
@@ -519,7 +519,8 @@
             "development": {
               "optimization": false,
               "extractLicenses": false,
-              "sourceMap": true
+              "sourceMap": true,
+              "define": { "import.meta.env.DEV": "true" }
             }
           },
           "defaultConfiguration": "production"
@@ -541,6 +542,8 @@
           "options": {
             "delegateTarget": "app6:dev-server",
             "sourceRoot": "projects/apps/app6/src"
+         ,
+            "introspection": true
           },
           "configurations": {
             "production": {},

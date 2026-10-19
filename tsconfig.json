@@ -25,6 +25,9 @@
       },
       {
         "name": "@epikodelabs/streamix/react/editor/tsserver"
+      },
+      {
+        "name": "@epikodelabs/streamix/vue/editor/tsserver"
       }
     ],
     "useDefineForClassFields": false,
