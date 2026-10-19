@@ -1,4 +1,4 @@
-import { RuntimeEventDispatcher } from '../lib/runtime/events';
+import { RuntimeEventBus } from '../lib/runtime/events';
 import { internalRuntime, StreamixRuntime } from '../lib/runtime/runtime';
 import { flow } from '../lib/atoms/atom';
 
@@ -8,8 +8,8 @@ describe('internal runtime execution events', () => {
     const source = {}, dependent = {};
     const invalidate = jasmine.createSpy('invalidate');
     const observed: string[] = [];
-    runtime.observe(() => { throw new Error('diagnostic failure'); });
-    runtime.observe(event => observed.push(event.kind));
+    runtime.events.observe(() => { throw new Error('diagnostic failure'); });
+    runtime.events.observe(event => observed.push(event.kind));
     expect(() => {
       runtime.register(source);
       runtime.register(dependent);
@@ -23,7 +23,7 @@ describe('internal runtime execution events', () => {
     expect(runtime.graph.has(dependent)).toBe(false);
   });
   it('delivers reentrant events in FIFO order', () => {
-    const events = new RuntimeEventDispatcher();
+    const events = new RuntimeEventBus();
     const node = {};
     const received: string[] = [];
     events.observe(event => {
@@ -36,7 +36,7 @@ describe('internal runtime execution events', () => {
   });
 
   it('isolates observer failures and preserves sequence', () => {
-    const events = new RuntimeEventDispatcher();
+    const events = new RuntimeEventBus();
     const node = {};
     const sequences: number[] = [];
     events.observe(() => { throw new Error('diagnostics failure'); });

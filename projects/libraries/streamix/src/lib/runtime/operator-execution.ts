@@ -1,4 +1,5 @@
-import { internalRuntime, isRuntimeInstrumentationEnabled } from './runtime';
+import { internalRuntime, type ExecutionSpan } from './runtime';
+import { isRuntimeInstrumentationEnabled } from './diagnostics';
 import type { RuntimeOrigin } from './origin';
 
 /**
@@ -13,30 +14,25 @@ export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: str
   const next = iterator.next.bind(iterator);
   const originalReturn = iterator.return?.bind(iterator);
   const originalThrow = iterator.throw?.bind(iterator);
-  let token: number | undefined;
+  let span: ExecutionSpan | undefined;
   let finished = false;
 
   const start = () => {
-    if (token === undefined && !finished) token = internalRuntime.executions.start(node, name, origin);
+    if (span === undefined && !finished) span = internalRuntime.beginExecution(node, name, origin);
   };
   const finish = (kind: 'complete' | 'cancel' | 'error', error?: unknown) => {
     if (finished) return;
     finished = true;
-    if (token === undefined) return;
-    internalRuntime.executions.finish(node, token, kind, error);
-    if (internalRuntime.events.observed)
-      internalRuntime.events.publish({ node, generation: token, kind, ...(kind === 'error' ? { error } : {}) });
+    const active = span;
+    span = undefined;
+    if (active === undefined) return;
+    active.finish(kind, error);
     // Operator iterators are one-shot: keep their diagnostics record only while active.
-    internalRuntime.executions.forget(node);
+    internalRuntime.diagnostics.executions.forget(node);
   };
   const accept = (result: IteratorResult<T>, requestedAt?: number): IteratorResult<T> => {
     if (result.done) finish('complete');
-    else if (!finished && token !== undefined) {
-      internalRuntime.executions.next(node, token);
-      if (internalRuntime.events.observed)
-        internalRuntime.events.publish({ node, generation: token, kind: 'next', value: result.value,
-          ...(requestedAt === undefined ? {} : { pullMs: Math.max(0, performance.now() - requestedAt) }) });
-    }
+    else if (!finished && span !== undefined) span.next(result.value, requestedAt);
     return result;
   };
   const fail = (error: unknown): never => { finish('error', error); throw error; };
@@ -49,7 +45,7 @@ export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: str
 
   iterator.next = ((...args: any[]) => {
     start();
-    const requestedAt = internalRuntime.events.observed ? performance.now() : undefined;
+    const requestedAt = span?.reports === true ? performance.now() : undefined;
     try { return observe((next as any)(...args), requestedAt); }
     catch (error) { return fail(error); }
   }) as typeof iterator.next;

@@ -1,10 +1,39 @@
 # Streamix Diagnostics Guide
 
 > Normative rules for everything that observes the runtime: execution
-> accounting, the event dispatcher, runtime introspection, the inspector
+> accounting, the runtime event bus, runtime introspection, the inspector
 > panel, and devtools tracing. The architectural overview lives in
 > [RUNTIME.md](./RUNTIME.md); this document states the rules that any change
 > to diagnostics must keep.
+
+## How the layer is shaped
+
+One bus, one ledger, one control surface:
+
+- **One bus** (`runtime/events.ts`): every event the runtime moves — graph
+  lifecycle (`register`/`dependencies`/`change`/`flow`/`dispose`), execution
+  lifecycle (`next`/`complete`/`cancel`/`error`), the coordinator's source
+  transport, and devtools traces — flows through a single
+  `RuntimeEventBus` with one sequence and one `observed` guard. Diagnostics
+  is a subscriber, never a second channel. Flow emissions publish one `next`
+  event, not a `change` plus a `next`; `changed()` skips the graph event for
+  flow-backed nodes.
+- **One ledger** (`runtime/diagnostics.ts`): `RuntimeDiagnostics` owns all
+  diagnostics-only state — execution records, origins, atom/flow state
+  readers — plus the frozen `inspect()` snapshot. The reactive core
+  (`StreamixRuntime`) never reads it. Record-backed nodes (flows, operator
+  iterators) are counted once, in their record — emissions, completions,
+  cancels, errors. The browser ledger counts only record-less nodes (atoms,
+  deriveds) and mirrors aggregates onto operator definition entries; every
+  node is counted by exactly one of the two.
+- **One span per execution** (`beginExecution` on the runtime): accounting
+  token and bus events in one object, or a shared no-op when instrumentation
+  is off and the bus is unobserved. Emission call sites never hand-build
+  events; `runtime/operator-execution.ts` and the flow run loop both go
+  through it.
+- **One control surface** (`runtime/controls.ts`): `streamixDiagnostics`
+  with `setEnabled`/`enabled` and the fine-grained `setAccounting` /
+  `setOriginCapture`. Internal per rule 7 — never in the package API.
 
 ## The rules at a glance
 
@@ -26,9 +55,10 @@
 Diagnostics is the first thing production strips and the last thing that may
 spend a cycle anyway.
 
-- Event objects are never constructed before the dispatcher's `observed`
+- Event objects are never constructed before the bus's `observed`
   check — not inside `publish()`, and not at the call site. A flow emission in
-  an unobserved production build allocates nothing for diagnostics.
+  an unobserved production build allocates nothing for diagnostics; the
+  `beginExecution` span returns the shared no-op.
 - Operator iterators are instrumented only when instrumentation is on or a
   listener is attached; otherwise `trackOperatorExecution` returns the
   original iterator untouched.
@@ -110,7 +140,8 @@ which are already handled by the factories — is in
   operator name as a label.
 - Origin capture is best-effort and honest about it: exact file positions in
   per-module dev serving; bundle-relative positions in bundled builds.
-  Capture is disabled in production and can be toggled (`setOriginCapture`).
+  Capture is disabled in production and can be toggled
+  (`streamixDiagnostics.setOriginCapture`).
 - The compile-time transform (variable names, owner classes, scope fields)
   refines and overrides — it is never the sole source of metadata. An app
   built without it still gets file-and-line-grade introspection.

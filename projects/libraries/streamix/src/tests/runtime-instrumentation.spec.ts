@@ -1,5 +1,6 @@
-import { internalRuntime, RuntimeExecutions, isRuntimeInstrumentationEnabled, setRuntimeInstrumentationEnabled } from '../lib/runtime/runtime';
-import { RuntimeEventDispatcher } from '../lib/runtime/events';
+import { internalRuntime } from '../lib/runtime/runtime';
+import { RuntimeExecutions, isRuntimeInstrumentationEnabled, setRuntimeInstrumentationEnabled } from '../lib/runtime/diagnostics';
+import { RuntimeEventBus } from '../lib/runtime/events';
 import { atom, flow } from '../lib/atoms/atom';
 
 function tick(): Promise<void> { return new Promise(resolve => setTimeout(resolve, 0)); }
@@ -47,7 +48,7 @@ describe('runtime instrumentation gating', () => {
   });
 
   it('drops events published while unobserved and delivers only observed ones', () => {
-    const dispatcher = new RuntimeEventDispatcher();
+    const dispatcher = new RuntimeEventBus();
     dispatcher.publish({ node: {}, generation: 1, kind: 'next', value: 'unobserved' });
 
     const received: unknown[] = [];
@@ -63,11 +64,11 @@ describe('runtime instrumentation gating', () => {
   it('allocates no atom state reader while disabled', () => {
     setRuntimeInstrumentationEnabled(false);
     const quiet = atom(1);
-    expect(internalRuntime.atomState(quiet)).toBeUndefined();
+    expect(internalRuntime.diagnostics.atomState(quiet)).toBeUndefined();
 
     setRuntimeInstrumentationEnabled(true);
     const loud = atom(2);
-    expect(internalRuntime.atomState(loud)).toEqual(jasmine.objectContaining({ hasValue: true, value: 2, subscribers: 0 }));
+    expect(internalRuntime.diagnostics.atomState(loud)).toEqual(jasmine.objectContaining({ hasValue: true, value: 2, subscribers: 0 }));
   });
 
   it('leaves no flow entry or execution record while disabled', async () => {
@@ -89,8 +90,8 @@ describe('runtime instrumentation gating', () => {
     try {
       for (let i = 0; i < 20 && seen.length === 0; i++) await tick();
       expect(seen).toEqual([1]);
-      expect(internalRuntime.flows().find(state => state.node === quiet.source)).toBeUndefined();
-      expect(internalRuntime.executions.describe(quiet.source)).toBeUndefined();
+      expect(internalRuntime.diagnostics.flows(internalRuntime.graph).find(state => state.node === quiet.source)).toBeUndefined();
+      expect(internalRuntime.diagnostics.executions.describe(quiet.source)).toBeUndefined();
     } finally {
       quiet.release(0);
       for (let i = 0; i < 20 && !quiet.source.disposed; i++) await tick();
@@ -103,8 +104,8 @@ describe('runtime instrumentation gating', () => {
     const loudStop = loud.source.subscribe(value => loudSeen.push(value));
     try {
       for (let i = 0; i < 20 && loudSeen.length === 0; i++) await tick();
-      expect(internalRuntime.executions.describe(loud.source)).toEqual(jasmine.objectContaining({ active: true }));
-      expect(internalRuntime.flows().find(state => state.node === loud.source)).toBeDefined();
+      expect(internalRuntime.diagnostics.executions.describe(loud.source)).toEqual(jasmine.objectContaining({ active: true }));
+      expect(internalRuntime.diagnostics.flows(internalRuntime.graph).find(state => state.node === loud.source)).toBeDefined();
     } finally {
       loud.release(0);
       for (let i = 0; i < 20 && !loud.source.disposed; i++) await tick();

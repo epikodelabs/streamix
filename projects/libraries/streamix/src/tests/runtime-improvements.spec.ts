@@ -1,7 +1,8 @@
 import { DefaultScheduler, getScheduler, type SchedulableNode } from '../lib/runtime/scheduling';
-import { internalRuntime, StreamixRuntime, RuntimeExecutions, isRuntimeInstrumentationEnabled, setRuntimeInstrumentationEnabled } from '../lib/runtime/runtime';
+import { internalRuntime, StreamixRuntime } from '../lib/runtime/runtime';
+import { RuntimeExecutions, isRuntimeInstrumentationEnabled, setRuntimeInstrumentationEnabled } from '../lib/runtime/diagnostics';
 import { trackOperatorExecution } from '../lib/runtime/operator-execution';
-import { RuntimeEventDispatcher } from '../lib/runtime/events';
+import { RuntimeEventBus } from '../lib/runtime/events';
 
 function queuedNode(name: string, depth: number, order: string[]): SchedulableNode {
   return { depth, queued: false, flush: () => { order.push(name); } };
@@ -124,7 +125,7 @@ describe('runtime diagnostics costs and accounting', () => {
   });
 
   it('does not read or copy an event when no observer exists', () => {
-    const events = new RuntimeEventDispatcher();
+    const events = new RuntimeEventBus();
     const event = { node: {}, generation: 1, kind: 'next' as const, get value(): unknown { throw new Error('copied'); } };
     expect(() => events.publish(event)).not.toThrow();
   });

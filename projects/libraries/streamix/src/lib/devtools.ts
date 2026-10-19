@@ -14,12 +14,13 @@ export interface StreamixDevtoolsEvent {
   readonly time: number;
 }
 
-/** Callback invoked when the bounded trace changes. */
-export type StreamixDevtoolsListener = () => void;
+/** Callback invoked with each recorded event; the trace still changes atomically per microtask. */
+export type StreamixDevtoolsListener = (event: StreamixDevtoolsEvent) => void;
 
 const maxEvents = 250;
 let events: readonly StreamixDevtoolsEvent[] = [];
 const listeners = new Set<StreamixDevtoolsListener>();
+let pending: StreamixDevtoolsEvent[] = [];
 let queued = false;
 
 /** True only when the bundler marks the build as development. */
@@ -30,12 +31,22 @@ export const streamixDevtoolsEnabled =
 export function recordStreamixDevtoolsEvent(event: Omit<StreamixDevtoolsEvent, "time">): void {
   if (!streamixDevtoolsEnabled) return;
 
-  events = [...events, { ...event, time: Date.now() }].slice(-maxEvents);
+  const recorded: StreamixDevtoolsEvent = { ...event, time: Date.now() };
+  events = [...events, recorded].slice(-maxEvents);
+  pending.push(recorded);
   if (!queued) {
     queued = true;
     queueMicrotask(() => {
       queued = false;
-      for (const listener of listeners) listener();
+      // Deliver every event recorded since the last flush; panels usually
+      // re-read the snapshot, trace consumers need each event exactly once.
+      const batch = pending;
+      pending = [];
+      for (const event of batch) {
+        for (const listener of [...listeners]) {
+          try { listener(event); } catch { /* a broken panel must not stop recording */ }
+        }
+      }
     });
   }
 }

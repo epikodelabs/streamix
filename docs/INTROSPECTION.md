@@ -79,7 +79,7 @@ closure:**
 
 ```ts
 if (isRuntimeInstrumentationEnabled()) {
-  internalRuntime.registerFlow(instance, () => ({
+  internalRuntime.diagnostics.registerFlow(instance, () => ({
     started, awaitingNext, subscribers: activeSubCount,
     hasValue: current !== NO_INITIAL_VALUE,
     value: current === NO_INITIAL_VALUE ? undefined : current,
@@ -87,39 +87,27 @@ if (isRuntimeInstrumentationEnabled()) {
 }
 ```
 
-**2. Account the execution with a token — start once per run, emit per
-value, finish exactly once:**
+**2. Open one execution span per run — it accounts and publishes together:**
 
 ```ts
-const token = internalRuntime.executions.start(instance, instance.name,
-  internalRuntime.originOf(instance));
-// ...
-internalRuntime.executions.next(instance, token);   // per emission
-// ...
-internalRuntime.executions.finish(instance, token, executionExit,
-  executionExit === "error" ? errorValue : undefined);   // in finally
-```
-
-The token makes late results from a previous run harmless: a stale `next` or
-`finish` for an old token is ignored and never counted. `start` accepts an
-optional label (the atom's `name`) and origin — pass `originOf(instance)`, do
-not capture a second origin inside the run loop.
-
-**3. Publish execution events — only when someone listens:**
-
-```ts
-const requestedAt = internalRuntime.events.observed ? performance.now() : undefined;
+const span = internalRuntime.beginExecution(instance, instance.name,
+  internalRuntime.diagnostics.originOf(instance));
 // per emission:
-if (internalRuntime.events.observed)
-  internalRuntime.events.publish({ node: instance, generation: token,
-    kind: "next", value: result.value,
-    ...(requestedAt === undefined ? {} : { pullMs: Math.max(0, performance.now() - requestedAt) }) });
+const requestedAt = span.reports ? performance.now() : undefined;
+// ...after the pull settles:
+span.next(result.value, requestedAt);
+// exactly once, in finally (or at dispose):
+span.finish(executionExit, executionExit === "error" ? errorValue : undefined);
 ```
 
-The `observed` guard is mandatory and sits *before* the object literal:
-unobserved builds allocate nothing. Event kinds are `next`, `complete`,
-`cancel`, `error`; exactly one terminal event per run, carrying `error` only
-for `error`.
+`beginExecution` returns a shared no-op span when instrumentation is off and
+the bus is unobserved, so the guard, the token, and the event shape live in
+one place — call sites never hand-build events. When a real span is returned,
+late results from a previous run are already harmless: the span retires its
+token on `finish`, and a stale `next`/`finish` is ignored and never counted.
+Pass `diagnostics.originOf(instance)`; do not capture a second origin inside
+the run loop. Event kinds are `next`, `complete`, `cancel`, `error`; exactly
+one terminal event per run, carrying `error` only for `error`.
 
 ### Scopes
 
@@ -246,8 +234,8 @@ the wrappers entirely (`streamixDevtoolsEnabled` gates the runtime side).
 | `createAtomBase` config `getCachedValue` | your factory | yes for atoms | value preview without evaluation |
 | funnel through `finalizeAtomInstance` | your factory | yes for atoms | registration, origin, scheduler link, disposal |
 | `isRuntimeInstrumentationEnabled()` gate around `registerFlow` | flow factories | yes for flows | live flow state without production closure |
-| `executions.start/next/finish` with one token per run | flow run loop | yes for flows | truthful accounting, `describe(node)` |
-| `events.observed` guard before every `events.publish` | run loop + terminals | always | allocation-free emissions when unobserved |
+| `executions.start/next/finish` with one token per run | flow run loop | yes for flows | truthful accounting, `describe(node)` — use the `beginExecution` span, which does this plus the events |
+| `beginExecution` span instead of hand-built events | run loop + terminals | always | allocation-free emissions when unobserved |
 | `createOperator` / `createPushOperator` | operator | preferred | labels, origin, tracking, composition for free |
 | `__streamixOperatorExecution` + `trackOperatorExecution` | manual `apply` | if not using the factories | same as above, manual |
 | `__streamixPipeline(result, inputs)` | pipeline builders | if custom composition | inspector composition view |

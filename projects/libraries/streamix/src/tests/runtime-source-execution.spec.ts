@@ -1,5 +1,5 @@
 import { RuntimeEventBuffer } from '../lib/runtime/event-buffer';
-import { RuntimeEventDispatcher } from '../lib/runtime/events';
+import { RuntimeEventBus } from '../lib/runtime/events';
 import { RuntimeSourceExecution } from '../lib/runtime/source-execution';
 
 describe('runtime source execution', () => {
@@ -36,7 +36,7 @@ describe('runtime source execution', () => {
 
 
   it('reopens transient completion when a dynamic source is attached', async () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     execution.notify(true);
     expect((await execution.wait()).done).toBe(true);
     execution.attach(1, { next: async () => ({ done: true, value: undefined }) });
@@ -60,7 +60,7 @@ describe('runtime source execution', () => {
   });
 
   it('delivers runtime events in FIFO order across concurrent demand', async () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     const first = execution.wait();
     const second = execution.wait();
     execution.publish(0, 10, 'next');
@@ -71,7 +71,7 @@ describe('runtime source execution', () => {
   });
 
   it('suppresses demand notification until the outer batch commits', async () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     let delivered = false;
     const pending = execution.wait().then(() => { delivered = true; });
     execution.batch(() => {
@@ -84,7 +84,7 @@ describe('runtime source execution', () => {
   });
 
   it('discards detached-source events without removing other source events', () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     execution.publish(0, 1, 'next');
     execution.publish(1, 2, 'next');
     execution.dropSourceEvents(0);
@@ -93,7 +93,7 @@ describe('runtime source execution', () => {
   });
 
   it('settles outstanding demand synchronously when closed', async () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     const pending = execution.wait();
     execution.close();
     expect((await pending).done).toBe(true);
@@ -101,7 +101,7 @@ describe('runtime source execution', () => {
     expect(execution.hasEvents).toBe(false);
   });
   it('settles demand registered after terminal completion without hanging', async () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     execution.notify(true);
     expect((await execution.wait()).done).toBe(true);
     execution.publish(0, 42, 'next');
@@ -110,7 +110,7 @@ describe('runtime source execution', () => {
   });
 
   it('drains queued values before returning terminal completion to late demand', async () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     execution.publish(0, 11, 'next');
     execution.notify(true);
     expect(execution.take()!.value).toBe(11);
@@ -119,7 +119,7 @@ describe('runtime source execution', () => {
   });
 
   it('removes only events belonging to a detached source', () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     execution.publish(0, 10, 'next');
     execution.publish(1, 20, 'next');
     execution.detach(0);
@@ -129,7 +129,7 @@ describe('runtime source execution', () => {
   });
 
   it('does not resurrect queued reentrant events after detachment', () => {
-    const events = new RuntimeEventDispatcher();
+    const events = new RuntimeEventBus();
     const execution = new RuntimeSourceExecution<number, number>(events, done);
     // Register after execution's observer: publish reentrantly, then detach
     // while the dispatcher still holds the nested event in its queue.
@@ -145,7 +145,7 @@ describe('runtime source execution', () => {
   });
 
   it('serves late demand from queued events before terminal completion', async () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     execution.publish(0, 7, 'next');
     execution.publish(0, 8, 'next');
     execution.notify(true);
@@ -156,14 +156,14 @@ describe('runtime source execution', () => {
   });
 
   it('serves late demand from buffered events even before completion', async () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     execution.publish(0, 17, 'next');
     expect((await execution.wait()).value).toBe(17);
     execution.close();
   });
 
   it('invalidates buffered events when an attached source slot is replaced', () => {
-    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventDispatcher(), done);
+    const execution = new RuntimeSourceExecution<number, number>(new RuntimeEventBus(), done);
     const source: AsyncIterator<number> = { next: async () => ({ done: true, value: undefined as any }) };
     execution.attach(0, source);
     execution.publish(0, 1, 'next');
@@ -177,7 +177,7 @@ describe('runtime source execution', () => {
   });
 
   it('rejects reentrant events from a previous source after slot replacement', () => {
-    const events = new RuntimeEventDispatcher();
+    const events = new RuntimeEventBus();
     const execution = new RuntimeSourceExecution<number, number>(events, done);
     const source: AsyncIterator<number> = { next: async () => ({ done: true, value: undefined as any }) };
     execution.attach(0, source);

@@ -2,7 +2,8 @@
 import { build } from 'esbuild';
 const result = await build({
   stdin: { contents: `
-import { internalRuntime, setRuntimeInstrumentationEnabled, StreamixRuntime } from '../projects/libraries/streamix/src/lib/runtime/runtime';
+import { internalRuntime, StreamixRuntime } from '../projects/libraries/streamix/src/lib/runtime/runtime';
+import { setRuntimeInstrumentationEnabled } from '../projects/libraries/streamix/src/lib/runtime/diagnostics';
 import { trackOperatorExecution } from '../projects/libraries/streamix/src/lib/runtime/operator-execution';
 const iterations = 100000;
 async function sample(enabled, observed) {

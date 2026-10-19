@@ -1,5 +1,5 @@
 import { internalRuntime } from './runtime';
-import { streamixDevtoolsEnabled, streamixDevtoolsSnapshot, subscribeStreamixDevtools } from '../devtools';
+import { streamixDevtoolsEnabled, streamixDevtoolsSnapshot, subscribeStreamixDevtools, type StreamixDevtoolsEvent } from '../devtools';
 
 export interface StreamixSourceMetadata {
   readonly kind: 'scope' | 'atom' | 'derived' | 'flow' | 'operator' | 'source' | 'subscription';
@@ -73,7 +73,7 @@ export interface StreamixInspectorAPI {
 }
 declare global { interface Window { __streamix?: StreamixInspectorAPI; } }
 
-type Entry = { id: number; ref: WeakRef<object>; source: StreamixSourceMetadata; owner?: number; composition: number[]; innerLifetimes?: Map<number, StreamixOperatorLifetime>; inputs?: number; metrics: { total: number; errors: number; completed: number; cancelled: number }; latest?: string; state?: string; emitted?: number; target?: number; subscriptions?: Set<number> };
+type Entry = { id: number; ref: WeakRef<object>; source: StreamixSourceMetadata; owner?: number; composition: number[]; innerLifetimes?: Map<number, StreamixOperatorLifetime>; inputs?: number; metrics: { total: number; errors: number; completed: number; cancelled: number }; latest?: string; state?: string; target?: number; subscriptions?: Set<number> };
 const identities = new WeakMap<object, Entry>();
 const entries = new Map<number, Entry>();
 // Finalization releases metadata without retaining the inspected object. The
@@ -118,10 +118,11 @@ export function streamixPreview(value: unknown): string {
   try { return (typeof value === 'string' ? value : JSON.stringify(summarize(value, 2)) ?? String(value)).slice(0, 240); }
   catch { return '[unavailable]'; }
 }
-function publish(entry: Entry, kind: string, value?: unknown, error?: unknown, pullMs?: number): void {
+function publish(entry: Entry, kind: string, value?: unknown, error?: unknown, pullMs?: number, count?: number): void {
+  const emission = count ?? entry.metrics.total;
   const event = Object.freeze({ id: entry.id, name: entry.source.name, kind, time: Date.now(), objectKind: entry.source.kind,
     ...(pullMs === undefined ? {} : { pullMs }),
-    ...((kind === 'next' || kind === 'change') && entry.metrics.total > 0 ? { emission: entry.metrics.total } : {}),
+    ...((kind === 'next' || kind === 'change') && emission > 0 ? { emission } : {}),
     ...(value !== undefined ? { value: streamixPreview(value) } : {}),
     ...(error !== undefined ? { error: error instanceof Error ? error.message.slice(0, 240) : streamixPreview(error) } : {}) });
   appendEvent(event);
@@ -140,6 +141,13 @@ function immutableMetadata(source: StreamixSourceMetadata): StreamixSourceMetada
 function idOf(node: object): number | undefined { return identities.get(node)?.id; }
 function ids(nodes: Iterable<object>): number[] { return [...nodes].map(idOf).filter((id): id is number => id !== undefined); }
 function recordEmission(entry: Entry): void { entry.metrics.total++; }
+/** One outcome into an entry's counters; used for record-less nodes and definition aggregates. */
+function recordOutcome(entry: Entry, kind: string): void {
+  if (kind === 'next') recordEmission(entry);
+  else if (kind === 'error') entry.metrics.errors++;
+  else if (kind === 'complete') entry.metrics.completed++;
+  else if (kind === 'cancel') entry.metrics.cancelled++;
+}
 function emissionMetrics(entry: Entry): StreamixEmissionMetrics {
   return Object.freeze({ ...entry.metrics });
 }
@@ -147,17 +155,22 @@ function details(id: number): StreamixObjectDetails | undefined {
   const entry = entries.get(id);
   const node = entry?.ref.deref() as any;
   if (!entry || !node || (entry.source.kind === 'scope' ? node._disposed === true : node.disposed === true || (entry.source.kind === 'subscription' && node.unsubscribed === true))) { entries.delete(id); return undefined; }
-  const cached = internalRuntime.atomState(node);
-  const execution = internalRuntime.executions.describe(node);
-  const flow = internalRuntime.flowState(node);
+  const cached = internalRuntime.diagnostics.atomState(node);
+  const execution = internalRuntime.diagnostics.executions.describe(node);
+  const flow = internalRuntime.diagnostics.flowState(node);
   const raw = entry.source.kind === 'scope' ? node._rawState ?? {} : {};
+  // Record-backed nodes take their counters from the runtime's own record;
+  // record-less nodes (atoms, deriveds, definitions) use the ledger counters.
+  const metrics = execution
+    ? Object.freeze({ total: execution.emitted, errors: execution.errors, completed: execution.completed, cancelled: execution.cancelled })
+    : emissionMetrics(entry);
   return Object.freeze({ id, name: entry.source.kind !== 'operator' && typeof node !== 'function' && typeof node.name === 'string' ? node.name : entry.source.name,
     kind: entry.source.kind, source: entry.source,
     state: entry.source.kind === 'subscription' ? 'subscribed' : execution?.active ? (flow?.awaitingNext ? 'awaiting source' : 'running')
       : execution?.lastExit ?? entry.state ?? (flow?.started === false ? 'idle' : cached?.hasValue ? 'ready' : 'unevaluated'),
     value: entry.source.kind === 'subscription' ? 'subscription handle' : cached?.hasValue ? streamixPreview(cached.value) : entry.latest ?? (entry.source.kind === 'scope' ? 'scope' : 'unevaluated'),
-    subscribers: flow?.subscribers ?? cached?.subscribers ?? 0, emitted: entry.metrics.total,
-    metrics: emissionMetrics(entry),
+    subscribers: flow?.subscribers ?? cached?.subscribers ?? 0, emitted: metrics.total,
+    metrics,
     innerLifetimes: Object.freeze([...(entry.innerLifetimes?.values() ?? [])].sort((a, b) =>
       a.operator.file.localeCompare(b.operator.file) || a.operator.line - b.operator.line ||
       a.operator.column - b.operator.column || a.operator.id - b.operator.id)),
@@ -181,66 +194,83 @@ export const streamixInspector: StreamixInspectorAPI = Object.freeze({
   trace: () => Object.freeze([...events]),
 });
 
+/** Marker identity for events that describe no runtime node. */
+const devtoolsTraceNode: object = { kind: 'devtools' };
+
 /** Called only by instrumented entry points; does nothing in production or SSR. */
 export function enableStreamixIntrospection(): void {
   if (enabled || !streamixDevtoolsEnabled || typeof window === 'undefined' || typeof document === 'undefined') return;
   enabled = true;
   window.__streamix = streamixInspector;
-  const recorded = new WeakSet<object>();
-  subscribeStreamixDevtools(() => {
-    for (const event of streamixDevtoolsSnapshot()) {
-      if (recorded.has(event)) continue;
-      recorded.add(event);
-      appendEvent(Object.freeze({ id: 0, name: event.source.slice(0, 240), kind: event.type, time: event.time }));
-    }
-  });
-  internalRuntime.observe(event => {
-    const entry = identities.get(event.node);
-    if (!entry) return;
-    if (event.kind === 'change' && (entry.source.kind === 'atom' || entry.source.kind === 'derived') && !internalRuntime.flowState(event.node)) {
-      recordEmission(entry);
-    }
-    if (event.kind === 'dispose') {
-      __streamixDebugDispose(event.node);
-      pipelines.delete(event.node);
-      for (const id of entry.composition) {
-        const child = entries.get(id);
-        if (child?.owner === entry.id) {
-          const other = [...entries.values()].find(candidate => candidate.id !== entry.id && candidate.composition.includes(id));
-          if (other) child.owner = other.id;
-          else entries.delete(id);
-        }
-      }
-    } else if (event.kind !== 'change' || (entry.source.kind !== 'flow' && entry.source.kind !== 'source')) {
-      // Flow and source entries publish every emission through the execution
-      // dispatcher (next/complete/... with the value). Their valueless graph
-      // 'change' would duplicate each event and let an always-ticking source
-      // flood the trace with counter lines.
-      publish(entry, event.kind);
-    }
-  });
+  // One subscription over the single runtime bus: graph lifecycle, execution
+  // lifecycle, and devtools traces all arrive here in order.
   internalRuntime.events.observe(event => {
     const entry = identities.get(event.node);
-    if (!entry) return;
-    entry.state = event.kind;
-    if (event.kind === 'next') recordEmission(entry);
-    else if (event.kind === 'error') entry.metrics.errors++;
-    else if (event.kind === 'complete') entry.metrics.completed++;
-    else if (event.kind === 'cancel') entry.metrics.cancelled++;
-    if (event.kind === 'next') { entry.latest = streamixPreview(event.value); entry.emitted = (entry.emitted ?? 0) + 1; }
-    const definition = definitions.get(event.node);
-    if (definition) {
-      if (event.kind === 'next') recordEmission(definition);
-      else if (event.kind === 'error') definition.metrics.errors++;
-      else if (event.kind === 'complete') definition.metrics.completed++;
-      else if (event.kind === 'cancel') definition.metrics.cancelled++;
-      definition.state = event.kind === 'next' ? 'running' : event.kind;
-      definition.latest = entry.latest;
-      if (event.kind === 'next') definition.emitted = (definition.emitted ?? 0) + 1;
+    if (!entry) {
+      // Events without a runtime node (devtools read/write/render lines) are
+      // trace-only; coordinator transport events carry no label and are ignored.
+      if (event.label !== undefined) {
+        appendEvent(Object.freeze({ id: 0, name: event.label.slice(0, 240), kind: event.kind, time: Date.now() }));
+      }
+      return;
     }
-    publish(entry, event.kind, event.value, event.error ?? internalRuntime.executions.describe(event.node)?.error, event.pullMs);
-    if (event.kind !== 'next' && entry.source.kind === 'operator') entries.delete(entry.id);
+    switch (event.kind) {
+      case 'register':
+      case 'dependencies':
+      case 'flow':
+        publish(entry, event.kind);
+        return;
+      case 'dispose':
+        __streamixDebugDispose(event.node);
+        pipelines.delete(event.node);
+        for (const id of entry.composition) {
+          const child = entries.get(id);
+          if (child?.owner === entry.id) {
+            const other = [...entries.values()].find(candidate => candidate.id !== entry.id && candidate.composition.includes(id));
+            if (other) child.owner = other.id;
+            else entries.delete(id);
+          }
+        }
+        return;
+      case 'change':
+        if ((entry.source.kind === 'atom' || entry.source.kind === 'derived') && !internalRuntime.diagnostics.flowState(event.node)) {
+          recordEmission(entry);
+        }
+        // Flow and source entries publish every emission as an execution
+        // 'next' event with the value. Their valueless 'change' would
+        // duplicate each emission and let an always-ticking source flood the
+        // trace with counter lines.
+        if (entry.source.kind !== 'flow' && entry.source.kind !== 'source') publish(entry, 'change');
+        return;
+      case 'next':
+      case 'complete':
+      case 'cancel':
+      case 'error': {
+        entry.state = event.kind;
+        // Nodes with an execution record are counted by the runtime itself;
+        // the browser ledger counts only record-less nodes and mirrors the
+        // aggregate onto the operator definition entry.
+        const record = internalRuntime.diagnostics.executions.describe(event.node);
+        if (!record) recordOutcome(entry, event.kind);
+        if (event.kind === 'next') entry.latest = streamixPreview(event.value);
+        const definition = definitions.get(event.node);
+        if (definition) {
+          recordOutcome(definition, event.kind);
+          definition.state = event.kind === 'next' ? 'running' : event.kind;
+          definition.latest = entry.latest;
+        }
+        publish(entry, event.kind, event.value, event.error ?? record?.error, event.pullMs, record?.emitted);
+        if (event.kind !== 'next' && entry.source.kind === 'operator') entries.delete(entry.id);
+        return;
+      }
+    }
   });
+  // Framework bridge events enter the same bus; seed the trace history first
+  // so events recorded before introspection was enabled are not lost.
+  const bridge = (event: StreamixDevtoolsEvent) =>
+    internalRuntime.events.publish({ kind: event.type, node: devtoolsTraceNode, label: event.source });
+  for (const event of streamixDevtoolsSnapshot()) bridge(event);
+  subscribeStreamixDevtools(bridge);
 }
 
 let lifetimeSequence = 0;
@@ -326,7 +356,7 @@ export function __streamixScopeMember(scope: object, key: PropertyKey, value: un
   if (!parent || (!(value as any).type || !['atom', 'scope'].includes((value as any).type))) return;
   const source = parent.source.members?.[String(key)] ?? { ...parent.source, members: undefined, name: parent.source.name + '.' + String(key),
     kind: (value as any).type === 'scope' ? 'scope' as const : 'atom' as const };
-  const kind = (value as any).type === 'scope' ? 'scope' : internalRuntime.flowState(value) ? 'flow'
+  const kind = (value as any).type === 'scope' ? 'scope' : internalRuntime.diagnostics.flowState(value) ? 'flow'
     : source.kind === 'source' || identities.get(value)?.source.kind === 'source' ? 'source'
     : typeof (value as any).next === 'function' ? 'atom' : 'derived';
   const members = source.members ?? identities.get(value)?.source.members;

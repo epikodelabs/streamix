@@ -1,10 +1,10 @@
-import { RuntimeEventDispatcher } from '../lib/runtime/events';
+import { RuntimeEventBus } from '../lib/runtime/events';
 import { RuntimeEventBuffer } from '../lib/runtime/event-buffer';
 import { RuntimeSourcePulls } from '../lib/runtime/source-pulls';
 
 describe('runtime execution stress and generation safety', () => {
   it('drains ten thousand reentrant events in FIFO order', () => {
-    const events = new RuntimeEventDispatcher();
+    const events = new RuntimeEventBus();
     const node = {};
     const seen: number[] = [];
     events.observe(event => {

@@ -1,31 +1,113 @@
-/** Internal process-local execution registry. Not exported from the package API. */
-export type RuntimeNode = object;
-export type RuntimeEvent = Readonly<{
-  sequence: number;
-  kind: "register" | "dependencies" | "dispose" | "change" | "flow";
-  node: RuntimeNode;
-}>;
+/** Internal process-local reactive core: graph, scheduling, invalidation, and the event bus. */
+import { runtimeScheduling, RuntimeScheduling, type SchedulableNode } from "./scheduling";
+import { RuntimeEventBus } from "./events";
+import { RuntimeDiagnostics, isRuntimeInstrumentationEnabled, type FlowExit } from "./diagnostics";
+import type { RuntimeOrigin } from "./origin";
 
-const DEV = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
+export type RuntimeNode = object;
+export type { RuntimeEvent, RuntimeEventKind, RuntimeEventBus } from "./events";
+
+/** One live execution observed by diagnostics: accounting plus bus events. */
+export interface ExecutionSpan {
+  /** True when execution events are published on the bus; callers may skip timing work otherwise. */
+  readonly reports: boolean;
+  /** Records one emitted value. `requestedAt` is the pull-start `performance.now()` timestamp. */
+  next(value: unknown, requestedAt?: number): void;
+  /** Closes the execution: the token is retired and the exit event published. */
+  finish(exit: FlowExit, error?: unknown): void;
+}
+
+const INACTIVE_EXECUTION: ExecutionSpan = { reports: false, next() {}, finish() {} };
+
+export class StreamixRuntime {
+  readonly graph = new RuntimeGraph();
+  readonly events = new RuntimeEventBus();
+  /** Diagnostics-only state; the reactive core never reads it. */
+  readonly diagnostics = new RuntimeDiagnostics(this.events);
+  readonly root = Object.freeze({ type: "root" as const });
+  private readonly invalidators = new Map<RuntimeNode, () => void>();
+  private readonly schedulables = new WeakMap<RuntimeNode, SchedulableNode>();
+
+  constructor(readonly scheduling: RuntimeScheduling = new RuntimeScheduling()) {}
+
+  /** Register a node, optionally linking its scheduler state and creation site for diagnostics. */
+  register(node: RuntimeNode, schedulable?: SchedulableNode, origin?: RuntimeOrigin): void {
+    this.graph.register(node);
+    if (schedulable) this.schedulables.set(node, schedulable);
+    if (origin) this.diagnostics.captureOrigin(node, origin);
+    this.events.publish({ kind: "register", node });
+  }
+
+  /** The scheduler-owned state of a node, when it has one. */
+  schedulableOf(node: RuntimeNode): SchedulableNode | undefined {
+    return this.schedulables.get(node);
+  }
+
+  dependencies(node: RuntimeNode, sources: Iterable<RuntimeNode>): void {
+    this.graph.replace(node, sources);
+    this.events.publish({ kind: "dependencies", node });
+  }
+
+  /** Register a graph-managed derived invalidator, not a public subscription. */
+  onInvalidate(node: RuntimeNode, invalidate: () => void): () => void {
+    this.invalidators.set(node, invalidate);
+    return () => {
+      if (this.invalidators.get(node) === invalidate) this.invalidators.delete(node);
+    };
+  }
+
+  /** Publish a committed value change to current graph dependents. */
+  changed(source: RuntimeNode): void {
+    // Flows report emissions as execution 'next' events; the valueless graph
+    // 'change' would double-count each emission in diagnostics consumers.
+    if (this.events.observed && !this.diagnostics.hasFlow(source)) {
+      this.events.publish({ kind: "change", node: source });
+    }
+    for (const dependent of this.graph.dependents(source)) {
+      // Edges may be replaced during an earlier invalidation.
+      if (!this.graph.hasDependency(dependent, source)) continue;
+      this.invalidators.get(dependent)?.();
+    }
+  }
+
+  dispose(node: RuntimeNode): void {
+    this.diagnostics.dispose(node);
+    this.invalidators.delete(node);
+    this.graph.remove(node);
+    this.events.publish({ kind: "dispose", node });
+  }
+
+  /**
+   * Opens one execution of a node: accounting token, bus events, or neither.
+   * Returns a shared no-op span when instrumentation is off and the bus is
+   * unobserved, so an unobserved production emission allocates nothing.
+   */
+  beginExecution(node: RuntimeNode, name?: string, origin?: RuntimeOrigin): ExecutionSpan {
+    const accounting = isRuntimeInstrumentationEnabled();
+    if (!accounting && !this.events.observed) return INACTIVE_EXECUTION;
+    const observed = this.events.observed;
+    const token = accounting ? this.diagnostics.executions.start(node, name, origin) : 0;
+    const executions = this.diagnostics.executions;
+    const events = this.events;
+    return {
+      reports: observed,
+      next(value: unknown, requestedAt?: number): void {
+        if (accounting) executions.next(node, token);
+        if (observed) events.publish({ node, generation: token, kind: "next", value,
+          ...(requestedAt !== undefined ? { pullMs: Math.max(0, performance.now() - requestedAt) } : {}) });
+      },
+      finish(exit: FlowExit, error?: unknown): void {
+        if (accounting) executions.finish(node, token, exit, exit === "error" ? error : undefined);
+        if (observed) events.publish({ node, generation: token, kind: exit, ...(exit === "error" ? { error } : {}) });
+      },
+    };
+  }
+}
 
 /**
- * Execution accounting and per-node state readers are diagnostics-only. Dev
- * builds default to on; production bundles start with capture off and never
- * pay for a record, a counter, or a state-reader closure. Tests and tooling
- * may toggle the flag explicitly, mirroring {@link ../origin:setOriginCapture}.
+ * Upstream/downstream edges between runtime nodes, with cycle rejection.
+ * Kept local to the core: diagnostics reads it, nothing else writes it.
  */
-let instrumentationEnabled = DEV;
-
-/** Enable or disable execution accounting and node state capture. */
-export function setRuntimeInstrumentationEnabled(next: boolean): void {
-  instrumentationEnabled = next;
-}
-
-/** True while execution accounting and node state capture are recorded. */
-export function isRuntimeInstrumentationEnabled(): boolean {
-  return instrumentationEnabled;
-}
-
 export class RuntimeGraph {
   private readonly upstream = new Map<RuntimeNode, Set<RuntimeNode>>();
   private readonly downstream = new Map<RuntimeNode, Set<RuntimeNode>>();
@@ -94,258 +176,6 @@ export class RuntimeGraph {
   dependents(node: RuntimeNode): ReadonlySet<RuntimeNode> { return new Set(this.downstream.get(node) ?? []); }
   nodes(): IterableIterator<RuntimeNode> { return this.upstream.keys(); }
   get size(): number { return this.upstream.size; }
-}
-
-import { runtimeScheduling, RuntimeScheduling, type SchedulableNode } from "./scheduling";
-import { RuntimeEventDispatcher } from "./events";
-import { collectInspection, type RuntimeInspection } from "./diagnostics";
-import type { RuntimeOrigin } from "./origin";
-
-/** Execution accounting is internal: a flow has one producer shared by its subscribers. */
-export type FlowExit = "complete" | "cancel" | "error";
-export interface FlowExecutionSnapshot {
-  readonly active: number;
-  readonly started: number;
-  readonly completed: number;
-  readonly cancelled: number;
-  readonly failed: number;
-  readonly emitted: number;
-}
-
-/** Frozen per-node view of execution accounting, for diagnostics consumers. */
-export interface ExecutionRecordSnapshot {
-  readonly node: RuntimeNode;
-  readonly name?: string;
-  readonly origin?: RuntimeOrigin;
-  readonly active: boolean;
-  readonly runs: number;
-  readonly emitted: number;
-  readonly lastExit?: FlowExit;
-  readonly lastError?: unknown;
-  /** Error of the current or most recently finished run; cleared on restart. */
-  readonly error?: unknown;
-}
-
-interface ExecutionRecord {
-  name?: string;
-  origin?: RuntimeOrigin;
-  runs: number;
-  emitted: number;
-  lastExit?: FlowExit;
-  lastError?: unknown;
-  error?: unknown;
-}
-
-export class RuntimeExecutions {
-  private readonly active = new Map<RuntimeNode, number>();
-  private readonly records = new Map<RuntimeNode, ExecutionRecord>();
-  private generation = 0;
-  private started = 0;
-  private completed = 0;
-  private cancelled = 0;
-  private failed = 0;
-  private emitted = 0;
-
-  /** A token prevents a late previous execution from closing a newer one. */
-  start(node: RuntimeNode, name?: string, origin?: RuntimeOrigin): number {
-    if (!instrumentationEnabled) return 0;
-    const previous = this.active.get(node);
-    if (previous !== undefined) this.finish(node, previous, "cancel");
-    const token = ++this.generation;
-    this.active.set(node, token);
-    let record = this.records.get(node);
-    if (!record) {
-      record = { runs: 0, emitted: 0 };
-      this.records.set(node, record);
-    }
-    if (name !== undefined) record.name = name;
-    if (origin !== undefined) record.origin = origin;
-    record.error = undefined;
-    record.runs++;
-    this.started++;
-    return token;
-  }
-
-  next(node: RuntimeNode, token: number): void {
-    if (!instrumentationEnabled) return;
-    if (this.active.get(node) !== token) return;
-    this.emitted++;
-    const record = this.records.get(node);
-    if (record) record.emitted++;
-  }
-
-  finish(node: RuntimeNode, token: number, exit: FlowExit, error?: unknown): void {
-    // Still release an execution that was active when capture was disabled,
-    // so the active map never strands a node after a mid-flight toggle.
-    if (!instrumentationEnabled) {
-      if (this.active.get(node) === token) this.active.delete(node);
-      return;
-    }
-    if (this.active.get(node) !== token) return;
-    this.active.delete(node);
-    if (exit === "complete") this.completed++;
-    else if (exit === "cancel") this.cancelled++;
-    else this.failed++;
-    const record = this.records.get(node);
-    if (record) {
-      record.lastExit = exit;
-      record.error = exit === "error" ? error : undefined;
-      if (exit === "error" && error !== undefined) record.lastError = error;
-    }
-  }
-
-  describe(node: RuntimeNode): ExecutionRecordSnapshot | undefined {
-    const record = this.records.get(node);
-    if (!record) return undefined;
-    return this.freezeRecord(node, record);
-  }
-
-  /** All execution records; the union with graph nodes forms the diagnostics node set. */
-  snapshotEntries(): ExecutionRecordSnapshot[] {
-    return Array.from(this.records.entries(), ([node, record]) => this.freezeRecord(node, record));
-  }
-
-  /** Drop the diagnostics record. Active executions keep their own lifecycle. */
-  forget(node: RuntimeNode): void {
-    this.records.delete(node);
-  }
-
-  private freezeRecord(node: RuntimeNode, record: ExecutionRecord): ExecutionRecordSnapshot {
-    return Object.freeze({
-      node,
-      name: record.name,
-      ...(record.origin ? { origin: record.origin } : {}),
-      active: this.active.has(node),
-      runs: record.runs,
-      emitted: record.emitted,
-      lastExit: record.lastExit,
-      lastError: record.lastError,
-      ...(record.error !== undefined ? { error: record.error } : {}),
-    });
-  }
-
-  snapshot(): FlowExecutionSnapshot {
-    return Object.freeze({
-      active: this.active.size, started: this.started,
-      completed: this.completed, cancelled: this.cancelled,
-      failed: this.failed, emitted: this.emitted,
-    });
-  }
-}
-
-/** Producer state read without subscribing, pulling, or evaluating a formula. */
-export interface FlowDiagnosticsState {
-  readonly started: boolean;
-  readonly awaitingNext: boolean;
-  readonly subscribers: number;
-  readonly hasValue: boolean;
-  readonly value: unknown;
-}
-
-export class StreamixRuntime {
-  private readonly atomStates = new WeakMap<RuntimeNode, () => { hasValue: boolean; value: unknown; subscribers: number; error: unknown }>();
-  registerAtomState(node: RuntimeNode, read: () => { hasValue: boolean; value: unknown; subscribers: number; error: unknown }): void {
-    if (!instrumentationEnabled) return;
-    this.atomStates.set(node, read);
-  }
-  atomState(node: RuntimeNode) { return this.atomStates.get(node)?.(); }
-  constructor(readonly scheduling: RuntimeScheduling = new RuntimeScheduling()) {}
-  readonly graph = new RuntimeGraph();
-  readonly events = new RuntimeEventDispatcher();
-  readonly executions = new RuntimeExecutions();
-  readonly root = Object.freeze({ type: "root" as const });
-  private readonly flowStates = new Map<RuntimeNode, () => FlowDiagnosticsState>();
-  private sequence = 0;
-  private readonly invalidators = new Map<RuntimeNode, () => void>();
-  private readonly schedulables = new WeakMap<RuntimeNode, SchedulableNode>();
-  private readonly origins = new WeakMap<RuntimeNode, RuntimeOrigin>();
-  private readonly observers = new Set<(event: RuntimeEvent) => void>();
-
-  /** Register a node, optionally linking its scheduler state and creation site for diagnostics. */
-  register(node: RuntimeNode, schedulable?: SchedulableNode, origin?: RuntimeOrigin): void {
-    this.graph.register(node);
-    if (schedulable) this.schedulables.set(node, schedulable);
-    if (origin) this.origins.set(node, origin);
-    this.emit("register", node);
-  }
-
-  /** The creation-site position of a node, when captured in a dev build. */
-  originOf(node: RuntimeNode): RuntimeOrigin | undefined {
-    return this.origins.get(node);
-  }
-
-  /** Register a flow-backed atom independently of its execution starting. */
-  registerFlow(node: RuntimeNode, state: () => FlowDiagnosticsState): void {
-    if (!instrumentationEnabled) return;
-    this.flowStates.set(node, state);
-    this.emit("flow", node);
-  }
-
-  flowState(node: RuntimeNode): FlowDiagnosticsState | undefined {
-    const state = this.flowStates.get(node)?.();
-    return state ? Object.freeze({ ...state }) : undefined;
-  }
-
-  /** Live flows, including idle and recoverably failed producers; disposed flows are removed. */
-  flows() {
-    return Object.freeze(Array.from(this.flowStates, ([node, read]) => Object.freeze({
-      node, ...read(), origin: this.origins.get(node), execution: this.executions.describe(node),
-      dependencies: Object.freeze([...this.graph.dependencies(node)]),
-      dependents: Object.freeze([...this.graph.dependents(node)]),
-    })));
-  }
-
-  /** The scheduler-owned state of a node, when it has one. */
-  schedulableOf(node: RuntimeNode): SchedulableNode | undefined {
-    return this.schedulables.get(node);
-  }
-  dependencies(node: RuntimeNode, sources: Iterable<RuntimeNode>): void {
-    this.graph.replace(node, sources);
-    this.emit("dependencies", node);
-  }
-  /** Register a graph-managed derived invalidator, not a public subscription. */
-  onInvalidate(node: RuntimeNode, invalidate: () => void): () => void {
-    this.invalidators.set(node, invalidate);
-    return () => {
-      if (this.invalidators.get(node) === invalidate) this.invalidators.delete(node);
-    };
-  }
-
-  /** Publish a committed value change to current graph dependents. */
-  changed(source: RuntimeNode): void {
-    this.emit("change", source);
-    for (const dependent of this.graph.dependents(source)) {
-      // Edges may be replaced during an earlier invalidation.
-      if (!this.graph.hasDependency(dependent, source)) continue;
-      this.invalidators.get(dependent)?.();
-    }
-  }
-
-  dispose(node: RuntimeNode): void {
-    this.flowStates.delete(node);
-    this.invalidators.delete(node);
-    this.executions.forget(node);
-    this.graph.remove(node);
-    this.emit("dispose", node);
-  }
-
-  /** One frozen snapshot of graph, scheduler, transaction, and execution state. */
-  inspect(): RuntimeInspection {
-    return collectInspection(this);
-  }
-
-  observe(callback: (event: RuntimeEvent) => void): () => void {
-    this.observers.add(callback);
-    return () => { this.observers.delete(callback); };
-  }
-  private emit(kind: RuntimeEvent["kind"], node: RuntimeNode): void {
-    if (!this.observers.size) return;
-    const event = { kind, node, sequence: ++this.sequence };
-    for (const observer of [...this.observers]) {
-      if (!this.observers.has(observer)) continue;
-      try { observer(event); } catch { /* diagnostics must not break propagation */ }
-    }
-  }
 }
 
 /** Shared internally; intentionally absent from public-api.ts. */

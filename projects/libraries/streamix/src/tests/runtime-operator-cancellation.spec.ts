@@ -9,14 +9,14 @@ describe('runtime operator cancellation accounting', () => {
       return: () => new Promise(resolve => { resolveReturn = resolve; }),
     };
     const tracked = trackOperatorExecution(iterator);
-    const before = internalRuntime.executions.snapshot();
+    const before = internalRuntime.diagnostics.executions.snapshot();
     expect((await tracked.next()).value).toBe(1);
     const cleanup = tracked.return!();
-    const during = internalRuntime.executions.snapshot();
+    const during = internalRuntime.diagnostics.executions.snapshot();
     expect(during.active).toBe(before.active);
     expect(during.cancelled).toBe(before.cancelled + 1);
     resolveReturn({ done: true, value: undefined });
     await cleanup;
-    expect(internalRuntime.executions.snapshot().cancelled).toBe(before.cancelled + 1);
+    expect(internalRuntime.diagnostics.executions.snapshot().cancelled).toBe(before.cancelled + 1);
   });
 });

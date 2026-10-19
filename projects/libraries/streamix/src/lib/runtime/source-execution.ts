@@ -1,6 +1,6 @@
 import { RuntimeEventBuffer } from './event-buffer';
 import { RuntimeSourcePulls } from './source-pulls';
-import { RuntimeEventDispatcher } from './events';
+import { RuntimeEventBus } from './events';
 
 /**
  * Internal source execution channel. Combines source pull ownership, ordered
@@ -21,7 +21,7 @@ export class RuntimeSourceExecution<S, T> {
   private done = false;
   private readonly terminal: IteratorResult<T>;
 
-  constructor(private readonly events: RuntimeEventDispatcher, terminal: IteratorResult<T>) {
+  constructor(private readonly events: RuntimeEventBus, terminal: IteratorResult<T>) {
     this.terminal = terminal;
     this.unsubscribe = events.observe(event => {
       if (this.closed || event.node !== this.identity || event.generation !== this.generation) return;

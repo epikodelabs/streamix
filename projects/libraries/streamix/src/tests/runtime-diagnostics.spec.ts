@@ -1,4 +1,5 @@
-import { internalRuntime, RuntimeExecutions, type RuntimeNode } from '../lib/runtime/runtime';
+import { internalRuntime, type RuntimeNode } from '../lib/runtime/runtime';
+import { RuntimeExecutions } from '../lib/runtime/diagnostics';
 import { getScheduler } from '../lib/runtime/scheduling';
 import { setOriginCapture } from '../lib/runtime/origin';
 import { atom, derived, flow } from '../lib/atoms/atom';
@@ -14,7 +15,7 @@ describe('runtime execution diagnostics records', () => {
     const node = {};
     const token = executions.start(node, 'labels');
     expect(executions.describe(node)).toEqual({
-      node, name: 'labels', active: true, runs: 1, emitted: 0,
+      node, name: 'labels', active: true, runs: 1, emitted: 0, completed: 0, cancelled: 0, errors: 0,
       lastExit: undefined, lastError: undefined,
     });
 
@@ -65,7 +66,7 @@ describe('runtime inspection', () => {
   it('reports graph shape, scheduler pending work, and transaction depth', () => {
     // The runtime singleton is shared across the whole suite: assert deltas for
     // this diamond, not absolute counts.
-    const baselineNodes = internalRuntime.inspect().graph.nodes;
+    const baselineNodes = internalRuntime.diagnostics.inspect(internalRuntime).graph.nodes;
     const source = atom(1);
     const left = derived($ => $(source) * 2);
     const right = derived($ => $(source) * 3);
@@ -73,7 +74,7 @@ describe('runtime inspection', () => {
     total.value; // force evaluation so edges exist
     const mine = new Set<RuntimeNode>([source, left, right, total]);
 
-    let inspection = internalRuntime.inspect();
+    let inspection = internalRuntime.diagnostics.inspect(internalRuntime);
     expect(inspection.graph.nodes - baselineNodes).toBe(4);
     expect(inspection.scheduler.transactionDepth).toBe(0);
     const nodes = inspection.nodes.filter(node => mine.has(node.node));
@@ -82,14 +83,14 @@ describe('runtime inspection', () => {
 
     internalRuntime.scheduling.transaction(() => {
       source.set(5);
-      inspection = internalRuntime.inspect();
+      inspection = internalRuntime.diagnostics.inspect(internalRuntime);
       expect(inspection.scheduler.transactionDepth).toBe(1);
       // The source has no user subscribers, so it does not queue; its two
       // derived children queue and total joins during the depth-ordered drain.
       expect(inspection.scheduler.pending).toBe(2);
       expect(inspection.nodes.filter(node => node.queued).length).toBe(2);
     });
-    expect(internalRuntime.inspect().scheduler.pending).toBe(0);
+    expect(internalRuntime.diagnostics.inspect(internalRuntime).scheduler.pending).toBe(0);
     expect(total.value).toBe(25);
   });
 
@@ -99,9 +100,9 @@ describe('runtime inspection', () => {
     for await (const value of iterable) values.push(value);
     expect(values).toEqual([10, 20, 30]);
 
-    const record = internalRuntime.executions.snapshotEntries().find(entry => entry.name === 'map');
+    const record = internalRuntime.diagnostics.executions.snapshotEntries().find(entry => entry.name === 'map');
     expect(record).toBeUndefined();
-    expect(internalRuntime.inspect().executions.completed).toBeGreaterThan(0);
+    expect(internalRuntime.diagnostics.inspect(internalRuntime).executions.completed).toBeGreaterThan(0);
   });
 
   it('shows an active labeled operator execution while a pull is pending', async () => {
@@ -113,14 +114,14 @@ describe('runtime inspection', () => {
 
     const pull = iterator.next();
     await Promise.resolve();
-    const record = internalRuntime.executions.snapshotEntries().find(entry => entry.name === 'map');
+    const record = internalRuntime.diagnostics.executions.snapshotEntries().find(entry => entry.name === 'map');
     expect(record).toBeDefined();
     expect(record!.active).toBe(true);
 
     release({ done: false, value: 7 });
     expect((await pull).value).toBe(7);
     await iterator.return?.();
-    expect(internalRuntime.executions.snapshotEntries().find(entry => entry.name === 'map')).toBeUndefined();
+    expect(internalRuntime.diagnostics.executions.snapshotEntries().find(entry => entry.name === 'map')).toBeUndefined();
   });
 
   it('tracks a flow execution from active through completion', async () => {
@@ -133,7 +134,7 @@ describe('runtime inspection', () => {
     const sub = source.subscribe(value => seen.push(value));
     for (let i = 0; i < 10 && seen.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 0));
 
-    expect(internalRuntime.executions.describe(source))
+    expect(internalRuntime.diagnostics.executions.describe(source))
       .toEqual(jasmine.objectContaining({ active: true, runs: 1, emitted: 1 }));
 
     // Resolving the pending yield ends the generator, completing the flow.
@@ -143,8 +144,8 @@ describe('runtime inspection', () => {
     expect(source.disposed).toBe(true);
 
     // The record is released together with the atom; global accounting remains.
-    expect(internalRuntime.executions.describe(source)).toBeUndefined();
-    expect(internalRuntime.inspect().executions.completed).toBeGreaterThan(0);
+    expect(internalRuntime.diagnostics.executions.describe(source)).toBeUndefined();
+    expect(internalRuntime.diagnostics.inspect(internalRuntime).executions.completed).toBeGreaterThan(0);
     await sub();
   });
 
@@ -161,18 +162,18 @@ describe('runtime inspection', () => {
 
     // The atom survives a recoverable failure, and so does its record.
     expect(source.disposed).toBe(false);
-    expect(internalRuntime.executions.describe(source)).toEqual(jasmine.objectContaining({
+    expect(internalRuntime.diagnostics.executions.describe(source)).toEqual(jasmine.objectContaining({
       active: false, runs: 1, emitted: 1, lastExit: 'error', lastError: new Error('flow blew up'),
     }));
 
     await sub();
-    expect(internalRuntime.executions.describe(source)).toBeUndefined();
+    expect(internalRuntime.diagnostics.executions.describe(source)).toBeUndefined();
   });
 
   it('reads scheduler pending work through the default scheduler', () => {
     const scheduler = getScheduler();
     expect(scheduler.pending).toBe(0);
-    expect(internalRuntime.inspect().scheduler.paused).toBe(false);
+    expect(internalRuntime.diagnostics.inspect(internalRuntime).scheduler.paused).toBe(false);
   });
 });
 
@@ -193,7 +194,7 @@ describe('automatic flow discovery', () => {
       },
     };
     const node = flow(source);
-    const inspect = () => internalRuntime.flows().find(state => state.node === node);
+    const inspect = () => internalRuntime.diagnostics.flows(internalRuntime.graph).find(state => state.node === node);
     expect(inspect()).toEqual(jasmine.objectContaining({
       started: false, awaitingNext: false, subscribers: 0, hasValue: false,
     }));
@@ -218,15 +219,15 @@ describe('runtime self-description', () => {
   it('captures the creation site of atoms without build tooling', () => {
     const first = atom(1);
     const second = atom(2);
-    const origin = internalRuntime.originOf(first);
+    const origin = internalRuntime.diagnostics.originOf(first);
     expect(origin).toBeDefined();
     expect(origin!.file.length).toBeGreaterThan(0);
     expect(origin!.line).toBeGreaterThan(0);
     // Distinct creation sites produce distinct origins.
     expect([origin!.line, origin!.column]).not.toEqual(
-      [internalRuntime.originOf(second)!.line, internalRuntime.originOf(second)!.column]);
+      [internalRuntime.diagnostics.originOf(second)!.line, internalRuntime.diagnostics.originOf(second)!.column]);
     // inspect() rows carry the origin too.
-    const row = internalRuntime.inspect().nodes.find(node => node.node === first);
+    const row = internalRuntime.diagnostics.inspect(internalRuntime).nodes.find(node => node.node === first);
     expect(row?.origin).toBeDefined();
   });
 
@@ -237,7 +238,7 @@ describe('runtime self-description', () => {
     try {
       const pull = iterator.next();
       await tick();
-      const record = internalRuntime.executions.snapshotEntries().find(entry => entry.name === 'map');
+      const record = internalRuntime.diagnostics.executions.snapshotEntries().find(entry => entry.name === 'map');
       expect(record?.origin).toBeDefined();
       expect(record!.origin!.line).toBeGreaterThan(0);
       await pull;
@@ -257,8 +258,8 @@ describe('runtime self-description', () => {
     const stop = source.subscribe(value => seen.push(value));
     try {
       for (let i = 0; i < 20 && seen.length === 0; i++) await tick();
-      expect(internalRuntime.executions.describe(source)?.origin).toBeDefined();
-      expect(internalRuntime.flows().find(state => state.node === source)?.origin).toBeDefined();
+      expect(internalRuntime.diagnostics.executions.describe(source)?.origin).toBeDefined();
+      expect(internalRuntime.diagnostics.flows(internalRuntime.graph).find(state => state.node === source)?.origin).toBeDefined();
     } finally {
       release({ value: 2, done: false });
       for (let i = 0; i < 20 && !source.disposed; i++) await tick();
@@ -270,8 +271,8 @@ describe('runtime self-description', () => {
     setOriginCapture(false);
     try {
       const source = atom(1);
-      expect(internalRuntime.originOf(source)).toBeUndefined();
-      const row = internalRuntime.inspect().nodes.find(node => node.node === source);
+      expect(internalRuntime.diagnostics.originOf(source)).toBeUndefined();
+      const row = internalRuntime.diagnostics.inspect(internalRuntime).nodes.find(node => node.node === source);
       expect(row?.origin).toBeUndefined();
     } finally {
       setOriginCapture(true);

@@ -1,4 +1,5 @@
-import { internalRuntime, RuntimeExecutions } from '../lib/runtime/runtime';
+import { internalRuntime } from '../lib/runtime/runtime';
+import { RuntimeExecutions } from '../lib/runtime/diagnostics';
 import { flow } from '../lib/atoms/atom';
 
 describe('runtime flow execution accounting', () => {
@@ -26,7 +27,7 @@ describe('runtime flow execution accounting', () => {
         release = value => resolve(value.value!);
       });
     });
-    const baseline = internalRuntime.executions.snapshot();
+    const baseline = internalRuntime.diagnostics.executions.snapshot();
     const first: number[] = [];
     const second: number[] = [];
     const sub1 = source.subscribe(value => { first.push(value); });
@@ -35,11 +36,11 @@ describe('runtime flow execution accounting', () => {
     expect(starts).toBe(1);
     expect(first).toEqual([1]);
     expect(second).toEqual([1]);
-    expect(internalRuntime.executions.snapshot().started - baseline.started).toBe(1);
+    expect(internalRuntime.diagnostics.executions.snapshot().started - baseline.started).toBe(1);
     release({ value: 2, done: false });
     await sub1();
     await sub2();
     source.dispose();
-    expect(internalRuntime.executions.snapshot().active).toBeLessThanOrEqual(baseline.active);
+    expect(internalRuntime.diagnostics.executions.snapshot().active).toBeLessThanOrEqual(baseline.active);
   });
 });

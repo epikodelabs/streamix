@@ -1,4 +1,5 @@
-import { internalRuntime, isRuntimeInstrumentationEnabled } from "../runtime/runtime";
+import { internalRuntime, type ExecutionSpan } from "../runtime/runtime";
+import { isRuntimeInstrumentationEnabled, type FlowExit } from "../runtime/diagnostics";
 import { captureOrigin } from "../runtime/origin";
 import { DefaultScheduler, getScheduler, setScheduler, isTransactionActive, finalizeAfterTransaction, type Scheduler } from "../runtime/scheduling";
 export type { Scheduler } from "../runtime/scheduling";
@@ -766,7 +767,7 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
   // Diagnostics-only reader: allocating it costs memory on every atom, so
   // production builds (instrumentation off) create no closure here.
   if (isRuntimeInstrumentationEnabled()) {
-    internalRuntime.registerAtomState(instance, () => {
+    internalRuntime.diagnostics.registerAtomState(instance, () => {
       const value = config.getCachedValue();
       return { hasValue: value !== NO_INITIAL_VALUE, value: value === NO_INITIAL_VALUE ? undefined : value,
         subscribers: config.getSubscriberCount?.() ?? subs.size, error: config.getError() };
@@ -819,8 +820,8 @@ function atomFromIteratorInternal<T>(
   let iterator: AsyncIterator<T> | undefined;
   let runPromise: Promise<void> | null = null;
   let awaitingNext = false;
-  let executionToken: number | undefined;
-  let executionExit: "complete" | "cancel" | "error" = "cancel";
+  let execution: ExecutionSpan | undefined;
+  let executionExit: FlowExit = "cancel";
 
   const setDirty = (next: boolean) => {
     if (dirty === next) return;
@@ -856,11 +857,9 @@ function atomFromIteratorInternal<T>(
     if (disposed) return;
     disposed = true;
     internalRuntime.dispose(instance);
-    if (executionToken !== undefined) {
-      internalRuntime.executions.finish(instance, executionToken, executionExit);
-      if (internalRuntime.events.observed)
-        internalRuntime.events.publish({ node: instance, generation: executionToken, kind: executionExit, ...(executionExit === "error" ? { error: errorValue } : {}) });
-      executionToken = undefined;
+    if (execution !== undefined) {
+      execution.finish(executionExit, executionExit === "error" ? errorValue : undefined);
+      execution = undefined;
     }
     setDirty(false);
     node.version++;
@@ -882,23 +881,20 @@ function atomFromIteratorInternal<T>(
   const run = async () => {
     if (runPromise) return runPromise;
     executionExit = "cancel";
-    const token = internalRuntime.executions.start(instance, instance.name, internalRuntime.originOf(instance));
-    executionToken = token;
+    const span = internalRuntime.beginExecution(instance, instance.name, internalRuntime.diagnostics.originOf(instance));
+    execution = span;
     runPromise = (async () => {
       try {
         iterator = source[Symbol.asyncIterator]();
         while (!disposed) {
           awaitingNext = true;
-          const requestedAt = internalRuntime.events.observed ? performance.now() : undefined;
+          const requestedAt = span.reports ? performance.now() : undefined;
           let result: IteratorResult<T>;
           try { result = await iterator.next(); }
           finally { awaitingNext = false; }
           if (disposed || result.done) break;
 
-          internalRuntime.executions.next(instance, token);
-          if (internalRuntime.events.observed)
-            internalRuntime.events.publish({ node: instance, generation: token, kind: "next", value: result.value,
-              ...(requestedAt === undefined ? {} : { pullMs: Math.max(0, performance.now() - requestedAt) }) });
+          span.next(result.value, requestedAt);
           previous = current;
           current = result.value;
           hasNewValue = true;
@@ -928,11 +924,9 @@ function atomFromIteratorInternal<T>(
           instance.fail(errorValue, { terminate: options?.terminateOnError });
         }
       } finally {
-        if (executionToken === token) {
-          internalRuntime.executions.finish(instance, token, executionExit, executionExit === "error" ? errorValue : undefined);
-          if (internalRuntime.events.observed)
-            internalRuntime.events.publish({ node: instance, generation: token, kind: executionExit, ...(executionExit === "error" ? { error: errorValue } : {}) });
-          executionToken = undefined;
+        if (execution === span) {
+          span.finish(executionExit, executionExit === "error" ? errorValue : undefined);
+          execution = undefined;
         }
         await stopIterator();
         runPromise = null;
@@ -998,7 +992,7 @@ function atomFromIteratorInternal<T>(
   // Flow diagnostics state is read-only introspection: skip the closure in
   // production builds, where nothing observes it.
   if (isRuntimeInstrumentationEnabled()) {
-    internalRuntime.registerFlow(instance, () => ({
+    internalRuntime.diagnostics.registerFlow(instance, () => ({
       started, awaitingNext, subscribers: activeSubCount,
       hasValue: current !== NO_INITIAL_VALUE, value: current === NO_INITIAL_VALUE ? undefined : current,
     }));
