@@ -1,4 +1,4 @@
-import { internalRuntime } from "../runtime/runtime";
+import { internalRuntime, isRuntimeInstrumentationEnabled } from "../runtime/runtime";
 import { captureOrigin } from "../runtime/origin";
 import { DefaultScheduler, getScheduler, setScheduler, isTransactionActive, finalizeAfterTransaction, type Scheduler } from "../runtime/scheduling";
 export type { Scheduler } from "../runtime/scheduling";
@@ -761,11 +761,15 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
     dispose() { void config.onDispose(instance); },
   };
 
-  internalRuntime.registerAtomState(instance, () => {
-    const value = config.getCachedValue();
-    return { hasValue: value !== NO_INITIAL_VALUE, value: value === NO_INITIAL_VALUE ? undefined : value,
-      subscribers: subs.size, error: config.getError() };
-  });
+  // Diagnostics-only reader: allocating it costs memory on every atom, so
+  // production builds (instrumentation off) create no closure here.
+  if (isRuntimeInstrumentationEnabled()) {
+    internalRuntime.registerAtomState(instance, () => {
+      const value = config.getCachedValue();
+      return { hasValue: value !== NO_INITIAL_VALUE, value: value === NO_INITIAL_VALUE ? undefined : value,
+        subscribers: subs.size, error: config.getError() };
+    });
+  }
   return {
     instance: finalizeAtomInstance(instance, config.conflate),
     meta,
@@ -982,10 +986,14 @@ function atomFromIteratorInternal<T>(
 
   const { instance: baseInstance, errorHandlers, subs } = base;
   instance = baseInstance as typeof instance;
-  internalRuntime.registerFlow(instance, () => ({
-    started, awaitingNext, subscribers: activeSubCount,
-    hasValue: current !== NO_INITIAL_VALUE, value: current === NO_INITIAL_VALUE ? undefined : current,
-  }));
+  // Flow diagnostics state is read-only introspection: skip the closure in
+  // production builds, where nothing observes it.
+  if (isRuntimeInstrumentationEnabled()) {
+    internalRuntime.registerFlow(instance, () => ({
+      started, awaitingNext, subscribers: activeSubCount,
+      hasValue: current !== NO_INITIAL_VALUE, value: current === NO_INITIAL_VALUE ? undefined : current,
+    }));
+  }
   if (hasInitialValue) {
     markAtomAsEmitted(instance as any);
     notifyEmitHandlers(instance as any);

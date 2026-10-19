@@ -6,6 +6,26 @@ export type RuntimeEvent = Readonly<{
   node: RuntimeNode;
 }>;
 
+const DEV = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
+
+/**
+ * Execution accounting and per-node state readers are diagnostics-only. Dev
+ * builds default to on; production bundles start with capture off and never
+ * pay for a record, a counter, or a state-reader closure. Tests and tooling
+ * may toggle the flag explicitly, mirroring {@link ../origin:setOriginCapture}.
+ */
+let instrumentationEnabled = DEV;
+
+/** Enable or disable execution accounting and node state capture. */
+export function setRuntimeInstrumentationEnabled(next: boolean): void {
+  instrumentationEnabled = next;
+}
+
+/** True while execution accounting and node state capture are recorded. */
+export function isRuntimeInstrumentationEnabled(): boolean {
+  return instrumentationEnabled;
+}
+
 export class RuntimeGraph {
   private readonly upstream = new Map<RuntimeNode, Set<RuntimeNode>>();
   private readonly downstream = new Map<RuntimeNode, Set<RuntimeNode>>();
@@ -66,13 +86,17 @@ export class RuntimeGraph {
     this.downstream.delete(node);
   }
 
+  hasDependency(node: RuntimeNode, source: RuntimeNode): boolean { return this.upstream.get(node)?.has(source) ?? false; }
+  dependencyCount(node: RuntimeNode): number { return this.upstream.get(node)?.size ?? 0; }
+  dependentCount(node: RuntimeNode): number { return this.downstream.get(node)?.size ?? 0; }
+
   dependencies(node: RuntimeNode): ReadonlySet<RuntimeNode> { return new Set(this.upstream.get(node) ?? []); }
   dependents(node: RuntimeNode): ReadonlySet<RuntimeNode> { return new Set(this.downstream.get(node) ?? []); }
   nodes(): IterableIterator<RuntimeNode> { return this.upstream.keys(); }
   get size(): number { return this.upstream.size; }
 }
 
-import { runtimeScheduling, type RuntimeScheduling, type SchedulableNode } from "./scheduling";
+import { runtimeScheduling, RuntimeScheduling, type SchedulableNode } from "./scheduling";
 import { RuntimeEventDispatcher } from "./events";
 import { collectInspection, type RuntimeInspection } from "./diagnostics";
 import type { RuntimeOrigin } from "./origin";
@@ -98,6 +122,8 @@ export interface ExecutionRecordSnapshot {
   readonly emitted: number;
   readonly lastExit?: FlowExit;
   readonly lastError?: unknown;
+  /** Error of the current or most recently finished run; cleared on restart. */
+  readonly error?: unknown;
 }
 
 interface ExecutionRecord {
@@ -107,6 +133,7 @@ interface ExecutionRecord {
   emitted: number;
   lastExit?: FlowExit;
   lastError?: unknown;
+  error?: unknown;
 }
 
 export class RuntimeExecutions {
@@ -121,6 +148,9 @@ export class RuntimeExecutions {
 
   /** A token prevents a late previous execution from closing a newer one. */
   start(node: RuntimeNode, name?: string, origin?: RuntimeOrigin): number {
+    if (!instrumentationEnabled) return 0;
+    const previous = this.active.get(node);
+    if (previous !== undefined) this.finish(node, previous, "cancel");
     const token = ++this.generation;
     this.active.set(node, token);
     let record = this.records.get(node);
@@ -130,12 +160,14 @@ export class RuntimeExecutions {
     }
     if (name !== undefined) record.name = name;
     if (origin !== undefined) record.origin = origin;
+    record.error = undefined;
     record.runs++;
     this.started++;
     return token;
   }
 
   next(node: RuntimeNode, token: number): void {
+    if (!instrumentationEnabled) return;
     if (this.active.get(node) !== token) return;
     this.emitted++;
     const record = this.records.get(node);
@@ -143,6 +175,12 @@ export class RuntimeExecutions {
   }
 
   finish(node: RuntimeNode, token: number, exit: FlowExit, error?: unknown): void {
+    // Still release an execution that was active when capture was disabled,
+    // so the active map never strands a node after a mid-flight toggle.
+    if (!instrumentationEnabled) {
+      if (this.active.get(node) === token) this.active.delete(node);
+      return;
+    }
     if (this.active.get(node) !== token) return;
     this.active.delete(node);
     if (exit === "complete") this.completed++;
@@ -151,6 +189,7 @@ export class RuntimeExecutions {
     const record = this.records.get(node);
     if (record) {
       record.lastExit = exit;
+      record.error = exit === "error" ? error : undefined;
       if (exit === "error" && error !== undefined) record.lastError = error;
     }
   }
@@ -181,6 +220,7 @@ export class RuntimeExecutions {
       emitted: record.emitted,
       lastExit: record.lastExit,
       lastError: record.lastError,
+      ...(record.error !== undefined ? { error: record.error } : {}),
     });
   }
 
@@ -205,10 +245,11 @@ export interface FlowDiagnosticsState {
 export class StreamixRuntime {
   private readonly atomStates = new WeakMap<RuntimeNode, () => { hasValue: boolean; value: unknown; subscribers: number; error: unknown }>();
   registerAtomState(node: RuntimeNode, read: () => { hasValue: boolean; value: unknown; subscribers: number; error: unknown }): void {
+    if (!instrumentationEnabled) return;
     this.atomStates.set(node, read);
   }
   atomState(node: RuntimeNode) { return this.atomStates.get(node)?.(); }
-  readonly scheduling: RuntimeScheduling = runtimeScheduling;
+  constructor(readonly scheduling: RuntimeScheduling = new RuntimeScheduling()) {}
   readonly graph = new RuntimeGraph();
   readonly events = new RuntimeEventDispatcher();
   readonly executions = new RuntimeExecutions();
@@ -235,6 +276,7 @@ export class StreamixRuntime {
 
   /** Register a flow-backed atom independently of its execution starting. */
   registerFlow(node: RuntimeNode, state: () => FlowDiagnosticsState): void {
+    if (!instrumentationEnabled) return;
     this.flowStates.set(node, state);
     this.emit("flow", node);
   }
@@ -272,9 +314,9 @@ export class StreamixRuntime {
   /** Publish a committed value change to current graph dependents. */
   changed(source: RuntimeNode): void {
     this.emit("change", source);
-    for (const dependent of [...this.graph.dependents(source)]) {
+    for (const dependent of this.graph.dependents(source)) {
       // Edges may be replaced during an earlier invalidation.
-      if (!this.graph.dependencies(dependent).has(source)) continue;
+      if (!this.graph.hasDependency(dependent, source)) continue;
       this.invalidators.get(dependent)?.();
     }
   }
@@ -307,4 +349,4 @@ export class StreamixRuntime {
 }
 
 /** Shared internally; intentionally absent from public-api.ts. */
-export const internalRuntime = new StreamixRuntime();
+export const internalRuntime = new StreamixRuntime(runtimeScheduling);

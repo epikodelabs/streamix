@@ -19,21 +19,22 @@ export interface Scheduler {
   readonly isPaused?: boolean;
 }
 
+interface QueueEntry { readonly node: SchedulableNode; readonly depth: number; readonly sequence: number; }
+
 export class DefaultScheduler implements Scheduler {
+  constructor(private readonly transactionActive: () => boolean = isTransactionActive) {}
   private isBatchScheduled = false;
   private isFlushing = false;
   private queuedCount = 0;
 
-  // Min-heap of queued nodes ordered by depth (shallow first).
-  // A node may appear multiple times if it was re-queued; stale entries are
-  // skipped via queuedNodes membership and node.queued checks.
-  private heap: SchedulableNode[] = [];
+  // Immutable priorities and entry identity prevent removed/requeued work from
+  // changing the ordering of entries already in the heap.
+  private heap: QueueEntry[] = [];
   private heapSeq = 0;
-  private heapSeqMap = new WeakMap<SchedulableNode, number>();
+  private readonly queuedEntries = new WeakMap<SchedulableNode, QueueEntry>();
 
-  private heapCompare(a: SchedulableNode, b: SchedulableNode): number {
-    if (a.depth !== b.depth) return a.depth - b.depth;
-    return (this.heapSeqMap.get(a) ?? 0) - (this.heapSeqMap.get(b) ?? 0);
+  private heapCompare(a: QueueEntry, b: QueueEntry): number {
+    return a.depth - b.depth || a.sequence - b.sequence;
   }
 
   private siftUp(i: number): void {
@@ -55,10 +56,8 @@ export class DefaultScheduler implements Scheduler {
       const left = (i << 1) + 1;
       if (left >= len) break;
       const right = left + 1;
-      let smallest = i;
-      if (this.heapCompare(this.heap[left], node) < 0) smallest = left;
-      if (right < len && this.heapCompare(this.heap[right], this.heap[smallest]) < 0) smallest = right;
-      if (smallest === i) break;
+      const smallest = right < len && this.heapCompare(this.heap[right], this.heap[left]) < 0 ? right : left;
+      if (this.heapCompare(this.heap[smallest], node) >= 0) break;
       this.heap[i] = this.heap[smallest];
       i = smallest;
     }
@@ -66,12 +65,13 @@ export class DefaultScheduler implements Scheduler {
   }
 
   private heapPush(node: SchedulableNode): void {
-    this.heapSeqMap.set(node, this.heapSeq++);
-    this.heap.push(node);
+    const entry = { node, depth: node.depth, sequence: this.heapSeq++ };
+    this.queuedEntries.set(node, entry);
+    this.heap.push(entry);
     this.siftUp(this.heap.length - 1);
   }
 
-  private heapPop(): SchedulableNode | undefined {
+  private heapPop(): QueueEntry | undefined {
     const last = this.heap.pop();
     if (last === undefined) return undefined;
     if (this.heap.length === 0) return last;
@@ -82,13 +82,15 @@ export class DefaultScheduler implements Scheduler {
   }
 
   flush(): void {
-    if (this.isFlushing || isTransactionActive()) return;
+    if (this.isFlushing || this.transactionActive()) return;
     this.isFlushing = true;
 
     try {
-      let node = this.heapPop();
-      while (node !== undefined) {
-        if (node.queued && !node.flushing) {
+      let entry = this.heapPop();
+      while (entry !== undefined) {
+        const node = entry.node;
+        if (this.queuedEntries.get(node) === entry && node.queued && !node.flushing) {
+          this.queuedEntries.delete(node);
           node.queued = false;
           this.queuedCount--;
           try {
@@ -99,7 +101,7 @@ export class DefaultScheduler implements Scheduler {
             console.error("streamix scheduler flush failed.", error);
           }
         }
-        node = this.heapPop();
+        entry = this.heapPop();
       }
     } finally {
       this.isFlushing = false;
@@ -115,6 +117,7 @@ export class DefaultScheduler implements Scheduler {
     }
 
     if (!node.queued || node.flushing) return;
+    this.queuedEntries.delete(node);
     node.queued = false;
     this.queuedCount--;
     node.flush();
@@ -135,6 +138,7 @@ export class DefaultScheduler implements Scheduler {
 
   remove(node: SchedulableNode): void {
     if (!node.queued) return;
+    this.queuedEntries.delete(node);
     node.queued = false;
     this.queuedCount = Math.max(0, this.queuedCount - 1);
   }
@@ -144,7 +148,7 @@ export class DefaultScheduler implements Scheduler {
 }
 
 export class RuntimeScheduling {
-  scheduler: Scheduler = new DefaultScheduler();
+  scheduler: Scheduler = new DefaultScheduler(() => this.isTransactionActive());
   transactionDepth = 0;
   readonly transactionFinalizers = new Set<() => void>();
 

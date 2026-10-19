@@ -10,6 +10,24 @@ const metadata = (name: string, kind: StreamixSourceMetadata['kind'] = 'atom'): 
 
 describe('debug runtime introspection', () => {
   beforeAll(() => enableStreamixIntrospection());
+  it('prunes dead weak entries incrementally while events are published', () => {
+    const value = __streamixDebug(atom(1), metadata('pruned-entry'));
+    const id = streamixInspector.inspect({ name: 'pruned-entry' })[0].id;
+    const deref = WeakRef.prototype.deref;
+    let visited = false;
+    const read = spyOn(WeakRef.prototype, 'deref').and.callFake(function(this: WeakRef<object>) {
+      const target = deref.call(this);
+      if (target === value) { visited = true; return undefined; }
+      return target;
+    });
+    const trigger = atom(0);
+    try {
+      for (let i = 0; i < 2048 && !visited; i++) __streamixDebug(trigger, metadata('pruning-trigger'));
+      expect(visited).toBeTrue();
+      read.and.callThrough();
+      expect(streamixInspector.details(id)).toBeUndefined();
+    } finally { read.and.callThrough(); value.dispose(); trigger.dispose(); }
+  });
   it('preserves identity and distinguishes instances from one creation site', () => {
     const a = atom(1), b = atom(2);
     try {

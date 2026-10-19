@@ -68,8 +68,8 @@ export function collectInspection(runtime: StreamixRuntime): RuntimeInspection {
       emitted: record?.emitted ?? 0,
       lastExit: record?.lastExit,
       lastError: record?.lastError,
-      dependencies: runtime.graph.dependencies(node).size,
-      dependents: runtime.graph.dependents(node).size,
+      dependencies: runtime.graph.dependencyCount(node),
+      dependents: runtime.graph.dependentCount(node),
     }));
   }
 

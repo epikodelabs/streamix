@@ -42,6 +42,19 @@ declare global { interface Window { __streamix?: StreamixInspectorAPI; } }
 type Entry = { id: number; ref: WeakRef<object>; source: StreamixSourceMetadata; owner?: number; composition: number[]; latest?: string; state?: string; emitted?: number; target?: number; subscriptions?: Set<number> };
 const identities = new WeakMap<object, Entry>();
 const entries = new Map<number, Entry>();
+// Finalization releases metadata without retaining the inspected object. The
+// incremental sweep also covers environments where collection is delayed.
+const finalized = new FinalizationRegistry<number>(id => { entries.delete(id); });
+let sweep: IterableIterator<[number, Entry]> | undefined;
+function pruneEntries(): void {
+  sweep ??= entries.entries();
+  for (let count = 0; count < 16; count++) {
+    const next = sweep.next();
+    if (next.done) { sweep = undefined; break; }
+    const [id, entry] = next.value;
+    if (!entry.ref.deref()) entries.delete(id);
+  }
+}
 const definitions = new WeakMap<object, Entry>();
 const pipelines = new WeakMap<object, readonly object[]>();
 const listeners = new Set<(event: StreamixInspectionEvent) => void>();
@@ -78,6 +91,7 @@ function publish(entry: Entry, kind: string, value?: unknown, error?: unknown): 
   appendEvent(event);
 }
 function appendEvent(event: StreamixInspectionEvent): void {
+  pruneEntries();
   events.push(event);
   if (events.length > 250) events.shift();
   for (const listener of [...listeners]) { try { listener(event); } catch { /* observer isolation */ } }
@@ -110,8 +124,8 @@ function details(id: number): StreamixObjectDetails | undefined {
     composition: Object.freeze([...entry.composition]),
     members: Object.freeze(Object.keys(raw).map(key => ({ name: key, id: object(raw[key]) ? idOf(raw[key]) : undefined,
       state: object(raw[key]) && idOf(raw[key]) !== undefined ? 'materialized' : typeof raw[key] === 'function' ? 'method' : 'unevaluated' }))),
-    error: cached?.error ? (cached.error instanceof Error ? cached.error.message : streamixPreview(cached.error))
-      : execution?.lastError instanceof Error ? execution.lastError.message : undefined,
+    error: cached?.error !== undefined ? (cached.error instanceof Error ? cached.error.message : streamixPreview(cached.error))
+      : execution?.error !== undefined ? streamixPreview(execution.error) : undefined,
   });
 }
 export const streamixInspector: StreamixInspectorAPI = Object.freeze({
@@ -163,7 +177,7 @@ export function enableStreamixIntrospection(): void {
       definition.latest = entry.latest;
       if (event.kind === 'next') definition.emitted = (definition.emitted ?? 0) + 1;
     }
-    publish(entry, event.kind, event.value, event.error ?? internalRuntime.executions.describe(event.node)?.lastError);
+    publish(entry, event.kind, event.value, event.error ?? internalRuntime.executions.describe(event.node)?.error);
     if (event.kind !== 'next' && entry.source.kind === 'operator') entries.delete(entry.id);
   });
 }
@@ -176,6 +190,7 @@ export function __streamixDebug<T>(value: T, metadata: StreamixSourceMetadata): 
   if (!entry) {
     entry = { id: ++sequence, ref: new WeakRef(value), source: immutableMetadata(metadata), composition: [] };
     identities.set(value, entry);
+    finalized.register(value, entry.id);
     entries.set(entry.id, entry);
   } else { entry.source = immutableMetadata(metadata); entries.set(entry.id, entry); }
   if (metadata.kind === 'scope') {

@@ -1,4 +1,4 @@
-import { internalRuntime } from './runtime';
+import { internalRuntime, isRuntimeInstrumentationEnabled } from './runtime';
 import type { RuntimeOrigin } from './origin';
 
 /**
@@ -8,6 +8,7 @@ import type { RuntimeOrigin } from './origin';
  * The optional name and origin label the execution record for runtime diagnostics.
  */
 export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: string, origin?: RuntimeOrigin): AsyncIterator<T> {
+  if (!isRuntimeInstrumentationEnabled() && !internalRuntime.events.observed) return iterator;
   const node = iterator as object;
   const next = iterator.next.bind(iterator);
   const originalReturn = iterator.return?.bind(iterator);

@@ -13,6 +13,8 @@ export interface ExecutionEvent {
  * FIFO, reentrancy-safe event delivery. A listener may publish another event,
  * but the current event is delivered to every listener before the next begins.
  * Listener exceptions cannot corrupt execution or strand the queue.
+ * Publishing while unobserved costs one set-size check: no event is built or
+ * queued, so production flows pay nothing per emission.
  */
 export class RuntimeEventDispatcher {
   private readonly listeners = new Set<(event: ExecutionEvent) => void>();
@@ -25,7 +27,10 @@ export class RuntimeEventDispatcher {
     return () => { this.listeners.delete(listener); };
   }
 
+  get observed(): boolean { return this.listeners.size > 0; }
+
   publish(event: Omit<ExecutionEvent, 'sequence'>): void {
+    if (this.listeners.size === 0) return;
     this.queue.push({ ...event, sequence: ++this.sequence });
     if (this.draining) return;
     this.draining = true;
