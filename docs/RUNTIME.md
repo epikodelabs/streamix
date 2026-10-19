@@ -241,3 +241,6 @@ The runtime coordinates mechanics; public primitives retain their semantics.
 This separation keeps the runtime small, framework-neutral, and invisible to
 normal Streamix usage while still giving atoms, flows, and operators one
 consistent execution model.
+
+The rules that diagnostics surfaces (accounting, introspection, tracing) must
+follow are normative in [DIAGNOSTICS.md](./DIAGNOSTICS.md).
