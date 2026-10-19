@@ -1,3 +1,4 @@
+import { refreshApplication, watchLibraries } from './watch-libraries';
 import { createBuilder, type BuilderOutput, type Target } from '@angular-devkit/architect';
 import { watch, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
@@ -21,6 +22,7 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
   let stopped = false;
   let run: { stop(): void; output: ObservableLike<BuilderOutput> } | undefined;
   let watcher: FSWatcher | undefined;
+  let stopLibraries: (() => void) | undefined;
   let rebuildQueue = Promise.resolve();
   let outputSubscription: { unsubscribe(): void } | undefined;
 
@@ -38,6 +40,11 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
 
       if (['serve', 'dev-server'].includes(context.target?.target ?? '') ||
           ['serve', 'dev-server'].includes(target) || options['watch'] === true) {
+        stopLibraries = watchLibraries(context.workspaceRoot, sourceRoot, () => {
+          rebuildQueue = rebuildQueue.then(async () => {
+            if (!stopped) await refreshApplication(context.workspaceRoot, sourceRoot, regenerateVueFile);
+          }).catch(error => context.logger.error(`Streamix library update failed: ${String(error)}`));
+        }, message => context.logger.warn(message));
         watcher = watch(join(context.workspaceRoot, sourceRoot), { recursive: true }, (_event, filename) => {
           if (stopped) return;
           rebuildQueue = rebuildQueue.then(async () => {
@@ -72,6 +79,7 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
 
   return () => {
     stopped = true;
+    stopLibraries?.();
     watcher?.close();
     outputSubscription?.unsubscribe();
     run?.stop();

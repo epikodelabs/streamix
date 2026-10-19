@@ -19,7 +19,8 @@ application build or dev server.
    and `tsConfig` roots. For dev-server delegates, configure the application
    target referenced by `buildTarget` with those virtual roots, as app6 does;
    application-only options are not forwarded to the dev-server schema.
-3. For `serve` or `watch: true` targets, the builder watches the source root
+3. For `serve` or `watch: true` targets, the builder watches the source root and local library sources resolved through
+   the application tsconfig (including inherited `paths` mappings)
    (recursively) and re-runs the generator on save; the delegate rebuilds on
    its own once the virtual files are rewritten. One-shot builds do not open watchers.
 

@@ -1,3 +1,4 @@
+import { refreshApplication, watchLibraries } from './watch-libraries';
 import { createBuilder, type BuilderOutput, type Target } from "@angular-devkit/architect";
 import { Observable } from "rxjs";
 import { generateReactProject, regenerateStreamixFile } from "./generate-project";
@@ -12,6 +13,7 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
   let stopped = false;
   let run: { stop(): void; output: ObservableLike<BuilderOutput> } | undefined;
   let watcher: FSWatcher | undefined;
+  let stopLibraries: (() => void) | undefined;
   let rebuildQueue = Promise.resolve();
   let outputSubscription: { unsubscribe(): void } | undefined;
 
@@ -28,7 +30,12 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
       if (stopped) return;
       // Watch the actual authored tree; the delegated builder watches only the virtual copy.
       // Queue edits so writes never interleave, and retain the previous virtual copy on errors.
-      if (context.target?.target === "serve" || target === "serve" || options["watch"] === true) {
+      if (["serve", "dev-server"].includes(context.target?.target ?? "") || ["serve", "dev-server"].includes(target) || options["watch"] === true) {
+        stopLibraries = watchLibraries(context.workspaceRoot, sourceRoot, () => {
+          rebuildQueue = rebuildQueue.then(async () => {
+            if (!stopped) await refreshApplication(context.workspaceRoot, sourceRoot, regenerateStreamixFile);
+          }).catch(error => context.logger.error(`Streamix library update failed: ${String(error)}`));
+        }, message => context.logger.warn(message));
         watcher = watch(join(context.workspaceRoot, sourceRoot), { recursive: true }, (_event, filename) => {
           if (stopped) return;
           rebuildQueue = rebuildQueue.then(async () => {
@@ -37,6 +44,7 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
             else await generateReactProject(context.workspaceRoot, sourceRoot);
           }).catch(error => context.logger.error(`Streamix React source update failed: ${String(error)}`));
         });
+        watcher.on("error", error => context.logger.error(`Streamix React watcher failed: ${String(error)}`));
       }
 
       const delegate: Target = { project, target };
@@ -60,6 +68,7 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
 
   return () => {
     stopped = true;
+    stopLibraries?.();
     watcher?.close();
     outputSubscription?.unsubscribe();
     run?.stop();

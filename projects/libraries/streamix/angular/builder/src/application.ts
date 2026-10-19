@@ -1,3 +1,4 @@
+import { watchLibraries } from './watch-libraries';
 import { createBuilder, type Target } from '@angular-devkit/architect';
 import { watch, type FSWatcher } from 'node:fs';
 import { readdir } from 'node:fs/promises';
@@ -286,10 +287,14 @@ const applicationBuilder = createBuilder(async function* (options, context) {
   const stopWatcher = regenerator
     ? startSourceWatcher(context, sourceRoot, regenerator.trigger)
     : () => undefined;
+  const stopLibraries = regenerator
+    ? watchLibraries(context.workspaceRoot, sourceRoot, regenerator.trigger, message => context.logger.warn(message))
+    : () => undefined;
 
   try {
     yield* delegateOutputs(run);
   } finally {
+    stopLibraries();
     stopWatcher();
     regenerator?.stop();
   }
