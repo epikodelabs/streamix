@@ -1,3 +1,5 @@
+import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection';
+import { SerialInnerExecution } from '../runtime/serial-inner-execution';
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
 import type { Atom } from "../atoms/atom";
 import { from } from '../factories';
@@ -75,69 +77,85 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
     const resolvedOptions = options;
 
     let outerIndex = 0;
-    let innerIterator: AsyncIterator<R> | null = null;
+    const inner = new SerialInnerExecution<R>();
+    let lifetime: StreamixLifetimeSpan | undefined;
+    const operator = this;
 
     const iterator: AsyncIterator<R> = {
       next: async () => {
-        while (true) {
-          // If no active inner iterator, get next outer value
-          if (!innerIterator) {
-            const result = await source.next();
-            if (result.done) {
-              return DONE;
-            }
-
-            let matched: typeof resolvedOptions[number] | undefined;
-            const outerValue = result.value;
-            const currentIndex = outerIndex++;
-
-            for (const option of resolvedOptions) {
-              const predicateResult = option.on(outerValue, currentIndex);
-              if (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) {
-                matched = option;
-                break;
+        try {
+          while (true) {
+            if (inner.stopped) return DONE;
+            // If no active inner iterator, get next outer value
+            if (!inner.active) {
+              const result = await source.next();
+              if (inner.stopped) return DONE;
+              if (result.done) {
+                return DONE;
               }
+
+              lifetime = __streamixBeginLifetime(operator);
+              lifetime?.start();
+              let matched: typeof resolvedOptions[number] | undefined;
+              const outerValue = result.value;
+              const currentIndex = outerIndex++;
+
+              for (const option of resolvedOptions) {
+                const predicateResult = option.on(outerValue, currentIndex);
+                const matches = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
+                if (inner.stopped) return DONE;
+                if (matches) {
+                  matched = option;
+                  break;
+                }
+              }
+
+              if (!matched) {
+                throw new Error(`No handler found for value: ${outerValue}`);
+              }
+
+              const innerStream = from(matched.handler(outerValue));
+              inner.attach(innerStream[Symbol.asyncIterator]() as AsyncIterator<R>);
             }
 
-            if (!matched) {
-              throw new Error(`No handler found for value: ${outerValue}`);
+            // Pull next inner value
+            const innerResult = await inner.next();
+            if (inner.stopped) return DONE;
+            if (innerResult.done) {
+              lifetime?.finish('complete');
+              continue;
             }
 
-            const innerStream = from(matched.handler(outerValue));
-            innerIterator = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
+            lifetime?.output();
+            return NEXT(innerResult.value);
           }
-
-          // Pull next inner value
-          const innerResult = await innerIterator.next();
-          if (innerResult.done) {
-            innerIterator = null;
-            continue;
-          }
-
-          return NEXT(innerResult.value);
+        } catch (error) {
+          lifetime?.finish('error');
+          void inner.close();
+          throw error;
         }
       },
 
-      async return(value?: any) {
+      async return(_value?: any) {
+        lifetime?.finish('cancel');
         try {
-          await innerIterator?.return?.(value);
+          await inner.close();
         } catch {}
         try {
           await source.return?.();
         } catch {}
-        innerIterator = null;
         return DONE;
       },
 
       async throw(err: any) {
+        lifetime?.finish('error');
         const error = normalizeError(err);
         try {
-          await innerIterator?.return?.();
+          await inner.close();
         } catch {}
         try {
           await source.return?.();
         } catch {}
-        innerIterator = null;
         throw error;
       }
     };

@@ -1,3 +1,5 @@
+import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection';
+import { SerialInnerExecution } from '../runtime/serial-inner-execution';
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from '../factories';
@@ -43,6 +45,9 @@ export const expand = <T = any>(
     };
     const queue: QueueItem[] = [];
     let sourceDone = false;
+    const inner = new SerialInnerExecution<T>();
+    let lifetime: StreamixLifetimeSpan | undefined;
+    const operator = this;
 
     const enqueueChildren = async (
       value: T,
@@ -50,16 +55,22 @@ export const expand = <T = any>(
     ) => {
       if (options.maxDepth !== undefined && depth >= options.maxDepth) return;
 
+      // Each span covers one direct child enumeration, not the whole subtree.
+      lifetime = __streamixBeginLifetime(operator);
+      lifetime?.start();
       const projected = project(value);
       const normalized = isPromiseLike(projected) ? await projected : projected;
 
+      if (inner.stopped) return;
       const stream = from(normalized);
-      const iterator = stream[Symbol.asyncIterator]() as AsyncIterator<T>;
+      inner.attach(stream[Symbol.asyncIterator]() as AsyncIterator<T>);
 
       const children: QueueItem[] = [];
       while (true) {
-        const child = await iterator.next();
-        if (child.done) break;
+        const child = await inner.next();
+        if (inner.stopped) return;
+        if (child.done) { lifetime?.finish('complete'); break; }
+        lifetime?.output();
         children.push({ result: child, depth: depth + 1 });
       }
 
@@ -75,34 +86,46 @@ export const expand = <T = any>(
 
     const iterator: AsyncIterator<T> = {
       next: async () => {
-        while (true) {
-          while (queue.length === 0 && !sourceDone) {
-            const result = await source.next();
-            if (result.done) {
-              sourceDone = true;
-              break;
+        try {
+          while (true) {
+            if (inner.stopped) return DONE;
+            while (queue.length === 0 && !sourceDone) {
+              const result = await source.next();
+              if (inner.stopped) return DONE;
+              if (result.done) {
+                sourceDone = true;
+                break;
+              }
+
+              queue.push({ result, depth: 0 });
             }
 
-            queue.push({ result, depth: 0 });
-          }
+            if (queue.length > 0) {
+              const item = queue.shift()!;
+              await enqueueChildren(item.result.value, item.depth);
+              if (inner.stopped) return DONE;
+              return NEXT(item.result.value);
+            }
 
-          if (queue.length > 0) {
-            const item = queue.shift()!;
-            await enqueueChildren(item.result.value, item.depth);
-            return NEXT(item.result.value);
-          }
+            if (sourceDone && queue.length === 0) {
+              return DONE;
+            }
 
-          if (sourceDone && queue.length === 0) {
-            return DONE;
+            // Yield to microtask queue to avoid starving the event loop
+            await new Promise<void>((resolve) => queueMicrotask(resolve));
           }
-
-          // Yield to microtask queue to avoid starving the event loop
-          await new Promise<void>((resolve) => queueMicrotask(resolve));
+        } catch (error) {
+          lifetime?.finish('error');
+          queue.length = 0;
+          void inner.close();
+          throw error;
         }
       },
 
       async return(value?: any) {
+        lifetime?.finish('cancel');
         queue.length = 0;
+        await inner.close();
         try {
           await source.return?.(value);
         } catch {}
@@ -110,6 +133,8 @@ export const expand = <T = any>(
       },
 
       async throw(err: any) {
+        lifetime?.finish('error');
+        await inner.close();
         const error = normalizeError(err);
         queue.length = 0;
         try {

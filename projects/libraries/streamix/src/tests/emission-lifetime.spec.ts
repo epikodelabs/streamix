@@ -1,3 +1,5 @@
+import { fork } from '../lib/operators/fork';
+import { expand } from '../lib/operators/expand';
 import { atom } from '../lib/atoms/atom';
 import { pipe } from '../lib/atoms/pipe';
 import { from } from '../lib/factories';
@@ -211,6 +213,102 @@ describe('flattening emission lifetimes', () => {
       expect(rows[0].operator.id).not.toBe(rows[1].operator.id);
     } finally { flow.dispose(); }
   });
+
+  const otherFlatteners: readonly [string, (project: (value: number) => any) => Operator<number, number>][] = [
+    ['fork', project => fork<number, number>({ on: () => true, handler: project })],
+    ['expand', project => expand<number>(project, { maxDepth: 1 })],
+  ];
+  for (const [name, factory] of otherFlatteners) {
+    it(name + ' measures a projected inner without changing output semantics', async () => {
+      const pending = deferred<number>();
+      const op = instrument('other-' + name, factory(() => pending.promise));
+      const reading = collect(op.apply(from([1])[Symbol.asyncIterator]()));
+      await tick(); now = 25; pending.resolve(7);
+      expect(await reading).toEqual(name === 'expand' ? [1, 7] : [7]);
+      expect(summaries('other-' + name)).toEqual([jasmine.objectContaining({ durationMs: 25, firstOutputMs: 25, outputs: 1, outcome: 'complete' })]);
+    });
+
+    it(name + ' cancels pending projection work and ignores its late resolution', async () => {
+      const pending = deferred<number>();
+      const op = instrument('pending-other-' + name, factory(() => pending.promise));
+      const iterator = op.apply(from([1])[Symbol.asyncIterator]());
+      const reading = iterator.next();
+      await tick(); now = 20; await iterator.return?.();
+      expect(summaries('pending-other-' + name)).toEqual([jasmine.objectContaining({ durationMs: 20, outcome: 'cancel', outputs: 0 })]);
+      now = 50; pending.resolve(9);
+      expect(await reading).toEqual(DONE);
+      expect(await iterator.next()).toEqual(DONE);
+      expect(summaries('pending-other-' + name).length).toBe(1);
+    });
+
+    it(name + ' closes the active inner once and suppresses a late inner value', async () => {
+      const pending = deferred<IteratorResult<number>>();
+      let returned = 0;
+      const op = instrument('active-other-' + name, factory(() => ({
+        [Symbol.asyncIterator]: () => ({ next: () => pending.promise, return: async () => { returned++; return DONE; } }),
+      })));
+      const iterator = op.apply(from([1])[Symbol.asyncIterator]());
+      const reading = iterator.next();
+      await tick(); now = 30; await iterator.return?.();
+      expect(returned).toBe(1);
+      expect(summaries('active-other-' + name)[0].durationMs).toBe(30);
+      pending.resolve(NEXT(99));
+      expect(await reading).toEqual(DONE);
+      await iterator.return?.();
+      expect(returned).toBe(1);
+      expect(summaries('active-other-' + name).length).toBe(1);
+    });
+
+    it(name + ' ignores an outer value received after cancellation', async () => {
+      const pending = deferred<IteratorResult<number>>();
+      let projected = 0;
+      const op = instrument('outer-other-' + name, factory(value => { projected++; return [value]; }));
+      const iterator = op.apply({ next: () => pending.promise, return: async () => DONE });
+      const reading = iterator.next();
+      await tick(); await iterator.return?.(); pending.resolve(NEXT(1));
+      expect(await reading).toEqual(DONE);
+      expect(projected).toBe(0);
+      expect(summaries('outer-other-' + name)).toEqual([]);
+    });
+  }
+
+  it('fork includes predicate waiting and skips the handler when cancelled during the predicate', async () => {
+    const predicate = deferred<boolean>();
+    let handled = 0;
+    const op = instrument('fork-predicate', fork<number, number>({ on: () => predicate.promise, handler: value => { handled++; return value; } }));
+    const iterator = op.apply(from([1])[Symbol.asyncIterator]());
+    const reading = iterator.next();
+    await tick(); now = 12; await iterator.return?.();
+    predicate.resolve(true);
+    expect(await reading).toEqual(DONE);
+    expect(handled).toBe(0);
+    expect(summaries('fork-predicate')).toEqual([jasmine.objectContaining({ durationMs: 12, outcome: 'cancel' })]);
+  });
+
+  const allFlatteners: readonly [string, (project: (value: number) => any) => Operator<number, number>][] = [
+    ['concatMap', project => concatMap<number, number>(project)],
+    ['exhaustMap', project => exhaustMap<number, number>(project)],
+    ['mergeMap', project => mergeMap<number, number>(project)],
+    ['switchMap', project => switchMap<number, number>(project)],
+    ...otherFlatteners,
+  ];
+  for (const [name, factory] of allFlatteners) {
+    it(name + ' reports an inner rejection as error exactly once', async () => {
+      const pending = deferred<IteratorResult<number>>();
+      let returned = 0;
+      const op = instrument('rejection-' + name, factory(() => ({
+        [Symbol.asyncIterator]: () => ({ next: () => pending.promise, return: async () => { returned++; return DONE; } }),
+      })));
+      const iterator = op.apply(from([1])[Symbol.asyncIterator]());
+      const reading = iterator.next();
+      const rejected = expectAsync(reading).toBeRejectedWithError('inner failed');
+      await tick(); now = 17; pending.reject(new Error('inner failed'));
+      await rejected;
+      await iterator.return?.();
+      expect(summaries('rejection-' + name)).toEqual([jasmine.objectContaining({ durationMs: 17, outcome: 'error' })]);
+      expect(returned).toBe(1);
+    });
+  }
 
   it('does not create a span for an uninstrumented operator', () => {
     expect(__streamixBeginLifetime({})).toBeUndefined();
