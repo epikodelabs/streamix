@@ -30,7 +30,11 @@ describe('Angular devtools', () => {
       count.set(2);
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
       expect(panel.textContent).toContain('inspector.count');
-      expect(panel.textContent).toContain('ready | 2');
+      // The list row is structured spans: read state and value from their own columns.
+      const row = Array.from(panel.querySelectorAll('[data-streamix-object-id]'))
+        .find(button => button.textContent!.includes('inspector.count'))!;
+      expect(row.querySelector('.sx-pill')!.textContent).toBe('ready');
+      expect(row.querySelector('.sx-value')!.textContent).toBe('2');
       expect(evaluations).toBe(0);
     } finally { fixture.destroy(); count.dispose(); lazy.dispose(); }
   });
