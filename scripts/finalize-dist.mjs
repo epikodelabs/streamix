@@ -148,4 +148,56 @@ export async function linkLocalPackage() {
   console.log('Linked node_modules/@epikodelabs/streamix to dist/streamix.');
 }
 
+// ---------------------------------------------------------------------------
+// Infrastructure bundles ship without source maps. The builder, compilers,
+// editors, and vite plugins run in Node at build time, where nothing consumes
+// a source map by default — publishing them only bloats the tarball. Runtime
+// bundles keep theirs: those are what consumers debug in devtools.
+// ---------------------------------------------------------------------------
+
+const infrastructureEntries = [
+  'angular-compiler',
+  'angular-builder',
+  'angular-editor',
+  'react-compiler',
+  'react-builder',
+  'react-editor',
+  'react-vite',
+  'vue-compiler',
+  'vue-builder',
+  'vue-editor',
+  'vue-vite',
+];
+
+export async function stripInfrastructureSourceMaps() {
+  let strippedBytes = 0;
+  for (const entry of infrastructureEntries) {
+    const mapPath = path.join('dist/streamix/fesm2022', `epikodelabs-streamix-${entry}.mjs.map`);
+    const bundlePath = path.join('dist/streamix/fesm2022', `epikodelabs-streamix-${entry}.mjs`);
+    try {
+      strippedBytes += (await fs.stat(mapPath)).size;
+      await fs.unlink(mapPath);
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
+    }
+    // Drop the trailer that points at the removed map; a dangling
+    // sourceMappingURL makes devtools log a missing-map warning.
+    try {
+      const source = await fs.readFile(bundlePath, 'utf8');
+      const cleaned = source.replace(/\n?\/\/# sourceMappingURL=.*$/g, '');
+      if (cleaned !== source) {
+        strippedBytes += source.length - cleaned.length;
+        await fs.writeFile(bundlePath, cleaned);
+      }
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
+    }
+  }
+  if (strippedBytes > 0) {
+    console.log(`Stripped infrastructure source maps (${(strippedBytes / 1024).toFixed(0)} KB).`);
+  }
+}
+
+await stripInfrastructureSourceMaps();
+
 await linkLocalPackage();
