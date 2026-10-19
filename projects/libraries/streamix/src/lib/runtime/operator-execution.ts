@@ -24,7 +24,8 @@ export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: str
     finished = true;
     if (token === undefined) return;
     internalRuntime.executions.finish(node, token, kind, error);
-    internalRuntime.events.publish({ node, generation: token, kind, ...(kind === 'error' ? { error } : {}) });
+    if (internalRuntime.events.observed)
+      internalRuntime.events.publish({ node, generation: token, kind, ...(kind === 'error' ? { error } : {}) });
     // Operator iterators are one-shot: keep their diagnostics record only while active.
     internalRuntime.executions.forget(node);
   };
@@ -32,8 +33,9 @@ export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: str
     if (result.done) finish('complete');
     else if (!finished && token !== undefined) {
       internalRuntime.executions.next(node, token);
-      internalRuntime.events.publish({ node, generation: token, kind: 'next', value: result.value,
-        ...(requestedAt === undefined ? {} : { pullMs: Math.max(0, performance.now() - requestedAt) }) });
+      if (internalRuntime.events.observed)
+        internalRuntime.events.publish({ node, generation: token, kind: 'next', value: result.value,
+          ...(requestedAt === undefined ? {} : { pullMs: Math.max(0, performance.now() - requestedAt) }) });
     }
     return result;
   };

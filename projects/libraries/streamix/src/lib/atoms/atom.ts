@@ -858,7 +858,8 @@ function atomFromIteratorInternal<T>(
     internalRuntime.dispose(instance);
     if (executionToken !== undefined) {
       internalRuntime.executions.finish(instance, executionToken, executionExit);
-      internalRuntime.events.publish({ node: instance, generation: executionToken, kind: executionExit, ...(executionExit === "error" ? { error: errorValue } : {}) });
+      if (internalRuntime.events.observed)
+        internalRuntime.events.publish({ node: instance, generation: executionToken, kind: executionExit, ...(executionExit === "error" ? { error: errorValue } : {}) });
       executionToken = undefined;
     }
     setDirty(false);
@@ -895,8 +896,9 @@ function atomFromIteratorInternal<T>(
           if (disposed || result.done) break;
 
           internalRuntime.executions.next(instance, token);
-          internalRuntime.events.publish({ node: instance, generation: token, kind: "next", value: result.value,
-            ...(requestedAt === undefined ? {} : { pullMs: Math.max(0, performance.now() - requestedAt) }) });
+          if (internalRuntime.events.observed)
+            internalRuntime.events.publish({ node: instance, generation: token, kind: "next", value: result.value,
+              ...(requestedAt === undefined ? {} : { pullMs: Math.max(0, performance.now() - requestedAt) }) });
           previous = current;
           current = result.value;
           hasNewValue = true;
@@ -928,7 +930,8 @@ function atomFromIteratorInternal<T>(
       } finally {
         if (executionToken === token) {
           internalRuntime.executions.finish(instance, token, executionExit, executionExit === "error" ? errorValue : undefined);
-          internalRuntime.events.publish({ node: instance, generation: token, kind: executionExit, ...(executionExit === "error" ? { error: errorValue } : {}) });
+          if (internalRuntime.events.observed)
+            internalRuntime.events.publish({ node: instance, generation: token, kind: executionExit, ...(executionExit === "error" ? { error: errorValue } : {}) });
           executionToken = undefined;
         }
         await stopIterator();
