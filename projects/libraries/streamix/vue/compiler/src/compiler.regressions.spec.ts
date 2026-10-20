@@ -248,7 +248,7 @@ describe('Vue production regression gates', () => {
     const originalTitle = source.indexOf('title="count"');
     const transformedTitle = result.code.indexOf('title="count"');
     expect(originalPosition(result.sourceMap!.mappings, result.code, transformedTitle)).toBe(originalTitle);
-    expect(originalPosition(result.sourceMap!.mappings, result.code, result.code.indexOf('useWritable(count)'))).toBe(undefined);
+    expect(originalPosition(result.sourceMap!.mappings, result.code, result.code.indexOf("useWritable(count, 'count')"))).toBe(undefined);
     expect(original.length).toBe(2);
   });
 });

@@ -25,7 +25,7 @@ describe('Vue builder project generation', () => {
 
       expect(output).toBe(join(workspace, '.angular', '.streamix', 'demo/src'));
       expect(counter).toContain('const count = atom(0);');
-      expect(counter).toContain('useWritable(count)');
+      expect(counter).toContain("useWritable(count, 'count')");
       expect(await readFile(join(output, 'plain.txt'), 'utf8')).toBe('copied unchanged');
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -110,6 +110,48 @@ describe('Vue builder introspection injection', () => {
       await writeFile(join(source, 'src', 'main.ts'), `createApp({}).mount('#app');\n`);
       const output = await generateVueProject(workspace, sourceRoot, true);
       expect(await readFile(join(output, 'src', 'main.ts'), 'utf8')).toContain('__sxEnable();');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('registers atoms from TS modules and SFC scripts while keeping adoption working', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-builder-register-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const source = join(workspace, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(workspace, 'tsconfig.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler' },
+        include: ['projects/apps/demo/src/**/*.ts'],
+      }));
+      await writeFile(join(source, 'store.ts'), `import { atom, derived } from '@epikodelabs/streamix';\nexport const count = atom(0);\nexport const doubled = derived(() => count * 2);\n`);
+      await writeFile(join(source, 'Counter.vue'), `
+        <script setup lang="ts">
+        import { atom, scope } from '@epikodelabs/streamix';
+        const clicks = atom(0);
+        const state = scope({ tone: 'quiet' });
+        </script>
+        <template><button @click="clicks++">{{ clicks }} {{ state.tone }}</button></template>
+      `);
+
+      const output = await generateVueProject(workspace, sourceRoot, true);
+      const store = await readFile(join(output, 'store.ts'), 'utf8');
+      expect(store).toContain('__sxDebug(atom(0)');
+      expect(store).toContain('__sxDebug(derived(');
+      const counter = await readFile(join(output, 'Counter.vue'), 'utf8');
+      expect(counter).toContain('__sxDebug(atom(0)');
+      // The scope bridge lands inside the registration wrapper: the compiler
+      // sees through __sxDebug, bridges the inner factory call, and the
+      // wrapper ends up outermost with its scope members attached.
+      expect(counter).toContain('__sxDebug(useScope(() => scope(');
+      expect(counter).toContain('"kind":"scope"');
+      expect(counter).toContain("useWritable(clicks, 'clicks')");
+
+      // Without the flag: no registration wrappers anywhere.
+      const plain = await generateVueProject(workspace, sourceRoot, false);
+      expect(await readFile(join(plain, 'store.ts'), 'utf8')).not.toContain('__sxDebug');
+      expect(await readFile(join(plain, 'Counter.vue'), 'utf8')).not.toContain('__sxDebug');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

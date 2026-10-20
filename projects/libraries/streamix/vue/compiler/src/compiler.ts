@@ -203,7 +203,7 @@ export function transformVueSfc(
     scriptEdits.push({
       start: declaration.statementEnd,
       end: declaration.statementEnd,
-      replacement: `\nconst ${reactiveBridgeName(declaration.name)} = ${bridge}(${declaration.name});`,
+      replacement: `\nconst ${reactiveBridgeName(declaration.name)} = ${bridge}(${declaration.name}, '${declaration.name}');`,
     });
   }
 
@@ -267,7 +267,7 @@ export function transformVueSfc(
         end: scope.statementEnd,
         replacement:
           `\nconst ${bridgeName(scope.name, member)} = useIterable(` +
-          `${scope.name}.get('${escapeSingleQuotes(member)}'));`,
+          `${scope.name}.get('${escapeSingleQuotes(member)}'), undefined, '${scope.name}.${member}');`,
       });
     }
 
@@ -684,7 +684,9 @@ function collectReactiveDeclarations(
         continue;
       }
 
-      const callee = declaration.initializer.expression.text;
+      const call = unwrapIntrospectionWrapper(declaration.initializer);
+      if (!ts.isIdentifier(call.expression)) continue;
+      const callee = call.expression.text;
       const aliased = imports.aliases.get(callee);
       // Adopt only an explicit Streamix import. A same-named local helper is
       // ordinary application code and must never be silently transformed.
@@ -695,16 +697,30 @@ function collectReactiveDeclarations(
       declarations.push({
         name: declaration.name.text,
         kind,
-        callExpressionStart: declaration.initializer.expression.getStart(file),
-        callEnd: declaration.initializer.end,
+        callExpressionStart: call.expression.getStart(file),
+        callEnd: call.end,
         statementEnd: statement.end,
-        ...(kind === 'derived' ? derivedCallbackSpan(declaration.initializer, file) : {}),
-        members: kind === 'scope' ? scopeMemberNames(declaration.initializer) : [],
+        ...(kind === 'derived' ? derivedCallbackSpan(call, file) : {}),
+        members: kind === 'scope' ? scopeMemberNames(call) : [],
       });
     }
   }
 
   return declarations;
+}
+
+/**
+ * The instrumenting builders wrap factory calls in `__sxDebug(call, metadata)`
+ * (the alias grows trailing underscores on name collisions). Adoption and
+ * bridge spans key on the factory call, never on the wrapper around it.
+ */
+function unwrapIntrospectionWrapper(call: ts.CallExpression): ts.CallExpression {
+  const callee = call.expression;
+  if (ts.isIdentifier(callee) && /^__sxDebug_*$/.test(callee.text) && call.arguments.length > 0) {
+    const inner = call.arguments[0];
+    if (ts.isCallExpression(inner)) return inner;
+  }
+  return call;
 }
 
 function derivedCallbackSpan(

@@ -22,8 +22,8 @@ import { useIterable } from './useIterable';
  * <input v-model="name">
  * ```
  */
-export function useWritable<T>(source: Writable<T>): Ref<T> {
-  const current = useIterable(source);
+export function useWritable<T>(source: Writable<T>, sourceName?: string): Ref<T> {
+  const current = useIterable(source, undefined, sourceName);
   // Do not wrap the bridge in `computed()`: computed refs only notify their
   // consumers when their returned value changes by Object.is. Streamix emits
   // are meaningful even when a mutable object is re-emitted by identity.

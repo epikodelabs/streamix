@@ -28,13 +28,13 @@ describe('Vue SFC compiler', () => {
       'import { useIterable, useWritable } from "@epikodelabs/streamix/vue";',
     );
     expect(result.code).toContain('const count = atom(0);');
-    expect(result.code).toContain('const __sx_count = useWritable(count);');
+    expect(result.code).toContain("const __sx_count = useWritable(count, 'count');");
     expect(result.code).toContain('const factor = atom(2);');
-    expect(result.code).toContain('const __sx_factor = useWritable(factor);');
+    expect(result.code).toContain("const __sx_factor = useWritable(factor, 'factor');");
     expect(result.code).toContain('const doubled = derived(() => count.value * factor.value);');
-    expect(result.code).toContain('const __sx_doubled = useIterable(doubled);');
+    expect(result.code).toContain("const __sx_doubled = useIterable(doubled, 'doubled');");
     expect(result.code).toContain('const updates = flow(async function* () { yield 1; });');
-    expect(result.code).toContain('const __sx_updates = useIterable(updates);');
+    expect(result.code).toContain("const __sx_updates = useIterable(updates, 'updates');");
     expect(result.code).toContain('{{ __sx_count }} {{ __sx_doubled }} {{ __sx_updates }}');
   });
 
@@ -57,8 +57,8 @@ describe('Vue SFC compiler', () => {
     expect(result.code).toContain(
       'import { useIterable, useScope } from "@epikodelabs/streamix/vue";',
     );
-    expect(result.code).toContain("useIterable(state.get('count'));");
-    expect(result.code).toContain("useIterable(state.get('title'));");
+    expect(result.code).toContain("useIterable(state.get('count'), undefined, 'state.count');");
+    expect(result.code).toContain("useIterable(state.get('title'), undefined, 'state.title');");
     expect(result.code).toContain(':value="__sx_000073000074000061000074000065_00007400006900007400006c000065"');
     expect(result.code).toContain('@click="state.set(\'count\', __sx_000073000074000061000074000065_00006300006f00007500006e000074 + 1)"');
   });
