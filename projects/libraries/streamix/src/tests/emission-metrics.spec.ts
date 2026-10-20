@@ -82,10 +82,10 @@ describe('inspector emission metrics', () => {
     const id = streamixInspector.inspect({ name: 'metrics-atom' })[0].id;
     try {
       expect(streamixInspector.details(id)!.metrics.total).toBe(0);
-      for (let i = 1; i <= 300; i++) node.set(i);
-      expect(streamixInspector.details(id)!.metrics.total).toBe(300);
-      expect(streamixInspector.details(id)!.emitted).toBe(300);
-      expect(streamixInspector.trace().length).toBe(250);
+      for (let i = 1; i <= 1100; i++) node.set(i);
+      expect(streamixInspector.details(id)!.metrics.total).toBe(1100);
+      expect(streamixInspector.details(id)!.emitted).toBe(1100);
+      expect(streamixInspector.trace().length).toBe(1000);
     } finally { node.dispose(); }
   });
 });

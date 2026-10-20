@@ -278,7 +278,7 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
     traceEntries.push({ event, row });
     traceRows.appendChild(row);
     // Match the inspector's bounded history; retained rows keep their identity.
-    if (traceEntries.length > 250) traceEntries.shift()!.row.remove();
+    if (traceEntries.length > 1000) traceEntries.shift()!.row.remove();
   };
   for (const event of streamixInspector.trace()) appendTrace(event);
   const describe = (id: number) => { const row = streamixInspector.details(id); return row ? row.name + ' #' + id : '#' + id + ' (released)'; };

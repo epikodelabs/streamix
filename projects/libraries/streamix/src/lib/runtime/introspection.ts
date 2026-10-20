@@ -1,4 +1,5 @@
 import { internalRuntime } from './runtime';
+import { setRuntimeInstrumentationEnabled } from './diagnostics';
 import { streamixDevtoolsEnabled, streamixDevtoolsSnapshot, subscribeStreamixDevtools, type StreamixDevtoolsEvent } from '../devtools';
 
 export interface StreamixSourceMetadata {
@@ -133,7 +134,7 @@ function publish(entry: Entry, kind: string, value?: unknown, error?: unknown, p
 function appendEvent(event: StreamixInspectionEvent): void {
   pruneEntries();
   events.push(event);
-  if (events.length > 250) events.shift();
+  if (events.length > 1000) events.shift();
   for (const listener of [...listeners]) { try { listener(event); } catch { /* observer isolation */ } }
 }
 
@@ -209,6 +210,11 @@ const devtoolsTraceNode: object = { kind: 'devtools' };
 export function enableStreamixIntrospection(): void {
   if (enabled || !streamixDevtoolsEnabled || typeof window === 'undefined' || typeof document === 'undefined') return;
   enabled = true;
+  // The introspection flag is the single dev activation switch: it must also
+  // arm runtime instrumentation, or flows created before/without accounting
+  // never register (flowStates feeds discovery) and are invisible to the
+  // inspector. Enable runs before application bootstrap in the virtual main.
+  setRuntimeInstrumentationEnabled(true);
   window.__streamix = streamixInspector;
   // One subscription over the single runtime bus: graph lifecycle, execution
   // lifecycle, and devtools traces all arrive here in order.
@@ -217,8 +223,8 @@ export function enableStreamixIntrospection(): void {
     const entry = identities.get(event.node);
     if (!entry) {
       // Events without a runtime node (devtools read/write/render lines) are
-      // trace-only. Coordinator transport never reaches this bus; it runs on
-      // a private per-coordinator bus.
+      // trace-only. Coordinator transport never reaches this bus; sources
+      // deliver straight into their own coordinator buffers.
       if (event.label !== undefined) {
         appendEvent(Object.freeze({ id: 0, name: event.label.slice(0, 240), kind: event.kind, time: Date.now() }));
       }
@@ -357,6 +363,7 @@ export function __streamixDebug<T>(value: T, metadata: StreamixSourceMetadata): 
   if (!enabled) enableStreamixIntrospection();
   if (!enabled || !object(value)) return value;
   let entry = identities.get(value);
+  const listed = entry !== undefined && entries.has(entry.id);
   if (!entry) {
     entry = { id: ++sequence, ref: new WeakRef(value), source: immutableMetadata(metadata), composition: [],
       metrics: { total: 0, errors: 0, completed: 0, cancelled: 0 } };
@@ -376,7 +383,9 @@ export function __streamixDebug<T>(value: T, metadata: StreamixSourceMetadata): 
       if (child && child.owner === undefined && (child.source.kind === 'operator' || child.source.kind === 'source')) child.owner = entry.id;
     }
   }
-  publish(entry, 'register');
+  // One register line when the object enters the listing; later calls only
+  // refresh metadata and must not re-announce it in the trace.
+  if (!listed) publish(entry, 'register');
   return value;
 }
 

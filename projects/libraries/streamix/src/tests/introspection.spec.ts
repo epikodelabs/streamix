@@ -2,6 +2,7 @@ import { atom, derived, flow } from '../lib/atoms/atom';
 import { scope } from '../lib/atoms/scope';
 import { pipe } from '../lib/atoms/pipe';
 import { map } from '../lib/operators/map';
+import { internalRuntime } from '../lib/runtime/runtime';
 import { __streamixDebug, __streamixSubscribe, enableStreamixIntrospection, streamixInspector, streamixPreview,
   type StreamixSourceMetadata } from '../lib/runtime/introspection';
 
@@ -45,9 +46,14 @@ describe('debug runtime introspection', () => {
       if (target === value) { visited = true; return undefined; }
       return target;
     });
-    const trigger = atom(0);
+    const trigger = __streamixDebug(atom(0), metadata('pruning-trigger'));
     try {
-      for (let i = 0; i < 2048 && !visited; i++) __streamixDebug(trigger, metadata('pruning-trigger'));
+      // The incremental sweep runs per appended event; drive it with real
+      // runtime events for the trigger rather than re-debug refreshes, which
+      // deliberately emit nothing.
+      for (let i = 0; i < 2048 && !visited; i++) {
+        internalRuntime.events.publish({ node: trigger, generation: 1, kind: 'next', value: i });
+      }
       expect(visited).toBeTrue();
       read.and.callThrough();
       expect(streamixInspector.details(id)).toBeUndefined();
@@ -64,6 +70,20 @@ describe('debug runtime introspection', () => {
       expect(rows[0].source.line).toBe(12);
     } finally { a.dispose(); b.dispose(); }
     expect(streamixInspector.inspect({ name: 'same' }).length).toBe(0);
+  });
+  it('announces a debugged object once; later calls refresh metadata silently', () => {
+    const value = atom(1);
+    try {
+      __streamixDebug(value, metadata('rename-me'));
+      const id = streamixInspector.inspect({ name: 'rename-me' })[0].id;
+      // Compiler enrichment and pipeline wiring re-debug the same object;
+      // those refreshes must not re-announce it in the trace.
+      __streamixDebug(value, metadata('renamed'));
+      const registers = streamixInspector.trace().filter(event => event.kind === 'register' && event.id === id);
+      expect(registers.length).toBe(1);
+      expect(registers[0].name).toBe('rename-me');
+      expect(streamixInspector.inspect({ name: 'renamed' })[0].id).toBe(id);
+    } finally { value.dispose(); }
   });
   it('never evaluates a derived formula or starts an idle producer', () => {
     let evaluations = 0, starts = 0;
@@ -104,9 +124,9 @@ describe('debug runtime introspection', () => {
     expect(streamixInspector.details(record.id)).toBeUndefined();
     expect(streamixInspector.trace().some(e => e.id === record.id && e.kind === 'complete')).toBe(true);
     const counter = __streamixDebug(atom(0), metadata('counter'));
-    try { for (let i = 1; i <= 300; i++) counter.set(i); }
+    try { for (let i = 1; i <= 1100; i++) counter.set(i); }
     finally { counter.dispose(); }
-    expect(streamixInspector.trace().length).toBe(250);
+    expect(streamixInspector.trace().length).toBe(1000);
   });
   it('preserves subscription identity and receiver and links component fields to their target', async () => {
     const source = __streamixDebug(atom(1), metadata('App.value'));

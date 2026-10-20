@@ -15,9 +15,10 @@ One bus, one ledger, one control surface:
   lifecycle (`next`/`complete`/`cancel`/`error`), and devtools traces — flows
   through a single `RuntimeEventBus` with one sequence and one `observed`
   guard. Diagnostics is a subscriber, never a second channel. Coordinator
-  source transport is deliberately *not* on this bus: each coordinator runs
-  its own private `RuntimeEventBus`, so production source delivery never
-  marks the shared bus observed (rule 1). Flow emissions publish one `next`
+  source transport is deliberately *not* on this bus: each execution delivers
+  values straight into its own buffer — no bus, no per-event allocation — so
+  production source delivery never marks the shared bus observed (rule 1).
+  Flow emissions publish one `next`
   event, not a `change` plus a `next`; `changed()` skips the graph event for
   flow-backed nodes in every configuration, not just while instrumentation
   is enabled.
@@ -37,6 +38,10 @@ One bus, one ledger, one control surface:
 - **One control surface** (`runtime/controls.ts`): `streamixDiagnostics`
   with `setEnabled`/`enabled` and the fine-grained `setAccounting` /
   `setOriginCapture`. Internal per rule 7 — never in the package API.
+  `enableStreamixIntrospection` arms accounting too: the dev introspection
+  flag is the single activation switch, and discovery depends on it — flows
+  register into `flowStates` (the discovery source) only while accounting is
+  on, so an inspector without accounting sees no flows at all.
 
 ## The rules at a glance
 
@@ -123,7 +128,8 @@ Everything a diagnostic surface has shown is a snapshot, frozen at creation.
 
 Diagnostics must not become the leak it exists to find.
 
-- Trace: the last 250 events, oldest discarded.
+- Trace: the last 1000 events, oldest discarded. The inspector panel mirrors
+  this bound with its DOM rows, so the two never drift apart.
 - Inspector entries: `WeakRef` plus a `FinalizationRegistry`, with an
   incremental sweep (16 entries per appended event) so dead metadata releases
   even where finalization is delayed.

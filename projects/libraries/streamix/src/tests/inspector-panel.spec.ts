@@ -148,7 +148,7 @@ describe('inspector trace history', () => {
     __streamixDebugDispose(node); __streamixDebugDispose(a); __streamixDebugDispose(b);
   });
 
-  it('filters existing rows without recreating them and caps history at 250', () => {
+  it('filters existing rows without recreating them and caps history at 1000', () => {
     const source = __streamixDebug({}, metadata('retained-trace'));
     const row = trace().lastElementChild as HTMLDivElement;
     const filter = host.querySelector('input')!;
@@ -157,11 +157,11 @@ describe('inspector trace history', () => {
     filter.value = ''; filter.dispatchEvent(new Event('input')); flush();
     expect(row.hidden).toBeFalse();
     expect(row.parentElement).toBe(trace());
-    for (let i = 0; i < 260; i++) internalRuntime.events.publish({ node: source, generation: 1, kind: 'next', value: i });
+    for (let i = 0; i < 1100; i++) internalRuntime.events.publish({ node: source, generation: 1, kind: 'next', value: i });
     flush();
-    expect(trace().children.length).toBe(250);
-    expect(trace().firstElementChild!.textContent).toContain('value: 10');
-    expect(trace().lastElementChild!.textContent).toContain('value: 259');
+    expect(trace().children.length).toBe(1000);
+    expect(trace().firstElementChild!.textContent).toContain('value: 100');
+    expect(trace().lastElementChild!.textContent).toContain('value: 1099');
     __streamixDebugDispose(source);
   });
 });
