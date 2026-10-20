@@ -519,8 +519,7 @@
             "development": {
               "optimization": false,
               "extractLicenses": false,
-              "sourceMap": true,
-              "define": { "import.meta.env.DEV": "true" }
+              "sourceMap": true
             }
           },
           "defaultConfiguration": "production"
@@ -541,8 +540,7 @@
           "builder": "@epikodelabs/streamix/angular/builder:application",
           "options": {
             "delegateTarget": "app6:dev-server",
-            "sourceRoot": "projects/apps/app6/src"
-         ,
+            "sourceRoot": "projects/apps/app6/src",
             "introspection": true
           },
           "configurations": {
