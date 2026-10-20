@@ -58,6 +58,19 @@ describe("React release-blocker regressions", () => {
     expect(parseErrors(ts.createSourceFile("Counter.jsx",result.code,ts.ScriptTarget.Latest,true,ts.ScriptKind.JSX)).length).toBe(0);
   });
 
+  it("adopts module-scope arrow components that read module atoms", () => {
+    const src = `import { atom } from "@epikodelabs/streamix";\nlet quantity = atom(1);\nexport const Widget = () => <span>{quantity}</span>;`;
+    const result = transformReactJsx(src, "Widget.jsx");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("useStreamixSource");
+  });
+
+  it("flags nested components that read atoms from an enclosing scope", () => {
+    const src = `import { atom } from "@epikodelabs/streamix";\nexport function Outer() { const local = atom(1); const Inner = () => <span>{local}</span>; return <Inner/>; }`;
+    const result = transformReactJsx(src, "Outer.tsx");
+    expect(result.diagnostics.some(d => /compilation boundary/.test(d.message))).toBe(true);
+  });
+
   it("maps repeated original identifiers by their exact occurrence", () => {
     const src = `import { atom } from "@epikodelabs/streamix";\nconst count = atom(0);\nexport function Counter() { const label = "count"; return <span title={label}>{label} / {count} / {label}</span>; }`;
     const out = transformReactJsx(src,"Counter.tsx");

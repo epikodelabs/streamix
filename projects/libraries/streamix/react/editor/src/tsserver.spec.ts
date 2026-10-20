@@ -140,7 +140,9 @@ describe("Streamix React tsserver plugin", () => {
 
   it("does not apply TSX virtual source offsets to ordinary TypeScript files", () => {
     const source = `const value: number = "not a number";`;
-    const fileName = ts.sys.resolvePath(resolve(process.cwd(), "plain-streamix-editor.ts"));
+    // TypeScript 6 matches language service files by normalized path; an
+    // unnormalized name fails the lookup with "Could not find source file".
+    const fileName = ts.sys.resolvePath(resolve(process.cwd(), "plain-streamix-editor.ts")).replaceAll("\\", "/");
     const options: ts.CompilerOptions = { strict: true, noEmit: true, skipLibCheck: true };
     const host: ts.LanguageServiceHost = {
       getCompilationSettings: () => options,

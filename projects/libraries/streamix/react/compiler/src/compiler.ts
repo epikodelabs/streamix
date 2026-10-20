@@ -1061,7 +1061,17 @@ export function transformReactJsx(
     // Nested components have their own hook lifetime. Transforming only the
     // outer component would leave their implicit reads unbound, while blindly
     // lifting hooks into the parent would violate React's Rules of Hooks.
-    if (node.parent !== sourceFile && (
+    // A component is nested when a block or function body sits between it and
+    // the module. Module-scope arrow components — `const Widget = () => ...`
+    // — are ordinary adoption targets even when they read module atoms, so
+    // they must not be flagged.
+    const nested = (): boolean => {
+      for (let ancestor = node.parent; ancestor && ancestor !== sourceFile; ancestor = ancestor.parent) {
+        if (ts.isBlock(ancestor)) return true;
+      }
+      return false;
+    };
+    if (nested() && (
       ts.isFunctionDeclaration(node) && !!node.name && /^[A-Z]/.test(node.name.text) ||
       ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && /^[A-Z]/.test(node.name.text) &&
         !!node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))

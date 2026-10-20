@@ -5,7 +5,6 @@ import { build } from "vite";
 import { sx } from "./plugin";
 
 describe("Streamix React Vite fixture", () => {
-  jasmine.DEFAULT_TIMEOUT_INTERVAL = 20_000;
   it("builds authored TSX through Streamix before the React plugin", async () => {
     const root = await mkdtemp(join(tmpdir(), "streamix-vite-"));
     try {
@@ -45,9 +44,14 @@ describe("Streamix React Vite fixture", () => {
         root,
         logLevel: "silent",
         plugins: [sx()],
-        esbuild: { jsx: "automatic" },
+        // Vite 8 replaced the esbuild pipeline with rolldown; JSX goes
+        // through the built-in oxc transform.
+        oxc: { jsx: { runtime: "automatic" } },
         build: {
           write: false,
+          // Assertions read the emitted code; keep external import names
+          // intact regardless of the bundler's minifier.
+          minify: false,
           rollupOptions: {
             input: entry,
             preserveEntrySignatures: "strict",
@@ -73,5 +77,7 @@ describe("Streamix React Vite fixture", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+    // A cold rolldown build exceeds the node runner's 5s default; the
+    // explicit per-spec timeout works in both runners.
+  }, 120_000);
 });

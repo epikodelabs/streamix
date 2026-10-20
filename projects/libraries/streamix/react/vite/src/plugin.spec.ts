@@ -13,12 +13,22 @@ describe("Streamix React Vite plugin", () => {
     expect(transformed.map.sources).toEqual(["/workspace/src/Counter.tsx"]);
   });
 
-  it("skips non-JSX and node_modules modules", () => {
+  it("skips plain modules without JSX or a Streamix import, and node_modules", () => {
     const plugin = sx();
     const context = { error: (message: string): never => { throw new Error(message); } } as any;
 
     expect(transformOf(plugin).call(context, "export const count = 0;", "/workspace/src/value.ts")).toBeNull();
     expect(transformOf(plugin).call(context, "export const count = 0;", "/workspace/node_modules/lib/index.tsx")).toBeNull();
+  });
+
+  it("adopts plain TypeScript modules that import Streamix", () => {
+    const plugin = sx();
+    const context = { error: (message: string): never => { throw new Error(message); } } as any;
+
+    const transformed = transformOf(plugin).call(context,
+      `import { atom } from "@epikodelabs/streamix";\nexport const total = atom(1);`,
+      "/workspace/src/store.ts") as { code: string };
+    expect(transformed.code).toContain("@epikodelabs/streamix");
   });
 });
 

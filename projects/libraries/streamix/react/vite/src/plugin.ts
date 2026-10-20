@@ -70,6 +70,10 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
       if (!/\.[jt]sx?$/i.test(fileName) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(fileName) ||
           fileName.replace(/\\/g, "/").includes("/node_modules/")) return null;
       if (options.include && !options.include(fileName)) return null;
+      // Adopt only files the compiler can touch: authored JSX, or a Streamix
+      // import (reactive lowering applies to plain TS modules too). Building a
+      // program for every other authored module would pay for nothing.
+      if (!/<[A-Za-z][^<>]*>|<\/[A-Za-z]|<>/.test(source) && !source.includes("@epikodelabs/streamix")) return null;
 
       const result = transformReactJsx(source, fileName, { program: programFor(fileName, source) });
       for (const warning of result.diagnostics.filter(item => item.category === "warning")) {
