@@ -471,8 +471,13 @@ function finalizeAtomInstance<T extends Atom<any> & InternalAtomContainer>(insta
   // disposer, and obscured real iterator cleanup leaks.
   const dispose = instance.dispose.bind(instance);
   instance.dispose = () => {
-    internalRuntime.dispose(instance);
-    dispose();
+    try {
+      dispose();
+    } finally {
+      // Flow cleanup finishes its execution before removing the runtime node.
+      // Retain bookkeeping for custom disposers without publishing twice.
+      if (internalRuntime.graph.has(instance)) internalRuntime.dispose(instance);
+    }
   };
   registerWithCurrentScope(instance as any);
   return instance;
@@ -856,11 +861,11 @@ function atomFromIteratorInternal<T>(
   const disposeInstance = async (): Promise<void> => {
     if (disposed) return;
     disposed = true;
-    internalRuntime.dispose(instance);
     if (execution !== undefined) {
       execution.finish(executionExit, executionExit === "error" ? errorValue : undefined);
       execution = undefined;
     }
+    internalRuntime.dispose(instance);
     setDirty(false);
     node.version++;
     subs.clear();

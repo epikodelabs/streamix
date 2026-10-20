@@ -46,6 +46,35 @@ describe('internal runtime execution events', () => {
     expect(sequences).toEqual([1, 2]);
   });
 
+  for (const mode of ['unsubscribe', 'dispose']) it(`reports cancellation before disposal exactly once on ${mode}`, async () => {
+    let started!: () => void;
+    const pulling = new Promise<void>(resolve => { started = resolve; });
+    let release: ((result: IteratorResult<number>) => void) | undefined;
+    const source = flow<number>({
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => new Promise<IteratorResult<number>>(resolve => { release = resolve; started(); }),
+          return: async () => {
+            release?.({ done: true, value: undefined });
+            return { done: true as const, value: undefined };
+          },
+        };
+      },
+    });
+    const terminal: string[] = [];
+    const stop = internalRuntime.events.observe(event => {
+      if (event.node === source && (event.kind === 'cancel' || event.kind === 'dispose')) terminal.push(event.kind);
+    });
+    const unsubscribe = source.subscribe(() => {});
+    try {
+      await pulling;
+      if (mode === 'dispose') source.dispose();
+      await unsubscribe();
+      await source.dispose();
+      expect(terminal).toEqual(['cancel', 'dispose']);
+    } finally { stop(); await source.dispose(); }
+  });
+
   it('reports flow values through the internal event dispatcher', async () => {
     const source = flow<number>(async function* () { yield 7; yield 8; });
     const received: number[] = [];

@@ -25,6 +25,28 @@ describe('inspector trace history', () => {
   });
   afterEach(() => { unmount(); host.remove(); });
 
+  it('follows the newest trace rows by default and pauses while reading older rows', () => {
+    const source = __streamixDebug({}, metadata('scrolling-trace'));
+    const emit = () => internalRuntime.events.publish({ node: source, generation: 1, kind: 'next', value: 1 });
+    try {
+      for (let i = 0; i < 100; i++) emit();
+      flush();
+      const pane = trace();
+      expect(pane.scrollHeight).toBeGreaterThan(pane.clientHeight);
+      expect(pane.scrollHeight - pane.scrollTop - pane.clientHeight).toBeLessThanOrEqual(2);
+      pane.scrollTop = 0;
+      pane.dispatchEvent(new Event('scroll'));
+      emit(); flush();
+      expect(pane.scrollTop).toBe(0);
+      pane.scrollTop = pane.scrollHeight;
+      pane.dispatchEvent(new Event('scroll'));
+      emit(); flush();
+      expect(pane.scrollHeight - pane.scrollTop - pane.clientHeight).toBeLessThanOrEqual(2);
+      tab('Atoms'); tab('Trace');
+      expect(pane.scrollHeight - pane.scrollTop - pane.clientHeight).toBeLessThanOrEqual(2);
+    } finally { __streamixDebugDispose(source); }
+  });
+
   it('appends parallel events without replacing, reordering or rewriting printed rows', () => {
     const a = __streamixDebug({}, metadata('trace-a'));
     const b = __streamixDebug({}, metadata('trace-b'));

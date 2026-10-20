@@ -36,6 +36,8 @@ export interface StreamixObjectDetails {
   readonly dependencies: readonly number[];
   readonly consumers: readonly number[];
   readonly composition: readonly number[];
+  readonly pipeline?: boolean;
+  readonly pipedSource?: boolean;
   readonly members: readonly { name: string; id?: number; state: string }[];
   readonly error?: string;
 }
@@ -91,6 +93,7 @@ function pruneEntries(): void {
 }
 const definitions = new WeakMap<object, Entry>();
 const pipelines = new WeakMap<object, readonly object[]>();
+const pipelineUsers = new WeakMap<object, Set<number>>();
 const listeners = new Set<(event: StreamixInspectionEvent) => void>();
 let sequence = 0;
 let enabled = false;
@@ -179,6 +182,8 @@ function details(id: number): StreamixObjectDetails | undefined {
     dependencies: Object.freeze(ids(internalRuntime.graph.dependencies(node))),
     consumers: Object.freeze([...ids(internalRuntime.graph.dependents(node)), ...entry.subscriptions ?? []]),
     composition: Object.freeze([...entry.composition]),
+    pipeline: pipelines.has(node),
+    pipedSource: isPipedSource(node),
     members: Object.freeze(Object.keys(raw).map(key => ({ name: key, id: object(raw[key]) ? idOf(raw[key]) : undefined,
       state: object(raw[key]) && idOf(raw[key]) !== undefined ? 'materialized' : typeof raw[key] === 'function' ? 'method' : 'unevaluated' }))),
     error: cached?.error !== undefined ? (cached.error instanceof Error ? cached.error.message : streamixPreview(cached.error))
@@ -186,9 +191,12 @@ function details(id: number): StreamixObjectDetails | undefined {
   });
 }
 export const streamixInspector: StreamixInspectorAPI = Object.freeze({
-  inspect: (filter: StreamixInspectionFilter = {}) => [...entries.keys()].map(details).filter((row): row is StreamixObjectDetails =>
+  inspect: (filter: StreamixInspectionFilter = {}) => {
+    if (enabled) for (const { node } of internalRuntime.diagnostics.flows(internalRuntime.graph)) discoverFlow(node);
+    return [...entries.keys()].map(details).filter((row): row is StreamixObjectDetails =>
     !!row && (!filter.name || row.name.includes(filter.name)) && (!filter.file || row.source.file.includes(filter.file)) &&
-    (!filter.kind || row.kind === filter.kind)),
+    (!filter.kind || row.kind === filter.kind));
+  },
   details,
   observe: (callback: (event: StreamixInspectionEvent) => void) => { listeners.add(callback); return () => { listeners.delete(callback); }; },
   trace: () => Object.freeze([...events]),
@@ -205,6 +213,7 @@ export function enableStreamixIntrospection(): void {
   // One subscription over the single runtime bus: graph lifecycle, execution
   // lifecycle, and devtools traces all arrive here in order.
   internalRuntime.events.observe(event => {
+    if (event.kind === 'flow' && !identities.has(event.node)) discoverFlow(event.node);
     const entry = identities.get(event.node);
     if (!entry) {
       // Events without a runtime node (devtools read/write/render lines) are
@@ -321,6 +330,27 @@ export function __streamixBeginLifetime(operator: object): StreamixLifetimeSpan 
   };
 }
 
+function isPipedSource(node: object): boolean {
+  if (pipelines.has(node)) return false;
+  const users = pipelineUsers.get(node);
+  if (!users) return false;
+  for (const id of users) {
+    const pipeline = entries.get(id)?.ref.deref();
+    if (!pipeline || (pipeline as { disposed?: boolean }).disposed) users.delete(id);
+  }
+  return users.size > 0;
+}
+
+/** Discover runtime-created flows without evaluating or subscribing to them. */
+function discoverFlow(node: object): void {
+  if (identities.has(node)) return;
+  const origin = internalRuntime.diagnostics.originOf(node);
+  const name = typeof (node as { name?: unknown }).name === 'string'
+    ? (node as { name: string }).name : origin?.fn ?? 'flow';
+  __streamixDebug(node, { kind: 'flow', name: name || 'flow',
+    file: origin?.file ?? '[runtime]', line: origin?.line ?? 0, column: origin?.column ?? 0 });
+}
+
 /** Compiler helper: returns the exact input, preserving overloads and lazy semantics. */
 export function __streamixDebug<T>(value: T, metadata: StreamixSourceMetadata): T {
   if (!enabled) enableStreamixIntrospection();
@@ -368,6 +398,7 @@ export function __streamixDebugDispose(node: object, kind = 'dispose'): void {
   const entry = identities.get(node);
   if (!entry || !entries.has(entry.id)) return;
   publish(entry, kind);
+  for (const input of pipelines.get(node) ?? []) pipelineUsers.get(input)?.delete(entry.id);
   entries.delete(entry.id);
   if (entry.target !== undefined) entries.get(entry.target)?.subscriptions?.delete(entry.id);
   for (const id of entry.subscriptions ?? []) {
@@ -399,7 +430,21 @@ export function __streamixSubscribe<T extends { subscribe: (...args: any[]) => a
   }) as T['subscribe'];
 }
 export function __streamixPipeline(result: object, inputs: readonly unknown[]): void {
-  if (enabled) pipelines.set(result, inputs.filter(object));
+  if (!enabled) return;
+  const previous = pipelines.get(result);
+  const previousId = identities.get(result)?.id;
+  if (previousId !== undefined) for (const input of previous ?? []) pipelineUsers.get(input)?.delete(previousId);
+  pipelines.set(result, inputs.filter(object));
+  discoverFlow(result);
+  const entry = identities.get(result);
+  if (entry) {
+    for (const input of pipelines.get(result) ?? []) {
+      let users = pipelineUsers.get(input);
+      if (!users) pipelineUsers.set(input, users = new Set());
+      users.add(entry.id);
+    }
+    __streamixDebug(result, entry.source);
+  }
 }
 export function __streamixOperatorExecution(operator: object, iterator: object): void {
   if (!enabled) return;

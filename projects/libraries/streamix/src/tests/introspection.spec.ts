@@ -10,6 +10,31 @@ const metadata = (name: string, kind: StreamixSourceMetadata['kind'] = 'atom'): 
 
 describe('debug runtime introspection', () => {
   beforeAll(() => enableStreamixIntrospection());
+  it('discovers uninstrumented flows and nested pipes without starting producers', () => {
+    let starts = 0;
+    const source = flow(async function* () { starts++; yield 1; });
+    const first = pipe(source, map((value: number) => value + 1));
+    const second = pipe(first, map((value: number) => value * 2));
+    try {
+      const rows = streamixInspector.inspect();
+      const pipes = rows.filter(row => row.pipeline);
+      expect(pipes.length).toBeGreaterThanOrEqual(2);
+      expect(rows.filter(row => row.kind === 'flow').length).toBeGreaterThanOrEqual(3);
+      expect(starts).toBe(0);
+      // Compiler metadata refines the automatically discovered identity.
+      __streamixDebug(first, metadata('discovered-pipe', 'flow'));
+      const named = streamixInspector.inspect({ name: 'discovered-pipe' });
+      expect(named.length).toBe(1);
+      expect(named[0].pipeline).toBeTrue();
+      expect(named[0].pipedSource).toBeFalse();
+      expect(named[0].composition.length).toBeGreaterThan(0);
+      expect(rows.find(row => row.id === named[0].composition[0])?.pipedSource).toBeTrue();
+      first.dispose();
+      const upstream = streamixInspector.inspect().find(row => row.id === named[0].composition[0]);
+      expect(upstream?.pipedSource).toBeFalse();
+    } finally { second.dispose(); first.dispose(); source.dispose(); }
+    expect(streamixInspector.inspect({ name: 'discovered-pipe' }).length).toBe(0);
+  });
   it('prunes dead weak entries incrementally while events are published', () => {
     const value = __streamixDebug(atom(1), metadata('pruned-entry'));
     const id = streamixInspector.inspect({ name: 'pruned-entry' })[0].id;

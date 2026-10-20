@@ -234,6 +234,11 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
   const traceRows = document.createElement('div');
   traceRows.className = 'sx-trace';
   traceRows.dataset['streamixTrace'] = '';
+  let followTrace = true;
+  traceRows.onscroll = () => {
+    if (traceRows.hidden || content.hidden || traceRows.clientHeight === 0) return;
+    followTrace = traceRows.scrollHeight - traceRows.scrollTop - traceRows.clientHeight <= 2;
+  };
   const detail = document.createElement('pre');
   detail.className = 'sx-detail';
   const main = document.createElement('div');
@@ -289,7 +294,7 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
     const list = all.filter(row => (related.checked && connected.has(row.id)) || ((!kind.value || row.kind === kind.value) &&
       (!query || (row.name + ' ' + row.source.file).toLowerCase().includes(query)) &&
       (tab === 'Scopes' ? row.kind === 'scope'
-        : tab === 'Atoms' ? ['atom', 'derived'].includes(row.kind) : row.kind === 'flow')));
+        : tab === 'Atoms' ? ['atom', 'derived'].includes(row.kind) : !row.pipedSource && (row.kind === 'flow' || row.kind === 'source' || row.pipeline))));
     rows.hidden = tab === 'Trace';
     traceRows.hidden = tab !== 'Trace';
     detail.hidden = tab === 'Trace' || selected === undefined;
@@ -302,6 +307,7 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
         row.hidden = (event.objectKind === 'operator' && !event.lifetime && !operatorEvents.checked) ||
           (!!query && !(event.name + ' ' + (event.ownerName ?? '') + ' ' + event.kind).toLowerCase().includes(query));
       }
+      if (followTrace) traceRows.scrollTop = traceRows.scrollHeight;
     } else {
       rows.replaceChildren();
       rows.classList.toggle('sx-empty', !list.length);
@@ -320,7 +326,7 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
         button.dataset['streamixObjectId'] = String(row.id);
         button.className = 'sx-row';
         button.dataset['selected'] = String(row.id === selected);
-        const badge = spanOf('sx-badge', row.kind);
+        const badge = spanOf('sx-badge', row.pipeline ? 'pipe' : row.kind);
         badge.dataset['kind'] = row.kind;
         const pill = spanOf('sx-pill', row.state);
         pill.dataset['state'] = row.state.toLowerCase();
@@ -353,7 +359,7 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
   ].join('\n');
   const schedule = () => { if (frame === undefined) frame = requestAnimationFrame(render); };
   for (const title of ['Scopes', 'Atoms', 'Flows', 'Trace']) {
-    const button = document.createElement('button'); button.textContent = title; button.onclick = () => { tab = title; render(); }; tabs.appendChild(button);
+    const button = document.createElement('button'); button.textContent = title; button.onclick = () => { if (title === 'Trace' && tab !== title) followTrace = true; tab = title; render(); }; tabs.appendChild(button);
   }
   filter.oninput = schedule; kind.onchange = schedule; related.onchange = schedule; operatorEvents.onchange = schedule;
   const stop = streamixInspector.observe(event => { appendTrace(event); markLive(); schedule(); });
