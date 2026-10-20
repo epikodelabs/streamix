@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.7 - 2026-10-20
+
+- The inspector headlines this release: collapsed by default, repeated events condensed to `×N`, changed values reported with previews, and subscription noise optional. Same insight, fewer scrollbars.
+- Fixed expand cancellation: it now closes the active child iterator, clears queued values, and ignores async results that arrive after cancellation. Errors also clean up the active child.
+- React, Vue, and Angular now share a single definition of "write". The lawyers were expensive.
+- One introspection activation helper now serves all three builders, which previously kept three identical copies out of politeness.
+- Source transport no longer detours through the diagnostics bus: zero allocations per emission.
+- The node test suite is back online after an extended vacation.
+
+
 ## 3.0.6 - 2026-10-12
 
 - **Angular DevTools:** added the exported `StreamixDevtools` in-app panel for

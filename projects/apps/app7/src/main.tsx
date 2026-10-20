@@ -2,6 +2,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { atom, derived, flow, scope } from "@epikodelabs/streamix";
+import { useStreamixAfterCommit, useStreamixLocal } from "@epikodelabs/streamix/react";
 import { Button, Card, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from "./components/ui";
 
 // A standalone atom: a compiler lowers `value={title}` through atomBinding().
@@ -68,8 +69,20 @@ function LocalIsland() {
 }
 
 function App() {
+  // The output freezes at the latest pre-mute state: the snapshot updates
+  // only while notifications are on, so muted controls stay local.
+  const frozen = useStreamixLocal(() => ({
+    text: `${state.name} · ${state.role} — ${title.value}: ${state.message}`,
+    accent: state.accent as string | undefined,
+  }));
+  useStreamixAfterCommit(() => {
+    if (state.notifications) {
+      frozen.text = `${state.name} · ${state.role} — ${title.value}: ${state.message}`;
+      frozen.accent = state.accent;
+    }
+  });
   return (
-    <main className="demo">
+    <main className="demo" data-accent={state.notifications ? state.accent : undefined}>
       <header className="hero">
         <p className="eyebrow">Streamix × React</p>
         <span className="status">{state.connection ?? "Connecting…"}</span>
@@ -102,7 +115,7 @@ function App() {
               Accent
               <Select value={state.accent} onValueChange={(accent) => state.accent = accent}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
+                <SelectContent data-accent={state.notifications ? state.accent : undefined}>
                   <SelectItem value="violet">Violet</SelectItem>
                   <SelectItem value="cyan">Cyan</SelectItem>
                   <SelectItem value="lime">Lime</SelectItem>
@@ -162,9 +175,9 @@ function App() {
         <Card className="card alias-card">
           <div className="card-heading"><h2>Aliases, maps, selection</h2></div>
           <div className="button-row">
-            <button type="button" onClick={() => clicks = clicks + 5}>clicks + 5 → {alias}</button>
-            <button type="button" onClick={() => mappedTally = mappedTally + 1}>mapped tally + 1</button>
-            <button type="button" onClick={() => swapped = !swapped}>{swapped.value ? "Show atom" : "Show alias"}</button>
+            <Button onClick={() => clicks = clicks + 5}>clicks + 5 → {alias}</Button>
+            <Button onClick={() => mappedTally = mappedTally + 1}>mapped tally + 1</Button>
+            <Button onClick={() => swapped = !swapped}>{swapped.value ? "Show atom" : "Show alias"}</Button>
           </div>
           <p className="mono">Alias {alias} · Map {model.title} · Keyed {model[swapped.value ? "tally" : "title"]} · Destructured {mappedTitle}</p>
           <p className="derived"><strong>Selection:</strong> {swapped.value ? alias : title}</p>
@@ -172,8 +185,12 @@ function App() {
 
       </section>
 
-      <output data-testid="preview" aria-live="polite" data-accent={state.accent}>
-        {state.enabled ? `${state.name} · ${state.role} — ${title}: ${state.message}` : "Workspace paused"}
+      <output data-testid="preview" aria-live="polite" data-accent={state.notifications ? state.accent : frozen.accent}>
+        {state.enabled
+          ? state.notifications
+            ? `${state.name} · ${state.role} — ${title}: ${state.message} · 🔔 notifications`
+            : `${frozen.text} · 🔕 muted`
+          : "Workspace paused"}
       </output>
     </main>
   );

@@ -59,15 +59,32 @@ button.ui-switch:hover, button.ui-switch[data-state="checked"]:hover { box-shado
 .mono { overflow-wrap: anywhere; color: #526882; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .74rem; line-height: 1.45; }
 .flow-value { margin: 0; color: #26725c; font-size: clamp(1.05rem, 2.4vh, 1.45rem); font-weight: 750; letter-spacing: -.03em; }
 
-button { justify-self: start; border: 1px solid #3869ad; border-radius: .45rem; padding: .42rem .68rem; background: #3869ad; color: #fff; font: inherit; font-size: .78rem; font-weight: 700; cursor: pointer; transition: background .16s ease, border-color .16s ease, box-shadow .16s ease; }
-button:hover { border-color: #2d5c9e; background: #2d5c9e; box-shadow: 0 2px 5px rgba(45, 92, 158, .2); transform: none; }
-button:focus-visible { outline: 3px solid rgba(75, 120, 185, .3); outline-offset: 2px; }
-button:active { background: #254e87; box-shadow: none; transform: none; }
+/* Scope button chrome to the UI Button: bare <button>s (Radix select trigger,
+   switch) style themselves and must not inherit the blue fill on hover. */
+.ui-button { justify-self: start; border: 1px solid #3869ad; border-radius: .45rem; padding: .42rem .68rem; background: #3869ad; color: #fff; font: inherit; font-size: .78rem; font-weight: 700; cursor: pointer; transition: background .16s ease, border-color .16s ease, box-shadow .16s ease; }
+.ui-button:hover { border-color: #2d5c9e; background: #2d5c9e; box-shadow: 0 2px 5px rgba(45, 92, 158, .2); transform: none; }
+.ui-button:focus-visible { outline: 3px solid rgba(75, 120, 185, .3); outline-offset: 2px; }
+.ui-button:active { background: #254e87; box-shadow: none; transform: none; }
 .button-row { display: flex; flex-wrap: wrap; gap: .4rem; }
-.button-row button { flex: 0 1 auto; }
+.button-row .ui-button { flex: 0 1 auto; }
 .island { display: grid; gap: .5rem; padding: .6rem; border: 1px dashed #bdc9d9; border-radius: .55rem; background: #fafcff; }
 
 output { display: block; padding: .6rem .75rem; border: 1px solid #dce5f0; border-radius: .5rem; background: #fff; color: #42617e; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .8rem; line-height: 1.4; overflow-wrap: anywhere; }
+
+/* Accent theme: custom properties follow the data-accent carriers — the demo
+   root (triggers, preview) and the portaled select content (dropdown items). */
+[data-accent="violet"] { --accent: #8b5cf6; --accent-soft: #f5f3ff; --accent-ink: #6d28d9; }
+[data-accent="cyan"] { --accent: #06b6d4; --accent-soft: #ecfeff; --accent-ink: #0e7490; }
+[data-accent="lime"] { --accent: #84cc16; --accent-soft: #f7fee7; --accent-ink: #4d7c0f; }
+
+output { border-left: .35rem solid var(--accent, #dce5f0); background: var(--accent-soft, #fff); color: var(--accent-ink, #42617e); }
+.ui-select-trigger { border-color: var(--accent, #cfd8e6); }
+.ui-select-trigger:hover { border-color: var(--accent, #aebcd0); background: var(--accent-soft, #fff); box-shadow: 0 0 0 3px var(--accent-soft, rgba(18, 38, 63, .03)); }
+.ui-select-trigger:focus-visible { border-color: var(--accent, #4b78b9); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #4b78b9) 16%, transparent); }
+.ui-select-icon { color: var(--accent, #61718a); }
+.ui-select-content { border-color: var(--accent, #cfd8e6); }
+.ui-select-check { color: var(--accent, #3869ad); }
+.ui-select-item[data-highlighted] { background: var(--accent-soft, #eef4fc); color: var(--accent-ink, #245892); }
 
 @media (max-width: 1100px), (max-height: 620px) {
   .dashboard { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto; }
