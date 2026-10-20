@@ -98,6 +98,7 @@ export function __streamixTrace(
   type: "read" | "subscription" | "write" | "unsubscribe" | "render",
   source: string,
   countsAsWrite = true,
+  value?: unknown,
 ): void {
   if (type === "write" && countsAsWrite) pendingWrites++;
   if (type === "render") {
@@ -106,7 +107,13 @@ export function __streamixTrace(
     if (pendingWrites === 0) return;
     pendingWrites = 0;
   }
-  recordStreamixDevtoolsEvent({ type, source });
+  let preview: string | undefined;
+  if (type === "write" && value !== undefined) {
+    // Bounded preview so the trace line says what changed, not just where.
+    try { preview = (typeof value === "string" ? value : JSON.stringify(value))?.slice(0, 240); }
+    catch { preview = String(value); }
+  }
+  recordStreamixDevtoolsEvent({ type, source, ...(preview !== undefined ? { value: preview } : {}) });
 }
 
 /** @internal Registers compiler tracing only after a component commits. */
@@ -183,7 +190,7 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
           entry!.snapshot = { version: entry!.version, value: next };
           // The first replay initializes the subscription; it isn't a write.
           if (replaying) return;
-          __streamixTrace("write", sourceName, dedupe);
+          __streamixTrace("write", sourceName, dedupe, next);
           for (const listener of entry!.listeners) listener();
         });
         replaying = false;

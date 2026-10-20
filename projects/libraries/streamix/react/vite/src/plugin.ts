@@ -1,15 +1,24 @@
 import type { Plugin } from "vite";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import ts from "typescript";
 import {
   formatReactJsxDiagnostics,
   transformReactJsx,
 } from "@epikodelabs/streamix/react/compiler";
+import { injectIntrospectionActivation, instrumentStreamixSource } from "@epikodelabs/streamix/compiler";
 
 export interface StreamixReactViteOptions {
   /** Optional filter for authored TS/TSX/JS/JSX modules; node_modules is always excluded. */
   readonly include?: (id: string) => boolean;
+  /**
+   * Builds the app with the inspector, mirroring the Angular builder's flag:
+   * factory calls register with `__streamixDebug` and the entry gets
+   * `__sxEnable()`/`__sxMount()`. Off (default) — completely without.
+   */
+  readonly introspection?: boolean;
 }
+
+const ENTRY_NAMES = ["main.tsx", "main.jsx", "main.ts", "main.js", "index.tsx", "index.jsx", "index.ts", "index.js"];
 
 /**
  * Native Vite host for the Streamix React compiler. Put this plugin before
@@ -65,6 +74,11 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
   return {
     name: "streamix-react",
     enforce: "pre",
+    // An introspection build must activate the inspector even outside the dev
+    // server, where Vite would otherwise leave import.meta.env.DEV false.
+    config: () => options.introspection
+      ? { define: { "import.meta.env.DEV": "true" } }
+      : undefined,
     transform(source, id) {
       const fileName = id.replace(/[?#].*$/, "");
       if (!/\.[jt]sx?$/i.test(fileName) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(fileName) ||
@@ -83,8 +97,20 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
       if (errors.length > 0) {
         this.error(formatReactJsxDiagnostics(source, fileName, errors));
       }
+      let code = result.code;
+      if (options.introspection) {
+        // Registration after adoption (compiler ordering): wrap factory calls
+        // in the transformed text, where the atom type is already resolved.
+        const program = programFor(fileName, code);
+        const sourceFile = program.getSourceFile(fileName);
+        if (sourceFile) {
+          code = instrumentStreamixSource({ file: sourceFile, checker: program.getTypeChecker(),
+            sourcePath: fileName, enabled: true });
+        }
+        if (ENTRY_NAMES.includes(basename(fileName).toLowerCase())) code = injectIntrospectionActivation(code);
+      }
       return {
-        code: result.code,
+        code,
         map: result.sourceMap && {
           ...result.sourceMap,
           sources: [...result.sourceMap.sources],

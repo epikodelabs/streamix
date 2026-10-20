@@ -30,6 +30,26 @@ describe("Streamix React Vite plugin", () => {
       "/workspace/src/store.ts") as { code: string };
     expect(transformed.code).toContain("@epikodelabs/streamix");
   });
+
+  it("builds with the inspector when introspection is on and completely without otherwise", () => {
+    const context = { error: (message: string): never => { throw new Error(message); } } as any;
+    const source = `import { atom } from "@epikodelabs/streamix";\nexport const count = atom(0);`;
+    const entry = "/workspace/src/main.tsx";
+
+    const on = sx({ introspection: true });
+    const define = (on.config as any)?.call(on, {}, { command: "build" });
+    expect(define.define["import.meta.env.DEV"]).toBe("true");
+    const enabled = transformOf(on).call(context, source, entry) as { code: string };
+    expect(enabled.code).toContain("__sxEnable();");
+    expect(enabled.code).toContain("__sxMount();");
+    expect(enabled.code).toContain("__sxDebug(atom(0)");
+
+    const off = sx();
+    expect((off.config as any)?.call(off, {}, { command: "build" })).toBeUndefined();
+    const plain = transformOf(off).call(context, source, entry) as { code: string };
+    expect(plain.code).not.toContain("__sxEnable");
+    expect(plain.code).not.toContain("__sxDebug");
+  });
 });
 
 function transformOf(plugin: ReturnType<typeof sx>): (source: string, id: string) => unknown {

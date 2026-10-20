@@ -75,6 +75,7 @@ describe("React Angular-hosted source generation", () => {
       const generated = await readFile(generatedPath, "utf8");
       expect(generated).toContain("__sxEnable();");
       expect(generated).toContain("__sxMount();");
+      expect(generated).toContain("__sxDebug(atom(0)");
       expect(generated.indexOf("__sxEnable();")).toBeLessThan(generated.indexOf("export const count"));
       // Authored source stays clean: injection lives only in the generated tree.
       expect(await readFile(join(source, "main.tsx"), "utf8")).toBe(authored);
