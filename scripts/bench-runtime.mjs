@@ -5,6 +5,7 @@ const result = await build({
 import { internalRuntime, StreamixRuntime } from '../projects/libraries/streamix/src/lib/runtime/runtime';
 import { setRuntimeInstrumentationEnabled } from '../projects/libraries/streamix/src/lib/runtime/diagnostics';
 import { trackOperatorExecution } from '../projects/libraries/streamix/src/lib/runtime/operator-execution';
+import { createAsyncCoordinator } from '../projects/libraries/streamix/src/lib/utils/coordinator';
 const iterations = 100000;
 async function sample(enabled, observed) {
   setRuntimeInstrumentationEnabled(enabled);
@@ -37,6 +38,17 @@ for (let run = 0; run < 8; run++) {
 }
 times.sort((a, b) => a - b);
 console.log('graph propagation: ' + times[3].toFixed(2) + ' ms / 1,000,000 invalidations (median of 7)');
+
+// Transport decoupling gate: coordinator source delivery runs on a private
+// bus. A live coordinator must not observe the runtime bus, or production
+// apps using sources would pay diagnostics eventing with no observer (rule 1).
+// Delta-based, so listeners held elsewhere in this script don't false-positive.
+const observedBefore = internalRuntime.events.observed;
+const coordinator = createAsyncCoordinator([]);
+if (internalRuntime.events.observed !== observedBefore) {
+  throw new Error('transport regression: a live coordinator observes the diagnostics bus');
+}
+console.log('coordinator transport: private bus, runtime bus unobserved');
 `, resolveDir: import.meta.dirname, loader: 'ts' },
   bundle: true, platform: 'node', format: 'esm', write: false,
 });

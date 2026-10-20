@@ -1,6 +1,8 @@
+import { internalRuntime } from '../lib/runtime/runtime';
 import { RuntimeEventBuffer } from '../lib/runtime/event-buffer';
 import { RuntimeEventBus } from '../lib/runtime/events';
 import { RuntimeSourceExecution } from '../lib/runtime/source-execution';
+import { createAsyncCoordinator } from '../lib/utils/coordinator';
 
 describe('runtime source execution', () => {
   it('releases consumed payloads and bounds storage while a backlog remains', () => {
@@ -194,4 +196,32 @@ describe('runtime source execution', () => {
     execution.close();
   });
 
+});
+
+describe('coordinator transport decoupling', () => {
+  it('delivers source values without observing the shared runtime bus', async () => {
+    // The runtime bus is the diagnostics gate: a live coordinator must never
+    // mark it observed, or production apps using sources pay diagnostics
+    // eventing with no observer. Assert the delta so pre-existing listeners
+    // (e.g. an enabled inspector) do not affect the invariant.
+    const observedBefore = internalRuntime.events.observed;
+    const coordinator = createAsyncCoordinator<number>([{
+      next: async () => ({ done: false, value: 7 }),
+      return: async () => ({ done: true as const, value: undefined }),
+    }]);
+    try {
+      const result = await coordinator.next();
+      expect(result.value).toEqual({ type: 'value', value: 7, sourceIndex: 0 });
+      expect(internalRuntime.events.observed).toBe(observedBefore);
+    } finally {
+      await coordinator.return?.();
+    }
+  });
+
+  it('does not mark the shared runtime bus observed when created without sources', () => {
+    const observedBefore = internalRuntime.events.observed;
+    const coordinator = createAsyncCoordinator([]);
+    expect(internalRuntime.events.observed).toBe(observedBefore);
+    void coordinator.return?.();
+  });
 });

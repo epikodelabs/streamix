@@ -29,10 +29,12 @@ atom write / source emission
             │                         ▼
             │                    scheduler flush
             │
-            └──► execution events ──► source coordinators ──► consumers
-                                            │
-                                            ▼
-                                      cancellation / cleanup
+            └──► execution events ──► diagnostics (dev-only observer)
+
+source iterators ──► private coordinator bus ──► consumers
+                                │
+                                ▼
+                          cancellation / cleanup
 ```
 
 ## Runtime composition
@@ -134,8 +136,11 @@ not change the iterator's pull contract:
 - `return()` publishes `cancel` immediately, even if iterator cleanup awaits;
 - a thrown or rejected pull publishes `error`.
 
-The event dispatcher is an internal diagnostic and coordination channel. Events
-are queued FIFO. If a listener publishes another event while handling one, all
+The event dispatcher is the internal diagnostics channel. Observing it is the
+gate that turns diagnostics eventing on, so nothing but diagnostics may listen:
+coordinator source delivery runs on a private per-coordinator bus (see below),
+keeping the `observed` flag a true statement about diagnostics. Events are
+queued FIFO. If a listener publishes another event while handling one, all
 listeners see the current event first; the new event is delivered afterward.
 Listener errors are isolated so diagnostic code cannot break a producer.
 
@@ -149,7 +154,13 @@ source coordinator chooses which source to pull.
 | --- | --- |
 | `RuntimeSourcePulls` | One outstanding `next()` call per source slot. |
 | `RuntimeEventBuffer` | FIFO produced values, waiting consumers, and terminal delivery. |
-| `RuntimeSourceExecution` | Source-slot epochs, event publication, batching, and closure. |
+| `RuntimeSourceExecution` | Source-slot epochs, event publication on its private transport bus, batching, and closure. |
+
+Transport events never share the diagnostics bus: `createAsyncCoordinator`
+constructs its execution with a dedicated `RuntimeEventBus`. A live coordinator
+therefore never marks the runtime bus observed, so production apps using
+`from`, `interval`, or merge operators do not pay diagnostics eventing without
+an observer.
 
 The pull registry coalesces duplicate requests for a busy slot; it never calls
 `next()` concurrently for the same iterator. Each attached slot has a

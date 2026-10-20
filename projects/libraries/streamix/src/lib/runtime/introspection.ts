@@ -217,7 +217,8 @@ export function enableStreamixIntrospection(): void {
     const entry = identities.get(event.node);
     if (!entry) {
       // Events without a runtime node (devtools read/write/render lines) are
-      // trace-only; coordinator transport events carry no label and are ignored.
+      // trace-only. Coordinator transport never reaches this bus; it runs on
+      // a private per-coordinator bus.
       if (event.label !== undefined) {
         appendEvent(Object.freeze({ id: 0, name: event.label.slice(0, 240), kind: event.kind, time: Date.now() }));
       }

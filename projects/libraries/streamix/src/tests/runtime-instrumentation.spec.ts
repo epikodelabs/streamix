@@ -71,6 +71,36 @@ describe('runtime instrumentation gating', () => {
     expect(internalRuntime.diagnostics.atomState(loud)).toEqual(jasmine.objectContaining({ hasValue: true, value: 2, subscribers: 0 }));
   });
 
+  it('never publishes a graph change event for a flow emission, even while accounting is disabled', async () => {
+    // Flow emissions report one 'next' execution event; the valueless graph
+    // 'change' would double-count them. The dedupe must not depend on the
+    // instrumentation flag, or toggling accounting would re-introduce it.
+    setRuntimeInstrumentationEnabled(false);
+    let release!: (value: number) => void;
+    const source = flow<number>(async function* () {
+      yield 1;
+      yield await new Promise<number>(resolve => { release = resolve; });
+    });
+    const kinds: string[] = [];
+    const stop = internalRuntime.events.observe(event => {
+      if (event.node === source && (event.kind === 'next' || event.kind === 'change')) kinds.push(event.kind);
+    });
+    try {
+      const seen: number[] = [];
+      const sub = source.subscribe(value => seen.push(value));
+      for (let i = 0; i < 20 && seen.length === 0; i++) await tick();
+      expect(seen).toEqual([1]);
+      expect(kinds).toContain('next');
+      expect(kinds).not.toContain('change');
+      release(2);
+      for (let i = 0; i < 20 && !source.disposed; i++) await tick();
+      await sub();
+    } finally {
+      stop();
+      setRuntimeInstrumentationEnabled(true);
+    }
+  });
+
   it('leaves no flow entry or execution record while disabled', async () => {
     // Stay mid-flight so the flow remains registered and its record would be
     // observable; a completed flow disposes and forgets records on its own.

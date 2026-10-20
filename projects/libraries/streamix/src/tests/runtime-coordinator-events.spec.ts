@@ -2,7 +2,10 @@ import { createAsyncCoordinator } from '../lib/utils/coordinator';
 import { internalRuntime } from '../lib/runtime/runtime';
 
 describe('runtime-coordinated source events', () => {
-  it('publishes source events through the internal runtime dispatcher', async () => {
+  it('delivers source events in order without touching the runtime dispatcher', async () => {
+    // Transport runs on a private per-coordinator bus: the runtime dispatcher
+    // is the diagnostics gate, and observing it must never capture transport
+    // events or pay for them in production.
     const seen: Array<{ kind: string; value: unknown }> = [];
     const unobserve = internalRuntime.events.observe(event => {
       if (event.value && typeof event.value === 'object' && 'sourceIndex' in event.value) {
@@ -21,14 +24,14 @@ describe('runtime-coordinated source events', () => {
     try {
       expect((await coordinator.next()).value).toEqual({ type: 'value', value: 42, sourceIndex: 0 });
       expect((await coordinator.next()).value).toEqual({ type: 'complete', sourceIndex: 0 });
-      expect(seen.map(event => event.kind)).toEqual(['next', 'complete']);
+      expect(seen).toEqual([]);
     } finally {
       unobserve();
       await coordinator.return?.();
     }
   });
 
-  it('isolates independent coordinators sharing the runtime dispatcher', async () => {
+  it('isolates independent coordinators from each other', async () => {
     const a = createAsyncCoordinator<number>([{ next: () => Promise.resolve({ done: false, value: 1 }) }]);
     const b = createAsyncCoordinator<number>([{ next: () => Promise.resolve({ done: false, value: 2 }) }]);
     try {

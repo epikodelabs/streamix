@@ -63,11 +63,15 @@ export class StreamixRuntime {
     if (this.events.observed && !this.diagnostics.hasFlow(source)) {
       this.events.publish({ kind: "change", node: source });
     }
-    for (const dependent of this.graph.dependents(source)) {
+    // Iterate the live downstream set: every dependent runs an idempotent
+    // invalidation, so visiting an entry added mid-broadcast is harmless, and
+    // Set iteration skips entries an earlier invalidation removed. This saves
+    // the snapshot allocation `dependents()` would make on every write.
+    this.graph.forEachDependent(source, dependent => {
       // Edges may be replaced during an earlier invalidation.
-      if (!this.graph.hasDependency(dependent, source)) continue;
+      if (!this.graph.hasDependency(dependent, source)) return;
       this.invalidators.get(dependent)?.();
-    }
+    });
   }
 
   dispose(node: RuntimeNode): void {
@@ -173,7 +177,15 @@ export class RuntimeGraph {
   dependentCount(node: RuntimeNode): number { return this.downstream.get(node)?.size ?? 0; }
 
   dependencies(node: RuntimeNode): ReadonlySet<RuntimeNode> { return new Set(this.upstream.get(node) ?? []); }
+  /** Snapshot copy; read-only consumers iterate safely outside invalidation. */
   dependents(node: RuntimeNode): ReadonlySet<RuntimeNode> { return new Set(this.downstream.get(node) ?? []); }
+
+  /** Visit downstream nodes without allocating a snapshot; safe under mid-iteration edge replacement. */
+  forEachDependent(node: RuntimeNode, visit: (dependent: RuntimeNode) => void): void {
+    const users = this.downstream.get(node);
+    if (!users) return;
+    for (const dependent of users) visit(dependent);
+  }
   nodes(): IterableIterator<RuntimeNode> { return this.upstream.keys(); }
   get size(): number { return this.upstream.size; }
 }

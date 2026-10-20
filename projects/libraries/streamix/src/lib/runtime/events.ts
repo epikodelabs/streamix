@@ -5,8 +5,11 @@ import type { RuntimeNode } from "./runtime";
  * Every event the runtime puts on the bus, in one stream:
  * - graph lifecycle: register, dependencies, change, flow, dispose
  * - execution lifecycle: next, complete, cancel, error
- * - coordinator source transport and devtools traces reuse the same
- *   delivery guarantees; `label` marks events that have no runtime node.
+ * - devtools traces reuse the same delivery guarantees; `label` marks events
+ *   that have no runtime node.
+ * Coordinator source transport deliberately runs on a private per-coordinator
+ * bus instead: its listener would otherwise keep this bus observed in
+ * production and switch diagnostics eventing on without any observer.
  */
 export type RuntimeEventKind =
   | "register" | "dependencies" | "change" | "flow" | "dispose"

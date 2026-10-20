@@ -196,6 +196,7 @@ export class RuntimeDiagnostics {
   private readonly origins = new WeakMap<RuntimeNode, RuntimeOrigin>();
   private readonly atomStates = new WeakMap<RuntimeNode, () => AtomStateReader>();
   private readonly flowStates = new Map<RuntimeNode, () => FlowDiagnosticsState>();
+  private readonly flowNodes = new WeakSet<RuntimeNode>();
   readonly executions = new RuntimeExecutions();
 
   constructor(private readonly events: RuntimeEventBus) {}
@@ -217,6 +218,12 @@ export class RuntimeDiagnostics {
 
   atomState(node: RuntimeNode) { return this.atomStates.get(node)?.(); }
 
+  /** Record a flow-backed atom's identity. Unconditional: the graph 'change'
+   * dedupe in `changed()` must not depend on instrumentation being enabled. */
+  markFlowNode(node: RuntimeNode): void {
+    this.flowNodes.add(node);
+  }
+
   /** Register a flow-backed atom independently of its execution starting. */
   registerFlow(node: RuntimeNode, state: () => FlowDiagnosticsState): void {
     if (!instrumentationEnabled) return;
@@ -229,9 +236,9 @@ export class RuntimeDiagnostics {
     return state ? Object.freeze({ ...state }) : undefined;
   }
 
-  /** True when the node registered a flow state (used to dedupe emissions). */
+  /** True when the node is a flow-backed atom (used to dedupe emissions). */
   hasFlow(node: RuntimeNode): boolean {
-    return this.flowStates.has(node);
+    return this.flowNodes.has(node);
   }
 
   /** Live flows, including idle and recoverably failed producers; disposed flows are removed. */

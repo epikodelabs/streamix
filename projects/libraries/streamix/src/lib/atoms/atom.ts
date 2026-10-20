@@ -994,8 +994,11 @@ function atomFromIteratorInternal<T>(
 
   const { instance: baseInstance, errorHandlers, subs } = base;
   instance = baseInstance as typeof instance;
-  // Flow diagnostics state is read-only introspection: skip the closure in
-  // production builds, where nothing observes it.
+  // Flow identity is tracked unconditionally so `changed()` can dedupe graph
+  // 'change' events against flow 'next' events in every configuration. The
+  // read-only state reader closure is skipped in production builds, where
+  // nothing observes it.
+  internalRuntime.diagnostics.markFlowNode(instance);
   if (isRuntimeInstrumentationEnabled()) {
     internalRuntime.diagnostics.registerFlow(instance, () => ({
       started, awaitingNext, subscribers: activeSubCount,

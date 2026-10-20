@@ -12,12 +12,15 @@ One bus, one ledger, one control surface:
 
 - **One bus** (`runtime/events.ts`): every event the runtime moves — graph
   lifecycle (`register`/`dependencies`/`change`/`flow`/`dispose`), execution
-  lifecycle (`next`/`complete`/`cancel`/`error`), the coordinator's source
-  transport, and devtools traces — flows through a single
-  `RuntimeEventBus` with one sequence and one `observed` guard. Diagnostics
-  is a subscriber, never a second channel. Flow emissions publish one `next`
+  lifecycle (`next`/`complete`/`cancel`/`error`), and devtools traces — flows
+  through a single `RuntimeEventBus` with one sequence and one `observed`
+  guard. Diagnostics is a subscriber, never a second channel. Coordinator
+  source transport is deliberately *not* on this bus: each coordinator runs
+  its own private `RuntimeEventBus`, so production source delivery never
+  marks the shared bus observed (rule 1). Flow emissions publish one `next`
   event, not a `change` plus a `next`; `changed()` skips the graph event for
-  flow-backed nodes.
+  flow-backed nodes in every configuration, not just while instrumentation
+  is enabled.
 - **One ledger** (`runtime/diagnostics.ts`): `RuntimeDiagnostics` owns all
   diagnostics-only state — execution records, origins, atom/flow state
   readers — plus the frozen `inspect()` snapshot. The reactive core

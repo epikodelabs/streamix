@@ -8,7 +8,7 @@
  */
 import { DONE } from "../atoms";
 import { normalizeError } from "../atoms/atom";
-import { internalRuntime } from "../runtime/runtime";
+import { RuntimeEventBus } from "../runtime/events";
 import { RuntimeSourceExecution } from "../runtime/source-execution";
 
 /**
@@ -129,7 +129,12 @@ export function createAsyncCoordinator<T = any>(
   sources: AsyncIterator<T>[] = [],
   options?: AsyncCoordinatorOptions
 ): AsyncCoordinator<T> {
-  const execution = new RuntimeSourceExecution<T, RunnerEvent<T>>(internalRuntime.events, DONE);
+  // Source transport runs on a private bus: the shared runtime bus is the
+  // diagnostics channel, and observing it is the gate that turns diagnostics
+  // eventing on. A coordinator must never flip that gate in production, where
+  // its listener is the only observer and the events carry no diagnostic
+  // value (introspection ignores them).
+  const execution = new RuntimeSourceExecution<T, RunnerEvent<T>>(new RuntimeEventBus(), DONE);
 
   // Use sparse arrays to support dynamic indices
   const sourceList: (AsyncIterator<T> | null)[] = [...sources];
