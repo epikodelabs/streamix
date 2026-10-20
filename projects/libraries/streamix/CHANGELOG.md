@@ -2,7 +2,7 @@
 
 ## 3.0.7 - 2026-10-20
 
-- **Meet the inspector.😊** An in-app diagnostics overlay, mounted automatically in dev builds and shared by Angular, React, and Vue: live tabs for Scopes (member state), Atoms, Flows, and a Trace that names every write with its value and timing. It mounts collapsed to a pulsing dot — expanding is always your call.
+- **Meet the inspector.😊** An in-app diagnostics overlay, mounted automatically in dev builds and shared by Angular, React, and Vue: live tabs for Scopes (member state), Atoms, Flows, and a Trace that names every write with its value and timing.
 - Fixed expand cancellation: it now closes the active child iterator, clears queued values, and ignores async results that arrive after cancellation. Errors also clean up the active child.
 - NO_INITIAL_VALUE is the only way to be empty. Value-less atoms and flows read it; deriveds wait for all inputs instead of seeing undefined; conditional dependencies swap edges cleanly.
 
