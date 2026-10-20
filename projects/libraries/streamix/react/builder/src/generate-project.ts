@@ -3,7 +3,7 @@ import { basename, dirname, join, relative } from "node:path";
 import ts from "typescript";
 import { formatReactJsxDiagnostics, transformReactJsx } from "@epikodelabs/streamix/react/compiler";
 
-export async function generateReactProject(workspaceRoot: string, sourceRoot: string): Promise<string> {
+export async function generateReactProject(workspaceRoot: string, sourceRoot: string, introspection = false): Promise<string> {
   const source = join(workspaceRoot, sourceRoot);
   const output = join(workspaceRoot, ".angular", ".streamix", virtualRootOf(sourceRoot));
   await rm(output, { recursive: true, force: true });
@@ -26,7 +26,13 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
     await writeFile(join(dirname(file), mapName), `${JSON.stringify(transformed.sourceMap)}\n`);
   }
   const available = new Set((await readdir(output)).map(name => name.toLowerCase()));
-  const entry = ["main.tsx", "main.jsx", "main.ts", "main.js", "index.tsx", "index.jsx", "index.ts", "index.js"].find(name => available.has(name));
+  const entry = ENTRY_NAMES.find(name => available.has(name));
+  if (introspection && entry !== undefined) {
+    // Devtools activation is injected into the generated entry only, mirroring
+    // the Angular builder: authored source stays clean and the gate stays
+    // `import.meta.env.DEV`, so production builds carry inert definitions.
+    await writeFile(join(output, entry), withIntrospection(await readFile(join(output, entry), "utf8")));
+  }
   await writeFile(
     join(dirname(output), "tsconfig.app.json"),
     `${JSON.stringify({
@@ -46,6 +52,13 @@ export function virtualRootOf(sourceRoot: string): string {
     .replace(/[\\/]src$/, "/src");
 }
 
+const ENTRY_NAMES = ["main.tsx", "main.jsx", "main.ts", "main.js", "index.tsx", "index.jsx", "index.ts", "index.js"];
+
+/** Inject devtools activation into a generated entry, matching the Angular builder's template. */
+function withIntrospection(code: string): string {
+  return `import { enableStreamixIntrospection as __sxEnable, mountStreamixInspector as __sxMount } from '@epikodelabs/streamix';\n__sxEnable();\n${code}\n__sxMount();\n`;
+}
+
 function toConfigPath(path: string): string {
   const normalized = path.replace(/\\/g, "/");
   return normalized.startsWith(".") ? normalized : `./${normalized}`;
@@ -63,7 +76,7 @@ async function collectAdoptableFiles(directory: string): Promise<string[]> {
 }
 
 /** Synchronize an original source change into the delegated virtual project. */
-export async function regenerateStreamixFile(workspaceRoot: string, sourceRoot: string, changedPath: string): Promise<void> {
+export async function regenerateStreamixFile(workspaceRoot: string, sourceRoot: string, changedPath: string, introspection = false): Promise<void> {
   const originalRoot = join(workspaceRoot, sourceRoot);
   const destRoot = join(workspaceRoot, ".angular", ".streamix", virtualRootOf(sourceRoot));
   const normalized = changedPath.replace(/\\/g, "/");
@@ -89,7 +102,11 @@ export async function regenerateStreamixFile(workspaceRoot: string, sourceRoot: 
     });
     const errors = transformed.diagnostics.filter(item => item.category === "error");
     if (errors.length) throw new Error(formatReactJsxDiagnostics(content, origin, errors));
-    await writeFile(destination, `${transformed.code}\n//# sourceMappingURL=${basename(destination)}.map\n`);
+    // A watch edit of the entry must keep the injected activation, or the
+    // first save would silently drop introspection until the next full regen.
+    const isEntry = introspection && ENTRY_NAMES.includes(basename(normalized).toLowerCase());
+    const code = isEntry ? withIntrospection(transformed.code) : transformed.code;
+    await writeFile(destination, `${code}\n//# sourceMappingURL=${basename(destination)}.map\n`);
     await writeFile(`${destination}.map`, JSON.stringify(transformed.sourceMap));
   } else {
     await writeFile(destination, await readFile(origin));

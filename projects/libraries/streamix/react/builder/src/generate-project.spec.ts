@@ -56,4 +56,39 @@ describe("React Angular-hosted source generation", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  it("injects introspection activation into the generated entry only when enabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-builder-introspect-"));
+    const sourceRoot = "projects/apps/demo/src";
+    try {
+      const source = join(root, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
+        include: ["projects/apps/demo/src/**/*.tsx"],
+      }));
+      const authored = `import { atom } from '@epikodelabs/streamix';\nexport const count = atom(0);\n`;
+      await writeFile(join(source, "main.tsx"), authored);
+      const generatedPath = join(root, ".angular/.streamix/demo/src/main.tsx");
+
+      const virtualRoot = await generateReactProject(root, sourceRoot, true);
+      const generated = await readFile(generatedPath, "utf8");
+      expect(generated).toContain("__sxEnable();");
+      expect(generated).toContain("__sxMount();");
+      expect(generated.indexOf("__sxEnable();")).toBeLessThan(generated.indexOf("export const count"));
+      // Authored source stays clean: injection lives only in the generated tree.
+      expect(await readFile(join(source, "main.tsx"), "utf8")).toBe(authored);
+
+      // A watch edit of the entry must keep the activation.
+      await regenerateStreamixFile(root, sourceRoot, "main.tsx", true);
+      expect(await readFile(generatedPath, "utf8")).toContain("__sxEnable();");
+      // Dropping the flag regenerates without it.
+      await generateReactProject(root, sourceRoot, false);
+      expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).not.toContain("__sxEnable");
+      await regenerateStreamixFile(root, sourceRoot, "main.tsx", false);
+      expect(await readFile(generatedPath, "utf8")).not.toContain("__sxEnable");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });

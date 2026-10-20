@@ -616,7 +616,7 @@
         },
         "serve": {
           "builder": "@epikodelabs/streamix/react/builder:application",
-          "options": { "delegateTarget": "app7:dev-server", "sourceRoot": "projects/apps/app7/src" },
+          "options": { "delegateTarget": "app7:dev-server", "sourceRoot": "projects/apps/app7/src", "introspection": true },
           "configurations": {
             "production": {},
             "development": {}
