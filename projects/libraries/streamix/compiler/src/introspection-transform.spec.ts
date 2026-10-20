@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import { injectIntrospectionActivation } from './introspection-activation';
 import { instrumentStreamixSource } from './introspection-transform';
 
 function transform(source: string, enabled = true): string {
@@ -113,5 +114,16 @@ const value = atom(sideEffect());`;
       () => { calls.push('argument'); return 1; })).toBe(instance);
     expect(calls).toEqual(['argument', 'factory', 'attach']);
     expect(() => run(() => {}, () => { throw new Error('factory failed'); }, () => 1)).toThrowError('factory failed');
+  });
+});
+
+describe('introspection entry activation', () => {
+  it('wraps the entry code with enable before and mount after', () => {
+    const code = injectIntrospectionActivation(`import { createApp } from 'vue';\ncreateApp({}).mount('#app');`);
+    expect(code).toContain("import { enableStreamixIntrospection as __sxEnable, mountStreamixInspector as __sxMount } from '@epikodelabs/streamix';");
+    expect(code.indexOf('__sxEnable();')).toBeLessThan(code.indexOf('createApp'));
+    expect(code.indexOf('createApp')).toBeLessThan(code.indexOf('__sxMount();'));
+    // A repeated injection must not nest: the activation import is unique.
+    expect(injectIntrospectionActivation(code).match(/__sxEnable\(\);/g)!.length).toBe(2);
   });
 });

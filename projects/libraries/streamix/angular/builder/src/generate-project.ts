@@ -6,6 +6,7 @@ import ts from 'typescript';
 // published subpath so ng-packagr treats it as an external dependency rather
 // than folding its sources into this entry.
 import { instrumentStreamixSource } from '@epikodelabs/streamix/angular/compiler';
+import { injectIntrospectionActivation } from '@epikodelabs/streamix/compiler';
 import { compileSxComponent } from '@epikodelabs/streamix/angular/compiler';
 import { installSxLifecycleIntoComponentSource } from '@epikodelabs/streamix/angular/compiler';
 import { findSxComponentTemplate, installSxComponentTemplate, virtualRootOf } from './options';
@@ -265,7 +266,7 @@ export async function generateProject({
     let source = rewriteDerivedAtomReads(instrumented);
     if (introspection && relative(sourceDirectory, sourcePath).replace(/\\/g, '/') === 'main.ts') {
       // Enable before bootstrapApplication constructs any component instances.
-      source = `import { enableStreamixIntrospection as __sxEnable, mountStreamixInspector as __sxMount } from '@epikodelabs/streamix';\n__sxEnable();\n` + source + '\n__sxMount();\n';
+      source = injectIntrospectionActivation(source);
     }
     const relativePath = relative(sourceDirectory, sourcePath).replace(/\\/g, '/');
     const outputPath = resolve(outputDirectory, relativePath);
