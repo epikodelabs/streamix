@@ -10,6 +10,45 @@ describe("Streamix React adoption regressions", () => {
     expect(owner.code).toContain("useStreamixLocal(() => atom(0))");
   });
 
+  it("lowers reads under pure unary operators but keeps increment writes intact", () => {
+    // A boolean toggle reads the atom under `!`; lowering the write but not
+    // the read emits `.next(!atomObject)` — always false, the toggle breaks.
+    const toggle = transformReactJsx(`
+      let on = atom(true);
+      function View() {
+        return <button onClick={() => on = !on}>{on ? "on" : "off"}</button>;
+      }
+    `);
+    expect(toggle.diagnostics.filter(d => d.category === "error")).toEqual([]);
+    expect(toggle.code).toContain("on.next(!on.value)");
+    const counter = transformReactJsx(`
+      let count = atom(0);
+      function View() { return <button onClick={() => count++}>{count}</button>; }
+    `);
+    expect(counter.code).toMatch(/count\.next\(/);
+    expect(counter.code).not.toContain("count.value++");
+  });
+
+  it("does not duplicate authored runtime hook imports", () => {
+    // An author may import hooks explicitly (e.g. for a snapshot effect);
+    // the injected runtime import must skip already-bound names or the
+    // virtual project fails with TS2300 duplicate identifier.
+    const result = transformReactJsx(`
+      import { useStreamixLocal, useStreamixAfterCommit } from "@epikodelabs/streamix/react";
+      let clicks = atom(0);
+      function View() {
+        const slot = useStreamixLocal(() => ({ seen: 0 }));
+        useStreamixAfterCommit(() => { slot.seen = clicks.value; });
+        return <button onClick={() => clicks++}>{clicks}</button>;
+      }
+    `);
+    expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
+    const imports = result.code.match(/import \{[^}]*\} from "@epikodelabs\/streamix\/react";/g) ?? [];
+    const bound = imports.flatMap(line => line.match(/\{([^}]*)\}/)![1].split(",").map(name => name.trim()));
+    expect(new Set(bound).size).toBe(bound.length);
+    expect(result.code).toContain("useStreamixLocal(() => ({ seen: 0 }))");
+  });
+
   it("does not corrupt property names, shadowing parameters, or const comparisons", () => {
     const result = transformReactJsx(`
       const count = atom(0);

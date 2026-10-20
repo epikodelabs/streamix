@@ -1170,7 +1170,21 @@ function isAtomReferenceExpression(
 function runtimePreludeFor(code: string): string {
   const names = ["useStreamixAfterCommit", "useStreamixLocal", "__streamixTrace", "useStreamixSource"]
     .filter(name => code.includes(`${name}(`));
-  return `import { ${names.join(", ")} } from "@epikodelabs/streamix/react";`;
+  // An authored import already binds the identifier; injecting our own line
+  // for the same name would be a duplicate declaration (TS2300).
+  const authored = new Set<string>();
+  const file = ts.createSourceFile("prelude.ts", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !statement.importClause?.namedBindings ||
+        !ts.isNamedImports(statement.importClause.namedBindings)) continue;
+    for (const element of statement.importClause.namedBindings.elements) {
+      if (names.includes(element.name.text)) authored.add(element.name.text);
+    }
+  }
+  const missing = names.filter(name => !authored.has(name));
+  return missing.length > 0
+    ? `import { ${missing.join(", ")} } from "@epikodelabs/streamix/react";`
+    : "";
 }
 
 function collectImportedReactiveSources(file: ts.SourceFile, checker?: ts.TypeChecker): Set<string> {
@@ -1665,7 +1679,13 @@ function rewriteAtomReads(
     // compiler diagnostic and must not be changed into a property write.
     if (ts.isBinaryExpression(node) && isAtomWriteOperator(node.operatorToken.kind) &&
         atomReferenceName(node.left, atoms, atomMaps)) return node;
+    // Only increment/decrement stay untouched: they are writes, and lowering
+    // their operand would produce an invalid `.value++` on the atom. Pure
+    // read operators (`!`, `-`, `+`, `~`, `typeof`) must descend, or a
+    // boolean toggle like `atom = !atom` keeps reading the atom object and
+    // always writes `false`.
     if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+        (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) &&
         atomReferenceName(node.operand, atoms, atomMaps)) return node;
     // An explicit `.value` read already observes the atom's current value.
     // Leave the whole expression untouched; descending would produce a
