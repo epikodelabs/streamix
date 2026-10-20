@@ -7,7 +7,7 @@ import {
 } from '@epikodelabs/streamix/vue/compiler';
 
 /** Creates a clean virtual Vue project for the delegate target. */
-export async function generateVueProject(workspaceRoot: string, sourceRoot: string): Promise<string> {
+export async function generateVueProject(workspaceRoot: string, sourceRoot: string, introspection = false): Promise<string> {
   const source = validatedSourceDirectory(workspaceRoot, sourceRoot);
   const output = join(workspaceRoot, '.angular', '.streamix', virtualRootOf(sourceRoot));
   await mkdir(dirname(output), { recursive: true });
@@ -19,6 +19,16 @@ export async function generateVueProject(workspaceRoot: string, sourceRoot: stri
     await cp(source, staging, { recursive: true });
     for (const file of await collectVueFiles(staging)) {
       await transformFile(file, relative(workspaceRoot, join(source, relative(staging, file))));
+    }
+    if (introspection) {
+      const entry = await findEntry(staging);
+      if (entry !== undefined) {
+        // Devtools activation is injected into the generated entry only,
+        // mirroring the Angular builder: authored source stays clean and the
+        // gate stays `import.meta.env.DEV`, so production builds carry inert
+        // definitions.
+        await writeFile(entry, withIntrospection(await readFile(entry, 'utf8')));
+      }
     }
     try {
       await rename(output, backup);
@@ -67,6 +77,7 @@ export async function regenerateVueFile(
   workspaceRoot: string,
   sourceRoot: string,
   changedPath: string,
+  introspection = false,
 ): Promise<void> {
   const originalRoot = validatedSourceDirectory(workspaceRoot, sourceRoot);
   const destRoot = join(workspaceRoot, '.angular', '.streamix', virtualRootOf(sourceRoot));
@@ -99,6 +110,11 @@ export async function regenerateVueFile(
     }
     output = Buffer.from(transformed.code);
   }
+  // A watch edit of the entry must keep the injected activation, or the
+  // first save would silently drop introspection until the next full regen.
+  if (introspection && ENTRY_NAMES.includes(basename(normalized).toLowerCase())) {
+    output = Buffer.from(withIntrospection(content.toString('utf8')));
+  }
 
   await mkdir(dirname(destination), { recursive: true });
   // Write only after a successful transform: a watch failure never leaves a
@@ -123,6 +139,28 @@ async function collectVueFiles(directory: string): Promise<string[]> {
     else if (entry.isFile() && path.endsWith('.vue')) files.push(path);
   }
   return files;
+}
+
+/** Entry bootstrap module names across common Vite layouts. */
+const ENTRY_NAMES = ['main.ts', 'main.js', 'index.ts', 'index.js'];
+
+/** The bootstrap module the delegate bundles, at the root or under src/. */
+async function findEntry(root: string): Promise<string | undefined> {
+  for (const directory of [join(root, 'src'), root]) {
+    for (const name of ENTRY_NAMES) {
+      const path = join(directory, name);
+      try {
+        await readFile(path);
+        return path;
+      } catch { /* not this one */ }
+    }
+  }
+  return undefined;
+}
+
+/** Inject devtools activation into a generated entry, matching the Angular builder's template. */
+function withIntrospection(code: string): string {
+  return `import { enableStreamixIntrospection as __sxEnable, mountStreamixInspector as __sxMount } from '@epikodelabs/streamix';\n__sxEnable();\n${code}\n__sxMount();\n`;
 }
 
 async function transformFile(file: string, fileName: string): Promise<void> {

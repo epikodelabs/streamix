@@ -29,28 +29,30 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
   void (async () => {
     const [project, target] = String(options['delegateTarget'] ?? '').split(':');
     const sourceRoot = String(options['sourceRoot'] ?? '');
+    const introspection = options['introspection'] === true;
     if (!project || !target || !sourceRoot) {
       subscriber.error(new Error('Streamix Vue builder requires delegateTarget and sourceRoot.'));
       return;
     }
 
     try {
-      await generateVueProject(context.workspaceRoot, sourceRoot);
+      await generateVueProject(context.workspaceRoot, sourceRoot, introspection);
       if (stopped) return;
 
       if (['serve', 'dev-server'].includes(context.target?.target ?? '') ||
           ['serve', 'dev-server'].includes(target) || options['watch'] === true) {
         stopLibraries = watchLibraries(context.workspaceRoot, sourceRoot, () => {
           rebuildQueue = rebuildQueue.then(async () => {
-            if (!stopped) await refreshApplication(context.workspaceRoot, sourceRoot, regenerateVueFile);
+            if (!stopped) await refreshApplication(context.workspaceRoot, sourceRoot,
+              (workspace, root, file) => regenerateVueFile(workspace, root, file, introspection));
           }).catch(error => context.logger.error(`Streamix library update failed: ${String(error)}`));
         }, message => context.logger.warn(message));
         watcher = watch(join(context.workspaceRoot, sourceRoot), { recursive: true }, (_event, filename) => {
           if (stopped) return;
           rebuildQueue = rebuildQueue.then(async () => {
             if (stopped) return;
-            if (filename) await regenerateVueFile(context.workspaceRoot, sourceRoot, String(filename));
-            else await generateVueProject(context.workspaceRoot, sourceRoot);
+            if (filename) await regenerateVueFile(context.workspaceRoot, sourceRoot, String(filename), introspection);
+            else await generateVueProject(context.workspaceRoot, sourceRoot, introspection);
           }).catch(error => context.logger.error(`Streamix Vue source update failed: ${String(error)}`));
         });
         watcher.on('error', error => context.logger.error(`Streamix Vue watcher failed: ${String(error)}`));

@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateVueProject, virtualRootOf } from './generate-project';
+import { generateVueProject, regenerateVueFile, virtualRootOf } from './generate-project';
 
 describe('Vue builder project generation', () => {
   it('copies and transforms Vue SFCs into the delegated virtual project', async () => {
@@ -62,6 +62,54 @@ describe('Vue builder production safety', () => {
       await writeFile(join(source, 'Broken.vue'), `<script setup>import { scope } from '@epikodelabs/streamix'; const state = scope({ name: '' });</script><template><x-control v-model="state.name"/></template>`);
       await expectAsync(generateVueProject(workspace, sourceRoot)).toBeRejectedWithError(/v-model on <x-control>/);
       expect(await readFile(join(output, 'Counter.vue'), 'utf8')).toBe(before);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Vue builder introspection injection', () => {
+  it('injects introspection activation into the generated entry only when enabled', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-builder-introspect-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const source = join(workspace, sourceRoot);
+      await mkdir(source, { recursive: true });
+      const authored = `import { createApp } from 'vue';\ncreateApp({}).mount('#app');\n`;
+      await writeFile(join(source, 'main.ts'), authored);
+      const generatedPath = join(workspace, '.angular', '.streamix', 'demo/src', 'main.ts');
+
+      const virtualRoot = await generateVueProject(workspace, sourceRoot, true);
+      const generated = await readFile(generatedPath, 'utf8');
+      expect(generated).toContain('__sxEnable();');
+      expect(generated).toContain('__sxMount();');
+      expect(generated.indexOf('__sxEnable();')).toBeLessThan(generated.indexOf('createApp'));
+      // Authored source stays clean: injection lives only in the generated tree.
+      expect(await readFile(join(source, 'main.ts'), 'utf8')).toBe(authored);
+
+      // A watch edit of the entry must keep the activation.
+      await regenerateVueFile(workspace, sourceRoot, 'main.ts', true);
+      expect(await readFile(generatedPath, 'utf8')).toContain('__sxEnable();');
+      // Dropping the flag regenerates without it.
+      await generateVueProject(workspace, sourceRoot, false);
+      expect(await readFile(join(virtualRoot, 'main.ts'), 'utf8')).not.toContain('__sxEnable');
+      await regenerateVueFile(workspace, sourceRoot, 'main.ts', false);
+      expect(await readFile(generatedPath, 'utf8')).not.toContain('__sxEnable');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('finds the bootstrap entry under src/ in the standard vite layout', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-builder-entry-'));
+    const sourceRoot = 'projects/apps/demo';
+    try {
+      const source = join(workspace, sourceRoot);
+      await mkdir(join(source, 'src'), { recursive: true });
+      await writeFile(join(source, 'index.html'), '<div id="app"></div>');
+      await writeFile(join(source, 'src', 'main.ts'), `createApp({}).mount('#app');\n`);
+      const output = await generateVueProject(workspace, sourceRoot, true);
+      expect(await readFile(join(output, 'src', 'main.ts'), 'utf8')).toContain('__sxEnable();');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
