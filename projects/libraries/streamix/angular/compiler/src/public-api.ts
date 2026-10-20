@@ -10,4 +10,6 @@ export * from './block-template-compiler';
 
 export * from './source-resolution';
 
-export * from './introspection-transform';
+// The introspection transform is framework-neutral TypeScript instrumentation
+// shared by every builder; this entry re-exports it as the Angular reference.
+export * from '@epikodelabs/streamix/compiler';

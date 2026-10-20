@@ -12,6 +12,7 @@
     "dom/src/tests/**/*.spec.ts",
     "networking/src/tests/**/*.spec.ts",
     "src/**/*.d.ts",
+    "compiler/src/**/*.spec.ts",
     "angular/compiler/src/**/*.spec.ts",
     "angular/builder/src/**/*.spec.ts"
   ]

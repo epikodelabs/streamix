@@ -43,6 +43,9 @@
       "@epikodelabs/streamix/aggregates": [
         "./projects/libraries/streamix/aggregates/src/lib/index.ts"
       ],
+      "@epikodelabs/streamix/compiler": [
+        "./projects/libraries/streamix/compiler/src/public-api.ts"
+      ],
       "@epikodelabs/streamix/dom": [
         "./projects/libraries/streamix/dom/src/lib/index.ts"
       ],
