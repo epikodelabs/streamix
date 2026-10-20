@@ -86,11 +86,26 @@ function isDisposable(value: unknown): value is Disposable {
     typeof (value as Partial<Disposable>).dispose === "function";
 }
 
+/** Compiler-path writes since the last traced render. Renders are traced
+ * only after such a write, mirroring the Angular layer's per-flush render
+ * event. Explicit escape-hatch writes never count: they have no render
+ * event to consume the count, and leaking it would misattribute the next
+ * unrelated component commit. */
+let pendingWrites = 0;
+
 /** @internal Shared compiler trace bridge; emitted only after React commits. */
 export function __streamixTrace(
   type: "read" | "subscription" | "write" | "unsubscribe" | "render",
   source: string,
+  countsAsWrite = true,
 ): void {
+  if (type === "write" && countsAsWrite) pendingWrites++;
+  if (type === "render") {
+    // Angular parity: a committed render is traced only when a write
+    // happened since the previous render event.
+    if (pendingWrites === 0) return;
+    pendingWrites = 0;
+  }
   recordStreamixDevtoolsEvent({ type, source });
 }
 
@@ -131,8 +146,12 @@ export function useStreamixLocal<T>(factory: () => T): T {
   return ref.current;
 }
 
-/** @internal Concurrent-safe shared subscription used by compiler JSX reads. */
-export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "dynamic atom"): T {
+/** @internal Concurrent-safe shared subscription used by compiler JSX reads.
+ * Dedupes equal emissions by default: Angular's binding equals gate skips
+ * unchanged values, so an equal emission is not a write — no re-render and
+ * no trace event. The explicit read hatches pass `dedupe: false` to keep
+ * their in-place-mutation re-render contract. */
+export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "dynamic atom", dedupe = true): T {
   const entryFor = (): NonNullable<ReturnType<typeof compilerSubscriptions.get>> => {
     const sourceKey = source as unknown as object;
     let entry = compilerSubscriptions.get(sourceKey);
@@ -154,12 +173,17 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
       if (!entry.stop) {
         let replaying = true;
         entry.stop = source.subscribe(() => {
+          const next = source.value;
+          // Angular parity: the binding equals gate skips unchanged values.
+          // An equal emission is not a write — it schedules no render and
+          // emits no trace event.
+          if (dedupe && Object.is(entry!.value, next)) return;
           entry!.version++;
-          entry!.value = source.value;
-          entry!.snapshot = { version: entry!.version, value: entry!.value };
+          entry!.value = next;
+          entry!.snapshot = { version: entry!.version, value: next };
           // The first replay initializes the subscription; it isn't a write.
           if (replaying) return;
-          __streamixTrace("write", sourceName);
+          __streamixTrace("write", sourceName, dedupe);
           for (const listener of entry!.listeners) listener();
         });
         replaying = false;
@@ -217,7 +241,9 @@ export function atomRef<T extends Atom<any>>(source: T): T {
 export function useAtomValue<T>(source: DependencySource<T>): T {
   // The explicit API and compiler syntax must share revisioned snapshots:
   // Object.is(value, value) cannot detect same-identity object emissions.
-  return useStreamixSource(source, "explicit atom read");
+  // Explicit reads keep re-rendering on every emission, including in-place
+  // mutations of the same reference, so the equals gate stays off here.
+  return useStreamixSource(source, "explicit atom read", false);
 }
 
 /** React-style value/setter binding for a writable atom. */

@@ -1,6 +1,6 @@
 import { act, createElement, StrictMode, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { atom, type Writable } from "@epikodelabs/streamix";
+import { atom, subscribeStreamixDevtools, type Writable } from "@epikodelabs/streamix";
 import {
   atomRef,
   createAtomSnapshot,
@@ -15,8 +15,11 @@ import {
   useAtom,
   useAtomValue,
   useResource,
+  useStreamixAfterCommit,
+  useStreamixSource,
   useWritable,
   write,
+  __streamixTrace,
 } from "../lib/runtime";
 import { recordStreamixDevtoolsEvent, StreamixDevtools } from "../lib/devtools";
 import { idescribe } from "./env.spec";
@@ -225,5 +228,64 @@ idescribe("React runtime escape hatches", () => {
       await Promise.resolve();
     });
     expect(container.textContent).toContain("write: title");
+  });
+});
+
+idescribe("React tracing parity with the Angular layer", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it("skips re-renders and write events for equal-value emissions", async () => {
+    const count = atom(1);
+    const renders: number[] = [];
+    const events: string[] = [];
+    const stop = subscribeStreamixDevtools(event => {
+      if (event.type === "write" || event.type === "render") events.push(`${event.type}:${event.source}`);
+    });
+    function Counter() {
+      const value = useStreamixSource(count, "count");
+      useStreamixAfterCommit(() => __streamixTrace("render", "Counter"));
+      renders.push(value);
+      return createElement("output", null, String(value));
+    }
+    try {
+      act(() => root.render(createElement(Counter)));
+      act(() => count.set(1)); // equal value: no re-render, no write event
+      await act(async () => { count.set(2); await Promise.resolve(); }); // changed value: one write, one gated render
+      expect(renders).toEqual([1, 2]);
+      expect(events).toEqual(["write:count", "render:Counter"]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("does not trace renders for commits without writes", async () => {
+    const count = atom(1);
+    const events: string[] = [];
+    const stop = subscribeStreamixDevtools(event => {
+      if (event.type === "render") events.push(event.source);
+    });
+    function Counter() {
+      useStreamixSource(count, "count");
+      useStreamixAfterCommit(() => __streamixTrace("render", "Counter"));
+      return createElement("output", null, "static");
+    }
+    try {
+      await act(async () => { root.render(createElement(Counter)); await Promise.resolve(); });
+      expect(events).toEqual([]);
+    } finally {
+      stop();
+    }
   });
 });
