@@ -60,6 +60,26 @@ describe('runtime execution diagnostics records', () => {
     expect(executions.describe(node)).toBeUndefined();
     expect(executions.snapshotEntries()).toEqual([]);
   });
+
+  it('publishes a cancel event for an execution displaced by a newer one', () => {
+    // Accounting auto-finishes a displaced token as 'cancel'; the bus must
+    // publish the matching terminal event or the trace silently disagrees
+    // with the record.
+    const node = {};
+    const seen: string[] = [];
+    const stop = internalRuntime.events.observe(event => { if (event.node === node) seen.push(event.kind); });
+    try {
+      internalRuntime.register(node);
+      const first = internalRuntime.beginExecution(node, 'first');
+      first.next(1);
+      const second = internalRuntime.beginExecution(node, 'second');
+      second.finish('complete');
+      expect(seen).toEqual(['register', 'next', 'cancel', 'complete']);
+    } finally {
+      stop();
+      internalRuntime.dispose(node);
+    }
+  });
 });
 
 describe('runtime inspection', () => {

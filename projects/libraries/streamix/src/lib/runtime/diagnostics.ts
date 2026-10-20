@@ -98,6 +98,11 @@ export class RuntimeExecutions {
     return token;
   }
 
+  /** Token of the execution currently active for a node, when accounting tracks one. */
+  activeTokenOf(node: RuntimeNode): number | undefined {
+    return this.active.get(node);
+  }
+
   next(node: RuntimeNode, token: number): void {
     if (!instrumentationEnabled) return;
     if (this.active.get(node) !== token) return;

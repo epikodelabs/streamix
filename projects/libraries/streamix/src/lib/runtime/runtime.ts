@@ -90,7 +90,13 @@ export class StreamixRuntime {
     const accounting = isRuntimeInstrumentationEnabled();
     if (!accounting && !this.events.observed) return INACTIVE_EXECUTION;
     const observed = this.events.observed;
+    // Accounting auto-finishes a displaced execution as 'cancel'; publish the
+    // matching terminal event so the trace never disagrees with the record.
+    const displaced = accounting ? this.diagnostics.executions.activeTokenOf(node) : undefined;
     const token = accounting ? this.diagnostics.executions.start(node, name, origin) : 0;
+    if (displaced !== undefined && observed) {
+      this.events.publish({ node, generation: displaced, kind: "cancel" });
+    }
     const executions = this.diagnostics.executions;
     const events = this.events;
     return {

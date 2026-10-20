@@ -154,13 +154,13 @@ source coordinator chooses which source to pull.
 | --- | --- |
 | `RuntimeSourcePulls` | One outstanding `next()` call per source slot. |
 | `RuntimeEventBuffer` | FIFO produced values, waiting consumers, and terminal delivery. |
-| `RuntimeSourceExecution` | Source-slot epochs, event publication on its private transport bus, batching, and closure. |
+| `RuntimeSourceExecution` | Source-slot replacement, direct synchronous delivery into the buffer, batching, and closure. |
 
-Transport events never share the diagnostics bus: `createAsyncCoordinator`
-constructs its execution with a dedicated `RuntimeEventBus`. A live coordinator
-therefore never marks the runtime bus observed, so production apps using
-`from`, `interval`, or merge operators do not pay diagnostics eventing without
-an observer.
+Transport uses no bus at all: `publish()` is a direct synchronous call into the
+execution's buffer, with no per-event allocation and no queued event left in
+flight. A live coordinator therefore never marks the runtime bus observed, so
+production apps using `from`, `interval`, or merge operators do not pay
+diagnostics eventing without an observer.
 
 The pull registry coalesces duplicate requests for a busy slot; it never calls
 `next()` concurrently for the same iterator. Each attached slot has a
@@ -180,19 +180,20 @@ settle.
 
 ## Replacing and cancelling sources
 
-Source slots carry an epoch in addition to pull ownership. Attaching a new
-iterator to an existing slot increments its epoch and removes buffered values
-from the previous one. A re-entrant event also carries that epoch, so it is
-discarded if the source was removed before delivery.
+Two boundaries prevent obsolete async results from reaching a current
+coordinator after a source replacement:
+
+- Delivery is synchronous, so an event is never in flight across a
+  replacement. Attaching or detaching a slot removes the previous iterator's
+  buffered values by source index.
+- Each pull slot carries a generation in `RuntimeSourcePulls`: late results
+  from a replaced iterator's pending `next()` are ignored by identity.
 
 ```text
-slot 0: source A ── emits value ──► queued event (epoch 1)
-slot 0: source B attached ───────► epoch becomes 2
-queued event from A ─────────────► discarded
+slot 0: source A ── emits value ──► buffered (source 0)
+slot 0: source B attached ───────► buffered values of source 0 dropped
+pending next() of A resolves ────► stale slot generation, ignored
 ```
-
-This is the boundary that prevents obsolete async results from reaching a
-current coordinator after a source replacement.
 
 Coordinator reads preserve earlier consumer demand even inside `batch()`.
 When an earlier waiter consumes the available event, a later `next()` waits

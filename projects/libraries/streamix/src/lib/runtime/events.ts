@@ -7,9 +7,10 @@ import type { RuntimeNode } from "./runtime";
  * - execution lifecycle: next, complete, cancel, error
  * - devtools traces reuse the same delivery guarantees; `label` marks events
  *   that have no runtime node.
- * Coordinator source transport deliberately runs on a private per-coordinator
- * bus instead: its listener would otherwise keep this bus observed in
- * production and switch diagnostics eventing on without any observer.
+ * Coordinator source transport deliberately uses no bus at all: each
+ * execution delivers values straight into its own buffer. A bus listener
+ * would keep this bus observed in production and switch diagnostics eventing
+ * on without any observer.
  */
 export type RuntimeEventKind =
   | "register" | "dependencies" | "change" | "flow" | "dispose"

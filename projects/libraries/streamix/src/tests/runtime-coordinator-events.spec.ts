@@ -3,7 +3,7 @@ import { internalRuntime } from '../lib/runtime/runtime';
 
 describe('runtime-coordinated source events', () => {
   it('delivers source events in order without touching the runtime dispatcher', async () => {
-    // Transport runs on a private per-coordinator bus: the runtime dispatcher
+    // Transport is direct coordinator delivery, no bus: the runtime dispatcher
     // is the diagnostics gate, and observing it must never capture transport
     // events or pay for them in production.
     const seen: Array<{ kind: string; value: unknown }> = [];
