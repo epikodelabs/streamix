@@ -226,7 +226,8 @@ export function enableStreamixIntrospection(): void {
       // trace-only. Coordinator transport never reaches this bus; sources
       // deliver straight into their own coordinator buffers.
       if (event.label !== undefined) {
-        appendEvent(Object.freeze({ id: 0, name: event.label.slice(0, 240), kind: event.kind, time: Date.now() }));
+        appendEvent(Object.freeze({ id: 0, name: event.label.slice(0, 240), kind: event.kind, time: Date.now(),
+          ...(event.value !== undefined ? { value: String(event.value).slice(0, 240) } : {}) }));
       }
       return;
     }

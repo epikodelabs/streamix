@@ -142,7 +142,7 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
   // Animating width/height reflows the toolbar and scroll panes every frame.
   let morph: Animation | undefined;
   let fades: Animation[] = [];
-  let collapsed = false;
+  let collapsed = true;
   const clearPendingReveal = (): void => {
     if (morph) morph.onfinish = null;
     morph?.cancel();
@@ -202,7 +202,9 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
       schedule();
     };
   };
-  collapse.setAttribute('aria-expanded', 'true');
+  // The overlay mounts as the collapsed FAB in every package; expanding is
+  // always a user action, so passive apps never pay the panel layout.
+  applyCollapsed();
   collapse.onclick = () => setCollapsed(!collapsed);
   const tabs = document.createElement('nav');
   tabs.className = 'sx-tabs';
@@ -223,9 +225,12 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
   const operatorEvents = document.createElement('input'); operatorEvents.type = 'checkbox';
   operatorEvents.setAttribute('aria-label', 'Show operator events');
   const operatorLabel = document.createElement('label'); operatorLabel.className = 'sx-chip'; operatorLabel.append(operatorEvents, ' Show operator events');
+  const lifecycleEvents = document.createElement('input'); lifecycleEvents.type = 'checkbox';
+  lifecycleEvents.setAttribute('aria-label', 'Show subscription lifecycle');
+  const lifecycleLabel = document.createElement('label'); lifecycleLabel.className = 'sx-chip'; lifecycleLabel.append(lifecycleEvents, ' Subscriptions');
   const toolbar = document.createElement('div');
   toolbar.className = 'sx-toolbar';
-  toolbar.append(filter, kind, relatedLabel, operatorLabel);
+  toolbar.append(filter, kind, relatedLabel, operatorLabel, lifecycleLabel);
   const traceHelp = document.createElement('p');
   traceHelp.className = 'sx-hint';
   traceHelp.textContent = 'Wait includes source delay. Lifetime covers one inner execution. Stage waits overlap; do not add them.';
@@ -253,8 +258,22 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
     if (liveTimer !== undefined) clearTimeout(liveTimer);
     liveTimer = setTimeout(() => { delete panel.dataset['live']; }, 1200);
   };
-  const traceEntries: { event: StreamixInspectionEvent; row: HTMLDivElement }[] = [];
+  const traceEntries: { event: StreamixInspectionEvent; row: HTMLDivElement; count?: number }[] = [];
+  /** A row with no payload of its own: coalescable with its predecessor. */
+  const isValueless = (event: StreamixInspectionEvent): boolean =>
+    event.value === undefined && event.error === undefined && !event.lifetime && event.pullMs === undefined;
+  const isLifecycle = (event: StreamixInspectionEvent): boolean =>
+    event.kind === 'subscription' || event.kind === 'unsubscribe';
   const appendTrace = (event: StreamixInspectionEvent) => {
+    // Routine repeats (change counters, per-commit renders) collapse into
+    // their predecessor with a repeat count; valued rows keep their history.
+    const last = traceEntries[traceEntries.length - 1];
+    if (isValueless(event) && !isLifecycle(event) && last && !isLifecycle(last.event) &&
+        last.event.kind === event.kind && last.event.name === event.name) {
+      last.count = (last.count ?? 1) + 1;
+      last.row.textContent += ' ×' + last.count;
+      return;
+    }
     const row = document.createElement('div');
     row.className = 'sx-trace-row';
     row.dataset['kind'] = event.lifetime ? 'lifetime' : event.kind;
@@ -274,7 +293,8 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
     if (event.pullMs !== undefined) row.title += '\nTime awaiting next(), including source waiting; not CPU processing time.';
     if (event.lifetime) row.title += '\nQueue: ' + event.lifetime.queueMs.toFixed(2) + ' ms | first output: ' +
       (event.lifetime.firstOutputMs === undefined ? '-' : event.lifetime.firstOutputMs.toFixed(2) + ' ms') + ' | outputs: ' + event.lifetime.outputs;
-    row.hidden = event.objectKind === 'operator' && !event.lifetime && !operatorEvents.checked;
+    row.hidden = (event.objectKind === 'operator' && !event.lifetime && !operatorEvents.checked) ||
+      (isLifecycle(event) && !lifecycleEvents.checked);
     traceEntries.push({ event, row });
     traceRows.appendChild(row);
     // Match the inspector's bounded history; retained rows keep their identity.
@@ -298,13 +318,14 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
     rows.hidden = tab === 'Trace';
     traceRows.hidden = tab !== 'Trace';
     detail.hidden = tab === 'Trace' || selected === undefined;
-    traceHelp.hidden = operatorLabel.hidden = tab !== 'Trace';
+    traceHelp.hidden = operatorLabel.hidden = lifecycleLabel.hidden = tab !== 'Trace';
     kind.hidden = relatedLabel.hidden = tab === 'Trace';
     filter.placeholder = tab === 'Trace' ? 'Filter trace by name or event' : 'Filter by name or file';
     subtitle.textContent = tab === 'Trace' ? traceEntries.length + ' events' : all.length + ' live objects';
     if (tab === 'Trace') {
       for (const { event, row } of traceEntries) {
         row.hidden = (event.objectKind === 'operator' && !event.lifetime && !operatorEvents.checked) ||
+          (isLifecycle(event) && !lifecycleEvents.checked) ||
           (!!query && !(event.name + ' ' + (event.ownerName ?? '') + ' ' + event.kind).toLowerCase().includes(query));
       }
       if (followTrace) traceRows.scrollTop = traceRows.scrollHeight;
@@ -361,7 +382,7 @@ export function mountStreamixInspector(host?: HTMLElement): () => void {
   for (const title of ['Scopes', 'Atoms', 'Flows', 'Trace']) {
     const button = document.createElement('button'); button.textContent = title; button.onclick = () => { if (title === 'Trace' && tab !== title) followTrace = true; tab = title; render(); }; tabs.appendChild(button);
   }
-  filter.oninput = schedule; kind.onchange = schedule; related.onchange = schedule; operatorEvents.onchange = schedule;
+  filter.oninput = schedule; kind.onchange = schedule; related.onchange = schedule; operatorEvents.onchange = schedule; lifecycleEvents.onchange = schedule;
   const stop = streamixInspector.observe(event => { appendTrace(event); markLive(); schedule(); });
   render();
   return () => {

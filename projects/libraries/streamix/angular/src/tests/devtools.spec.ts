@@ -24,6 +24,8 @@ describe('Angular devtools', () => {
     const fixture = TestBed.createComponent(StreamixDevtools);
     try {
       const panel = (fixture.nativeElement as HTMLElement).querySelector('[data-streamix-inspector]')!;
+      // The overlay mounts collapsed by default; this spec asserts the panel body.
+      (panel.querySelector('.sx-collapse') as HTMLButtonElement).click();
       Array.from(panel.querySelectorAll('button')).find(button => button.textContent === 'Atoms')!.click();
       expect(panel.textContent).toContain('inspector.lazy');
       expect(evaluations).toBe(0);

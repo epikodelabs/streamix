@@ -12,6 +12,8 @@ export interface StreamixDevtoolsEvent {
   readonly type: "read" | "subscription" | "write" | "unsubscribe" | "render";
   readonly source: string;
   readonly time: number;
+  /** Preview of the written value for `write` events, when the reporter has it. */
+  readonly value?: string;
 }
 
 /** Callback invoked with each recorded event; the trace still changes atomically per microtask. */

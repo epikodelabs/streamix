@@ -21,6 +21,9 @@ describe('inspector trace history', () => {
     spyOn(window, 'cancelAnimationFrame').and.stub();
     host = document.createElement('div'); document.body.appendChild(host);
     unmount = mountStreamixInspector(host);
+    // The overlay mounts collapsed by default; these specs exercise the panel
+    // body, so expand it first (the morph's delayed finish is harmless here).
+    (host.querySelector('.sx-collapse') as HTMLButtonElement).click();
     tab('Trace');
   });
   afterEach(() => { unmount(); host.remove(); });
@@ -163,5 +166,37 @@ describe('inspector trace history', () => {
     expect(trace().firstElementChild!.textContent).toContain('value: 100');
     expect(trace().lastElementChild!.textContent).toContain('value: 1099');
     __streamixDebugDispose(source);
+  });
+
+  it('collapses consecutive valueless rows but keeps valued history', () => {
+    const source = __streamixDebug({}, metadata('coalesced'));
+    const emit = (value?: number) => internalRuntime.events.publish({ node: source, generation: 1, kind: 'next', value });
+    try {
+      for (let i = 0; i < 5; i++) emit();
+      emit(42);
+      flush();
+      // The fresh panel replays the persisted history, so assert on this
+      // spec's own rows at the tail.
+      const rows = Array.from(trace().children).slice(-2) as HTMLDivElement[];
+      expect(rows[0].textContent).toContain('×5');
+      expect(rows[1].textContent).toContain('value: 42');
+    } finally { __streamixDebugDispose(source); }
+  });
+
+  it('carries written values in labeled rows and hides lifecycle rows until enabled', () => {
+    const emit = (kind: 'subscription' | 'write', label: string, value?: string) =>
+      internalRuntime.events.publish({ kind, node: { bridge: true }, label, ...(value !== undefined ? { value } : {}) });
+    try {
+      emit('subscription', 'state.accent');
+      emit('write', 'state.accent', '"cyan"');
+      flush();
+      const rows = Array.from(trace().children) as HTMLDivElement[];
+      expect(rows.some(row => row.textContent!.includes('write: state.accent | value: "cyan"'))).toBeTrue();
+      const subscription = rows.find(row => row.textContent!.includes('subscription: state.accent'))!;
+      expect(subscription.hidden).toBeTrue();
+      const chip = host.querySelector('input[aria-label="Show subscription lifecycle"]') as HTMLInputElement;
+      chip.checked = true; chip.dispatchEvent(new Event('change')); flush();
+      expect(subscription.hidden).toBeFalse();
+    } finally { /* host teardown in afterEach */ }
   });
 });
