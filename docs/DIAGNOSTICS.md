@@ -178,8 +178,9 @@ A rule in this guide is only real if a test breaks when it is violated.
   accounting invariants and the no-cost-when-unused toggles.
 - `introspection.spec.ts` — pruning, lazy evaluation, scope relations,
   previews, trace behavior.
-- `app6` e2e (`projects/apps/app6/e2e/introspection.mjs`) — the end-to-end
-  gate, including production parity.
+- Demo e2e (`scripts/verify-demo-introspection.mjs`) — discovery in all seven
+  built development apps, app5 request output, app6 interaction and scaling,
+  and production parity (`--production`, using `dist/apps-production`).
 - Tests that toggle flags restore them in `finally`. Fixture flows that must
   stay observable mid-flight stay pending on a release function; a completed
   fixture releases its record with its atom by design.

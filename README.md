@@ -74,8 +74,9 @@ streamix/
 │       ├── app2/                   # Reactive wizard — scopes + custom renderer
 │       ├── app3/                   # Brownian motion — animationFrame + Angular
 │       ├── app4/                   # Travel blog — scroll-driven DOM animations
-│       ├── app5/                   # HTTP client — networking demos
-│       └── app6/                   # Rainbow clicker — compiled Angular templates
+│       ├── app5/                   # HTTP client — networking demos in React
+│       ├── app6/                   # Rainbow clicker — compiled React JSX
+│       └── app7/                   # React JSX lab — direct atom reads
 ├── docs/                           # VitePress documentation source
 ├── scripts/                        # Build, docs, and packaging automation
 ├── dist/                           # Build output (library, apps, API docs)
@@ -99,7 +100,7 @@ npm run build
 # Run the test suite (or `npm run jasmine:coverage` for coverage)
 npm test
 
-# Serve a demo app
+# Serve a demo app (development introspection is enabled for every app)
 ng serve app1
 
 # Build the documentation site
@@ -107,6 +108,13 @@ npm run docs:build
 ```
 
 The static site lands in `dist/.vitepress/dist/`.
+
+All seven demos enable Streamix introspection with `ng serve appN` or
+`ng build appN --configuration development`. The compiler adds source metadata
+and mounts the inspector automatically; the runtime API is available as
+`window.__streamix`. Production builds disable introspection. App5 and app6 use
+React; app5 keeps each request card's output in a component-local Streamix scope
+so its state is inspectable even before starting a request.
 
 ---
 
