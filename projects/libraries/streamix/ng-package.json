@@ -15,6 +15,8 @@
     "vue/builder/builders.json",
     "vue/builder/schema.json",
     "vue/builder/application.mjs",
+    "vue/builder/vite.mjs",
+    "vue/builder/schema-vite.json",
     "vue/editor/README.md",
     "vue/editor/tsserver.cjs",
     "react/editor/README.md",
@@ -24,6 +26,8 @@
     "entryFile": "src/public-api.ts"
   },
   "allowedNonPeerDependencies": [
-    "@epikodelabs/streamix"
+    "@epikodelabs/streamix",
+    "vite",
+    "@vitejs/plugin-vue"
   ]
 }

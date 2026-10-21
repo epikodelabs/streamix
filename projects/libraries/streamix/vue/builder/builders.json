@@ -4,6 +4,11 @@
       "implementation": "./application.mjs",
       "schema": "./schema.json",
       "description": "Compiles Streamix Vue SFCs before delegating to a Vue-capable application target."
+    },
+    "vite": {
+      "implementation": "./vite.mjs",
+      "schema": "./schema-vite.json",
+      "description": "Builds or serves the generated Vue project with Vite."
     }
   }
 }

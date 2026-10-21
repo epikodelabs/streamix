@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "Streamix Vue Vite builder",
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "description": "Vite project root, relative to the workspace root."
+    },
+    "outputPath": {
+      "type": "string",
+      "description": "Build output directory, relative to the workspace root."
+    },
+    "serve": {
+      "type": "boolean",
+      "description": "Run the Vite dev server instead of a one-shot build."
+    },
+    "port": {
+      "type": "number",
+      "description": "Dev server port."
+    },
+    "viteConfig": {
+      "type": "string",
+      "description": "Vite config file name, relative to the root."
+    },
+    "sourceMap": {
+      "type": "boolean",
+      "description": "Emit source maps for the production build."
+    }
+  },
+  "required": ["root"],
+  "additionalProperties": true
+}
