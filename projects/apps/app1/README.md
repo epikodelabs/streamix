@@ -8,8 +8,8 @@ Real-time operator demos powered by streamix.
 |---------|-----------|
 | Live Metrics | `interval` + `scan` + `tap` |
 | Search Stream | `addListener` + `map` + `debounce` + `filter` |
-| Event Buffer | `atomExpr` + `subscribeTo` (manual batching) |
-| Combined Stream | scope-derived value |
+| Event Buffer | scope writes + manual batching |
+| Combined Stream | scope-derived value, sliders via two-way bindings |
 | Activity Log | `merge` + `tap` + `throttle` |
 | Julia Set (Non-optimized) | `range` + `map` + `bufferCount` + `tap` + `finalize` |
 

@@ -1,12 +1,5 @@
-import { mountApp } from './app/app.component';
+import { bootstrapApplication } from '@angular/platform-browser';
 
-const root = document.getElementById('app');
-if (!root) {
-    throw new Error('Root element #app not found');
-}
+import { AppComponent } from './app/app.component';
 
-const dispose = mountApp(root);
-
-window.addEventListener('beforeunload', () => {
-    dispose();
-});
+bootstrapApplication(AppComponent).catch(error => console.error(error));

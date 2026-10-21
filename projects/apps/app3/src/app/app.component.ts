@@ -1,6 +1,7 @@
-import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
-import { Subscription, pipe, scope, tap } from '@epikodelabs/streamix';
+import { Component, OnDestroy } from '@angular/core';
+import { type Subscription, pipe, scope, tap } from '@epikodelabs/streamix';
 import { on } from '@epikodelabs/streamix/dom';
+
 interface Particle {
     x: number;
     y: number;
@@ -13,6 +14,18 @@ interface Particle {
     shape: 'rect' | 'circle';
     restitution: number;
 }
+
+/** Display-ready row the compiled template binds against: positions and the
+ * transform are precomputed strings, so block bindings stay pure reads. */
+interface ParticleView {
+    left: string;
+    top: string;
+    sizePx: string;
+    color: string;
+    transform: string;
+    circle: boolean;
+}
+
 const PALETTE = [
     '#ff4d6d',
     '#ff8fa3',
@@ -25,9 +38,11 @@ const PALETTE = [
     '#ffbe0b',
     '#ff9e00',
 ];
+
 function rand(min: number, max: number): number {
     return Math.random() * (max - min) + min;
 }
+
 function createParticle(x: number, y: number): Particle {
     const angle = rand(0, Math.PI * 2);
     const speed = rand(0.5, 2.5);
@@ -44,6 +59,13 @@ function createParticle(x: number, y: number): Particle {
         restitution: rand(0.6, 0.95),
     };
 }
+
+interface AppState {
+    count: number;
+    subtitle: string;
+    particles: ParticleView[];
+}
+
 @Component({
     selector: 'app-root',
     standalone: true,
@@ -51,19 +73,19 @@ function createParticle(x: number, y: number): Particle {
     <div class="stage">
       <div class="content">
         <h1>Brownian Motion</h1>
-        <p class="subtitle">{{ particles.length }} particles wandering via streamix</p>
+        <p class="subtitle">{{ model.subtitle }}</p>
       </div>
 
-      @for (p of particles; track $index) {
+      @for (p of model.particles; track $index) {
         <div
           class="particle"
-          [class.circle]="p.shape === 'circle'"
-          [style.left.px]="p.x"
-          [style.top.px]="p.y"
-          [style.width.px]="p.size"
-          [style.height.px]="p.size"
+          [class.circle]="p.circle"
+          [style.left]="p.left"
+          [style.top]="p.top"
+          [style.width]="p.sizePx"
+          [style.height]="p.sizePx"
           [style.background-color]="p.color"
-          [style.transform]="'translate(-50%, -50%) rotate(' + p.rotation + 'deg)'"
+          [style.transform]="p.transform"
         ></div>
       }
     </div>
@@ -126,16 +148,22 @@ function createParticle(x: number, y: number): Particle {
   `]
 })
 export class AppComponent implements OnDestroy {
-    private readonly cdr = inject(ChangeDetectorRef);
-    particles: Particle[] = [];
+    readonly model = scope<AppState>({
+        count: 0,
+        subtitle: self => `${self.count} particles wandering via streamix`,
+        particles: [],
+    });
+
     private animation?: Subscription;
     private resize?: Subscription;
-    private readonly appScope = scope({});
+    private particles: Particle[] = [];
     private width = window.innerWidth;
     private height = window.innerHeight;
+
     constructor() {
         this.start();
     }
+
     private resolveCollisions(): void {
         const particles = this.particles;
         for (let i = 0; i < particles.length; i++) {
@@ -178,6 +206,17 @@ export class AppComponent implements OnDestroy {
         }
     }
 
+    private toView(p: Particle): ParticleView {
+        return {
+            left: `${p.x}px`,
+            top: `${p.y}px`,
+            sizePx: `${p.size}px`,
+            color: p.color,
+            transform: `translate(-50%, -50%) rotate(${p.rotation}deg)`,
+            circle: p.shape === 'circle',
+        };
+    }
+
     private start(): void {
         // Seed an initial swarm.
         const cx = this.width / 2;
@@ -185,12 +224,13 @@ export class AppComponent implements OnDestroy {
         for (let i = 0; i < 300; i++) {
             this.particles.push(createParticle(cx + rand(-200, 200), cy + rand(-200, 200)));
         }
-        this.resize = pipe(on('viewportChange'), tap((viewport) => {
+        this.model.particles = this.particles.map(p => this.toView(p));
+        this.model.count = this.particles.length;        this.resize = pipe(on('viewportChange'), tap((viewport) => {
             this.width = viewport.width;
             this.height = viewport.height;
         }))
             .subscribe();
-        this.appScope.cleanups.add(() => this.resize?.());
+        this.model.cleanups.add(() => this.resize?.());
         this.animation = pipe(on('animationFrame'), tap(() => {
             for (const p of this.particles) {
                 // Brownian kick: small random acceleration.
@@ -228,13 +268,16 @@ export class AppComponent implements OnDestroy {
                 }
             }
             this.resolveCollisions();
-            this.cdr.detectChanges();
+            // One scope emission per frame: the compiled @for refreshes every
+            // row's bindings directly — no change detection pass.
+            this.model.particles = this.particles.map(p => this.toView(p));
         }))
             .subscribe();
-        this.appScope.cleanups.add(() => this.animation?.());
+        this.model.cleanups.add(() => this.animation?.());
     }
+
     ngOnDestroy(): void {
-        this.appScope.dispose();
+        this.model.dispose();
         this.particles = [];
     }
 }

@@ -5,23 +5,23 @@
   "projects": {
     "app1": {
       "projectType": "application",
-      "schematics": {
-        "@schematics/angular:component": {
-          "style": "scss"
-        }
-      },
       "root": "projects/apps/app1",
       "sourceRoot": "projects/apps/app1/src",
-      "prefix": "app",
       "architect": {
         "application": {
           "builder": "@angular/build:application",
           "options": {
             "outputPath": "dist/apps/app1",
             "index": "projects/apps/app1/src/index.html",
-            "browser": ".angular/.streamix/app1/src/main.ts",
+            "browser": "projects/apps/app1/src/main.ts",
             "polyfills": [],
             "tsConfig": ".angular/.streamix/app1/tsconfig.app.json",
+            "fileReplacements": [
+              {
+                "replace": "projects/apps/app1/src/main.ts",
+                "with": ".angular/.streamix/app1/src/main.ts"
+              }
+            ],
             "inlineStyleLanguage": "scss",
             "assets": [
               {
@@ -32,35 +32,11 @@
             "styles": [
               "projects/apps/app1/src/styles.scss"
             ],
-            "scripts": [],
-            "define": {
-              "import.meta.env.DEV": "false"
-            }
+            "scripts": []
           },
           "configurations": {
-            "production": {
-              "budgets": [
-                {
-                  "type": "initial",
-                  "maximumWarning": "500kB",
-                  "maximumError": "1MB"
-                },
-                {
-                  "type": "anyComponentStyle",
-                  "maximumWarning": "2kB",
-                  "maximumError": "8kB"
-                }
-              ],
-              "outputHashing": "all"
-            },
-            "development": {
-              "optimization": false,
-              "extractLicenses": false,
-              "sourceMap": true,
-              "define": {
-                "import.meta.env.DEV": "true"
-              }
-            }
+            "production": { "outputHashing": "all" },
+            "development": { "optimization": false, "extractLicenses": false, "sourceMap": true }
           },
           "defaultConfiguration": "production"
         },
@@ -71,12 +47,8 @@
             "sourceRoot": "projects/apps/app1/src"
           },
           "configurations": {
-            "production": {
-              "introspection": false
-            },
-            "development": {
-              "introspection": true
-            }
+            "production": {},
+            "development": {}
           },
           "defaultConfiguration": "production"
         },
@@ -84,114 +56,54 @@
           "builder": "@epikodelabs/streamix/angular/builder:application",
           "options": {
             "delegateTarget": "app1:dev-server",
-            "sourceRoot": "projects/apps/app1/src"
+            "sourceRoot": "projects/apps/app1/src",
+            "introspection": true
           },
           "configurations": {
-            "production": {
-              "introspection": false
-            },
-            "development": {
-              "introspection": true
-            }
+            "production": {},
+            "development": {}
           },
           "defaultConfiguration": "development"
         },
         "dev-server": {
           "builder": "@angular/build:dev-server",
           "configurations": {
-            "production": {
-              "buildTarget": "app1:application:production"
-            },
-            "development": {
-              "buildTarget": "app1:application:development"
-            }
+            "production": { "buildTarget": "app1:application:production" },
+            "development": { "buildTarget": "app1:application:development" }
           },
           "defaultConfiguration": "development"
-        },
-        "extract-i18n": {
-          "builder": "@angular/build:extract-i18n"
-        },
-        "test": {
-          "builder": "@angular/build:karma",
-          "options": {
-            "polyfills": [
-              "zone.js",
-              "zone.js/testing"
-            ],
-            "tsConfig": "projects/apps/app1/tsconfig.spec.json",
-            "inlineStyleLanguage": "scss",
-            "assets": [
-              {
-                "glob": "**/*",
-                "input": "projects/apps/app1/public"
-              }
-            ],
-            "styles": [
-              "projects/apps/app1/src/styles.scss"
-            ],
-            "scripts": []
-          }
         }
       }
     },
     "app2": {
       "projectType": "application",
-      "schematics": {
-        "@schematics/angular:component": {
-          "style": "scss"
-        }
-      },
       "root": "projects/apps/app2",
       "sourceRoot": "projects/apps/app2/src",
-      "prefix": "app",
       "architect": {
         "application": {
           "builder": "@angular/build:application",
           "options": {
             "outputPath": "dist/apps/app2",
             "index": "projects/apps/app2/src/index.html",
-            "browser": ".angular/.streamix/app2/src/main.ts",
+            "browser": "projects/apps/app2/src/main.ts",
             "polyfills": [],
             "tsConfig": ".angular/.streamix/app2/tsconfig.app.json",
-            "inlineStyleLanguage": "scss",
-            "assets": [
+            "fileReplacements": [
               {
-                "glob": "**/*",
-                "input": "projects/apps/app2/public"
+                "replace": "projects/apps/app2/src/main.ts",
+                "with": ".angular/.streamix/app2/src/main.ts"
               }
             ],
+            "inlineStyleLanguage": "scss",
+        "assets": [],
             "styles": [
               "projects/apps/app2/src/styles.scss"
             ],
-            "scripts": [],
-            "define": {
-              "import.meta.env.DEV": "false"
-            }
+            "scripts": []
           },
           "configurations": {
-            "production": {
-              "budgets": [
-                {
-                  "type": "initial",
-                  "maximumWarning": "500kB",
-                  "maximumError": "1MB"
-                },
-                {
-                  "type": "anyComponentStyle",
-                  "maximumWarning": "2kB",
-                  "maximumError": "8kB"
-                }
-              ],
-              "outputHashing": "all"
-            },
-            "development": {
-              "optimization": false,
-              "extractLicenses": false,
-              "sourceMap": true,
-              "define": {
-                "import.meta.env.DEV": "true"
-              }
-            }
+            "production": { "outputHashing": "all" },
+            "development": { "optimization": false, "extractLicenses": false, "sourceMap": true }
           },
           "defaultConfiguration": "production"
         },
@@ -202,12 +114,8 @@
             "sourceRoot": "projects/apps/app2/src"
           },
           "configurations": {
-            "production": {
-              "introspection": false
-            },
-            "development": {
-              "introspection": true
-            }
+            "production": {},
+            "development": {}
           },
           "defaultConfiguration": "production"
         },
@@ -215,114 +123,54 @@
           "builder": "@epikodelabs/streamix/angular/builder:application",
           "options": {
             "delegateTarget": "app2:dev-server",
-            "sourceRoot": "projects/apps/app2/src"
+            "sourceRoot": "projects/apps/app2/src",
+            "introspection": true
           },
           "configurations": {
-            "production": {
-              "introspection": false
-            },
-            "development": {
-              "introspection": true
-            }
+            "production": {},
+            "development": {}
           },
           "defaultConfiguration": "development"
         },
         "dev-server": {
           "builder": "@angular/build:dev-server",
           "configurations": {
-            "production": {
-              "buildTarget": "app2:application:production"
-            },
-            "development": {
-              "buildTarget": "app2:application:development"
-            }
+            "production": { "buildTarget": "app2:application:production" },
+            "development": { "buildTarget": "app2:application:development" }
           },
           "defaultConfiguration": "development"
-        },
-        "extract-i18n": {
-          "builder": "@angular/build:extract-i18n"
-        },
-        "test": {
-          "builder": "@angular/build:karma",
-          "options": {
-            "polyfills": [
-              "zone.js",
-              "zone.js/testing"
-            ],
-            "tsConfig": "projects/apps/app2/tsconfig.spec.json",
-            "inlineStyleLanguage": "scss",
-            "assets": [
-              {
-                "glob": "**/*",
-                "input": "projects/apps/app2/public"
-              }
-            ],
-            "styles": [
-              "projects/apps/app2/src/styles.scss"
-            ],
-            "scripts": []
-          }
         }
       }
     },
     "app3": {
       "projectType": "application",
-      "schematics": {
-        "@schematics/angular:component": {
-          "style": "scss"
-        }
-      },
       "root": "projects/apps/app3",
       "sourceRoot": "projects/apps/app3/src",
-      "prefix": "app",
       "architect": {
         "application": {
           "builder": "@angular/build:application",
           "options": {
             "outputPath": "dist/apps/app3",
             "index": "projects/apps/app3/src/index.html",
-            "browser": ".angular/.streamix/app3/src/main.ts",
+            "browser": "projects/apps/app3/src/main.ts",
             "polyfills": [],
             "tsConfig": ".angular/.streamix/app3/tsconfig.app.json",
-            "inlineStyleLanguage": "scss",
-            "assets": [
+            "fileReplacements": [
               {
-                "glob": "**/*",
-                "input": "projects/apps/app3/public"
+                "replace": "projects/apps/app3/src/main.ts",
+                "with": ".angular/.streamix/app3/src/main.ts"
               }
             ],
+            "inlineStyleLanguage": "scss",
+        "assets": [],
             "styles": [
               "projects/apps/app3/src/styles.scss"
             ],
-            "scripts": [],
-            "define": {
-              "import.meta.env.DEV": "false"
-            }
+            "scripts": []
           },
           "configurations": {
-            "production": {
-              "budgets": [
-                {
-                  "type": "initial",
-                  "maximumWarning": "1MB",
-                  "maximumError": "2MB"
-                },
-                {
-                  "type": "anyComponentStyle",
-                  "maximumWarning": "2kB",
-                  "maximumError": "4kB"
-                }
-              ],
-              "outputHashing": "all"
-            },
-            "development": {
-              "optimization": false,
-              "extractLicenses": false,
-              "sourceMap": true,
-              "define": {
-                "import.meta.env.DEV": "true"
-              }
-            }
+            "production": { "outputHashing": "all" },
+            "development": { "optimization": false, "extractLicenses": false, "sourceMap": true }
           },
           "defaultConfiguration": "production"
         },
@@ -333,12 +181,8 @@
             "sourceRoot": "projects/apps/app3/src"
           },
           "configurations": {
-            "production": {
-              "introspection": false
-            },
-            "development": {
-              "introspection": true
-            }
+            "production": {},
+            "development": {}
           },
           "defaultConfiguration": "production"
         },
@@ -346,75 +190,44 @@
           "builder": "@epikodelabs/streamix/angular/builder:application",
           "options": {
             "delegateTarget": "app3:dev-server",
-            "sourceRoot": "projects/apps/app3/src"
+            "sourceRoot": "projects/apps/app3/src",
+            "introspection": true
           },
           "configurations": {
-            "production": {
-              "introspection": false
-            },
-            "development": {
-              "introspection": true
-            }
+            "production": {},
+            "development": {}
           },
           "defaultConfiguration": "development"
         },
         "dev-server": {
           "builder": "@angular/build:dev-server",
           "configurations": {
-            "production": {
-              "buildTarget": "app3:application:production"
-            },
-            "development": {
-              "buildTarget": "app3:application:development"
-            }
+            "production": { "buildTarget": "app3:application:production" },
+            "development": { "buildTarget": "app3:application:development" }
           },
           "defaultConfiguration": "development"
-        },
-        "extract-i18n": {
-          "builder": "@angular/build:extract-i18n"
-        },
-        "test": {
-          "builder": "@angular/build:karma",
-          "options": {
-            "polyfills": [
-              "zone.js",
-              "zone.js/testing"
-            ],
-            "tsConfig": "projects/apps/app3/tsconfig.spec.json",
-            "inlineStyleLanguage": "scss",
-            "assets": [
-              {
-                "glob": "**/*",
-                "input": "projects/apps/app3/public"
-              }
-            ],
-            "styles": [
-              "projects/apps/app3/src/styles.scss"
-            ],
-            "scripts": []
-          }
         }
       }
     },
     "app4": {
       "projectType": "application",
-      "schematics": {
-        "@schematics/angular:component": {
-          "style": "scss"
-        }
-      },
       "root": "projects/apps/app4",
       "sourceRoot": "projects/apps/app4/src",
-      "prefix": "app",
       "architect": {
         "application": {
           "builder": "@angular/build:application",
           "options": {
             "outputPath": "dist/apps/app4",
             "index": "projects/apps/app4/src/index.html",
-            "browser": ".angular/.streamix/app4/src/main.ts",
+            "browser": "projects/apps/app4/src/main.ts",
             "polyfills": [],
             "tsConfig": ".angular/.streamix/app4/tsconfig.app.json",
+            "fileReplacements": [
+              {
+                "replace": "projects/apps/app4/src/main.ts",
+                "with": ".angular/.streamix/app4/src/main.ts"
+              }
+            ],
             "inlineStyleLanguage": "scss",
             "assets": [
               {
@@ -425,35 +238,11 @@
             "styles": [
               "projects/apps/app4/src/styles.scss"
             ],
-            "scripts": [],
-            "define": {
-              "import.meta.env.DEV": "false"
-            }
+            "scripts": []
           },
           "configurations": {
-            "production": {
-              "budgets": [
-                {
-                  "type": "initial",
-                  "maximumWarning": "500kB",
-                  "maximumError": "1MB"
-                },
-                {
-                  "type": "anyComponentStyle",
-                  "maximumWarning": "2kB",
-                  "maximumError": "4kB"
-                }
-              ],
-              "outputHashing": "all"
-            },
-            "development": {
-              "optimization": false,
-              "extractLicenses": false,
-              "sourceMap": true,
-              "define": {
-                "import.meta.env.DEV": "true"
-              }
-            }
+            "production": { "outputHashing": "all" },
+            "development": { "optimization": false, "extractLicenses": false, "sourceMap": true }
           },
           "defaultConfiguration": "production"
         },
@@ -464,12 +253,8 @@
             "sourceRoot": "projects/apps/app4/src"
           },
           "configurations": {
-            "production": {
-              "introspection": false
-            },
-            "development": {
-              "introspection": true
-            }
+            "production": {},
+            "development": {}
           },
           "defaultConfiguration": "production"
         },
@@ -477,53 +262,22 @@
           "builder": "@epikodelabs/streamix/angular/builder:application",
           "options": {
             "delegateTarget": "app4:dev-server",
-            "sourceRoot": "projects/apps/app4/src"
+            "sourceRoot": "projects/apps/app4/src",
+            "introspection": true
           },
           "configurations": {
-            "production": {
-              "introspection": false
-            },
-            "development": {
-              "introspection": true
-            }
+            "production": {},
+            "development": {}
           },
           "defaultConfiguration": "development"
         },
         "dev-server": {
           "builder": "@angular/build:dev-server",
           "configurations": {
-            "production": {
-              "buildTarget": "app4:application:production"
-            },
-            "development": {
-              "buildTarget": "app4:application:development"
-            }
+            "production": { "buildTarget": "app4:application:production" },
+            "development": { "buildTarget": "app4:application:development" }
           },
           "defaultConfiguration": "development"
-        },
-        "extract-i18n": {
-          "builder": "@angular/build:extract-i18n"
-        },
-        "test": {
-          "builder": "@angular/build:karma",
-          "options": {
-            "polyfills": [
-              "zone.js",
-              "zone.js/testing"
-            ],
-            "tsConfig": "projects/apps/app4/tsconfig.spec.json",
-            "inlineStyleLanguage": "scss",
-            "assets": [
-              {
-                "glob": "**/*",
-                "input": "projects/apps/app4/public"
-              }
-            ],
-            "styles": [
-              "projects/apps/app4/src/styles.scss"
-            ],
-            "scripts": []
-          }
         }
       }
     },

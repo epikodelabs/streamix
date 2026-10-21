@@ -1,27 +1,55 @@
-import { DecimalPipe } from '@angular/common';
-import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import { addListener, atomExpr, bufferCount, debounce, filter, finalize, interval, map, merge, method, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
+import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { addListener, bufferCount, debounce, filter, finalize, interval, map, merge, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
+
 interface Metric {
     name: string;
-    value: number;
+    display: string;
     unit: string;
     trend: 'up' | 'down' | 'flat';
 }
 
-interface AppScopeShape {
-    clicks: string;
+interface LogEntry {
+    time: string;
+    message: string;
+    type: string;
+}
+
+interface Batch {
+    label: string;
+    items: string[];
+}
+
+interface AppState {
+    metrics: Metric[];
+    sparkline: { height: string }[];
+    rawSearchCount: number;
+    debouncedSearchCount: number;
+    rawSearchLabel: string;
+    debouncedLabel: string;
+    searchResults: string[];
+    batches: Batch[];
     sliderA: number;
     sliderB: number;
     combined: number;
-    emitClick: (label: string) => void;
-    updateStreamA: (value: number) => void;
-    updateStreamB: (value: number) => void;
+    combinedLabel: string;
+    sliderALabel: string;
+    sliderBLabel: string;
+    sliderABarHeight: string;
+    sliderBBarHeight: string;
+    combinedBarHeight: string;
+    juliaGenerating: boolean;
+    juliaProgress: number;
+    juliaProgressText: string;
+    juliaProgressWidth: string;
+    juliaElapsed: number;
+    juliaElapsedText: string;
+    logEntries: LogEntry[];
 }
 
 @Component({
     selector: 'app-root',
     standalone: true,
-    imports: [DecimalPipe],
+    imports: [],
     template: `
     <div class="app">
       <header class="header">
@@ -38,19 +66,19 @@ interface AppScopeShape {
           </div>
           <p class="tooltip">Auto-updating dashboard. No interaction needed — watch metrics drift and the sparkline redraw every 800 ms.</p>
           <div class="metrics">
-            @for (m of metrics; track m.name) {
+            @for (m of model.metrics; track m.name) {
               <div class="metric">
                 <span class="metric-name">{{ m.name }}</span>
                 <span class="metric-value" [class.up]="m.trend === 'up'" [class.down]="m.trend === 'down'">
-                  {{ m.value | number:'1.0-1' }} {{ m.unit }}
+                  {{ m.display }} {{ m.unit }}
                 </span>
               </div>
             }
           </div>
-          <div class="sparkline">
-            <svg viewBox="0 0 100 30" preserveAspectRatio="none">
-              <polyline [attr.points]="sparklinePoints" fill="none" stroke="currentColor" stroke-width="0.5" />
-            </svg>
+          <div class="sparkline" aria-hidden="true">
+            @for (point of model.sparkline; track $index) {
+              <span class="spark-bar" [style.height]="point.height"></span>
+            }
           </div>
         </section>
 
@@ -68,14 +96,14 @@ interface AppScopeShape {
             class="search-input"
           />
           <div class="search-meta">
-            <span>Raw events: {{ rawSearchCount }}</span>
-            <span>Debounced: {{ debouncedSearchCount }}</span>
+            <span>{{ model.rawSearchLabel }}</span>
+            <span>{{ model.debouncedLabel }}</span>
           </div>
           <div class="search-results">
-            @for (r of searchResults; track r) {
+            @for (r of model.searchResults; track r) {
               <div class="result-item">🔍 {{ r }}</div>
             }
-            @if (!searchResults.length) {
+            @if (model.searchResults.length === 0) {
               <div class="empty">Waiting for input...</div>
             }
           </div>
@@ -94,17 +122,17 @@ interface AppScopeShape {
             <button (click)="emitClick('C')">Emit C</button>
           </div>
           <div class="buffer-batches">
-            @for (batch of batches; track $index; let i = $index) {
+            @for (batch of model.batches; track batch.label) {
               <div class="batch">
-                <span class="batch-label">Batch {{ i + 1 }}</span>
+                <span class="batch-label">{{ batch.label }}</span>
                 <div class="batch-items">
-                  @for (item of batch; track $index) {
+                  @for (item of batch.items; track $index) {
                     <span class="batch-item">{{ item }}</span>
                   }
                 </div>
               </div>
             }
-            @if (!batches.length) {
+            @if (model.batches.length === 0) {
               <div class="empty">Click buttons to emit events...</div>
             }
           </div>
@@ -119,36 +147,24 @@ interface AppScopeShape {
           <p class="tooltip">Drag the sliders to change Stream A and B. combineLatest recalculates (A × B) / 100 in real time.</p>
           <div class="combined-controls">
             <label>
-              Stream A ({{ sliderAValue }})
-              <input
-                type="range"
-                min="0"
-                max="100"
-                [value]="sliderAValue"
-                (input)="updateStreamA(+($any($event.target)).value)"
-              />
+              <span>{{ model.sliderALabel }}</span>
+              <input type="range" min="0" max="100" [(value)]="model.sliderA" />
             </label>
             <label>
-              Stream B ({{ sliderBValue }})
-              <input
-                type="range"
-                min="0"
-                max="100"
-                [value]="sliderBValue"
-                (input)="updateStreamB(+($any($event.target)).value)"
-              />
+              <span>{{ model.sliderBLabel }}</span>
+              <input type="range" min="0" max="100" [(value)]="model.sliderB" />
             </label>
           </div>
           <div class="combined-result">
-            <div class="formula">(A × B) / 100 = {{ combinedValue | number:'1.0-1' }}</div>
+            <div class="formula">{{ model.combinedLabel }}</div>
             <div class="bar-chart">
-              <div class="bar" [style.height.%]="sliderAValue">
+              <div class="bar" [style.height]="model.sliderABarHeight">
                 <span>A</span>
               </div>
-              <div class="bar" [style.height.%]="sliderBValue">
+              <div class="bar" [style.height]="model.sliderBBarHeight">
                 <span>B</span>
               </div>
-              <div class="bar result" [style.height.%]="combinedValue">
+              <div class="bar result" [style.height]="model.combinedBarHeight">
                 <span>×</span>
               </div>
             </div>
@@ -163,19 +179,19 @@ interface AppScopeShape {
           </div>
           <p class="tooltip">Click Generate to render a Julia set fractal pixel-by-pixel using reactive stream operators.</p>
           <div class="julia-controls">
-            <button (click)="drawJulia()" [disabled]="juliaGenerating">Generate</button>
-            @if (juliaElapsed > 0) {
-              <span class="julia-meta">Elapsed: {{ juliaElapsed | number:'1.0-0' }} ms</span>
+            <button (click)="drawJulia()" [disabled]="model.juliaGenerating">Generate</button>
+            @if (model.juliaElapsed > 0) {
+              <span class="julia-meta">Elapsed: {{ model.juliaElapsedText }} ms</span>
             }
           </div>
           <div class="julia-canvas-wrap">
             <canvas #juliaCanvas width="150" height="150"></canvas>
-            @if (juliaGenerating) {
+            @if (model.juliaGenerating) {
               <div class="julia-overlay">
                 <div class="julia-progress-bar">
-                  <div class="julia-progress-fill" [style.width.%]="juliaProgress"></div>
+                  <div class="julia-progress-fill" [style.width]="model.juliaProgressWidth"></div>
                 </div>
-                <span class="julia-progress-text">{{ juliaProgress | number:'1.0-0' }}%</span>
+                <span class="julia-progress-text">{{ model.juliaProgressText }}%</span>
               </div>
             }
           </div>
@@ -189,13 +205,13 @@ interface AppScopeShape {
           </div>
           <p class="tooltip">Throttled log stream. Events appear automatically as internal streams produce values.</p>
           <div class="log-panel">
-            @for (entry of logEntries; track $index) {
-              <div class="log-entry" [class]="entry.type">
+            @for (entry of model.logEntries; track $index) {
+              <div class="log-entry" [class.metric]="entry.type === 'metric'" [class.search]="entry.type === 'search'" [class.buffer]="entry.type === 'buffer'" [class.combined]="entry.type === 'combined'">
                 <span class="log-time">{{ entry.time }}</span>
                 <span class="log-msg">{{ entry.message }}</span>
               </div>
             }
-            @if (!logEntries.length) {
+            @if (model.logEntries.length === 0) {
               <div class="empty">No activity yet...</div>
             }
           </div>
@@ -283,8 +299,15 @@ interface AppScopeShape {
     .metric-value.up { color: var(--success); }
     .metric-value.down { color: var(--error); }
 
-    .sparkline { height: 40px; color: var(--accent); opacity: 0.7; }
-    .sparkline svg { width: 100%; height: 100%; }
+    .sparkline { height: 40px; display: flex; align-items: flex-end; gap: 2px; color: var(--accent); }
+    .spark-bar {
+      flex: 1;
+      min-height: 2px;
+      background: currentColor;
+      opacity: 0.7;
+      border-radius: 2px 2px 0 0;
+      transition: height 0.3s ease;
+    }
 
     .search-input {
       background: var(--bg);
@@ -451,83 +474,73 @@ interface AppScopeShape {
   `],
 })
 export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
-    constructor(private cdr: ChangeDetectorRef) { }
     @ViewChild('searchInput')
     searchInput!: ElementRef<HTMLInputElement>;
     @ViewChild('juliaCanvas')
     juliaCanvas!: ElementRef<HTMLCanvasElement>;
-    // Live metrics
-    metrics: Metric[] = [
-        { name: 'Throughput', value: 0, unit: 'req/s', trend: 'flat' },
-        { name: 'Latency', value: 0, unit: 'ms', trend: 'flat' },
-        { name: 'Errors', value: 0, unit: '%', trend: 'flat' },
-        { name: 'Active', value: 0, unit: 'conn', trend: 'flat' },
-    ];
-    sparklinePoints = '';
+
+    // Every dynamic template binding reads this scope; the compiled template
+    // updates the DOM directly from scope emissions — no change detection.
+    readonly model = scope<AppState>({
+        metrics: [
+            { name: 'Throughput', display: '0.0', unit: 'req/s', trend: 'flat' },
+            { name: 'Latency', display: '0.0', unit: 'ms', trend: 'flat' },
+            { name: 'Errors', display: '0.0', unit: '%', trend: 'flat' },
+            { name: 'Active', display: '0', unit: 'conn', trend: 'flat' },
+        ],
+        sparkline: [],
+        rawSearchLabel: self => `Raw events: ${self.rawSearchCount}`,
+        debouncedLabel: self => `Debounced: ${self.debouncedSearchCount}`,
+        rawSearchCount: 0,
+        debouncedSearchCount: 0,
+        searchResults: [],
+        batches: [],
+        sliderA: 30,
+        sliderB: 60,
+        combined: self => (self.sliderA * self.sliderB) / 100,
+        combinedLabel: self => `(A × B) / 100 = ${self.combined.toFixed(1)}`,
+        sliderALabel: self => `Stream A (${self.sliderA})`,
+        sliderBLabel: self => `Stream B (${self.sliderB})`,
+        sliderABarHeight: self => `${self.sliderA}%`,
+        sliderBBarHeight: self => `${self.sliderB}%`,
+        combinedBarHeight: self => `${self.combined}%`,
+        juliaGenerating: false,
+        juliaProgress: 0,
+        juliaProgressText: self => String(Math.round(self.juliaProgress)),
+        juliaProgressWidth: self => `${self.juliaProgress}%`,
+        juliaElapsed: 0,
+        juliaElapsedText: self => String(Math.round(self.juliaElapsed)),
+        logEntries: [],
+    });
+
     private sparklineHistory: number[] = [];
-    // Search
-    rawSearchCount = 0;
-    debouncedSearchCount = 0;
-    searchResults: string[] = [];
-    // Buffer
-    batches: string[][] = [];
-    // Combined
-    sliderAValue = 30;
-    sliderBValue = 60;
-    combinedValue = 18;
-    // juliabrot
-    juliaGenerating = false;
-    juliaProgress = 0;
-    juliaElapsed = 0;
-    // Log
-    logEntries: {
-        time: string;
-        message: string;
-        type: string;
-    }[] = [];
-    private readonly appScope = scope<AppScopeShape>(() => ({
-        clicks: atomExpr<string>(),
-        sliderA: this.sliderAValue,
-        sliderB: this.sliderBValue,
-        combined: (self: AppScopeShape) => (self.sliderA * self.sliderB) / 100,
-        emitClick: method((self: AppScopeShape, label: string) => { self.clicks = label; }),
-        updateStreamA: method((self: AppScopeShape, value: number) => {
-            this.sliderAValue = value;
-            self.sliderA = value;
-        }),
-        updateStreamB: method((self: AppScopeShape, value: number) => {
-            this.sliderBValue = value;
-            self.sliderB = value;
-        }),
-    }));
+    private batchCounter = 0;
+    private readonly clickBuffer: string[] = [];
+
     ngOnInit(): void {
-        const clickBuffer: string[] = [];
-        const bufferUnsubscribe = this.appScope.subscribeTo('clicks', (click: string) => {
-            clickBuffer.push(click);
-            if (clickBuffer.length < 5) return;
-            const batch = clickBuffer.splice(0, clickBuffer.length);
-            this.batches.unshift(batch);
-            if (this.batches.length > 8)
-                this.batches.pop();
-            this.cdr.detectChanges();
-        });
-        this.appScope.cleanups.add(() => bufferUnsubscribe());
-
-        const unsubscribe = this.appScope.subscribeTo('combined', v => {
-            this.combinedValue = v;
-            this.cdr.detectChanges();
-        });
-        this.appScope.cleanups.add(() => unsubscribe());
-
         this.initMetricsStream();
         this.initLogStream();
     }
+
     ngAfterViewInit(): void {
         this.initSearchStream();
     }
+
     ngOnDestroy(): void {
-        this.appScope.dispose();
+        this.model.dispose();
     }
+
+    emitClick(label: string): void {
+        this.clickBuffer.push(label);
+        if (this.clickBuffer.length < 5) return;
+        const items = this.clickBuffer.splice(0, this.clickBuffer.length);
+        this.batchCounter += 1;
+        this.model.batches = [
+            { label: `Batch ${this.batchCounter}`, items },
+            ...this.model.batches,
+        ].slice(0, 8);
+    }
+
     drawJulia(): void {
         const canvas = this.juliaCanvas?.nativeElement;
         if (!canvas)
@@ -537,10 +550,9 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         const height = canvas.height;
         const imageData = ctx.createImageData(width, height);
         const data = imageData.data;
-        this.juliaGenerating = true;
-        this.juliaProgress = 0;
-        this.juliaElapsed = 0;
-        this.cdr.detectChanges();
+        this.model.juliaGenerating = true;
+        this.model.juliaProgress = 0;
+        this.model.juliaElapsed = 0;
         const startTime = performance.now();
         const maxIterations = 60;
         const zoom = 55;
@@ -595,17 +607,16 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
                 data[idx + 3] = 255;
             }
             pixelsDone += batch.length;
-            this.juliaProgress = (pixelsDone / (width * height)) * 100;
+            this.model.juliaProgress = (pixelsDone / (width * height)) * 100;
             ctx.putImageData(imageData, 0, 0);
-            this.cdr.detectChanges();
             await new Promise<void>((r) => requestAnimationFrame(() => r()));
         }), finalize(() => {
-            this.juliaElapsed = performance.now() - startTime;
-            this.juliaGenerating = false;
-            this.cdr.detectChanges();
+            this.model.juliaElapsed = performance.now() - startTime;
+            this.model.juliaGenerating = false;
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => unsubscribe());
+        this.model.cleanups.add(() => unsubscribe());
     }
+
     private initMetricsStream(): void {
         const s = pipe(interval(800), scan(acc => {
             const throughput = Math.max(0, acc.throughput + (Math.random() - 0.5) * 40);
@@ -614,67 +625,57 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
             const active = Math.max(0, acc.active + Math.floor((Math.random() - 0.5) * 6));
             return { throughput, latency, errors, active };
         }, { throughput: 120, latency: 45, errors: 0.5, active: 24 }), tap(({ throughput, latency, errors, active }) => {
-            this.metrics = [
-                { name: 'Throughput', value: throughput, unit: 'req/s', trend: throughput > 120 ? 'up' : 'down' },
-                { name: 'Latency', value: latency, unit: 'ms', trend: latency < 45 ? 'up' : 'down' },
-                { name: 'Errors', value: errors, unit: '%', trend: errors < 0.5 ? 'up' : 'down' },
-                { name: 'Active', value: active, unit: 'conn', trend: active > 24 ? 'up' : 'down' },
+            this.model.metrics = [
+                { name: 'Throughput', display: throughput.toFixed(1), unit: 'req/s', trend: throughput > 120 ? 'up' : 'down' },
+                { name: 'Latency', display: latency.toFixed(1), unit: 'ms', trend: latency < 45 ? 'up' : 'down' },
+                { name: 'Errors', display: errors.toFixed(1), unit: '%', trend: errors < 0.5 ? 'up' : 'down' },
+                { name: 'Active', display: String(active), unit: 'conn', trend: active > 24 ? 'up' : 'down' },
             ];
             this.sparklineHistory.push(throughput);
-            if (this.sparklineHistory.length > 50)
+            if (this.sparklineHistory.length > 30)
                 this.sparklineHistory.shift();
             const min = Math.min(...this.sparklineHistory);
             const max = Math.max(...this.sparklineHistory);
             const range = max - min || 1;
-            this.sparklinePoints = this.sparklineHistory
-                .map((v, i) => `${i * (100 / (this.sparklineHistory.length - 1 || 1))},${30 - ((v - min) / range) * 28}`)
-                .join(' ');
-            this.cdr.detectChanges();
+            this.model.sparkline = this.sparklineHistory.map(v => ({
+                height: `${8 + ((v - min) / range) * 92}%`,
+            }));
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => s());
+        this.model.cleanups.add(() => s());
     }
+
     private initSearchStream(): void {
         const input = this.searchInput?.nativeElement;
         if (!input)
             return;
         const value$ = pipe(addListener(input, 'input'), map(() => input.value as string));
         // Raw counter
-        const rawUnsubscribe = pipe(value$, tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })).subscribe(() => { });
-        this.appScope.cleanups.add(() => rawUnsubscribe());
+        const rawUnsubscribe = pipe(value$, tap(() => { this.model.rawSearchCount++; })).subscribe(() => { });
+        this.model.cleanups.add(() => rawUnsubscribe());
         // Debounced results
-        const unsubscribe = pipe(value$, debounce(400), filter((q: string) => q.length > 1), tap(() => { this.debouncedSearchCount++; this.cdr.detectChanges(); }), tap((query: string) => {
-            this.searchResults.unshift(`Matched "${query}" (${Math.floor(Math.random() * 50)} results)`);
-            if (this.searchResults.length > 5)
-                this.searchResults.pop();
-            this.cdr.detectChanges();
+        const unsubscribe = pipe(value$, debounce(400), filter((q: string) => q.length > 1), tap(() => { this.model.debouncedSearchCount++; }), tap((query: string) => {
+            this.model.searchResults = [
+                `Matched "${query}" (${Math.floor(Math.random() * 50)} results)`,
+                ...this.model.searchResults,
+            ].slice(0, 5);
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => unsubscribe());
+        this.model.cleanups.add(() => unsubscribe());
     }
+
     private initLogStream(): void {
         const metricLog$ = pipe(interval(2000), throttle(2000), map(() => {
             const names = ['Throughput spike detected', 'Latency normalized', 'Connection pool resized', 'Cache invalidated'];
             return names[Math.floor(Math.random() * names.length)];
         }), tap(msg => this.pushLog(msg, 'metric')));
         const searchLog$ = pipe(interval(3500), throttle(3500), map(() => 'Search index refreshed'), tap(msg => this.pushLog(msg, 'search')));
-        const bufferLog$ = pipe(interval(5000), throttle(5000), map(() => `Buffer flushed — ${this.batches.length} active batches`), tap(msg => this.pushLog(msg, 'buffer')));
-        const combinedLog$ = pipe(interval(4200), throttle(4200), map(() => `Combined recalculated: A=${this.sliderAValue}, B=${this.sliderBValue}`), tap(msg => this.pushLog(msg, 'combined')));
+        const bufferLog$ = pipe(interval(5000), throttle(5000), map(() => `Buffer flushed — ${this.model.batches.length} active batches`), tap(msg => this.pushLog(msg, 'buffer')));
+        const combinedLog$ = pipe(interval(4200), throttle(4200), map(() => `Combined recalculated: A=${this.model.sliderA}, B=${this.model.sliderB}`), tap(msg => this.pushLog(msg, 'combined')));
         const s = merge(metricLog$, searchLog$, bufferLog$, combinedLog$).subscribe(() => { });
-        this.appScope.cleanups.add(() => s());
+        this.model.cleanups.add(() => s());
     }
-    emitClick(label: string): void {
-        this.appScope.emitClick(label);
-    }
-    updateStreamA(value: number): void {
-        this.appScope.updateStreamA(value);
-    }
-    updateStreamB(value: number): void {
-        this.appScope.updateStreamB(value);
-    }
+
     private pushLog(message: string, type: string): void {
         const time = new Date().toLocaleTimeString();
-        this.logEntries.unshift({ time, message, type });
-        if (this.logEntries.length > 40)
-            this.logEntries.pop();
-        this.cdr.detectChanges();
+        this.model.logEntries = [{ time, message, type }, ...this.model.logEntries].slice(0, 40);
     }
 }

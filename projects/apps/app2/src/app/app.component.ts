@@ -1,329 +1,338 @@
-import { flow, method, scope, type Scope } from '@epikodelabs/streamix';
-import { ReactiveRenderer } from './renderer';
+import { Component, OnDestroy, OnInit } from '@angular/core';
+import { scope } from '@epikodelabs/streamix';
 
-interface PersonalShape {
+interface AppModel {
+    step: number;
     name: string;
     email: string;
-}
-
-interface AddressShape {
     street: string;
     country: string;
-}
-
-interface PreferencesShape {
     notifications: boolean;
     theme: string;
-}
-
-interface WizardShape {
-    step: number;
-    personal: Scope<PersonalShape>;
-    address: Scope<AddressShape>;
-    preferences: Scope<PreferencesShape>;
-    async: { countries: string[] };
-}
-
-interface UIShape {
     activeTab: string;
     sidebarCollapsed: boolean;
     toast: string | null;
+    zonesLoading: boolean;
+    zonesReady: boolean;
+    selectDisplay: string;
+    countries: string[];
+    nameDisplay: string;
+    emailDisplay: string;
+    streetDisplay: string;
+    countryDisplay: string;
     completeness: number;
-    state: Record<string, any>;
-    countriesList: string[];
-    countryOptions: string;
+    completenessText: string;
+    completenessLabel: string;
+    completenessSyncedLabel: string;
+    completenessWidth: string;
+    stageTransform: string;
+    namePulse: string;
+    emailPulse: string;
+    sidebarArrow: string;
+    zonesLabel: string;
+    snapshotText: string;
 }
 
-interface AppShape {
-    personal: Scope<PersonalShape>;
-    address: Scope<AddressShape>;
-    preferences: Scope<PreferencesShape>;
-    wizard: Scope<WizardShape>;
-    ui: Scope<UIShape>;
-    Math: any;
-    JSON: any;
-    goBack: () => void;
-    goNext: () => void;
-    submit: () => void;
-    toggleSidebar: () => void;
-    setTabTree: () => void;
-    setTabState: () => void;
-}
-
-const template = `
-<div class="universe">
-  <div class="mesh">
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-    <div class="orb orb-3"></div>
-  </div>
-
-  <div class="toast-container">
-    <div if="ui.toast" class="toast">{{ ui.toast }}</div>
-  </div>
-
-  <header>
-    <div class="badge">Reactive Laboratory</div>
-    <h1>Atoms &amp; Scopes</h1>
-    <p class="subtitle">Watch state flow through the tree in real time</p>
-    <div class="completeness-bar">
-      <div class="fill" [style.width.%]="Math.round(ui.completeness)"></div>
-      <span>{{ Math.round(ui.completeness) }}% complete</span>
-    </div>
-  </header>
-
-  <main class="stage">
-    <section class="specimen" [style.transform]="'translateX(calc(-' + wizard.step + ' * 100% / 3))'">
-
-      <div class="slide">
-        <h2>Identity</h2>
-        <div class="field">
-          <label [class.lit]="personal.name">Codename</label>
-          <input model="personal.name" placeholder="Enter codename" />
-          <div class="pulse-bar" [style.width.%]="personal.name.length * 5"></div>
-        </div>
-        <div class="field">
-          <label [class.lit]="personal.email">Channel</label>
-          <input model="personal.email" placeholder="secure@node.net" />
-          <div class="pulse-bar" [style.width.%]="personal.email.length * 3"></div>
-        </div>
+@Component({
+    selector: 'app-root',
+    standalone: true,
+    imports: [],
+    template: `
+    <div class="universe">
+      <div class="mesh">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
       </div>
 
-      <div class="slide">
-        <h2>Location</h2>
-        <div class="field">
-          <label [class.lit]="address.street">Sector</label>
-          <input model="address.street" placeholder="Sector 7-G" />
-        </div>
-        <div class="field">
-          <label [class.lit]="address.country">Zone</label>
-          <div if="ui.countriesList.length === 0" class="loading-pulse">Scanning zones…</div>
-          <select if="ui.countriesList.length > 0" bind-innerhtml="ui.countryOptions" model="address.country"></select>
-        </div>
+      <div class="toast-container">
+        @if (model.toast) {
+          <div class="toast">{{ model.toast }}</div>
+        }
       </div>
 
-      <div class="slide">
-        <h2>Configuration</h2>
-        <div class="field row">
-          <label class="toggle">
-            <input type="checkbox" model="preferences.notifications" />
-            <span class="toggle-glow" [class.on]="preferences.notifications"></span>
-            <span>Signal beacon</span>
-          </label>
+      <header>
+        <div class="badge">Reactive Laboratory</div>
+        <h1>Atoms &amp; Scopes</h1>
+        <p class="subtitle">Watch state flow through the tree in real time</p>
+        <div class="completeness-bar">
+          <div class="fill" [style.width]="model.completenessWidth"></div>
+          <span>{{ model.completenessLabel }}</span>
         </div>
-        <div class="field">
-          <label>Interface</label>
-          <div class="radio-group">
-            <label class="radio">
-              <input type="radio" name="theme" value="dark" model="preferences.theme" />
-              <span class="radio-glow" [class.on]="preferences.theme === 'dark'"></span>
-              <span>dark</span>
-            </label>
-            <label class="radio">
-              <input type="radio" name="theme" value="light" model="preferences.theme" />
-              <span class="radio-glow" [class.on]="preferences.theme === 'light'"></span>
-              <span>light</span>
-            </label>
-            <label class="radio">
-              <input type="radio" name="theme" value="auto" model="preferences.theme" />
-              <span class="radio-glow" [class.on]="preferences.theme === 'auto'"></span>
-              <span>auto</span>
-            </label>
+      </header>
+
+      <main class="stage">
+        <section class="specimen" [style.transform]="model.stageTransform">
+
+          <div class="slide">
+            <h2>Identity</h2>
+            <div class="field">
+              <label [class.lit]="model.name">Codename</label>
+              <input [(value)]="model.name" placeholder="Enter codename" />
+              <div class="pulse-bar" [style.width]="model.namePulse"></div>
+            </div>
+            <div class="field">
+              <label [class.lit]="model.email">Channel</label>
+              <input [(value)]="model.email" placeholder="secure@node.net" />
+              <div class="pulse-bar" [style.width]="model.emailPulse"></div>
+            </div>
           </div>
-        </div>
-      </div>
 
-    </section>
-  </main>
-
-  <aside class="sidebar" [class.collapsed]="ui.sidebarCollapsed">
-    <div class="sidebar-header">
-      <span class="sidebar-title">🔬 Reactive Lab</span>
-      <button class="sidebar-toggle" (click)="toggleSidebar">{{ ui.sidebarCollapsed ? '◀' : '▶' }}</button>
-    </div>
-    <div class="tabs">
-      <button [class.active]="ui.activeTab === 'tree'" (click)="setTabTree">tree</button>
-      <button [class.active]="ui.activeTab === 'state'" (click)="setTabState">state</button>
-    </div>
-    <div class="tab-panel">
-
-      <div if="ui.activeTab === 'tree'">
-        <div class="tree">
-          <div class="node scope-root" [class.loading]="wizard.loading">
-            <span class="dot"></span>
-            <span class="label">wizard</span>
-            <span class="status">{{ wizard.loading ? 'syncing' : 'ready' }}</span>
+          <div class="slide">
+            <h2>Location</h2>
+            <div class="field">
+              <label [class.lit]="model.street">Sector</label>
+              <input [(value)]="model.street" placeholder="Sector 7-G" />
+            </div>
+            <div class="field">
+              <label [class.lit]="model.country">Zone</label>
+              @if (model.zonesLoading) {
+                <div class="loading-pulse">Scanning zones…</div>
+              }
+              <select [(value)]="model.country" [style.display]="model.selectDisplay">
+                <option value="">Select zone</option>
+                @for (c of model.countries; track c) {
+                  <option [value]="c">{{ c }}</option>
+                }
+              </select>
+            </div>
           </div>
-          <div class="branch">
-            <div class="node atom">
-              <span class="dot"></span>
-              <span class="label">step</span>
-              <span class="value">{{ wizard.step }}</span>
+
+          <div class="slide">
+            <h2>Configuration</h2>
+            <div class="field row">
+              <label class="toggle">
+                <input type="checkbox" [(checked)]="model.notifications" />
+                <span class="toggle-glow" [class.on]="model.notifications"></span>
+                <span>Signal beacon</span>
+              </label>
             </div>
-            <div class="node scope" [class.loading]="personal.loading">
-              <span class="dot"></span>
-              <span class="label">personal</span>
-            </div>
-            <div class="branch">
-              <div class="node atom" [class.pulse]="personal.name">
-                <span class="dot"></span>
-                <span class="label">name</span>
-                <span class="value truncate">{{ personal.name || '—' }}</span>
-              </div>
-              <div class="node atom" [class.pulse]="personal.email">
-                <span class="dot"></span>
-                <span class="label">email</span>
-                <span class="value truncate">{{ personal.email || '—' }}</span>
-              </div>
-            </div>
-            <div class="node scope" [class.loading]="address.loading">
-              <span class="dot"></span>
-              <span class="label">address</span>
-            </div>
-            <div class="branch">
-              <div class="node atom" [class.pulse]="address.street">
-                <span class="dot"></span>
-                <span class="label">street</span>
-                <span class="value truncate">{{ address.street || '—' }}</span>
-              </div>
-              <div class="node atom" [class.pulse]="address.country">
-                <span class="dot"></span>
-                <span class="label">country</span>
-                <span class="value truncate">{{ address.country || '—' }}</span>
-              </div>
-            </div>
-            <div class="node scope" [class.loading]="preferences.loading">
-              <span class="dot"></span>
-              <span class="label">preferences</span>
-            </div>
-            <div class="branch">
-              <div class="node atom" [class.pulse]="preferences.notifications">
-                <span class="dot"></span>
-                <span class="label">notifications</span>
-                <span class="value">{{ preferences.notifications }}</span>
-              </div>
-              <div class="node atom pulse">
-                <span class="dot"></span>
-                <span class="label">theme</span>
-                <span class="value">{{ preferences.theme }}</span>
-              </div>
-            </div>
-            <div class="node scope" [class.loading]="wizard.async.loading">
-              <span class="dot"></span>
-              <span class="label">async</span>
-            </div>
-            <div class="branch">
-              <div class="node atom" [class.pulse]="!wizard.async.loading">
-                <span class="dot"></span>
-                <span class="label">countries</span>
-                <span class="value">{{ ui.countriesList.length }} zones</span>
+            <div class="field">
+              <label>Interface</label>
+              <div class="radio-group">
+                <label class="radio">
+                  <input type="radio" name="theme" value="dark" [checked]="model.theme === 'dark'" (change)="setTheme('dark')" />
+                  <span class="radio-glow" [class.on]="model.theme === 'dark'"></span>
+                  <span>dark</span>
+                </label>
+                <label class="radio">
+                  <input type="radio" name="theme" value="light" [checked]="model.theme === 'light'" (change)="setTheme('light')" />
+                  <span class="radio-glow" [class.on]="model.theme === 'light'"></span>
+                  <span>light</span>
+                </label>
+                <label class="radio">
+                  <input type="radio" name="theme" value="auto" [checked]="model.theme === 'auto'" (change)="setTheme('auto')" />
+                  <span class="radio-glow" [class.on]="model.theme === 'auto'"></span>
+                  <span>auto</span>
+                </label>
               </div>
             </div>
           </div>
+
+        </section>
+      </main>
+
+      <aside class="sidebar" [class.collapsed]="model.sidebarCollapsed">
+        <div class="sidebar-header">
+          <span class="sidebar-title">🔬 Reactive Lab</span>
+          <button class="sidebar-toggle" (click)="toggleSidebar()">{{ model.sidebarArrow }}</button>
         </div>
-      </div>
+        <div class="tabs">
+          <button [class.active]="model.activeTab === 'tree'" (click)="setTabTree()">tree</button>
+          <button [class.active]="model.activeTab === 'state'" (click)="setTabState()">state</button>
+        </div>
+        <div class="tab-panel">
 
-      <div if="ui.activeTab === 'state'">
-        <pre class="snapshot">{{ JSON.stringify(ui.state, null, 2) }}</pre>
-      </div>
+          @if (model.activeTab === 'tree') {
+            <div class="tree">
+              <div class="node scope-root">
+                <span class="dot"></span>
+                <span class="label">profile</span>
+                <span class="status">{{ model.completenessSyncedLabel }}</span>
+              </div>
+              <div class="branch">
+                <div class="node scope">
+                  <span class="dot"></span>
+                  <span class="label">personal</span>
+                </div>
+                <div class="branch">
+                  <div class="node atom" [class.pulse]="model.name">
+                    <span class="dot"></span>
+                    <span class="label">name</span>
+                    <span class="value truncate">{{ model.nameDisplay }}</span>
+                  </div>
+                  <div class="node atom" [class.pulse]="model.email">
+                    <span class="dot"></span>
+                    <span class="label">email</span>
+                    <span class="value truncate">{{ model.emailDisplay }}</span>
+                  </div>
+                </div>
+                <div class="node scope">
+                  <span class="dot"></span>
+                  <span class="label">address</span>
+                </div>
+                <div class="branch">
+                  <div class="node atom" [class.pulse]="model.street">
+                    <span class="dot"></span>
+                    <span class="label">street</span>
+                    <span class="value truncate">{{ model.streetDisplay }}</span>
+                  </div>
+                  <div class="node atom" [class.pulse]="model.country">
+                    <span class="dot"></span>
+                    <span class="label">country</span>
+                    <span class="value truncate">{{ model.countryDisplay }}</span>
+                  </div>
+                </div>
+                <div class="node scope">
+                  <span class="dot"></span>
+                  <span class="label">preferences</span>
+                </div>
+                <div class="branch">
+                  <div class="node atom" [class.pulse]="model.notifications">
+                    <span class="dot"></span>
+                    <span class="label">notifications</span>
+                    <span class="value">{{ model.notifications }}</span>
+                  </div>
+                  <div class="node atom pulse">
+                    <span class="dot"></span>
+                    <span class="label">theme</span>
+                    <span class="value">{{ model.theme }}</span>
+                  </div>
+                </div>
+                <div class="node scope" [class.loading]="model.zonesLoading">
+                  <span class="dot"></span>
+                  <span class="label">async</span>
+                </div>
+                <div class="branch">
+                  <div class="node atom" [class.pulse]="model.zonesReady">
+                    <span class="dot"></span>
+                    <span class="label">countries</span>
+                    <span class="value">{{ model.zonesLabel }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          }
 
+          @if (model.activeTab === 'state') {
+            <pre class="snapshot">{{ model.snapshotText }}</pre>
+          }
+
+        </div>
+      </aside>
+
+      <footer class="nav">
+        <button (click)="goBack()" [disabled]="model.step === 0">← Back</button>
+        <div class="step-dots">
+          <span [class.on]="model.step === 0"></span>
+          <span [class.on]="model.step === 1"></span>
+          <span [class.on]="model.step === 2"></span>
+        </div>
+        @if (model.step === 2) {
+          <button (click)="submit()">Submit</button>
+        } @else {
+          <button (click)="goNext()" [disabled]="model.step === 2">Next →</button>
+        }
+      </footer>
     </div>
-  </aside>
-
-  <footer class="nav">
-    <button (click)="goBack" [disabled]="wizard.step === 0">← Back</button>
-    <div class="step-dots">
-      <span [class.on]="wizard.step === 0"></span>
-      <span [class.on]="wizard.step === 1"></span>
-      <span [class.on]="wizard.step === 2"></span>
-    </div>
-    <button if="wizard.step === 2" (click)="submit">Submit</button>
-    <button if="wizard.step !== 2" (click)="goNext" [disabled]="wizard.step === 2">Next →</button>
-  </footer>
-</div>
-`;
-
-export function mountApp(root: HTMLElement): () => void {
-    const app = scope<AppShape>(() => {
-        const personal = scope<PersonalShape>({
-            name: '',
-            email: '',
-        });
-
-        const address = scope<AddressShape>({
-            street: '',
-            country: '',
-        });
-
-        const preferences = scope<PreferencesShape>({
-            notifications: true,
-            theme: 'dark',
-        });
-
-        const wizard = scope<WizardShape>({
-            step: 0,
-            personal,
-            address,
-            preferences,
-            async: {
-                countries: () => flow((async function* () {
-                    await new Promise(r => setTimeout(r, 1500));
-                    yield ['US', 'CA', 'UK', 'DE', 'FR'];
-                })()),
-            },
-        });
-
-        const ui = scope<UIShape>({
-            activeTab: 'tree',
-            sidebarCollapsed: false,
-            toast: null as string | null,
-            completeness: () => {
-                let score = 0;
-                if (personal.name) score++;
-                if (personal.email) score++;
-                if (address.street) score++;
-                if (address.country) score++;
-                return (score / 4) * 100;
-            },
-            state: (self) => ({
-                ...wizard.snapshot(),
-                completeness: self.completeness,
-            }),
-            countriesList: () => wizard.async.countries ?? [],
-            countryOptions: (self) =>
-                '<option value="">Select zone</option>' +
-                self.countriesList.map((c: string) => `<option value="${c}">${c}</option>`).join('')
-            ,
-        });
-
-        const submit = () => {
-            if (ui.completeness === 100) {
-                ui.toast = 'Profile synchronized successfully';
-            } else {
-                ui.toast = `Complete all fields first (${Math.round(ui.completeness)}%)`;
-            }
-            // Guard against the app being unmounted before the timer fires.
-            setTimeout(() => { if (!ui._disposed) ui.set('toast', null); }, 3000);
-        };
-
-        return {
-            personal, address, preferences, wizard, ui,
-            Math: () => Math,
-            JSON: () => JSON,
-            goBack: method(() => wizard.step = Math.max(0, wizard.step - 1)),
-            goNext: method(() => wizard.step = Math.min(2, wizard.step + 1)),
-            submit: method(submit),
-            toggleSidebar: method(() => ui.sidebarCollapsed = !ui.sidebarCollapsed),
-            setTabTree: method(() => ui.activeTab = 'tree'),
-            setTabState: method(() => ui.activeTab = 'state'),
-        };
+  `,
+})
+export class AppComponent implements OnInit, OnDestroy {
+    readonly model = scope<AppModel>({
+        step: 0,
+        name: '',
+        email: '',
+        street: '',
+        country: '',
+        notifications: true,
+        theme: 'dark',
+        activeTab: 'tree',
+        sidebarCollapsed: false,
+        toast: null,
+        zonesLoading: true,
+        zonesReady: self => self.zonesLoading === false,
+        selectDisplay: self => (self.zonesLoading ? 'none' : ''),
+        countries: [],
+        nameDisplay: self => (self.name === '' ? '—' : self.name),
+        emailDisplay: self => (self.email === '' ? '—' : self.email),
+        streetDisplay: self => (self.street === '' ? '—' : self.street),
+        countryDisplay: self => (self.country === '' ? '—' : self.country),
+        completeness: self => {
+            let score = 0;
+            if (self.name) score++;
+            if (self.email) score++;
+            if (self.street) score++;
+            if (self.country) score++;
+            return (score / 4) * 100;
+        },
+        completenessText: self => String(Math.round(self.completeness)),
+        completenessLabel: self => `${Math.round(self.completeness)}% complete`,
+        completenessSyncedLabel: self => `${Math.round(self.completeness)}% synced`,
+        completenessWidth: self => `${self.completeness}%`,
+        stageTransform: self => `translateX(calc(-${self.step} * 100% / 3))`,
+        namePulse: self => `${self.name.length * 5}%`,
+        emailPulse: self => `${self.email.length * 3}%`,
+        sidebarArrow: self => (self.sidebarCollapsed ? '◀' : '▶'),
+        zonesLabel: self => `${self.countries.length} zones`,
+        snapshotText: self => JSON.stringify({
+            step: self.step,
+            personal: { name: self.name, email: self.email },
+            address: { street: self.street, country: self.country },
+            preferences: { notifications: self.notifications, theme: self.theme },
+            completeness: self.completeness,
+        }, null, 2),
     });
 
-    const renderer = new ReactiveRenderer();
-    renderer.render(template, app, root);
+    private toastTimer?: ReturnType<typeof setTimeout>;
 
-    return () => {
-        renderer.destroy();
-        app.dispose();
-    };
+    ngOnInit(): void {
+        // Simulated async zone scan: the compiled template updates the select
+        // and the tree as soon as the writes land.
+        const scan = setTimeout(() => {
+            this.model.zonesLoading = false;
+            this.model.countries = ['US', 'CA', 'UK', 'DE', 'FR'];
+        }, 1500);
+        this.model.cleanups.add(() => clearTimeout(scan));
+        this.model.cleanups.add(() => clearTimeout(this.toastTimer));
+    }
+
+    ngOnDestroy(): void {
+        this.model.dispose();
+    }
+
+    goBack(): void {
+        this.model.step = Math.max(0, this.model.step - 1);
+    }
+
+    goNext(): void {
+        this.model.step = Math.min(2, this.model.step + 1);
+    }
+
+    setTheme(theme: string): void {
+        this.model.theme = theme;
+    }
+
+    toggleSidebar(): void {
+        this.model.sidebarCollapsed = !this.model.sidebarCollapsed;
+    }
+
+    setTabTree(): void {
+        this.model.activeTab = 'tree';
+    }
+
+    setTabState(): void {
+        this.model.activeTab = 'state';
+    }
+
+    submit(): void {
+        if (this.model.completeness === 100) {
+            this.model.toast = 'Profile synchronized successfully';
+        } else {
+            this.model.toast = `Complete all fields first (${Math.round(this.model.completeness)}%)`;
+        }
+        clearTimeout(this.toastTimer);
+        this.toastTimer = setTimeout(() => {
+            this.model.toast = null;
+        }, 3000);
+    }
 }

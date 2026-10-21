@@ -7,7 +7,7 @@
 - A particle swarm updated from `animationFrame` events
 - Viewport resize handling through `@epikodelabs/streamix/dom`
 - Collision resolution, elastic edge bouncing, drag, and random motion
-- Manual change detection paired with a small streamix scope for lifecycle cleanup
+- A compiled `@for` over a scope emission per frame — no change detection
 
 ## Key files
 

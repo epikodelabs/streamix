@@ -70,10 +70,10 @@ streamix/
 │   │       ├── react/              # React bindings
 │   │       └── vue/                # Vue bindings
 │   └── apps/
-│       ├── app1/                   # Stream monitor — live operator demos
-│       ├── app2/                   # Reactive wizard — scopes + custom renderer
-│       ├── app3/                   # Brownian motion — animationFrame + Angular
-│       ├── app4/                   # Travel blog — scroll-driven DOM animations
+│       ├── app1/                   # Stream monitor — compiled scope templates
+│       ├── app2/                   # Reactive wizard — scopes + compiled templates
+│       ├── app3/                   # Brownian motion — compiled @for particles
+│       ├── app4/                   # Travel blog — scroll-driven atoms
 │       ├── app5/                   # HTTP client — networking demos in React
 │       ├── app6/                   # Rainbow clicker — compiled React JSX
 │       ├── app7/                   # React JSX lab — direct atom reads
