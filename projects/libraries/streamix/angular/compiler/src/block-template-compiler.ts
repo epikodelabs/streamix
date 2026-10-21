@@ -780,7 +780,10 @@ const SAFE_BLOCK_PROPERTIES = new Set([
   'textContent', 'title', 'type', 'value', 'width',
 ]);
 const SAFE_BLOCK_STYLES = new Set([
-  'display', 'height', 'opacity', 'transform', 'visibility', 'width',
+  'background', 'background-color', 'border-radius', 'bottom', 'color',
+  'display', 'font-size', 'gap', 'height', 'left', 'line-height', 'margin',
+  'max-height', 'max-width', 'min-height', 'min-width', 'opacity', 'padding',
+  'right', 'top', 'transform', 'visibility', 'width', 'z-index',
 ]);
 
 function boundInputKind(
@@ -959,7 +962,9 @@ function compileBlockInput(
       !/[A-Za-z_$][\w$.]*\s*\(/.test(expanded)) {
     const local = rewriteLocalReads(stripAnyCasts(expanded), 'currentContext');
     if (kind === 'property') {
-      state.updates.push(`${variable}[${JSON.stringify(name)}] = ${local};`);
+      // Loop-local reads are `unknown`; index through a widened element so the
+      // generated body type-checks against typed DOM properties.
+      state.updates.push(`(${variable} as unknown as Record<string, unknown>)[${JSON.stringify(name)}] = ${local};`);
     } else if (kind === 'class') {
       state.updates.push(`${variable}.classList.toggle(${JSON.stringify(name)}, Boolean(${local}));`);
     } else if (kind === 'style') {

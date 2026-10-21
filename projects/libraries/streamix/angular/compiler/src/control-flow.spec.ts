@@ -149,6 +149,26 @@ describe('standard Angular atom templates', () => {
     );
   });
 
+  it('lowers a nested @for whose row context extends the enclosing one', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (batch of model.items; track batch.id) { <ul>@for (item of batch.entries; track $index) { <li>{{ item }}</li> }</ul> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('ɵcreateSxKeyedBlock');
+    // The row context is initialized from a captured enclosing context, never
+    // from its own shadowing declaration.
+    expect(result.setup).toContain('Parent = currentContext;');
+    expect(result.setup).not.toContain(
+      'let currentContext = { ...currentContext',
+    );
+    // A loop-local collection read types as `unknown`; the keyed block source
+    // casts it to the Iterable contract.
+    expect(result.setup).toContain('as Iterable<unknown>');
+  });
+
   it('resolves every marker before replacing any of them', () => {
     const result = transformAngularComponentTemplate(
       `@if (model.ready) { <p>a</p> } @if (model.message) { <p>b</p> }`,
@@ -354,10 +374,15 @@ describe('standard Angular atom templates', () => {
 
     expect(result.setup).toContain('ɵcreateSxKeyedBlock(');
     expect(result.setup).toContain(
-      'read: () => ɵsxReadLocal(currentContext, "group.tags")',
+      'read: () => (ɵsxReadLocal(currentContext, "group.tags")) as Iterable<unknown>',
     );
-    // The nested context extends the enclosing one, so outer locals stay visible.
-    expect(result.setup).toContain('let currentContext = { ...currentContext,');
+    // The nested context extends the enclosing one through a captured parent,
+    // so outer locals stay visible without the row declaration shadowing the
+    // variable its own initializer reads.
+    expect(result.setup).toContain('Parent = currentContext;');
+    expect(result.setup).toMatch(
+      /let currentContext = \{ \.\.\.block\d+Parent, /,
+    );
   });
 });
 

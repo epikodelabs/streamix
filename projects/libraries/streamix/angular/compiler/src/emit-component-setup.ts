@@ -31,20 +31,20 @@ function sources(dependencies: readonly string[] | undefined): string {
 
 /**
  * Emits a lowered reactive value: a direct source object, or an expression
- * object carrying its sources and a reader evaluated once per flush.
+ * object carrying its sources and a reader evaluated once per flush. `cast`
+ * widens a `local` read whose runtime value only the call site knows.
  */
 function loweredValue(
   value: SxLoweredValue | SxCompiledValue,
+  cast?: string,
 ): string {
   if (value.kind === 'source') {
     return source(value.source);
   }
 
   if (value.kind === 'local') {
-    return (
-      `{ sources: [], read: () => ` +
-      `${rewriteLocalReads(value.expression, 'currentContext')} }`
-    );
+    const read = rewriteLocalReads(value.expression, 'currentContext');
+    return `{ sources: [], read: () => ${cast ? `(${read}) as ${cast}` : read} }`;
   }
 
   return (
@@ -536,13 +536,25 @@ function emitNestedBlock(
   const innerPad = spaces + 6;
   const roots = nested.body.rootNodes;
 
+  // The row's `let currentContext` shadows the enclosing variable for its
+  // whole body, so the spread in its own initializer cannot read the enclosing
+  // context by name. Capture it under a per-block name before the block.
+  const parentContext = context ? `${nested.variable}Parent` : undefined;
+  if (parentContext) {
+    lines.push(`${pad}const ${parentContext} = ${context};`);
+  }
+
   lines.push(`${pad}const ${nested.variable} = ɵcreateSxKeyedBlock(`);
   lines.push(`${pad}  ${nested.anchor},`);
-  lines.push(`${pad}  ${nestedValue(nested.source)},`);
+  // A loop-local collection read types as `unknown`; the keyed block source
+  // contract only needs an Iterable at runtime.
+  lines.push(`${pad}  ${nested.source?.kind === 'local'
+    ? loweredValue(nested.source, 'Iterable<unknown>')
+    : nestedValue(nested.source)},`);
   lines.push(`${pad}  {`);
   lines.push(`${pad}    create(${nested.item}, index, count) {`);
   lines.push(
-    `${pad}      ${nestedContextDeclaration(nested, context)}`,
+    `${pad}      ${nestedContextDeclaration(nested, parentContext)}`,
   );
   lines.push(indent(nested.body.createBody, innerPad));
   lines.push(...emitBodyContent(nested.body, innerPad, 'currentContext'));
