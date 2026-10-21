@@ -117,7 +117,11 @@ export function instrumentStreamixSource({ file, checker, sourcePath, enabled }:
       const factory = imported(node.expression);
       if (factory) {
         const type = checker.getTypeAtLocation(node);
-        const kind = factory === 'scope' ? 'scope' : ['pipe', 'flow', 'atomFromIterator'].includes(factory) ? 'flow'
+        const discriminator = type.getProperty('type');
+        const runtimeKind = discriminator && checker.typeToString(checker.getTypeOfSymbolAtLocation(discriminator, node));
+        // A scope is callable and has Function.apply. Ownership hooks return
+        // that same scope; do not overwrite its metadata as an operator.
+        const kind = factory === 'scope' || runtimeKind === '"scope"' ? 'scope' : ['pipe', 'flow', 'atomFromIterator'].includes(factory) ? 'flow'
           : factory === 'derived' ? 'derived' : factory === 'atom' ? 'atom'
           : type.getProperty('apply') ? 'operator' : type.getProperty('subscribe') && type.getProperty('value') ? 'source' : undefined;
         if (kind) {

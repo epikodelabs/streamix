@@ -13,7 +13,8 @@ function transform(source: string, enabled = true): string {
     export declare function flow(value: unknown): Atom<unknown>;
     export declare function pipe(value: unknown, ...ops: Operator[]): Atom<unknown>;
     export declare function map(fn: (value: number) => number): Operator;
-    export declare function scope<T>(value: T): T;
+    export declare function scope<T>(value: T): T & { type: 'scope'; apply(source: unknown): unknown };
+    export declare function useStreamixLocal<T>(factory: () => T): T;
   `;
   const files = new Map([['/app.ts', source], ['/streamix.d.ts', declarations]]);
   const host: ts.CompilerHost = {
@@ -29,6 +30,13 @@ function transform(source: string, enabled = true): string {
 }
 
 describe('Angular debug introspection transform', () => {
+  it('keeps a React-owned callable scope classified as a scope', () => {
+    const result = transform(`import { scope } from '@epikodelabs/streamix';
+import { useStreamixLocal } from '@epikodelabs/streamix/react';
+function DemoCard() { const output = useStreamixLocal(() => scope({ body: '' })); return output; }`);
+    expect(result).toContain('"kind":"scope","name":"DemoCard.output"');
+    expect(result).not.toContain('"kind":"operator","name":"DemoCard.output"');
+  });
   it('resolves aliases and namespace imports while ignoring shadowed functions', () => {
     const source = `import { atom as state } from '@epikodelabs/streamix';
 import * as sx from '@epikodelabs/streamix';

@@ -21,6 +21,7 @@ const STYLE = `
 .sx-panel[data-collapsed] .sx-collapse:hover::before{transform:scale(1.15)}
 .sx-panel[data-collapsed][data-live] .sx-collapse::before{animation:sx-pulse 1.1s ease-in-out 3}
 .sx-panel *,.sx-panel *::before,.sx-panel *::after{box-sizing:border-box}
+.sx-panel button{box-shadow:none;transform:none;margin:0;border-radius:0;letter-spacing:normal;text-transform:none}
 .sx-panel ::-webkit-scrollbar{width:8px;height:8px}
 .sx-panel ::-webkit-scrollbar-thumb{background:#2c3a52;border-radius:4px}
 .sx-panel ::-webkit-scrollbar-thumb:hover{background:#3b4d6b}
