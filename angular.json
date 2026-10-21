@@ -796,6 +796,73 @@
         }
       }
     },
+    "app8": {
+      "projectType": "application",
+      "root": "projects/apps/app8",
+      "sourceRoot": "projects/apps/app8/src",
+      "architect": {
+        "application": {
+          "builder": "@epikodelabs/streamix/vue/builder:vite",
+          "options": {
+            "root": ".angular/.streamix/app8/src",
+            "outputPath": "dist/apps/app8/browser"
+          },
+          "configurations": {
+            "production": {},
+            "development": {
+              "sourceMap": true
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "build": {
+          "builder": "@epikodelabs/streamix/vue/builder:application",
+          "options": {
+            "delegateTarget": "app8:application",
+            "sourceRoot": "projects/apps/app8/src"
+          },
+          "configurations": {
+            "production": {
+              "introspection": false
+            },
+            "development": {
+              "introspection": true,
+              "sourceMap": true
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@epikodelabs/streamix/vue/builder:application",
+          "options": {
+            "delegateTarget": "app8:dev-server",
+            "sourceRoot": "projects/apps/app8/src"
+          },
+          "configurations": {
+            "production": {
+              "introspection": false
+            },
+            "development": {
+              "introspection": true
+            }
+          },
+          "defaultConfiguration": "development"
+        },
+        "dev-server": {
+          "builder": "@epikodelabs/streamix/vue/builder:vite",
+          "options": {
+            "root": ".angular/.streamix/app8/src",
+            "serve": true,
+            "port": 4200
+          },
+          "configurations": {
+            "production": {},
+            "development": {}
+          },
+          "defaultConfiguration": "development"
+        }
+      }
+    },
     "streamix": {
       "projectType": "library",
       "root": "projects/libraries/streamix",
