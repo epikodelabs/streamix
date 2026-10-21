@@ -76,7 +76,8 @@ streamix/
 │       ├── app4/                   # Travel blog — scroll-driven DOM animations
 │       ├── app5/                   # HTTP client — networking demos in React
 │       ├── app6/                   # Rainbow clicker — compiled React JSX
-│       └── app7/                   # React JSX lab — direct atom reads
+│       ├── app7/                   # React JSX lab — direct atom reads
+│       └── app8/                   # Vue task board — compiled Vue SFCs
 ├── docs/                           # VitePress documentation source
 ├── scripts/                        # Build, docs, and packaging automation
 ├── dist/                           # Build output (library, apps, API docs)
@@ -109,12 +110,14 @@ npm run docs:build
 
 The static site lands in `dist/.vitepress/dist/`.
 
-All seven demos enable Streamix introspection with `ng serve appN` or
+All eight demos enable Streamix introspection with `ng serve appN` or
 `ng build appN --configuration development`. The compiler adds source metadata
 and mounts the inspector automatically; the runtime API is available as
 `window.__streamix`. Production builds disable introspection. App5 and app6 use
 React; app5 keeps each request card's output in a component-local Streamix scope
-so its state is inspectable even before starting a request.
+so its state is inspectable even before starting a request. App8 is a native
+Vue project whose SFCs are compiled by the Streamix Vue builder and bundled by
+Vite.
 
 ---
 

@@ -27,7 +27,7 @@ let browser;
 try {
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  for (const app of process.argv.includes('--app6') ? [6] : production ? [5, 6] : [1, 2, 3, 4, 5, 6, 7]) {
+  for (const app of process.argv.includes('--app6') ? [6] : production ? [5, 6] : [1, 2, 3, 4, 5, 6, 7, 8]) {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -48,6 +48,19 @@ try {
       await page.waitForFunction(() => document.querySelector('.output')?.textContent.includes('Inspector test post'));
       assert(await page.evaluate(() => window.__streamix.inspect().some(entry => entry.value.includes('Inspector test post'))),
         'The inspector must expose the response output');
+    }
+    if (app === 8 && !production) {
+      assert(await page.evaluate(() => window.__streamix.inspect().some(entry => entry.kind === 'scope')),
+        'The Vue demo must expose its board scope');
+      await page.getByPlaceholder('What needs doing?').fill('Inspector task');
+      await page.getByRole('button', { name: 'Add task' }).click();
+      await page.waitForFunction(() => document.querySelector('.tasks')?.textContent.includes('Inspector task'));
+      const kinds = await page.evaluate(() => new Set(window.__streamix.inspect().map(entry => entry.kind)));
+      for (const kind of ['atom', 'scope', 'derived', 'flow']) {
+        assert(kinds.has(kind), `The Vue demo must expose a ${kind} declaration`);
+      }
+      await page.locator('.filter select').selectOption('active');
+      await page.waitForFunction(() => document.querySelectorAll('.tasks li').length === 1);
     }
     if (app === 6) {
       if (process.argv.includes('--screenshot')) await page.screenshot({ path: resolve(root, 'app6-layout.png') });
