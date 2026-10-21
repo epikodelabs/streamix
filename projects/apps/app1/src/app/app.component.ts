@@ -642,7 +642,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         const rawUnsubscribe = pipe(value$, tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })).subscribe(() => { });
         this.appScope.cleanups.add(() => rawUnsubscribe());
         // Debounced results
-        const unsubscribe = pipe(value$, debounce(400), filter(q => q.length > 1), tap(() => { this.debouncedSearchCount++; this.cdr.detectChanges(); }), tap((query: string) => {
+        const unsubscribe = pipe(value$, debounce(400), filter((q: string) => q.length > 1), tap(() => { this.debouncedSearchCount++; this.cdr.detectChanges(); }), tap((query: string) => {
             this.searchResults.unshift(`Matched "${query}" (${Math.floor(Math.random() * 50)} results)`);
             if (this.searchResults.length > 5)
                 this.searchResults.pop();
