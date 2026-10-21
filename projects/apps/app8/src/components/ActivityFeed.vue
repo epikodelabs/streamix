@@ -12,5 +12,6 @@ defineProps<{ entries: Entry[] }>();
         <span class="text">{{ entry.text }}</span>
       </li>
     </ul>
+    <p v-if="entries.length === 0" class="empty">Use the board — actions show up here.</p>
   </section>
 </template>
