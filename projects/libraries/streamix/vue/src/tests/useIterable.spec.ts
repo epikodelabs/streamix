@@ -1,5 +1,6 @@
 import {
   atom,
+  flow,
   type Atom,
 } from '@epikodelabs/streamix';
 import {
@@ -117,6 +118,22 @@ describe('useIterable', () => {
     const value = vueScope.run(() => useIterable(source, -1))!;
 
     expect(value.value).toBe(-1);
+  });
+
+  it('keeps serving the last emission after a completed flow disposes itself', async () => {
+    const completed = flow(async function* () {
+      yield 'Loading tasks…';
+      yield 'Tasks synced';
+    });
+
+    const value = vueScope.run(() => useIterable(completed))!;
+
+    await flushMicrotasks();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The finished flow disposed its backing atom; the ref must answer with
+    // the final emission instead of throwing into every later render.
+    expect(value.value).toBe('Tasks synced');
   });
 
   it('consumes a plain async iterable and exposes its latest emission', async () => {

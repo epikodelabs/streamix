@@ -109,25 +109,50 @@ function traceValue(value: unknown): string {
   }
 }
 
+function isDisposed(source: DependencySource<unknown>): boolean {
+  return (source as { disposed?: unknown }).disposed === true;
+}
+
 function dependencyRef<T>(
   source: DependencySource<T>,
   initialValue: T | undefined,
   owned: boolean,
   sourceName = 'Vue reactive source',
 ): IterableBridge<T> {
+  // Mirrors every emission so reads survive disposal: a completed flow
+  // disposes its backing atom, and the last emission must stay readable
+  // through the ref instead of throwing inside a render effect.
+  let lastValue: T | undefined;
+  let lastKnown = false;
   const bridge = readonlyBridgeRef(() => {
-    const value = source.value;
-    return value === undefined && initialValue !== undefined
-      ? initialValue
-      : value;
+    if (isDisposed(source)) {
+      return (lastKnown ? lastValue : initialValue) as T;
+    }
+    try {
+      const value = source.value;
+      return value === undefined && initialValue !== undefined ? initialValue : value;
+    } catch {
+      return (lastKnown ? lastValue : initialValue) as T;
+    }
   });
 
   let subscribing = true;
   recordStreamixDevtoolsEvent({ type: 'subscription', source: sourceName });
   const subscription = source.subscribe(() => {
+    try {
+      lastValue = source.value;
+      lastKnown = true;
+    } catch {
+      // The source disposed between the emission and this read; the mirror
+      // keeps the previous emission readable.
+    }
     if (!subscribing) {
       bridge.invalidate();
-      recordStreamixDevtoolsEvent({ type: 'write', source: sourceName, value: traceValue(source.value) });
+      recordStreamixDevtoolsEvent({
+        type: 'write',
+        source: sourceName,
+        value: traceValue(isDisposed(source) ? lastValue : source.value),
+      });
     }
   });
   subscribing = false;
