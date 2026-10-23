@@ -15,6 +15,29 @@ const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms))
 
 describe('Atom System', () => {
   describe('atom()', () => {
+    it('delivers values written by a subscriber callback sequentially without re-entering it', () => {
+      const a = atom(0);
+      const order: number[] = [];
+      let reentered = false;
+
+      a.subscribe((current) => {
+        if (current > 0 && current < 50) {
+          a.set(current + 1);
+          // If the runtime re-entered this callback synchronously, `order`
+          // would already contain the follow-up value at this point.
+          reentered = order.includes(current + 1);
+        }
+        order.push(current);
+      });
+
+      a.set(1);
+
+      expect(reentered).toBe(false);
+      expect(order).toEqual(
+        Array.from({ length: 51 }, (_, index) => index),
+      );
+    });
+
     it('should create an atom with initial value', () => {
       const a = atom(42);
       expect(a.value).toBe(42);
@@ -210,6 +233,19 @@ describe('Atom System', () => {
   });
 
   describe('derived()', () => {
+    it('recovers a derived atom whose first evaluation threw once a dependency changes', () => {
+      const source = atom(1);
+      const d = derived(() => {
+        if (source.value === 1) throw new Error('not ready');
+        return source.value * 2;
+      });
+
+      expect(() => d.value).toThrowError('not ready');
+
+      source.set(2);
+      expect(d.value).toBe(4);
+    });
+
     it('should track dependencies read outside derived scopes', () => {
       const left = atom(2);
       const right = atom(3);
@@ -962,6 +998,23 @@ describe('Atom System', () => {
 
 
   describe('transaction()', () => {
+    it('updates previous for writes made by subscribers during a transaction commit', () => {
+      const a = atom(0);
+      const seen: Array<[number, number]> = [];
+
+      a.subscribe((current, previous) => {
+        if (current === 1) a.set(2);
+        // Verify the immutable snapshot delivered with this notification.
+        // Reading a.previous after the nested write observes the newer atom state.
+        seen.push([current, previous]);
+      });
+
+      transaction(() => a.set(1));
+
+      expect(seen).toEqual([[0, 0], [1, 0], [2, 1]]);
+      expect(a.previous).toBe(1);
+    });
+
     it('should batch discrete atom writes into one notification', () => {
       const a = atom(0);
       const values: Array<[number, number]> = [];

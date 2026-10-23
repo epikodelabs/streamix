@@ -1,6 +1,6 @@
 import { internalRuntime } from './runtime';
 import { setRuntimeInstrumentationEnabled } from './diagnostics';
-import { streamixDevtoolsEnabled, streamixDevtoolsSnapshot, subscribeStreamixDevtools, type StreamixDevtoolsEvent } from '../devtools';
+import { streamixDevtoolsEnabled, streamixDevtoolsSnapshot, subscribeStreamixDevtools, type StreamixDevtoolsEvent } from './devtools';
 
 export interface StreamixSourceMetadata {
   readonly kind: 'scope' | 'atom' | 'derived' | 'flow' | 'operator' | 'source' | 'subscription';

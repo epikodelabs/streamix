@@ -1,8 +1,18 @@
+import { collect } from './helpers/operator';
 import { finalize, flow, from, interval, iterate, map, pipe } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 describe("dispose", () => {
+  it('finalize operators are reusable across separate streams', async () => {
+    let calls = 0;
+    const fin = finalize(() => { calls++; });
+
+    expect(await collect(iterate(pipe(from([1]), fin)))).toEqual([1]);
+    expect(await collect(iterate(pipe(from([9, 9]), fin)))).toEqual([9, 9]);
+    expect(calls).toBe(2);
+  });
+
   it("should call finalizer on normal completion", async () => {
     const called: string[] = [];
     const atom = pipe(from([1, 2, 3]), finalize(() => { called.push("finalized"); }));

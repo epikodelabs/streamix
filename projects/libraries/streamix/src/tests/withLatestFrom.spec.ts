@@ -1,6 +1,27 @@
+import { collect, sleep } from './helpers/operator';
 import { createAsyncPushable, from, iterate, pipe, withLatestFrom } from '@epikodelabs/streamix';
 
 describe('withLatestFrom', () => {
+  it('withLatestFrom completes when the main source completes before an auxiliary emits', async () => {
+    const never: AsyncIterable<number> = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => new Promise<IteratorResult<number>>(() => {}),
+          return: async () => ({ done: true, value: undefined as any }),
+        };
+      },
+    };
+
+    const values = await Promise.race([
+      collect(iterate(pipe(from(['a', 'b']), withLatestFrom(never)))),
+      sleep(50).then(() => {
+        throw new Error('withLatestFrom timed out waiting for a silent auxiliary');
+      }),
+    ]);
+
+    expect(values).toEqual([]);
+  });
+
   it('should combine emissions with the latest value from another stream', async () => {
     const atom = pipe(
       from([1, 2, 3]),

@@ -1,8 +1,20 @@
+import { collect } from './helpers/operator';
 import { atom, DONE, flow, from, iterate, NEXT, pipe, switchMap } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 describe('switchMap', () => {
+  it('switchMap waits for an in-flight promise projection before completing', async () => {
+    const values = await collect<unknown>(iterate(pipe(
+      from([1]),
+      switchMap((value: number) => new Promise<number[]>((resolve) => {
+        setTimeout(() => resolve([value, value * 10]), 30);
+      })),
+    )));
+
+    expect(values).toEqual([1, 10]);
+  });
+
   it('cancels a pending inner pull immediately without disposing the outer flow', async () => {
     const source = atom(false);
     let pulled = false;

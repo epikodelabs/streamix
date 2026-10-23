@@ -1,8 +1,14 @@
+import { collect } from './helpers/operator';
 import { atom, forkJoin, from, iterate } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
 describe('forkJoin', () => {
+  it('forkJoin with no sources completes without emitting', async () => {
+    expect(await collect(iterate(forkJoin()))).toEqual([]);
+    expect(await collect(iterate(forkJoin([])))).toEqual([]);
+  });
+
   it('should emit last values from all sources', async () => {
     const results: any[] = [];
 

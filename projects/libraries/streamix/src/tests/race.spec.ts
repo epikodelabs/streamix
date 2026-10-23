@@ -1,8 +1,32 @@
-import { atom, flow, from, race, type Writable } from '@epikodelabs/streamix';
+import { sleep } from './helpers/operator';
+import { atom, flow, from, race, type Writable, iterate } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
 describe('race', () => {
+  it('race delivers the winner without waiting for loser teardown', async () => {
+    async function* fast() {
+      yield 'fast';
+    }
+    async function* slow() {
+      await sleep(300);
+      yield 'slow';
+    }
+
+    const started = Date.now();
+    const values: string[] = [];
+    for await (const value of iterate(race(fast(), slow()) as AsyncIterable<string>)) {
+      values.push(value);
+      break;
+    }
+    const elapsed = Date.now() - started;
+
+    expect(values).toEqual(['fast']);
+    // The unfixed implementation blocked the winner behind the loser's
+    // in-flight 300ms pull before delivering the first value.
+    expect(elapsed).toBeLessThan(150);
+  });
+
   it('should complete without emitting when called with no streams', async () => {
     const results: unknown[] = [];
 

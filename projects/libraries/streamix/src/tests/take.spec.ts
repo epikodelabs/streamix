@@ -1,6 +1,22 @@
+import { collect } from './helpers/operator';
 import {from, iterate, pipe, take} from '@epikodelabs/streamix';
 
 describe('take', () => {
+  it('take(n) consumes exactly n values from the source', async () => {
+    let produced = 0;
+    function* source() {
+      for (let i = 1; ; i++) {
+        produced++;
+        yield i;
+      }
+    }
+
+    const values = await collect(iterate(pipe(source(), take(2))));
+
+    expect(values).toEqual([1, 2]);
+    expect(produced).toBe(2);
+  });
+
   it('should take specified number of emissions', async () => {
     const atom = pipe(from([1, 2, 3, 4, 5]), take(3));
 

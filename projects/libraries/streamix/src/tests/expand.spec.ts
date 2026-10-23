@@ -1,6 +1,19 @@
+import { collect } from './helpers/operator';
 import {expand, from, map, pipe, iterate} from '@epikodelabs/streamix';
 
 describe('expand', () => {
+  it('expand depth traversal explores children before siblings', async () => {
+    // Tree: A -> [B, C]; B -> [D]. Depth-first visits A, B, D, C.
+    const children: Record<string, string[]> = { A: ['B', 'C'], B: ['D'], C: [], D: [] };
+
+    const values = await collect(iterate(pipe(
+      from(['A']),
+      expand((node: string) => children[node] ?? []),
+    )));
+
+    expect(values).toEqual(['A', 'B', 'D', 'C']);
+  });
+
   it('should handle errors thrown by the project function', async () => {
     const error = new Error('Project function error');
     const project = (value: number) => {

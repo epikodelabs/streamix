@@ -3,7 +3,7 @@ import {
   streamixDevtoolsEnabled,
   streamixDevtoolsSnapshot,
   subscribeStreamixDevtools,
-} from '../lib/devtools';
+} from '../lib/runtime/devtools';
 
 describe('Streamix devtools store', () => {
   it('records a bounded, timestamped trace in development builds', () => {

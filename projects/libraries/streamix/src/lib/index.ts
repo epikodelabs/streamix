@@ -1,5 +1,5 @@
 export * from './atoms';
-export * from './devtools';
+export * from './runtime/devtools';
 export * from './factories';
 export * from './operators';
 export * from './primitives';

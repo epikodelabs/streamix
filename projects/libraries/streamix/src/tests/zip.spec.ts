@@ -1,8 +1,31 @@
-import { atom, from, zip } from '@epikodelabs/streamix';
+import { collect, sleep } from './helpers/operator';
+import { atom, from, zip, iterate, createAsyncPushable } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
 describe('zip', () => {
+  it('zip buffers multiple values from one source while waiting for its partner', async () => {
+    const left = createAsyncPushable<number>();
+    const right = createAsyncPushable<string>();
+
+    const collected = collect(iterate(zip(left, right)));
+
+    left.push(1);
+    left.push(2);
+    await sleep(10);
+    right.push('x');
+    right.push('y');
+    await sleep(10);
+
+    // zip remains open while another pair could still be formed. Complete both
+    // push sources after the buffered pairs have been supplied.
+    left.dispose();
+    right.dispose();
+
+    const values = await collected;
+    expect(values).toEqual([[1, 'x'], [2, 'y']]);
+  });
+
   it('should zip values from multiple streams', async () => {
     const stream1$ = from([1, 2, 3]);
     const stream2$ = from(['a', 'b', 'c']);
