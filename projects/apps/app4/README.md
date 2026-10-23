@@ -7,7 +7,7 @@ Angular component template with scroll-driven streamix atoms and DOM operators.
 - **`on('animationFrame')`** — smooth interpolation loops
 - **`on('intersection')`** — reveal-on-scroll triggers
 - **`addListener`** — focus, blur, mouseenter, mouseleave streams
-- **`merge`** + **`filter`** + **`tap`** — coordinated animation state
+- **`arbitrate`** + **`filter`** + **`tap`** — coordinated animation state
 
 ## Run
 

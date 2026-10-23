@@ -109,11 +109,11 @@ interface AppState {
           </div>
         </section>
 
-        <!-- Event Buffer: bufferCount + merge -->
+        <!-- Event Buffer: bufferCount + arbitrate -->
         <section class="card">
           <div class="card-header">
             <h2>Event Buffer</h2>
-            <span class="badge">bufferCount + merge</span>
+            <span class="badge">bufferCount + arbitrate</span>
           </div>
           <p class="tooltip">Click the buttons to emit events. They are buffered into batches of 5 via bufferCount before display.</p>
           <div class="buffer-controls">
