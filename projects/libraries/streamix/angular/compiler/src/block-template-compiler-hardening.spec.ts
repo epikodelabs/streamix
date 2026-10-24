@@ -1,6 +1,7 @@
 import {
   compileSxBlockTemplate,
 } from './block-template-compiler';
+import { jsStringLiteral } from './codegen';
 
 describe('compiled structural template diagnostics', () => {
   it('supports nested property interpolation', () => {
@@ -67,5 +68,18 @@ describe('compiled structural template diagnostics', () => {
 
     expect(result.nested.length).toBe(1);
     expect(result.nested[0].kind).toBe('conditional');
+  });
+
+  it('embeds string literals without script-context breakouts', () => {
+    const hostile = 'a</script>b\u2028c/d>e';
+    const literal = jsStringLiteral(hostile);
+
+    expect(literal).not.toMatch(/[<>/]/);
+    expect(literal).not.toContain('\u2028');
+    expect(literal).not.toContain('\u2029');
+    // The escape sequences must reconstruct the identical runtime value.
+    expect((0, eval)(literal)).toBe(hostile);
+    expect(jsStringLiteral('user.profile.name')).toBe('"user.profile.name"');
+    expect(jsStringLiteral(undefined)).toBe('undefined');
   });
 });

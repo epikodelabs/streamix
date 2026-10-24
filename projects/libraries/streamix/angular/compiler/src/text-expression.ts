@@ -1,3 +1,4 @@
+import { jsStringLiteral } from './codegen';
 import { localPathSpans } from './expression-spans';
 import type { SxReactiveSourceResolver } from './source-resolution';
 
@@ -332,7 +333,7 @@ export function rewriteLocalReads(
     }
 
     rewritten += expression.slice(cursor, span.start);
-    rewritten += `ɵsxReadLocal(${contextName}, ${JSON.stringify(span.text)})`;
+    rewritten += `ɵsxReadLocal(${contextName}, ${jsStringLiteral(span.text)})`;
     cursor = span.end;
   }
 

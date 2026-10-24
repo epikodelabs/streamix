@@ -19,6 +19,7 @@ import {
   parseNativeEventBinding,
   splitArguments,
 } from './event-binding';
+import { jsStringLiteral } from './codegen';
 
 import type { SxReactiveSourceResolver } from './source-resolution';
 import {
@@ -816,11 +817,11 @@ function boundInputKind(
     const pattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
     let cursor = 0, match: RegExpExecArray | null;
     while ((match = pattern.exec(inner))) {
-      if (match.index > cursor) pieces.push(JSON.stringify(inner.slice(cursor, match.index)));
+      if (match.index > cursor) pieces.push(jsStringLiteral(inner.slice(cursor, match.index)));
       pieces.push(`(${match[1].trim()})`);
       cursor = match.index + match[0].length;
     }
-    if (cursor < inner.length) pieces.push(JSON.stringify(inner.slice(cursor)));
+    if (cursor < inner.length) pieces.push(jsStringLiteral(inner.slice(cursor)));
     expression = pieces.join(' + ') || '""';
   }
 
@@ -974,13 +975,13 @@ function compileBlockInput(
     if (kind === 'property') {
       // Loop-local reads are `unknown`; index through a widened element so the
       // generated body type-checks against typed DOM properties.
-      state.updates.push(`(${variable} as unknown as Record<string, unknown>)[${JSON.stringify(name)}] = ${local};`);
+      state.updates.push(`(${variable} as unknown as Record<string, unknown>)[${jsStringLiteral(name)}] = ${local};`);
     } else if (kind === 'class') {
-      state.updates.push(`${variable}.classList.toggle(${JSON.stringify(name)}, Boolean(${local}));`);
+      state.updates.push(`${variable}.classList.toggle(${jsStringLiteral(name)}, Boolean(${local}));`);
     } else if (kind === 'style') {
-      state.updates.push(`{ const value = ${local}; if (value == null || value === false) ${variable}.style.removeProperty(${JSON.stringify(name)}); else ${variable}.style.setProperty(${JSON.stringify(name)}, String(value)); }`);
+      state.updates.push(`{ const value = ${local}; if (value == null || value === false) ${variable}.style.removeProperty(${jsStringLiteral(name)}); else ${variable}.style.setProperty(${jsStringLiteral(name)}, String(value)); }`);
     } else {
-      state.updates.push(`{ const value = ${local}; if (value == null) ${variable}.removeAttribute(${JSON.stringify(name)}); else ${variable}.setAttribute(${JSON.stringify(name)}, String(value)); }`);
+      state.updates.push(`{ const value = ${local}; if (value == null) ${variable}.removeAttribute(${jsStringLiteral(name)}); else ${variable}.setAttribute(${jsStringLiteral(name)}, String(value)); }`);
     }
   } else {
     throw new Error(

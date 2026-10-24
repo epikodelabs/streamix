@@ -10,6 +10,7 @@ import type {
 } from './block-template-compiler';
 import {
   indent,
+  jsStringLiteral,
 } from './codegen';
 import { HELD_KEY_MODIFIERS, KEY_MODIFIER_KEYS } from './event-binding';
 import type {
@@ -79,7 +80,7 @@ function elementPathExpression(path: SxElementPath): string {
 function targetExpression(parsed: ParsedSxTemplate, nodeId: string): string {
   const selector = parsed.nodeSelectors?.[nodeId];
   return selector
-    ? `host.querySelector(${JSON.stringify(selector)})`
+    ? `host.querySelector(${jsStringLiteral(selector)})`
     : elementPathExpression(parsed.nodePaths[nodeId]);
 }
 
@@ -157,32 +158,32 @@ export function emitComponentSetup(
         break;
       case 'property':
         lines.push(
-          `  ɵsxProperty(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${source(entry.source)});`,
+          `  ɵsxProperty(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${source(entry.source)});`,
         );
         break;
       case 'property-expression':
         lines.push(
-          `  ɵsxPropertyExpression(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+          `  ɵsxPropertyExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
         );
         break;
       case 'attribute':
         lines.push(
-          `  ɵsxAttribute(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${source(entry.source)});`,
+          `  ɵsxAttribute(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${source(entry.source)});`,
         );
         break;
       case 'attribute-expression':
         lines.push(
-          `  ɵsxAttributeExpression(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+          `  ɵsxAttributeExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
         );
         break;
       case 'class':
         lines.push(
-          `  ɵsxClass(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${source(entry.source)});`,
+          `  ɵsxClass(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${source(entry.source)});`,
         );
         break;
       case 'class-expression':
         lines.push(
-          `  ɵsxClassExpression(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+          `  ɵsxClassExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
         );
         break;
       case 'class-map':
@@ -192,12 +193,12 @@ export function emitComponentSetup(
         break;
       case 'style':
         lines.push(
-          `  ɵsxStyle(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${source(entry.source)});`,
+          `  ɵsxStyle(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${source(entry.source)});`,
         );
         break;
       case 'style-expression':
         lines.push(
-          `  ɵsxStyleExpression(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+          `  ɵsxStyleExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
         );
         break;
       case 'style-map':
@@ -207,7 +208,7 @@ export function emitComponentSetup(
         break;
       case 'event':
         lines.push(
-          `  ɵsxListener(table, ${entry.slot}, ${entry.node}, ${JSON.stringify(entry.name)}, ${eventHandler(entry)}, ${eventOptions(entry)}, server);`,
+          `  ɵsxListener(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${eventHandler(entry)}, ${eventOptions(entry)}, server);`,
         );
         break;
     }
@@ -452,7 +453,7 @@ function blockBindingLines(
     ...compiled.bindings.map((binding, slot) => {
       if (binding.kind === 'event') {
         return (
-          `${pad}ɵsxListener(blockTable, ${slot}, ${binding.node}, ${JSON.stringify(binding.name)}, ` +
+          `${pad}ɵsxListener(blockTable, ${slot}, ${binding.node}, ${jsStringLiteral(binding.name)}, ` +
           `${eventHandlerBody(binding.handler, binding.modifiers)}, undefined, server);`
         );
       }
@@ -464,8 +465,8 @@ function blockBindingLines(
           class: 'ɵsxClass', style: 'ɵsxStyle',
         }[binding.kind];
         return binding.dependencies
-          ? `${pad}${helper}Expression(blockTable, ${slot}, ${binding.node}, ${JSON.stringify(binding.name)}, ${sources(binding.dependencies)}, () => ${reader});`
-          : `${pad}${helper}(blockTable, ${slot}, ${binding.node}, ${JSON.stringify(binding.name)}, ctx.${binding.source});`;
+          ? `${pad}${helper}Expression(blockTable, ${slot}, ${binding.node}, ${jsStringLiteral(binding.name)}, ${sources(binding.dependencies)}, () => ${reader});`
+          : `${pad}${helper}(blockTable, ${slot}, ${binding.node}, ${jsStringLiteral(binding.name)}, ctx.${binding.source});`;
       }
 
       // Block bodies build their own DOM, so the binding targets the text
