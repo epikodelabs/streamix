@@ -295,13 +295,13 @@ describe('Atom System', () => {
       sum.dispose();
     });
 
-    it('should support callable derived scope reads for single and multiple atoms', () => {
+    it('should track single and multiple atom value reads', () => {
       const a = atom(1);
       const b = atom(2);
 
-      const total = derived(($: DerivedScope) => {
-        const single = $(a);
-        const [left, right] = $(a, b);
+      const total = derived(() => {
+        const single = a.value;
+        const [left, right] = [a.value, b.value];
         return single + left + right;
       });
 
@@ -478,7 +478,7 @@ describe('Atom System', () => {
         },
       };
 
-      const doubled = derived(($: any) => $(foreignAtom) * 2);
+      const doubled = derived((self: DerivedScope) => self.read(foreignAtom) * 2);
 
       expect(doubled.value).toBe(2);
 
@@ -629,15 +629,15 @@ describe('Atom System', () => {
           yield await new Promise<number>(resolve => { emitRight = resolve; });
         }
       });
-      const total = derived(($: DerivedScope) => {
-        const leftValue = $(left);
-        const rightValue = $(right);
+      const total = derived(() => {
+        const leftValue = left.value;
+        const rightValue = right.value;
         return leftValue === undefined || rightValue === undefined
           ? undefined
           : leftValue + rightValue;
       });
-      const labelledTotal = derived(($: DerivedScope) => {
-        const value = $(total);
+      const labelledTotal = derived(() => {
+        const value = total.value;
         return value === undefined ? 'pending' : `total:${value}`;
       });
       const values: string[] = [];
@@ -675,12 +675,12 @@ describe('Atom System', () => {
 
     it('should allow a flow-backed atom to depend on a derived atom', async () => {
       const source = atom(2);
-      const doubled = derived(($: DerivedScope) => $(source) * 2);
+      const doubled = derived(() => source.value * 2);
       const asynchronous = flow(async function* () {
         yield doubled.value + 1;
       });
-      const result = derived(($: DerivedScope) => {
-        const value = $(asynchronous);
+      const result = derived(() => {
+        const value = asynchronous.value;
         return value === undefined ? undefined : value * 10;
       });
       const values: Array<number | undefined> = [];

@@ -101,18 +101,15 @@ form.next({ ...form.value, name: 'Grace' });
 import { atom, derived } from '@epikodelabs/streamix';
 
 const count = atom(2);
-const doubled = derived($ => $(count) * 2);
-const label = derived($ => `${$(count)} clicks`);
+const doubled = derived(() => count * 2);
+const label = derived(() => `${count} clicks`);
 </script>
 
 <template>{{ doubled }} — {{ label }}</template>
 ```
 
-`$` receives and tracks an atom reference, then returns its current value.
-Use `$(count)` in authored examples because it is explicit and works without
-framework-specific shorthand. The Vue compiler also supports bare `count` as a
-convenience inside recognized `derived` callbacks, lowering it to a value read.
-It never rewrites `$(count)` to `$(count.value)`.
+The Vue compiler turns direct atom references inside `derived` callbacks into
+tracked value reads, such as `count.value`.
 
 ## What the compiler adopts
 
@@ -173,7 +170,7 @@ paths, and other code outside Vue's tracked setup/render path.
 | Use case | Use |
 | --- | --- |
 | Template value, event, or supported `v-model` | Raw atom or scope field |
-| Derived dependency | `$(source)` inside `derived` |
+| Derived dependency | `source` inside `derived` |
 | Editable object members | A `scope` or explicit whole-object atom update |
 | Plain `AsyncIterable` | `useIterable` in setup |
 | Outside a Vue effect scope | `createIterableBridge` and `dispose()` |

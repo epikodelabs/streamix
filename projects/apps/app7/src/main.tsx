@@ -9,7 +9,7 @@ import { Button, Card, Input, Select, SelectContent, SelectItem, SelectTrigger, 
 let title = atom("Native atom property");
 let clicks = atom(0);
 let lastAction = atom("Waiting for input");
-const summary = derived($ => `${$(title)} · ${$(clicks)} actions`);
+const summary = derived(() => `${title} · ${clicks} actions`);
 
 // Write-operator targets: every compound, update, and logical assignment on a
 // `let` atom lowers to an atom emission.

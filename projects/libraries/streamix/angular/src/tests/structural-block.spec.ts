@@ -28,6 +28,40 @@ function elementBlock(tag: string, text: string): SxBlockInstance {
 }
 
 idescribe('sx structural runtime', () => {
+  it('applies Angular content styles to generated sparkline bars and descendants', () => {
+    const host = document.createElement('div');
+    host.setAttribute('_ngcontent-test', '');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+    const style = document.createElement('style');
+    style.textContent = '.spark-bar[_ngcontent-test] { display: block; width: 12px; background: rgb(1, 2, 3); }';
+    document.head.appendChild(style);
+    document.body.appendChild(host);
+    const source = atom([1]);
+    const block = ɵcreateSxKeyedBlock(anchor, source, {
+      create() {
+        const instance = elementBlock('span', '');
+        const bar = instance.first as HTMLElement;
+        bar.className = 'spark-bar';
+        bar.style.height = '20px';
+        bar.appendChild(document.createElement('i'));
+        return instance;
+      },
+    }, (_index, item) => item);
+    try {
+      const bar = host.querySelector('span')!;
+      expect(bar.hasAttribute('_ngcontent-test')).toBeTrue();
+      expect(bar.firstElementChild!.hasAttribute('_ngcontent-test')).toBeTrue();
+      expect(getComputedStyle(bar).width).toBe('12px');
+      expect(getComputedStyle(bar).backgroundColor).toBe('rgb(1, 2, 3)');
+    } finally {
+      block.destroy();
+      source.dispose();
+      host.remove();
+      style.remove();
+    }
+  });
+
   it('creates and destroys a direct value block', () => {
     const host = document.createElement('div');
     const anchor = document.createComment('sx');

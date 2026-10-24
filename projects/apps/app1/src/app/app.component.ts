@@ -21,7 +21,6 @@ interface Batch {
 
 interface AppState {
     metrics: Metric[];
-    sparkline: { height: string }[];
     rawSearchCount: number;
     debouncedSearchCount: number;
     rawSearchLabel: string;
@@ -75,11 +74,12 @@ interface AppState {
               </div>
             }
           </div>
-          <div class="sparkline" aria-hidden="true">
-            @for (point of model.sparkline; track $index) {
-              <span class="spark-bar" [style.height]="point.height"></span>
-            }
-          </div>
+          <svg class="sparkline" viewBox="0 0 300 40" preserveAspectRatio="none"
+            role="img" aria-label="Live throughput over the last 30 samples">
+            <polyline #sparklineLine points="0,20 300,20" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+          </svg>
         </section>
 
         <!-- Search Stream: debounce + filter -->
@@ -299,14 +299,20 @@ interface AppState {
     .metric-value.up { color: var(--success); }
     .metric-value.down { color: var(--error); }
 
-    .sparkline { height: 40px; display: flex; align-items: flex-end; gap: 2px; color: var(--accent); }
-    .spark-bar {
-      flex: 1;
-      min-height: 2px;
-      background: currentColor;
-      opacity: 0.7;
-      border-radius: 2px 2px 0 0;
-      transition: height 0.3s ease;
+    .sparkline {
+      display: block;
+      box-sizing: border-box;
+      width: 100%;
+      height: 88px;
+      padding: 12px;
+      color: var(--accent);
+      background-color: #101725;
+      background-image:
+        linear-gradient(rgba(139, 160, 200, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(139, 160, 200, 0.08) 1px, transparent 1px);
+      background-size: 100% 22px, 48px 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
     }
 
     .search-input {
@@ -476,6 +482,8 @@ interface AppState {
 export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     @ViewChild('searchInput')
     searchInput!: ElementRef<HTMLInputElement>;
+    @ViewChild('sparklineLine')
+    sparklineLine!: ElementRef<SVGPolylineElement>;
     @ViewChild('juliaCanvas')
     juliaCanvas!: ElementRef<HTMLCanvasElement>;
 
@@ -488,7 +496,6 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
             { name: 'Errors', display: '0.0', unit: '%', trend: 'flat' },
             { name: 'Active', display: '0', unit: 'conn', trend: 'flat' },
         ],
-        sparkline: [],
         rawSearchLabel: self => `Raw events: ${self.rawSearchCount}`,
         debouncedLabel: self => `Debounced: ${self.debouncedSearchCount}`,
         rawSearchCount: 0,
@@ -637,9 +644,15 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
             const min = Math.min(...this.sparklineHistory);
             const max = Math.max(...this.sparklineHistory);
             const range = max - min || 1;
-            this.model.sparkline = this.sparklineHistory.map(v => ({
-                height: `${8 + ((v - min) / range) * 92}%`,
-            }));
+            const samples = this.sparklineHistory.length === 1
+                ? [throughput, throughput]
+                : this.sparklineHistory;
+            const points = samples.map((value, index) => {
+                const x = (index / (samples.length - 1)) * 300;
+                const y = max === min ? 20 : 36 - ((value - min) / range) * 32;
+                return x.toFixed(2) + ',' + y.toFixed(2);
+            }).join(' ');
+            this.sparklineLine?.nativeElement.setAttribute('points', points);
         })).subscribe(() => { });
         this.model.cleanups.add(() => s());
     }

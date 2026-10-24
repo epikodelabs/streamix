@@ -675,7 +675,19 @@ function moveInstanceAfter(
     instance.last,
   );
 
+  // Direct DOM factories bypass Angular's renderer, so inherit the content
+  // scope used by the surrounding template before mounting their elements.
+  const contentAttributes = parent.nodeType === 1
+    ? (parent as Element).getAttributeNames().filter(name => name.startsWith('_ngcontent-'))
+    : [];
+
   for (const node of nodes) {
+    if (contentAttributes.length && node.nodeType === 1) {
+      const element = node as Element;
+      for (const target of [element, ...Array.from(element.querySelectorAll('*'))]) {
+        for (const attribute of contentAttributes) target.setAttribute(attribute, '');
+      }
+    }
     parent.insertBefore(node, before);
   }
 }

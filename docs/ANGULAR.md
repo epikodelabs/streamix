@@ -82,7 +82,7 @@ values in an adopted template:
 ```ts
 readonly quantity = atom(2);
 readonly price = atom(8);
-readonly total = derived($ => $(this.quantity) * $(this.price));
+readonly total = derived(() => this.quantity * this.price);
 ```
 
 ```html

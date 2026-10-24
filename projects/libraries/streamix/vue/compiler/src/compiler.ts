@@ -653,7 +653,9 @@ function factoryImports(script: string): FactoryImports {
       for (const item of bindings.elements) {
         const imported = (item.propertyName ?? item.name).text;
 
-        if (isStreamix && FACTORY_NAMES.has(imported as FactoryKind)) {
+        if (isStreamix && imported === 'pipe') {
+          aliases.set(item.name.text, 'flow');
+        } else if (isStreamix && FACTORY_NAMES.has(imported as FactoryKind)) {
           aliases.set(item.name.text, imported as FactoryKind);
         }
       }
@@ -798,7 +800,7 @@ function derivedAtomValueReadEdits(
   script: string,
   declarations: readonly ReactiveDeclaration[],
 ): readonly SpanEdit[] {
-  const atoms = new Set(declarations.filter(item => item.kind === 'atom').map(item => item.name));
+  const atoms = new Set(declarations.filter(item => item.kind !== 'scope').map(item => item.name));
   if (atoms.size === 0) return [];
   const file = ts.createSourceFile('script.ts', script, ts.ScriptTarget.Latest, true);
   const edits: SpanEdit[] = [];

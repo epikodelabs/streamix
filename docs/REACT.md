@@ -97,16 +97,15 @@ export function Profile() {
 
 ## 5. Derive values
 
-Use `derived` for values computed from Streamix sources. `$` receives an atom
-reference, tracks it as a dependency, and returns its current value.
+Use `derived` for values computed from Streamix sources. The compiler turns
+atom references in the callback into tracked value reads.
 
 ```tsx
-const label = derived($ => `${$(count)} clicks`);
+const label = derived(() => `${count} clicks`);
 return <output>{label}</output>;
 ```
 
-`$(count)` is intentionally an atom-reference argument. It is not compiled to
-`$(count.value)`.
+The callback is compiled to read `count.value`, which tracks the dependency.
 
 ## 6. Pass a source to a child
 
@@ -182,7 +181,7 @@ explicit boundary.
 | Use case | Use |
 | --- | --- |
 | JSX value or supported JSX write | Raw atom or scope field |
-| Derived dependency | `$(source)` inside `derived` |
+| Derived dependency | `source` inside `derived` |
 | Capitalized React child prop | Pass the atom/scope reference |
 | Custom element or third-party prop | `atomRef(source)` |
 | Timer, callback, proxy, or dynamic path | `read`, `write`, or a React hook |

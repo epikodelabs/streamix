@@ -237,14 +237,13 @@ describe("Streamix React adoption regressions", () => {
     expect(memo.code).toContain('__streamixTrace("render", "App")');
   });
 
-  it("preserves DerivedScope tracker arguments as atom references", () => {
+  it("lowers standalone derived callbacks to tracked value reads", () => {
     const result = transformReactJsx(`
       import { atom, derived } from "@epikodelabs/streamix";
       const count = atom(0);
-      const summary = derived($ => $(count));
+      const summary = derived(() => count);
     `);
 
-    expect(result.code).toContain('derived($ => $(count))');
-    expect(result.code).not.toContain('$(count.value)');
+    expect(result.code).toContain('derived(() => count.value)');
   });
 });

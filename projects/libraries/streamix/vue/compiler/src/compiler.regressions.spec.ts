@@ -211,15 +211,14 @@ describe('Vue production regression gates', () => {
     expect(result.code).toContain('derived(() => count.value * 2)');
   });
 
-  it('preserves DerivedScope tracker arguments as atom references', () => {
+  it('lowers standalone derived callbacks to tracked value reads', () => {
     const result = compile(`
       import { atom, derived } from '@epikodelabs/streamix';
       const count = atom(2);
-      const doubled = derived($ => $(count));
+      const doubled = derived(() => count);
     `, '{{ doubled }}');
     expectNoError(result);
-    expect(result.code).toContain('derived($ => $(count))');
-    expect(result.code).not.toContain('$(count.value)');
+    expect(result.code).toContain('derived(() => count.value)');
   });
 
   it('only imports generated bridges actually needed by the SFC', () => {
@@ -290,3 +289,19 @@ function originalPosition(mappings: string, generated: string, offset: number): 
   void source;
   return authored.split('\n').slice(0, found.line).reduce((sum, line) => sum + line.length + 1, 0) + found.column;
 }
+
+ describe('standalone derived source reads', () => {
+  it('tracks raw piped, flow, and derived atoms', () => {
+    const result = compile(`
+      import { atom, derived, flow, pipe, map } from '@epikodelabs/streamix';
+      const count = atom(2);
+      const doubled = derived(() => count * 2);
+      const source = flow([1, 2]);
+      const piped = pipe(count, map(value => value + 1));
+      const total = derived(() => { void piped; return doubled + source; });
+    `, '{{ total }}');
+    expectNoError(result);
+    expect(result.code).toContain('void piped.value');
+    expect(result.code).toContain('return doubled.value + source.value');
+  });
+});

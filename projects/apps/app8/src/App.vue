@@ -30,12 +30,12 @@ const board = scope({
 const liveSearch = pipe(search, debounce(200), startWith(""));
 
 // ── The visible list: one derived combining every control. ──
-const visible = derived(($) => {
-  const tasks = $(board.get("tasks")) as Task[];
-  const kind = $(filter);
-  const wanted = $(tag);
-  const sort = $(sortBy);
-  const query = $(liveSearch).trim().toLowerCase();
+const visible = derived(() => {
+  const tasks = board.tasks as Task[];
+  const kind = filter;
+  const wanted = tag;
+  const sort = sortBy;
+  const query = liveSearch.trim().toLowerCase();
 
   const matched = tasks.filter((task) =>
     (kind === "all" || task.done === (kind === "done")) &&
@@ -53,8 +53,8 @@ const visible = derived(($) => {
 });
 
 // ── Board stats: completion, sync health, average completion time. ──
-const stats = derived(($) => {
-  const tasks = $(board.get("tasks")) as Task[];
+const stats = derived(() => {
+  const tasks = board.tasks as Task[];
   const done = tasks.filter((task) => task.done);
   const finished = done.filter((task) => task.completedAt !== undefined);
   const avgMinutes = finished.length === 0 ? 0 : Math.round(
@@ -72,7 +72,7 @@ const stats = derived(($) => {
 
 // ── Undo: snapshots taken before every user mutation. ──
 const undoStack = atom<Task[][]>([]);
-const undoCount = derived(($) => $(undoStack).length);
+const undoCount = derived(() => undoStack.length);
 
 function checkpoint(): void {
   undoStack.set([...undoStack.value, (board.tasks as Task[]).map((task) => ({ ...task }))].slice(-10));
@@ -143,9 +143,9 @@ const persistence = pipe(
 // the last local save. ──
 const clock = pipe(interval(1000), map(() => Date.now()));
 
-const savedAgo = derived(($) => {
-  $(clock);
-  const at = $(lastSavedAt);
+const savedAgo = derived(() => {
+  void clock;
+  const at = lastSavedAt;
   if (at === 0) return "not saved yet";
   const seconds = Math.round((Date.now() - at) / 1000);
   if (seconds < 5) return "saved just now";

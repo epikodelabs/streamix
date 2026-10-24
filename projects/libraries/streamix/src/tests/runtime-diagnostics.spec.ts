@@ -88,9 +88,9 @@ describe('runtime inspection', () => {
     // this diamond, not absolute counts.
     const baselineNodes = internalRuntime.diagnostics.inspect(internalRuntime).graph.nodes;
     const source = atom(1);
-    const left = derived($ => $(source) * 2);
-    const right = derived($ => $(source) * 3);
-    const total = derived($ => $(left) + $(right));
+    const left = derived(() => source.value * 2);
+    const right = derived(() => source.value * 3);
+    const total = derived(() => left.value + right.value);
     total.value; // force evaluation so edges exist
     const mine = new Set<RuntimeNode>([source, left, right, total]);
 

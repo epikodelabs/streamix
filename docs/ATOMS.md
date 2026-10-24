@@ -81,10 +81,10 @@ console.log(count.value); // 42
 These represent computed values that automatically recalculate when their dependencies update:
 
 ```ts
-const fullName = derived($ => `${$(firstName)} ${$(lastName)}`);
+const fullName = derived(() => `${firstName} ${lastName}`);
 ```
 
-The `$` helper tracks dependencies dynamically. Its arguments are atom references, not values: `$(firstName)` both reads the current value and records `firstName` as a dependency. Framework compilers preserve those tracker arguments exactly; they never lower them to `$(firstName.value)`.
+Framework compilers turn direct atom references in derived callbacks into tracked value reads. Without a framework compiler, read each atom through `.value` explicitly.
 
 `derived()` is intentionally synchronous — the type signature rejects promise-returning callbacks. For sequencing, a generator form may yield atoms or promises before returning the computed value; for full `await`, cancellation, or restart semantics, move that work into `flow()`.
 

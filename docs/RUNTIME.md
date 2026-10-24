@@ -68,10 +68,11 @@ The graph keeps both directions of an edge:
 - **upstream:** sources read by a derived node;
 - **downstream:** derived nodes that must be invalidated when a source changes.
 
-Replacing edges instead of adding to them is important for conditional formulas:
+Replacing edges instead of adding to them is important for conditional formulas.
+With a framework compiler, write direct atom references:
 
 ```ts
-const label = derived($ => $(enabled) ? $(primary) : $(fallback));
+const label = derived(() => enabled ? primary : fallback);
 ```
 
 When `enabled` changes branches, `primary` is removed and `fallback` is added.

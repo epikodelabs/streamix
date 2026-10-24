@@ -23,14 +23,13 @@ describe('Angular derived shorthand', () => {
     expect(transformed).toContain('derived(() => price.value * quantity.value)');
   });
 
-  it('preserves DerivedScope tracker arguments as atom references', () => {
+  it('lowers standalone derived callbacks to tracked value reads', () => {
     const transformed = rewriteDerivedAtomReads(`
       const count = atom(2);
-      const summary = derived($ => $(count));
+      const summary = derived(() => count);
     `);
 
-    expect(transformed).toContain('derived($ => $(count))');
-    expect(transformed).not.toContain('$(count.value)');
+    expect(transformed).toContain('derived(() => count.value)');
   });
 });
 

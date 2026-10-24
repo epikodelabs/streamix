@@ -34,8 +34,8 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 console.log("=== 1. inspect(): the whole runtime in one call ===");
 const price = atom(10);
 const quantity = atom(2);
-const total = derived($ => $(price) * $(quantity));
-const label = derived($ => \`total = \${$(total)}\`);
+const total = derived(() => price.value * quantity.value);
+const label = derived(() => \`total = \${total.value}\`);
 total.value; label.value;
 
 const snapshot = internalRuntime.inspect();
