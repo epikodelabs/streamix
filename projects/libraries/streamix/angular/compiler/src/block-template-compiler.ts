@@ -708,6 +708,16 @@ function compileNestedValue(
   }
 
   if (state.allowLocals) {
+    // The expression is embedded verbatim in generated code as a local read,
+    // so only proven loop locals may appear in it — the same proof compiled
+    // block bindings already pass. Anything else (a component field, a global,
+    // a typo) would read the wrong scope or corrupt the generated expression.
+    if (!isProvenLocalExpression(text, state.localNames)) {
+      throw new Error(
+        `Unknown loop-local in sx block expression ${JSON.stringify(text)}. ` +
+        'Local conditions and collections may only read the enclosing loop context.',
+      );
+    }
     return { kind: 'local', expression: text };
   }
 
