@@ -51,7 +51,9 @@ function loweredValue(
 
   if (value.kind === 'local') {
     const read = rewriteLocalReads(value.expression, 'currentContext');
-    return `{ sources: [], read: () => ${cast ? `(${read}) as ${cast}` : read} }`;
+    const readExpression = cast ? `(${read}) as ${cast}` : read;
+
+    return `{ sources: [], read: () => ${readExpression} }`;
   }
 
   return (
