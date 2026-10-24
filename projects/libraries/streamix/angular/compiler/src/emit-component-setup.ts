@@ -30,13 +30,20 @@ function sources(dependencies: readonly string[] | undefined): string {
 }
 
 /**
+ * The casts a generated local read may take. Kept closed on purpose: this
+ * text is spliced verbatim into generated code, so only compiler-owned
+ * literals belong here — never template-derived text.
+ */
+type LoweredValueCast = 'Iterable<unknown>';
+
+/**
  * Emits a lowered reactive value: a direct source object, or an expression
  * object carrying its sources and a reader evaluated once per flush. `cast`
  * widens a `local` read whose runtime value only the call site knows.
  */
 function loweredValue(
   value: SxLoweredValue | SxCompiledValue,
-  cast?: string,
+  cast?: LoweredValueCast,
 ): string {
   if (value.kind === 'source') {
     return source(value.source);
