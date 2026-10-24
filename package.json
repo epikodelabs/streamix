@@ -54,7 +54,7 @@
     "@angular/compiler-cli": "^22.1.0",
     "@angular/language-service": "^22.2.2",
     "@angular/platform-server": "^22.2.0",
-    "@epikodelabs/testify": "^1.0.57",
+    "@epikodelabs/testify": "^1.0.58",
     "@types/jasmine": "^6.0.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.0.0",
