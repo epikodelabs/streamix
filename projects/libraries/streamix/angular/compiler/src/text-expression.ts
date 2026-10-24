@@ -301,6 +301,27 @@ export function extractComponentSourcePath(
     : undefined;
 }
 
+const UNSAFE_JS_LITERAL_CHARS = /[<>/\u2028\u2029]/g;
+
+function escapeUnsafeJsLiteral(jsonStringLiteral: string): string {
+  return jsonStringLiteral.replace(UNSAFE_JS_LITERAL_CHARS, (char) => {
+    switch (char) {
+      case '<':
+        return '\\u003C';
+      case '>':
+        return '\\u003E';
+      case '/':
+        return '\\u002F';
+      case '\u2028':
+        return '\\u2028';
+      case '\u2029':
+        return '\\u2029';
+      default:
+        return char;
+    }
+  });
+}
+
 /**
  * Rewrites every dotted-path read of a loop-local expression to a context
  * lookup, so `item.price * 2` compiles to
@@ -332,7 +353,7 @@ export function rewriteLocalReads(
     }
 
     rewritten += expression.slice(cursor, span.start);
-    rewritten += `ɵsxReadLocal(${contextName}, ${JSON.stringify(span.text)})`;
+    rewritten += `ɵsxReadLocal(${contextName}, ${escapeUnsafeJsLiteral(JSON.stringify(span.text))})`;
     cursor = span.end;
   }
 
