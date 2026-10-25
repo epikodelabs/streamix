@@ -45,13 +45,13 @@
   },
   "author": "Oleksii Shepel <oleksii.shepel@outlook.com>",
   "peerDependencies": {
-    "@angular-devkit/architect": ">=20.0.0",
-    "@angular/compiler": ">=20.0.0",
-    "@angular/language-service": ">=20.0.0",
-    "@angular/core": ">=20.0.0",
+    "@angular-devkit/architect": ">=22.0.0",
+    "@angular/compiler": ">=22.0.0",
+    "@angular/language-service": ">=22.0.0",
+    "@angular/core": ">=22.0.0",
     "react": ">=18.0.0",
     "vue": ">=3.4.0",
-    "typescript": ">=5.5.0"
+    "typescript": ">=6.0.0"
   },
   "peerDependenciesMeta": {
     "@angular-devkit/architect": {
