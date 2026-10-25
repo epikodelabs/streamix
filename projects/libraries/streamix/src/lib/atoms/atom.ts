@@ -494,10 +494,21 @@ export function normalizeError(err: any): Error {
 /**
  * Creates a subscriber set for an atom.
  *
+ * Delivery guarantees (pinned by delivery-guarantees.spec.ts):
+ *
+ * 1. An asynchronous subscriber callback is always awaited before its next
+ *    invocation: a busy callback is never re-entered.
+ * 2. Delivery is FIFO by default: queued values reach the callback in emission
+ *    order, each exactly once.
+ * 3. Intermediate updates are never silently discarded by default. Only
+ *    explicit analog delivery (conflate = true, the interval/timer analog
+ *    opt-in) keeps just the latest pending value per busy subscriber, and it
+ *    is marked as such (ANALOG_DELIVERY).
+ *
  * @param conflate - If true, values emitted while a subscriber callback is still
  *   running are coalesced: only the latest pending value is delivered once the
  *   callback finishes. This is used by latest-value sequence delivery. If false, every emitted value
- *   is still delivered sequentially (callbacks are never re-entered), but no
+ *   is still delivered sequentially (callbacks are never re-entered), and no
  *   intermediate values are dropped.
  */
 function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, conflate: boolean) {
