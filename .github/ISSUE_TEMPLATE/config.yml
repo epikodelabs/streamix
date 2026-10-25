@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Streamix Discord community
+    url: https://discord.gg/XSC9qFn2R
+    about: Ask for help, share examples, and show what you are building with Streamix.
+  - name: Questions and design discussions
+    url: https://github.com/epikodelabs/streamix/discussions
+    about: Discuss ideas and longer questions. Use issues for reproducible bugs.

@@ -171,8 +171,10 @@ Some former companion modules now live as separate packages, compatible with str
 
 We'd love to hear what you build.
 
+- Join the [Streamix Discord community](https://discord.gg/XSC9qFn2R) for help, examples, and project showcases.
 - ⭐ Star the [public docs repo](https://github.com/epikodelabs/epikodelabs.github.io) if streamix helps you.
-- Join [GitHub Discussions](https://github.com/orgs/epikodelabs/discussions).
+- Use [GitHub Discussions](https://github.com/epikodelabs/streamix/discussions) for longer questions and design proposals.
+- Report reproducible bugs in [GitHub Issues](https://github.com/epikodelabs/streamix/issues).
 - [Share feedback](https://forms.gle/CDLvoXZqMMyp4VKu9).
 
 ---

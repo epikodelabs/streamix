@@ -197,6 +197,9 @@ This gives you on-demand computation, bounded memory, and consumer-driven backpr
 
 ## Resources
 
+- [Join the Streamix Discord community](https://discord.gg/XSC9qFn2R) for help, examples, and project showcases
+- [GitHub Discussions](https://github.com/epikodelabs/streamix/discussions) for longer questions and design proposals
+- [Report a bug](https://github.com/epikodelabs/streamix/issues)
 - [Documentation](https://epikodelabs.github.io/streamix)
 - [npm](https://www.npmjs.com/package/@epikodelabs/streamix)
 - [GitHub](https://github.com/epikodelabs/streamix)

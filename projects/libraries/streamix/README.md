@@ -239,8 +239,10 @@ Some capabilities live in sibling packages, all compatible with streamix v3:
 
 We'd love to hear what you build.
 
+* Join the [Streamix Discord community](https://discord.gg/XSC9qFn2R) for help, examples, and project showcases
 * Give the [public docs repo](https://github.com/epikodelabs/epikodelabs.github.io) a star if streamix helps you
-* Join [GitHub Discussions](https://github.com/orgs/epikodelabs/discussions) for questions and ideas
+* Use [GitHub Discussions](https://github.com/epikodelabs/streamix/discussions) for longer questions and design proposals
+* Report reproducible bugs in [GitHub Issues](https://github.com/epikodelabs/streamix/issues)
 * [Share your feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
 
 ---

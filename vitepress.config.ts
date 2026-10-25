@@ -15,6 +15,7 @@ export default defineConfig({
       { text: 'Pricing', link: '/PRICING' },
       { text: 'Changelog', link: '/CHANGELOG' },
       { text: 'API Reference', link: '/api/' },
+      { text: 'Discord', link: 'https://discord.gg/XSC9qFn2R' },
       {
         text: 'Legal',
         items: [
@@ -73,6 +74,7 @@ export default defineConfig({
     },
 
     socialLinks: [
+      { icon: 'discord', link: 'https://discord.gg/XSC9qFn2R' },
       { icon: 'github', link: 'https://github.com/epikodelabs/streamix' }
     ],
 
