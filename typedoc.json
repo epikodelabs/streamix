@@ -41,7 +41,7 @@
     "ScopeOf",
     "UnwrapSnapshotValues",
     "WithLatestInput",
-    "AtomNode",
+    "RuntimeScheduling",
     "ForkHandlerResult",
     "Observer",
     "Simplify",
