@@ -13,14 +13,11 @@
   <a href="https://www.npmjs.com/package/@epikodelabs%2Fstreamix">
     <img src="https://img.shields.io/npm/v/@epikodelabs%2Fstreamix.svg?style=flat-square&color=0ea5e9" alt="NPM Version">
   </a>
-  <a href="https://www.npmjs.com/package/@epikodelabs%2Fstreamix">
-    <img src="https://img.shields.io/npm/dt/@epikodelabs%2Fstreamix.svg?style=flat-square&color=0ea5e9" alt="Total Downloads">
+  <a href="https://codecov.io/gh/epikodelabs/streamix">
+    <img src="https://codecov.io/gh/epikodelabs/streamix/graph/badge.svg?style=flat-square" alt="Coverage">
   </a>
-  <a href="https://github.com/epikodelabs/streamix">
-    <img src="https://raw.githubusercontent.com/epikodelabs/epikodelabs.github.io/161dea3e83f7bb6c27dcee0e33d615ba91cc5c5b/streamix/bundle-size.svg" alt="Bundle Size">
-  </a>
-  <a href="https://github.com/epikodelabs/streamix/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License">
+  <a href="https://discord.gg/XSC9qFn2R">
+    <img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord">
   </a>
 </p>
 
@@ -241,6 +238,7 @@ We'd love to hear what you build.
 
 * Give the [public docs repo](https://github.com/epikodelabs/epikodelabs.github.io) a star if streamix helps you
 * Join [GitHub Discussions](https://github.com/orgs/epikodelabs/discussions) for questions and ideas
+* Join the [Streamix Discord community](https://discord.gg/XSC9qFn2R) for help, examples, and project showcases
 * [Share your feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
 
 ---

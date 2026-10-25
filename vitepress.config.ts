@@ -23,6 +23,7 @@ export default defineConfig({
           { text: 'Refund Policy', link: '/REFUND-POLICY' }
         ]
       },
+      { text: 'Discord', link: 'https://discord.gg/XSC9qFn2R' },
       { text: 'GitHub', link: 'https://github.com/epikodelabs/streamix' }
     ],
 
@@ -73,6 +74,7 @@ export default defineConfig({
     },
 
     socialLinks: [
+      { icon: 'discord', link: 'https://discord.gg/XSC9qFn2R' },
       { icon: 'github', link: 'https://github.com/epikodelabs/streamix' }
     ],
 
