@@ -158,6 +158,7 @@ function details(id: number): StreamixObjectDetails | undefined {
   const execution = internalRuntime.diagnostics.executions.describe(node);
   const flow = internalRuntime.diagnostics.flowState(node);
   const raw = entry.source.kind === 'scope' ? node._rawState ?? {} : {};
+  const memberCount = entry.source.kind === 'scope' ? Object.keys(raw).length : 0;
   // Record-backed nodes take their counters from the runtime's own record;
   // record-less nodes (atoms, deriveds, definitions) use the ledger counters.
   const metrics = execution
@@ -165,7 +166,12 @@ function details(id: number): StreamixObjectDetails | undefined {
     : emissionMetrics(entry);
   return Object.freeze({ id, name: entry.source.kind !== 'operator' && typeof node !== 'function' && typeof node.name === 'string' ? node.name : entry.source.name,
     kind: entry.source.kind, source: entry.source,
-    state: entry.source.kind === 'subscription' ? 'subscribed' : execution?.active ? (flow?.awaitingNext ? 'awaiting source' : 'running')
+    state: entry.source.kind === 'subscription' ? 'subscribed'
+      // A scope is a live container the moment it exists and leaves the
+      // listing when disposed, so every listed scope is live; the member
+      // count is the useful detail to surface in the state pill.
+      : entry.source.kind === 'scope' ? (memberCount ? `live · ${memberCount} members` : 'live')
+      : execution?.active ? (flow?.awaitingNext ? 'awaiting source' : 'running')
       : execution?.lastExit ?? entry.state ?? (flow?.started === false ? 'idle' : cached?.hasValue ? 'ready' : 'unevaluated'),
     value: entry.source.kind === 'subscription' ? 'subscription handle' : cached?.hasValue ? streamixPreview(cached.value) : entry.latest ?? (entry.source.kind === 'scope' ? 'scope' : 'unevaluated'),
     subscribers: flow?.subscribers ?? cached?.subscribers ?? 0, emitted: metrics.total,

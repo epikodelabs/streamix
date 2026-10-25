@@ -105,6 +105,9 @@ describe('debug runtime introspection', () => {
     try {
       const owner = streamixInspector.inspect({ kind: 'scope', name: 'model' })[0];
       const count = streamixInspector.inspect({ name: 'model.count' })[0];
+      // The pill counts every listed member, including the scope's internal
+      // loading/dirty atoms — the same set the members list shows.
+      expect(owner.state).toBe('live · 4 members');
       expect(count.owner).toBe(owner.id);
       expect(count.source.line).toBe(13);
       model.count = 3;
