@@ -1,3 +1,4 @@
+import ts from 'typescript';
 import { jsStringLiteral } from './codegen';
 import { localPathSpans } from './expression-spans';
 import type { SxReactiveSourceResolver } from './source-resolution';
@@ -198,7 +199,12 @@ function matchingParen(expression: string, open: number): number {
 export function analyzeSxExpression(
   expressionSource: string,
   resolveReactiveSource?: SxReactiveSourceResolver,
+  samplePlainState = false,
 ): SxTextExpressionAnalysis | undefined {
+  if (resolveReactiveSource) {
+    const resolve = resolveReactiveSource;
+    resolveReactiveSource = path => resolve(path.replace(/^this\./, ''));
+  }
   const authoredExpression = stripAnyCasts(expressionSource.trim());
 
   if (!authoredExpression) {
@@ -243,7 +249,9 @@ export function analyzeSxExpression(
     };
   }
 
-  const reads = findDependencyReads(expression);
+  const reads = findDependencyReads(expression).filter(read => !resolveReactiveSource ||
+    resolveReactiveSource(read.source) ||
+    resolveReactiveSource(read.source.replace(/\.get\(\s*['"]([^'"]+)['"]\s*\)/g, '.$1')));
   if (reads.length === 0) {
     return undefined;
   }
@@ -261,7 +269,7 @@ export function analyzeSxExpression(
   return {
     expression,
     dependencies,
-    mode: isSupportedDirectExpression(expression, reads)
+    mode: isSupportedDirectExpression(expression, reads, samplePlainState)
       ? 'expression'
       : 'unsupported',
     sourceTransparent: normalized.changed,
@@ -344,7 +352,10 @@ export function rewriteLocalReads(
 export function rewriteSxTextExpression(
   expression: string,
   contextName = 'ctx',
+  samplePlainState = false,
+  preserveNames: ReadonlySet<string> = new Set(),
 ): string {
+  if (samplePlainState) return rewriteComponentReads(expression, contextName, preserveNames);
   const reads = findDependencyReads(expression);
   if (reads.length === 0) {
     return expression;
@@ -520,10 +531,10 @@ function findDependencyReads(expression: string): DependencyRead[] {
 function isSupportedDirectExpression(
   expression: string,
   reads: readonly DependencyRead[],
+  samplePlainState = false,
 ): boolean {
-  // Keep Angular-specific template-string semantics, pipes and mutation
-  // expressions in Angular. Hybrid invalidation still makes their Streamix
-  // reads reactive.
+  // Angular pipes, template strings and mutations need Angular-specific
+  // evaluation semantics, so they cannot be emitted as direct JavaScript.
   if (expression.includes('`')) {
     return false;
   }
@@ -562,9 +573,9 @@ function isSupportedDirectExpression(
       continue;
     }
 
-    // Anything else is component state/method state that Streamix cannot know
-    // has changed. Keep the expression Angular-owned and install invalidation.
-    return false;
+    // Sampled component fields are re-read on reactive emissions, without
+    // installing notifications on ordinary JavaScript variables.
+    if (!samplePlainState) return false;
   }
 
   return true;
@@ -620,4 +631,32 @@ function isIdentifierStart(char: string | undefined): boolean {
 
 function isPathContinuation(char: string | undefined): boolean {
   return !!char && /[A-Za-z0-9_$.]/.test(char);
+}
+
+/** Qualifies sampled component reads while preserving keys, strings and globals. */
+function rewriteComponentReads(expression: string, contextName: string, preserveNames: ReadonlySet<string>): string {
+  const file = ts.createSourceFile('expression.ts', '(' + expression + ')', ts.ScriptTarget.Latest, true);
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+  const visit = (node: ts.Node): void => {
+    if (node.kind === ts.SyntaxKind.ThisKeyword) {
+      edits.push({ start: node.getStart(file) - 1, end: node.end - 1, text: contextName });
+    }
+    if (ts.isIdentifier(node) && node.text !== contextName &&
+        !ALLOWED_BARE_IDENTIFIERS.has(node.text) && !preserveNames.has(node.text)) {
+      const parent = node.parent;
+      const key = (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+        (ts.isPropertyAssignment(parent) && parent.name === node) ||
+        (ts.isMethodDeclaration(parent) && parent.name === node);
+      if (!key) edits.push({ start: node.getStart(file) - 1, end: node.end - 1,
+        text: ts.isShorthandPropertyAssignment(parent)
+          ? node.text + ': ' + contextName + '.' + node.text
+          : contextName + '.' + node.text });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    expression = expression.slice(0, edit.start) + edit.text + expression.slice(edit.end);
+  }
+  return expression;
 }

@@ -360,8 +360,9 @@ export function createBindingTable(
 }
 
 
-function boundTextNode(target: Element): Text {
-  const first = target.firstChild;
+function boundTextNode(target: Element, textIndex = 0): Text {
+  const first = Array.from(target.childNodes).filter(node => node.nodeType === 3)[textIndex];
+  if (!first && textIndex > 0) throw new Error('Missing interpolation text node at index ' + textIndex);
 
   if (first?.nodeType === 3) {
     return first as Text;
@@ -393,8 +394,9 @@ export function ɵsxTextNode(
   slot: BindingSlot,
   target: Element,
   source: DependencySource<unknown>,
+  textIndex = 0,
 ): void {
-  table.bind(slot, source, writeText(boundTextNode(target)), equalText);
+  table.bind(slot, source, writeText(boundTextNode(target, textIndex)), equalText);
 }
 
 /** Compiler instruction: direct reactive text expression. @internal */
@@ -415,12 +417,13 @@ export function ɵsxTextExpressionNode(
   target: Element,
   sources: readonly DependencySource<unknown>[],
   read: () => unknown,
+  textIndex = 0,
 ): void {
   table.bindExpression(
     slot,
     sources,
     read,
-    writeText(boundTextNode(target)),
+    writeText(boundTextNode(target, textIndex)),
     equalText,
   );
 }

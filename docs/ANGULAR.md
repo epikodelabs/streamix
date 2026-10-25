@@ -139,6 +139,23 @@ writes the initial value, coalesces later emissions into frames, and removes
 all listeners when Angular destroys the view. Replacing a source field tears
 down old bindings before installing new ones.
 
+### Mixing atoms and plain values
+
+Standalone atoms and scope fields can be combined with plain component values,
+operators, and literal text in the same interpolation:
+
+```html
+<p>{{ label }}: {{ count }} / {{ model.total * multiplier }}</p>
+<p title="{{ label }}: {{ count }}">Count: {{ count }} {{ unit }}</p>
+```
+
+The compiler subscribes to the atoms used by each binding. Plain values such as
+`label`, `multiplier`, and `unit` are sampled initially and again when an atom
+in that binding emits. Changing a plain value alone does not schedule a Streamix
+update. These text updates work in zoneless apps without a change-detection pass.
+Plain-only interpolations remain Angular-owned. Angular pipes and sanitizer-sensitive
+attribute sinks are outside this direct interpolation path.
+
 ### What is generated
 
 The compiler preserves the component field and emits a per-view binding table.

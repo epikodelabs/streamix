@@ -16,20 +16,17 @@ describe('reactive reads the compiler cannot own', () => {
     'model.ready': "model.get('ready')",
     'model.items': "model.get('items')",
   } as Record<string, string>)[path];
-  it('rejects a native binding expression that mixes atoms with component state', () => {
-    expect(() => transformAngularComponentTemplate(
-      '<span [title]="model.msg + suffix"></span>',
-      'inline.html',
-      { resolveReactiveSource },
-    )).toThrowError(/cannot bind "model\.get\('msg'\)".*mixes reactive reads/s);
+  it('samples plain state in a native binding when an atom emits', () => {
+    const result = transformAngularComponentTemplate('<span [title]="model.msg + suffix"></span>',
+      'inline.html', { resolveReactiveSource });
+    expect(result.setup).toContain('ctx.suffix');
+    expect(result.setup).toContain('ctx.model.get');
   });
 
-  it('rejects an interpolation that mixes atoms with component state', () => {
-    expect(() => transformAngularComponentTemplate(
-      '<span>{{ count * multiplier }}</span>',
-      'inline.html',
-      { resolveReactiveSource },
-    )).toThrowError(/cannot bind "count".*mixes reactive reads/s);
+  it('samples plain state in interpolation when an atom emits', () => {
+    const result = transformAngularComponentTemplate('<span>{{ count * multiplier }}</span>',
+      'inline.html', { resolveReactiveSource });
+    expect(result.setup).toContain('ctx.count.value * ctx.multiplier');
   });
 
   it('still compiles an interpolation whose reads are all reactive', () => {
@@ -76,12 +73,10 @@ describe('reactive reads the compiler cannot own', () => {
     )).toThrowError(/cannot bind "count"/);
   });
 
-  it('rejects atom reads in attribute interpolation', () => {
-    expect(() => transformAngularComponentTemplate(
-      '<span title="{{ count }}"></span>',
-      'inline.html',
-      { resolveReactiveSource },
-    )).toThrowError(/cannot bind "count".*Attribute interpolation/s);
+  it('compiles atom reads in safe attribute interpolation', () => {
+    const result = transformAngularComponentTemplate('<span title="{{ count }}"></span>',
+      'inline.html', { resolveReactiveSource });
+    expect(result.setup).toContain('ɵsxAttributeExpression');
   });
 
   it('leaves attribute interpolation over plain state to Angular', () => {

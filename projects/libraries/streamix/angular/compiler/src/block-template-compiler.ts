@@ -960,7 +960,7 @@ function compileBlockInput(
       source: analysis.expression, dependencies: analysis.dependencies,
     });
   } else if (analysis?.mode === 'unsupported') {
-    const mixed = mixedBlockExpression(expanded, analysis.expression, analysis.dependencies, state);
+    const mixed = mixedBlockExpression(expanded, analysis.expression, analysis.dependencies, state) ?? sampledBlockExpression(expanded, state);
     if (!mixed) {
       throw new Error(`Unsupported mixed Streamix/local compiled block binding ${JSON.stringify(expression)}.`);
     }
@@ -1089,6 +1089,11 @@ function emitBoundText(
         state.resolveReactiveSource,
       );
 
+      if (analysis?.mode === 'direct' && analysis.directSource) {
+        state.bindings.push({ kind: 'text', node: variable, source: analysis.directSource });
+        state.bindingCount += 1;
+        continue;
+      }
       if (analysis?.mode === 'expression') {
         state.bindings.push({
           kind: 'text',
@@ -1101,7 +1106,7 @@ function emitBoundText(
       }
 
       if (analysis?.mode === 'unsupported') {
-        const mixed = mixedBlockExpression(expression, analysis.expression, analysis.dependencies, state);
+        const mixed = mixedBlockExpression(expression, analysis.expression, analysis.dependencies, state) ?? sampledBlockExpression(expression, state);
         if (mixed) {
           state.bindings.push({ kind: 'text', node: variable, source: mixed.expression,
             dependencies: mixed.dependencies, contextual: true });
@@ -1228,4 +1233,15 @@ function parseInterpolation(
   }
 
   return parts;
+}
+
+/** Plain component state is sampled only when the reactive inputs emit. */
+function sampledBlockExpression(expression: string, state: EmitState) {
+  const analysis = analyzeSxExpression(expression, state.resolveReactiveSource, true);
+  if (analysis?.mode !== 'expression') return undefined;
+  const locals = new Set([...(state.localNames ?? [])].filter(name => !state.resolveReactiveSource?.(name)));
+  const qualified = rewriteSxTextExpression(analysis.expression, 'ctx', true, locals);
+  return { expression: state.localNames
+    ? rewriteLocalReads(qualified, 'currentContext') : qualified,
+    dependencies: analysis.dependencies, contextual: true as const };
 }

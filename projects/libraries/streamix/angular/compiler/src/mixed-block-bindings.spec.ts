@@ -95,15 +95,25 @@ describe('sx mixed loop-local/reactive block expressions', () => {
     }
   });
 
-  it('refuses arbitrary calls and untracked component state', () => {
-    expect(() => compileSxBlockTemplate(
-      '<li [title]="row.name + plain + model.suffix"></li>',
-      'mixed.html', options,
-    )).toThrowError(/Unsupported mixed|Unknown loop-local/);
-    expect(() => compileSxBlockTemplate(
-      '<li [title]="format(row.name) + model.suffix"></li>',
-      'mixed.html', options,
-    )).toThrowError(/Unsupported mixed|Unknown loop-local/);
+  it('samples component fields and component method results alongside loop locals', () => {
+    const field = compileSxBlockTemplate(
+      '<li [title]="row.name + plain + model.suffix"></li>', 'mixed.html', options,
+    );
+    const method = compileSxBlockTemplate(
+      '<li [title]="format(row.name) + model.suffix"></li>', 'mixed.html', options,
+    );
+    const fieldBinding = field.bindings[0];
+    const methodBinding = method.bindings[0];
+    if (fieldBinding.kind === 'event' || methodBinding.kind === 'event') {
+      fail('Expected reactive property bindings');
+      return;
+    }
+    expect(fieldBinding.source).toContain('ctx.plain');
+    expect(methodBinding.source).toContain('ctx.format(');
+    expect(fieldBinding.source).toContain('ɵsxReadLocal(currentContext, "row.name")');
+  });
+
+  it('refuses assignments in mixed expressions', () => {
     // The Angular parser refuses the assignment before the compiler's own
     // mixed-expression validation runs; either refusal is a loud build error.
     expect(() => compileSxBlockTemplate(

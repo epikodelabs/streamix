@@ -1,4 +1,5 @@
 import {
+  Interpolation,
   TmplAstBoundText,
   TmplAstContent,
   TmplAstElement,
@@ -9,6 +10,7 @@ import {
   type TmplAstNode,
 } from '@angular/compiler';
 
+import { jsStringLiteral } from './codegen';
 import {
   createBindingPlan,
   type SxBindingKind,
@@ -18,7 +20,6 @@ import {
 import { parseNativeEventBinding } from './event-binding';
 import {
   analyzeSxExpression,
-  analyzeSxTextInterpolation,
   extractComponentSourcePath,
   extractDirectValueSource,
   stripAnyCasts,
@@ -246,11 +247,24 @@ function walkStaticChildren(
   parentUnstable = false,
 ): void {
   let elementIndex = 0;
+  let rootTextIndex = 0;
   const siblings = flattenTransparentContainers(nodes);
   let precedingDynamic = parentUnstable;
 
   for (let index = 0; index < siblings.length; index += 1) {
     const node = siblings[index];
+    if (parentPath.length === 0 && (node instanceof TmplAstBoundText || node instanceof TmplAstText)) {
+      if (node instanceof TmplAstBoundText) {
+        const hostId = 'hostNode';
+        if (!state.nodePaths[hostId]) {
+          state.nodes.push(hostId);
+          state.nodePaths[hostId] = [];
+        }
+        bindTextInterpolation(node, state, hostId, rootTextIndex);
+      }
+      if (node instanceof TmplAstBoundText || node.value.trim()) rootTextIndex++;
+      continue;
+    }
 
     if (node instanceof TmplAstElement) {
       // Children of a custom element are projected into a component-owned
@@ -385,25 +399,20 @@ function visitElement(
     const publicName = extractPublicBindingName(raw);
 
     if (!publicName) {
-      // Attribute interpolation (`title="{{ count }}"`) arrives here as an
-      // input Angular evaluates itself: a reactive read would render once and
-      // go stale.
-      for (const match of raw.matchAll(/\{\{([\s\S]*?)\}\}/g)) {
-        const analysis = analyzeSxExpression(
-          match[1],
-          state.resolveReactiveSource,
-        );
-
-        if (analysis) {
-          throw new Error(
-            angularOwnedReadError(
-              analysis.dependencies[0] ?? match[1].trim(),
-              'Attribute interpolation is evaluated by Angular, not by the compiled view.',
-            ),
-          );
-        }
+      const analysis = analyzeInterpolation(input.value, state);
+      if (!analysis) continue;
+      const attributeName = input.name;
+      if (!/^(?:title|role|tabindex|aria-[\w-]+|data-[\w-]+)$/.test(attributeName)) {
+        throw new Error(angularOwnedReadError(analysis.dependencies[0], 'This interpolated attribute requires Angular sanitization.'));
       }
-
+      if (analysis.mode === 'unsupported') {
+        throw new Error(angularOwnedReadError(analysis.dependencies[0], MIXED_STATE_REASON));
+      }
+      const span = { start: input.sourceSpan.start.offset, end: input.sourceSpan.end.offset };
+      state.bindings.push({ kind: 'attribute-expression', node: nodeId, name: attributeName,
+        source: analysis.expression, dependencies: analysis.dependencies, span });
+      state.bindingSpans.push(span);
+      state.bindingEdits.push({ ...span, replacement: angularFallbackForExpression('attr.' + attributeName, analysis.expression) });
       continue;
     }
 
@@ -442,6 +451,7 @@ function visitElement(
       const analysis = analyzeSxExpression(
         expression,
         state.resolveReactiveSource,
+        true,
       );
 
       if (!analysis) {
@@ -559,62 +569,16 @@ function visitElement(
     state.bindingSpans.push(span);
   }
 
-  // Automatic text lowering is limited to a sole interpolation. The generated
-  // direct binding updates Angular's existing Text node, preserving hydration
-  // identity. Mixed text/child-node content stays Angular-owned.
-  if (!hasExplicitTextBinding && element.children.length === 1) {
-    const child = element.children[0];
-
-    if (child instanceof TmplAstBoundText) {
-      const raw = sourceText(state.template, child.sourceSpan);
-      const analysis = analyzeSxTextInterpolation(
-        raw,
-        state.resolveReactiveSource,
-      );
-
-      if (analysis) {
-        // An expression that mixes reactive reads with component state cannot
-        // be bound and cannot be left to Angular without going stale.
-        if (analysis.mode === 'unsupported') {
-          throw new Error(
-            angularOwnedReadError(
-              analysis.dependencies[0] ?? analysis.expression,
-              MIXED_STATE_REASON,
-            ),
-          );
-        }
-
-        const span = {
-          start: child.sourceSpan.start.offset,
-          end: child.sourceSpan.end.offset,
-        };
-
-        if (analysis.sourceTransparent) {
-          state.bindingEdits.push({
-            ...span,
-            replacement: `{{ ${analysis.expression} }}`,
-          });
-        }
-
-        if (analysis.mode === 'direct') {
-          state.bindings.push({
-            kind: 'text-node',
-            node: nodeId,
-            source: analysis.directSource!,
-            span,
-          });
-          state.bindingSpans.push(span);
-        } else {
-          state.bindings.push({
-            kind: 'text-expression-node',
-            node: nodeId,
-            source: analysis.expression,
-            dependencies: analysis.dependencies,
-            span,
-          });
-          state.bindingSpans.push(span);
-        }
-      }
+  // Each Angular bound-text node can contain literals and several runs.
+  // Keep sibling elements and their text nodes intact when updating a run.
+  if (!hasExplicitTextBinding) {
+    let textIndex = 0;
+    for (const child of element.children) {
+      if (!(child instanceof TmplAstBoundText) && !(child instanceof TmplAstText)) continue;
+      if (child instanceof TmplAstText && !child.value.trim()) continue;
+      const index = textIndex++;
+      if (!(child instanceof TmplAstBoundText)) continue;
+      bindTextInterpolation(child, state, nodeId, element.children.length === 1 ? undefined : index);
     }
   }
 
@@ -690,6 +654,10 @@ function containsCompiledBinding(
     return false;
   }
 
+  if (node instanceof TmplAstBoundText) {
+    return !!analyzeInterpolation(node.value, { template, resolveReactiveSource });
+  }
+
   if (node instanceof TmplAstElement) {
     let hasExplicitTextBinding = false;
 
@@ -739,15 +707,8 @@ function containsCompiledBinding(
       }
     }
 
-    if (!hasExplicitTextBinding && node.children.length === 1) {
-      const child = node.children[0];
-      if (child instanceof TmplAstBoundText) {
-        const raw = sourceText(template, child.sourceSpan);
-        if (analyzeSxTextInterpolation(raw, resolveReactiveSource)) {
-          return true;
-        }
-      }
-    }
+    if (!hasExplicitTextBinding && node.children.some(child => child instanceof TmplAstBoundText &&
+      analyzeInterpolation(child.value, { template, resolveReactiveSource }))) return true;
   }
 
   const record = node as Record<string, unknown>;
@@ -820,7 +781,7 @@ function classifyExpressionBinding(
   expression: string,
   resolveReactiveSource?: SxReactiveSourceResolver,
 ): Omit<SxTemplateBinding, 'span'> | undefined {
-  const analysis = analyzeSxExpression(expression, resolveReactiveSource);
+  const analysis = analyzeSxExpression(expression, resolveReactiveSource, true);
 
   if (!analysis || analysis.mode !== 'expression') {
     return undefined;
@@ -1083,4 +1044,53 @@ function isAngularDynamicNode(node: object): boolean {
     name === 'ForLoopBlock' ||
     name === 'SwitchBlock' ||
     name === 'DeferredBlock';
+}
+
+/** Uses Angular's interpolation AST, including quoted braces and literal runs. */
+function analyzeInterpolation(
+  value: unknown,
+  state: Pick<WalkState, 'template' | 'resolveReactiveSource'>,
+): ReturnType<typeof analyzeSxExpression> {
+  const ast = value instanceof Interpolation ? value : (value as { ast?: unknown })?.ast;
+  if (!(ast instanceof Interpolation)) return undefined;
+  const analyses = ast.expressions.map(expression => analyzeSxExpression(
+    state.template.slice(expression.sourceSpan.start, expression.sourceSpan.end),
+    state.resolveReactiveSource, true,
+  ));
+  const reactive = analyses.filter((analysis): analysis is NonNullable<typeof analysis> => !!analysis);
+  if (!reactive.length) return undefined;
+  if (ast.expressions.length === 1 && ast.strings.every(text => text === '')) return reactive[0];
+  const parts: string[] = [];
+  ast.expressions.forEach((expression, index) => {
+    parts.push(jsStringLiteral(ast.strings[index]));
+    const normalized = analyses[index]?.expression ??
+      state.template.slice(expression.sourceSpan.start, expression.sourceSpan.end);
+    parts.push('((' + normalized + ') ?? "")');
+  });
+  parts.push(jsStringLiteral(ast.strings[ast.strings.length - 1]));
+  const combined = '[' + parts.join(', ') + '].join("")';
+  return { expression: combined, dependencies: [...new Set(reactive.flatMap(analysis => analysis.dependencies))],
+    mode: reactive.some(analysis => analysis.mode === 'unsupported') ||
+      analyzeSxExpression(combined, state.resolveReactiveSource, true)?.mode === 'unsupported'
+      ? 'unsupported' : 'expression',
+    sourceTransparent: true };
+}
+
+function bindTextInterpolation(child: TmplAstBoundText, state: WalkState, nodeId: string, index?: number): void {
+  const analysis = analyzeInterpolation(child.value, state);
+  if (!analysis) return;
+  if (analysis.mode === 'unsupported') {
+    throw new Error(angularOwnedReadError(analysis.dependencies[0], MIXED_STATE_REASON));
+  }
+  const span = { start: child.sourceSpan.start.offset, end: child.sourceSpan.end.offset };
+  if (analysis.sourceTransparent) {
+    state.bindingEdits.push({ ...span, replacement: '{{ ' + analysis.expression + ' }}' });
+  }
+  state.bindings.push({
+    kind: analysis.mode === 'direct' ? 'text-node' : 'text-expression-node',
+    node: nodeId, name: index === undefined ? undefined : String(index),
+    source: analysis.directSource ?? analysis.expression,
+    dependencies: analysis.dependencies, span,
+  });
+  state.bindingSpans.push(span);
 }

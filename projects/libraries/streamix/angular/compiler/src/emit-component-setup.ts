@@ -143,17 +143,17 @@ export function emitComponentSetup(
         break;
       case 'text-node':
         lines.push(
-          `  ɵsxTextNode(table, ${entry.slot}, ${entry.node}, ${source(entry.source)});`,
+          `  ɵsxTextNode(table, ${entry.slot}, ${entry.node}, ${source(entry.source)}${entry.name === undefined ? '' : ', ' + entry.name});`,
         );
         break;
       case 'text-expression':
         lines.push(
-          `  ɵsxTextExpression(table, ${entry.slot}, ${entry.node}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+          `  ɵsxTextExpression(table, ${entry.slot}, ${entry.node}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source, 'ctx', true)});`,
         );
         break;
       case 'text-expression-node':
         lines.push(
-          `  ɵsxTextExpressionNode(table, ${entry.slot}, ${entry.node}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+          `  ɵsxTextExpressionNode(table, ${entry.slot}, ${entry.node}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source, 'ctx', true)}${entry.name === undefined ? '' : ', ' + entry.name});`,
         );
         break;
       case 'property':
@@ -163,7 +163,7 @@ export function emitComponentSetup(
         break;
       case 'property-expression':
         lines.push(
-          `  ɵsxPropertyExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+          `  ɵsxPropertyExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source, 'ctx', true)});`,
         );
         break;
       case 'attribute':
@@ -173,7 +173,7 @@ export function emitComponentSetup(
         break;
       case 'attribute-expression':
         lines.push(
-          `  ɵsxAttributeExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+          `  ɵsxAttributeExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source, 'ctx', true)});`,
         );
         break;
       case 'class':
@@ -183,7 +183,7 @@ export function emitComponentSetup(
         break;
       case 'class-expression':
         lines.push(
-          `  ɵsxClassExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+          `  ɵsxClassExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source, 'ctx', true)});`,
         );
         break;
       case 'class-map':
@@ -198,7 +198,7 @@ export function emitComponentSetup(
         break;
       case 'style-expression':
         lines.push(
-          `  ɵsxStyleExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source)});`,
+          `  ɵsxStyleExpression(table, ${entry.slot}, ${entry.node}, ${jsStringLiteral(entry.name)}, ${sources(entry.dependencies)}, () => ${rewriteSxTextExpression(entry.source, 'ctx', true)});`,
         );
         break;
       case 'style-map':

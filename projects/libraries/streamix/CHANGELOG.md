@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.9 - 2026-10-25
+
+- **Angular interpolation fixes.** Multi-part interpolations now update in zoneless apps, including combinations of standalone atoms, scoped atoms, literal text, and plain component values. Plain values are sampled initially and when an atom used by the binding emits.
+- Safe interpolated attributes and text around sibling elements now update directly while preserving DOM identity. Compiled loop expressions support mixed local, reactive, and sampled component reads, including standalone atoms named `count`.
+- Added focused compiler and browser regression tests for interpolation, dependency deduplication, nullish values, sampling, and teardown, and documented the update behavior.
+
 ## 3.0.8 - 2026-10-25
 
 - **Introspection moves behind its own entry.** The inspector, runtime diagnostics accounting, and operator execution tracking moved to `@epikodelabs/streamix/introspection`; the default core keeps only inert no-op seams, so applications that never enable introspection download and execute none of it (the root build dropped from ~134 KB to ~102 KB minified). The compiler injects the entry import into instrumented dev builds automatically, and `enableStreamixIntrospection` / `mountStreamixInspector` now come from the entry instead of the package root. In the inspector, scopes report as `live · N members` from the moment they exist instead of falling back to unevaluated.
