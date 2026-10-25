@@ -4,7 +4,7 @@ import { pipe } from '../lib/atoms/pipe';
 import { map } from '../lib/operators/map';
 import { internalRuntime } from '../lib/runtime/runtime';
 import { __streamixDebug, __streamixSubscribe, enableStreamixIntrospection, streamixInspector, streamixPreview,
-  type StreamixSourceMetadata } from '../lib/runtime/introspection';
+  type StreamixSourceMetadata } from '@epikodelabs/streamix/introspection';
 
 const metadata = (name: string, kind: StreamixSourceMetadata['kind'] = 'atom'): StreamixSourceMetadata =>
   ({ name, kind, file: 'src/store.ts', line: 12, column: 3 });

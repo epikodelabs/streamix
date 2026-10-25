@@ -3,8 +3,8 @@ import { build } from 'esbuild';
 const result = await build({
   stdin: { contents: `
 import { internalRuntime, StreamixRuntime } from '../projects/libraries/streamix/src/lib/runtime/runtime';
-import { setRuntimeInstrumentationEnabled } from '../projects/libraries/streamix/src/lib/runtime/diagnostics';
-import { trackOperatorExecution } from '../projects/libraries/streamix/src/lib/runtime/operator-execution';
+import { setRuntimeInstrumentationEnabled } from '../projects/libraries/streamix/src/lib/runtime/instrumentation';
+import { trackOperatorExecution } from '../projects/libraries/streamix/introspection/src/lib/operator-execution';
 import { createAsyncCoordinator } from '../projects/libraries/streamix/src/lib/utils/coordinator';
 const iterations = 100000;
 async function sample(enabled, observed) {
@@ -51,5 +51,10 @@ if (internalRuntime.events.observed !== observedBefore) {
 console.log('coordinator transport: direct delivery, runtime bus unobserved');
 `, resolveDir: import.meta.dirname, loader: 'ts' },
   bundle: true, platform: 'node', format: 'esm', write: false,
+  // Keep the entry's package-name imports on the source graph, not dist.
+  alias: {
+    '@epikodelabs/streamix/introspection': new URL('../projects/libraries/streamix/introspection/src/lib/index.ts', import.meta.url).pathname.slice(1),
+    '@epikodelabs/streamix': new URL('../projects/libraries/streamix/src/lib/index.ts', import.meta.url).pathname.slice(1),
+  },
 });
 await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));

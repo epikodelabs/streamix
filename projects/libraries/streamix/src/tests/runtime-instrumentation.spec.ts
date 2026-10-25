@@ -1,5 +1,5 @@
 import { internalRuntime } from '../lib/runtime/runtime';
-import { RuntimeExecutions, isRuntimeInstrumentationEnabled, setRuntimeInstrumentationEnabled } from '../lib/runtime/diagnostics';
+import { RuntimeExecutions, isRuntimeInstrumentationEnabled, setRuntimeInstrumentationEnabled } from '@epikodelabs/streamix/introspection';
 import { RuntimeEventBus } from '../lib/runtime/events';
 import { atom, flow } from '../lib/atoms/atom';
 

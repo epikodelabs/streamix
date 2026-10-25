@@ -20,6 +20,13 @@ If you use `createOperator`, `createPushOperator`, or build atoms on
 `createAtomBase`, the wiring in this document is already done. Read the
 checklist at the end to confirm; read the sections when you go custom.
 
+The `__streamix*` hooks and `trackOperatorExecution` resolve from the core
+seam (`src/lib/runtime/introspection-hooks.ts`): inside the core, import them
+from there; the implementations live in the
+`@epikodelabs/streamix/introspection` secondary entry, which installs them at
+import time. Compiled application code keeps importing the hook names from
+the package root — the seam delegates.
+
 ---
 
 ## Factories

@@ -1,9 +1,9 @@
-import { trackOperatorExecution } from '../lib/runtime/operator-execution';
+import { trackOperatorExecution } from '@epikodelabs/streamix/introspection';
 import { pipe } from '../lib/atoms/pipe';
 import { concatMap } from '../lib/operators/concatMap';
 import { atom } from '../lib/atoms/atom';
 import { internalRuntime } from '../lib/runtime/runtime';
-import { __streamixDebug, __streamixDebugDispose, enableStreamixIntrospection, streamixInspector } from '../lib/runtime/introspection';
+import { __streamixDebug, __streamixDebugDispose, enableStreamixIntrospection, streamixInspector } from '@epikodelabs/streamix/introspection';
 
 describe('inspector emission metrics', () => {
   beforeAll(() => enableStreamixIntrospection());

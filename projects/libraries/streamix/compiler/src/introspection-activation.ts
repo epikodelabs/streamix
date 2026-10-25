@@ -7,5 +7,5 @@
  * functions, so production bundles carry inert definitions.
  */
 export function injectIntrospectionActivation(code: string): string {
-  return `import { enableStreamixIntrospection as __sxEnable, mountStreamixInspector as __sxMount } from '@epikodelabs/streamix';\n__sxEnable();\n${code}\n__sxMount();\n`;
+  return `import { enableStreamixIntrospection as __sxEnable, mountStreamixInspector as __sxMount } from '@epikodelabs/streamix/introspection';\n__sxEnable();\n${code}\n__sxMount();\n`;
 }

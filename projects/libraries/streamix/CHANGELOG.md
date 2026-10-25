@@ -2,6 +2,7 @@
 
 ## 3.0.7 - 2026-10-20
 
+- **Introspection is now an optional entry.** The inspector, runtime diagnostics accounting, and operator execution tracking moved to `@epikodelabs/streamix/introspection`; the default core keeps only inert no-op seams, so applications that never enable introspection stop downloading or executing any of it. The compiler injects the entry import into instrumented dev builds automatically; `enableStreamixIntrospection` and `mountStreamixInspector` now come from the entry instead of the package root. Dev builds without introspection also no longer run background execution accounting.
 - **Meet the inspector.😊** An in-app diagnostics overlay, mounted automatically in dev builds and shared by Angular, React, and Vue: live tabs for Scopes (member state), Atoms, Flows, and a Trace that names every write with its value and timing.
 - Fixed expand cancellation: it now closes the active child iterator, clears queued values, and ignores async results that arrive after cancellation. Errors also clean up the active child.
 - NO_INITIAL_VALUE is the only way to be empty. Value-less atoms and flows read it; deriveds wait for all inputs instead of seeing undefined; conditional dependencies swap edges cleanly.

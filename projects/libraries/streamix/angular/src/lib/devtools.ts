@@ -6,13 +6,13 @@ import {
   inject,
 } from '@angular/core';
 import {
-  mountStreamixInspector,
   recordStreamixDevtoolsEvent,
   streamixDevtoolsEnabled,
   streamixDevtoolsSnapshot,
   subscribeStreamixDevtools,
   type StreamixDevtoolsEvent,
 } from '@epikodelabs/streamix';
+import { mountStreamixInspector } from '@epikodelabs/streamix/introspection';
 
 export {
   recordStreamixDevtoolsEvent,

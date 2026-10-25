@@ -1,4 +1,4 @@
-import { trackOperatorExecution } from '../lib/runtime/operator-execution';
+import { trackOperatorExecution } from '@epikodelabs/streamix/introspection';
 import { internalRuntime } from '../lib/runtime/runtime';
 
 describe('runtime operator cancellation accounting', () => {

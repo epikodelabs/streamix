@@ -6,8 +6,8 @@ import { createAsyncPushable } from "../utils";
 import { normalizeError } from "../atoms";
 import { SwitchingInnerExecution } from "../runtime/inner-execution";
 import { isAsyncIterable } from "../utils/helpers";
-import { trackOperatorExecution } from "../runtime/operator-execution";
-import { __streamixBeginLifetime, type StreamixLifetimeSpan, __streamixOperatorExecution } from "../runtime/introspection";
+import { trackOperatorExecution } from "../runtime/introspection-hooks";
+import { __streamixBeginLifetime, type StreamixLifetimeSpan, __streamixOperatorExecution } from "../runtime/introspection-hooks";
 
 /**
  * Transforms each value from the source stream into a new inner stream, promise, or array,

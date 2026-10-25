@@ -1,5 +1,5 @@
 import { internalRuntime } from '../lib/runtime/runtime';
-import { RuntimeExecutions } from '../lib/runtime/diagnostics';
+import { RuntimeExecutions } from '@epikodelabs/streamix/introspection';
 import { flow } from '../lib/atoms/atom';
 
 describe('runtime flow execution accounting', () => {

@@ -8,8 +8,18 @@
 
 ## How the layer is shaped
 
-One bus, one ledger, one control surface:
+One bus, one ledger, one control surface — and one optional entry that carries
+them:
 
+- **One seam** (`runtime/introspection-hooks.ts` in the core, plus the
+  instrumentation flag in `runtime/instrumentation.ts`): the reactive core
+  calls the `__streamix*` hooks and `trackOperatorExecution` through no-op
+  defaults that preserve exact value and iterator semantics. The
+  `@epikodelabs/streamix/introspection` secondary entry installs the real
+  implementations and the real diagnostics port at import time; applications
+  that never import it never download any diagnostics code. The
+  `flowNodes` identity set stays in the core (`StreamixRuntime.markFlowNode`)
+  because the `changed()` dedupe must be correct before the entry loads.
 - **One bus** (`runtime/events.ts`): every event the runtime moves — graph
   lifecycle (`register`/`dependencies`/`change`/`flow`/`dispose`), execution
   lifecycle (`next`/`complete`/`cancel`/`error`), and devtools traces — flows
@@ -22,10 +32,13 @@ One bus, one ledger, one control surface:
   event, not a `change` plus a `next`; `changed()` skips the graph event for
   flow-backed nodes in every configuration, not just while instrumentation
   is enabled.
-- **One ledger** (`runtime/diagnostics.ts`): `RuntimeDiagnostics` owns all
+- **One ledger** (`introspection/src/lib/diagnostics.ts` in the
+  introspection entry): `RuntimeDiagnostics` owns all
   diagnostics-only state — execution records, origins, atom/flow state
   readers — plus the frozen `inspect()` snapshot. The reactive core
-  (`StreamixRuntime`) never reads it. Record-backed nodes (flows, operator
+  (`StreamixRuntime`) never reads it; it sees only the
+  `RuntimeDiagnosticsPort` interface with a built-in no-op. Record-backed
+  nodes (flows, operator
   iterators) are counted once, in their record — emissions, completions,
   cancels, errors. The browser ledger counts only record-less nodes (atoms,
   deriveds) and mirrors aggregates onto operator definition entries; every
@@ -33,11 +46,12 @@ One bus, one ledger, one control surface:
 - **One span per execution** (`beginExecution` on the runtime): accounting
   token and bus events in one object, or a shared no-op when instrumentation
   is off and the bus is unobserved. Emission call sites never hand-build
-  events; `runtime/operator-execution.ts` and the flow run loop both go
+  events; the entry's `operator-execution.ts` and the flow run loop both go
   through it.
-- **One control surface** (`runtime/controls.ts`): `streamixDiagnostics`
+- **One control surface** (`introspection/src/lib/controls.ts`):
+  `streamixDiagnostics`
   with `setEnabled`/`enabled` and the fine-grained `setAccounting` /
-  `setOriginCapture`. Internal per rule 7 — never in the package API.
+  `setOriginCapture`. Internal per rule 7 — never in the root package API.
   `enableStreamixIntrospection` arms accounting too: the dev introspection
   flag is the single activation switch, and discovery depends on it — flows
   register into `flowStates` (the discovery source) only while accounting is

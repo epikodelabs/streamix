@@ -8,7 +8,7 @@ import { exhaustMap } from '../lib/operators/exhaustMap';
 import { mergeMap } from '../lib/operators/mergeMap';
 import { switchMap } from '../lib/operators/switchMap';
 import { type Operator, DONE, NEXT } from '../lib/atoms/operator';
-import { __streamixDebug, __streamixDebugDispose, __streamixBeginLifetime, enableStreamixIntrospection, streamixInspector } from '../lib/runtime/introspection';
+import { __streamixDebug, __streamixDebugDispose, __streamixBeginLifetime, enableStreamixIntrospection, streamixInspector } from '@epikodelabs/streamix/introspection';
 
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 const collect = async (iterator: AsyncIterator<number>) => {

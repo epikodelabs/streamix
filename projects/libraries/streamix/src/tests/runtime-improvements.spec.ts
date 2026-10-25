@@ -1,7 +1,7 @@
 import { DefaultScheduler, getScheduler, type SchedulableNode } from '../lib/runtime/scheduling';
 import { internalRuntime, StreamixRuntime } from '../lib/runtime/runtime';
-import { RuntimeExecutions, isRuntimeInstrumentationEnabled, setRuntimeInstrumentationEnabled } from '../lib/runtime/diagnostics';
-import { trackOperatorExecution } from '../lib/runtime/operator-execution';
+import { RuntimeExecutions, isRuntimeInstrumentationEnabled, setRuntimeInstrumentationEnabled } from '@epikodelabs/streamix/introspection';
+import { trackOperatorExecution } from '@epikodelabs/streamix/introspection';
 import { RuntimeEventBus } from '../lib/runtime/events';
 
 function queuedNode(name: string, depth: number, order: string[]): SchedulableNode {

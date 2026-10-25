@@ -1,5 +1,5 @@
-import { mountStreamixInspector } from '../lib/runtime/inspector-panel';
-import { __streamixPipeline, __streamixBeginLifetime, __streamixDebug, __streamixDebugDispose, enableStreamixIntrospection } from '../lib/runtime/introspection';
+import { mountStreamixInspector } from '@epikodelabs/streamix/introspection';
+import { __streamixPipeline, __streamixBeginLifetime, __streamixDebug, __streamixDebugDispose, enableStreamixIntrospection } from '@epikodelabs/streamix/introspection';
 import { internalRuntime } from '../lib/runtime/runtime';
 
 describe('inspector trace history', () => {

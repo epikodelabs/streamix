@@ -1,6 +1,7 @@
 import { useAngularTestEnvironment } from './angular-test-environment';
 import { TestBed } from '@angular/core/testing';
-import { atom, derived, __streamixDebug, enableStreamixIntrospection } from '@epikodelabs/streamix';
+import { atom, derived, __streamixDebug } from '@epikodelabs/streamix';
+import { enableStreamixIntrospection } from '@epikodelabs/streamix/introspection';
 import { SxBindingTable } from '../lib/binding-table';
 import {
   recordStreamixDevtoolsEvent,

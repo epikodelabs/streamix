@@ -1,18 +1,18 @@
-import { internalRuntime } from './runtime';
-import { setRuntimeInstrumentationEnabled } from './diagnostics';
-import { streamixDevtoolsEnabled, streamixDevtoolsSnapshot, subscribeStreamixDevtools, type StreamixDevtoolsEvent } from './devtools';
+import {
+  __streamixRuntime as internalRuntime,
+  installStreamixIntrospection,
+  setRuntimeInstrumentationEnabled,
+  streamixDevtoolsEnabled,
+  streamixDevtoolsSnapshot,
+  subscribeStreamixDevtools,
+  type StreamixDevtoolsEvent,
+  type StreamixSourceMetadata,
+  type StreamixLifetimeSpan,
+} from '@epikodelabs/streamix';
+// Evaluating the real diagnostics ledger is part of this module's install.
+import './diagnostics';
 
-export interface StreamixSourceMetadata {
-  readonly kind: 'scope' | 'atom' | 'derived' | 'flow' | 'operator' | 'source' | 'subscription';
-  readonly name: string;
-  readonly file: string;
-  readonly line: number;
-  readonly column: number;
-  readonly enclosing?: string;
-  readonly ownerClass?: string;
-  readonly field?: string;
-  readonly members?: Readonly<Record<string, StreamixSourceMetadata>>;
-}
+export type { StreamixSourceMetadata, StreamixLifetimeSpan };
 export interface StreamixInspectionFilter { name?: string; file?: string; kind?: string; }
 /** Constant-space counters for events observed since this object was instrumented. */
 export interface StreamixEmissionMetrics {
@@ -61,11 +61,6 @@ export interface StreamixLifetimeOperator {
 export interface StreamixOperatorLifetime {
   readonly operator: StreamixLifetimeOperator;
   readonly lifetime: StreamixEmissionLifetime;
-}
-export interface StreamixLifetimeSpan {
-  start(): void;
-  output(): void;
-  finish(outcome: StreamixEmissionLifetime['outcome']): void;
 }
 export interface StreamixInspectionEvent { readonly id: number; readonly name: string; readonly kind: string; readonly time: number; readonly objectKind?: StreamixSourceMetadata['kind']; readonly ownerName?: string; readonly emission?: number; readonly lifetime?: StreamixEmissionLifetime; readonly operator?: StreamixLifetimeOperator; readonly pullMs?: number; readonly value?: string; readonly error?: string; }
 export interface StreamixInspectorAPI {
@@ -467,3 +462,18 @@ export function __streamixOperatorExecution(operator: object, iterator: object):
   execution.owner = definition.owner;
   definitions.set(iterator, definition);
 }
+
+// Self-install: evaluating this module swaps the core's inert `__streamix*`
+// stubs for these real implementations. Lives at module scope (not in the
+// entry facade) because bundlers may flatten re-export facades and skip
+// their side effects. `enableStreamixIntrospection` remains the arm switch.
+// Operator-iterator tracking installs itself from operator-execution.ts.
+installStreamixIntrospection({
+  debug: __streamixDebug,
+  subscribe: __streamixSubscribe,
+  scopeMember: __streamixScopeMember,
+  debugDispose: __streamixDebugDispose,
+  beginLifetime: __streamixBeginLifetime,
+  pipeline: __streamixPipeline,
+  operatorExecution: __streamixOperatorExecution,
+});

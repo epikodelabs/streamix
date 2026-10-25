@@ -1,6 +1,6 @@
-import { __streamixOperatorExecution } from '../runtime/introspection';
+import { __streamixOperatorExecution } from '../runtime/introspection-hooks';
 import { captureOrigin } from '../runtime/origin';
-import { trackOperatorExecution } from "../runtime/operator-execution";
+import { trackOperatorExecution } from "../runtime/introspection-hooks";
 import { AsyncPushable, createAsyncPushable } from "../utils/pushable";
 import { normalizeError, type Atom } from "./atom";
 

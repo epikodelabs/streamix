@@ -1,5 +1,5 @@
 import { internalRuntime, type RuntimeNode } from '../lib/runtime/runtime';
-import { RuntimeExecutions } from '../lib/runtime/diagnostics';
+import { RuntimeExecutions } from '@epikodelabs/streamix/introspection';
 import { getScheduler } from '../lib/runtime/scheduling';
 import { setOriginCapture } from '../lib/runtime/origin';
 import { atom, derived, flow } from '../lib/atoms/atom';

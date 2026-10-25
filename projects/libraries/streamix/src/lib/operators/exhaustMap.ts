@@ -1,4 +1,4 @@
-import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection';
+import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection-hooks';
 import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";

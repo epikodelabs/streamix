@@ -4,6 +4,7 @@
     "./projects/libraries/streamix/dom/src/lib",
     "./projects/libraries/streamix/networking/src/lib",
     "./projects/libraries/streamix/compiler/src",
+    "./projects/libraries/streamix/introspection/src/lib",
     "./projects/libraries/streamix/src/lib",
     "./projects/libraries/streamix/angular/src/lib",
     "./projects/libraries/streamix/angular/builder/src",

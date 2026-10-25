@@ -1,4 +1,4 @@
-import { __streamixScopeMember, __streamixDebugDispose } from '../runtime/introspection';
+import { __streamixScopeMember, __streamixDebugDispose } from '../runtime/introspection-hooks';
 import { isAtom, isAtomLike } from "../utils/helpers";
 import {
   atom,

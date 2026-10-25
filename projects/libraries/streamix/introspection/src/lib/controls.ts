@@ -4,8 +4,10 @@
  * rule 7 of DIAGNOSTICS.md — tests and tooling import it directly; it stays
  * behind internal imports and never enters the package API.
  */
-import { setRuntimeInstrumentationEnabled, isRuntimeInstrumentationEnabled } from './diagnostics';
-import { setOriginCapture } from './origin';
+import { setRuntimeInstrumentationEnabled, isRuntimeInstrumentationEnabled, setOriginCapture } from '@epikodelabs/streamix';
+// The control surface implies the full introspection entry: toggles are
+// meaningless without the implementations they gate.
+import './introspection';
 
 export const streamixDiagnostics = Object.freeze({
   /** Master switch: accounting plus origin capture together, the dev defaults. */

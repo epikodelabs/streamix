@@ -1,11 +1,192 @@
 /** Internal process-local reactive core: graph, scheduling, invalidation, and the event bus. */
 import { runtimeScheduling, RuntimeScheduling, type SchedulableNode } from "./scheduling";
 import { RuntimeEventBus } from "./events";
-import { RuntimeDiagnostics, isRuntimeInstrumentationEnabled, type FlowExit } from "./diagnostics";
+import { isRuntimeInstrumentationEnabled } from "./instrumentation";
 import type { RuntimeOrigin } from "./origin";
 
 export type RuntimeNode = object;
 export type { RuntimeEvent, RuntimeEventKind, RuntimeEventBus } from "./events";
+
+/** Exit kind of a finished execution. */
+export type FlowExit = "complete" | "cancel" | "error";
+
+/** Frozen aggregate of execution accounting, for diagnostics consumers. */
+export interface FlowExecutionSnapshot {
+  readonly active: number;
+  readonly started: number;
+  readonly completed: number;
+  readonly cancelled: number;
+  readonly failed: number;
+  readonly emitted: number;
+}
+
+/** Frozen per-node view of execution accounting, for diagnostics consumers. */
+export interface ExecutionRecordSnapshot {
+  readonly node: RuntimeNode;
+  readonly name?: string;
+  readonly origin?: RuntimeOrigin;
+  readonly active: boolean;
+  readonly runs: number;
+  readonly emitted: number;
+  readonly completed: number;
+  readonly cancelled: number;
+  readonly errors: number;
+  readonly lastExit?: FlowExit;
+  readonly lastError?: unknown;
+  /** Error of the current or most recently finished run; cleared on restart. */
+  readonly error?: unknown;
+}
+
+/** Producer state read without subscribing, pulling, or evaluating a formula. */
+export interface FlowDiagnosticsState {
+  readonly started: boolean;
+  readonly awaitingNext: boolean;
+  readonly subscribers: number;
+  readonly hasValue: boolean;
+  readonly value: unknown;
+}
+
+export interface AtomStateReader {
+  hasValue: boolean;
+  value: unknown;
+  subscribers: number;
+  error: unknown;
+}
+
+/** One live flow as listed by the diagnostics port. */
+export interface FlowSnapshot {
+  readonly node: RuntimeNode;
+  readonly started: boolean;
+  readonly awaitingNext: boolean;
+  readonly subscribers: number;
+  readonly hasValue: boolean;
+  readonly value: unknown;
+  readonly origin?: RuntimeOrigin;
+  readonly execution?: ExecutionRecordSnapshot;
+  readonly dependencies: readonly RuntimeNode[];
+  readonly dependents: readonly RuntimeNode[];
+}
+
+/** Per-node diagnostics merged from the graph, the scheduler, and execution records. */
+export interface NodeDiagnostics {
+  /** The node these diagnostics describe. */
+  readonly node: RuntimeNode;
+  /** Label captured at execution start (operator name) or read from the node's `name` property. */
+  readonly name?: string;
+  /** Creation site of the node, captured automatically in dev builds. */
+  readonly origin?: RuntimeOrigin;
+  /** Scheduler depth (shallow dependencies first). Present only for schedulable nodes. */
+  readonly depth?: number;
+  /** True when invalidation work is queued but not flushed yet. */
+  readonly queued: boolean;
+  /** True while an execution started by this node is still running. */
+  readonly active: boolean;
+  /** Number of executions started by this node since registration. */
+  readonly runs: number;
+  /** Values emitted across all executions of this node. */
+  readonly emitted: number;
+  /** Executions of this node that completed since registration. */
+  readonly completed: number;
+  /** Executions of this node cancelled since registration. */
+  readonly cancelled: number;
+  /** Executions of this node that failed since registration. */
+  readonly errors: number;
+  /** Exit kind of the most recently finished execution. */
+  readonly lastExit?: FlowExit;
+  /** Error captured by the most recently failed execution, if any. */
+  readonly lastError?: unknown;
+  /** Current upstream dependency count from the graph. */
+  readonly dependencies: number;
+  /** Current downstream dependent count from the graph. */
+  readonly dependents: number;
+}
+
+/** One frozen introspection snapshot of the whole runtime. */
+export interface RuntimeInspection {
+  readonly graph: { readonly nodes: number };
+  readonly scheduler: {
+    readonly pending: number;
+    readonly paused: boolean;
+    readonly transactionDepth: number;
+  };
+  readonly executions: FlowExecutionSnapshot;
+  readonly nodes: readonly NodeDiagnostics[];
+}
+
+/** Execution accounting surface the runtime and diagnostics consumers rely on. */
+export interface RuntimeExecutionsPort {
+  activeTokenOf(node: RuntimeNode): number | undefined;
+  start(node: RuntimeNode, name?: string, origin?: RuntimeOrigin): number;
+  next(node: RuntimeNode, token: number): void;
+  finish(node: RuntimeNode, token: number, exit: FlowExit, error?: unknown): void;
+  describe(node: RuntimeNode): ExecutionRecordSnapshot | undefined;
+  snapshotEntries(): readonly ExecutionRecordSnapshot[];
+  snapshot(): FlowExecutionSnapshot;
+  forget(node: RuntimeNode): void;
+}
+
+/**
+ * All diagnostics-only runtime state: origins, per-node state readers, and
+ * execution records. Owns no reactive behavior — disposing the runtime must
+ * stay correct with a no-op port installed. The real implementation ships in
+ * the introspection entry and is swapped in via
+ * {@link installRuntimeDiagnostics} when that entry is imported.
+ */
+export interface RuntimeDiagnosticsPort {
+  readonly executions: RuntimeExecutionsPort;
+  captureOrigin(node: RuntimeNode, origin: RuntimeOrigin): void;
+  originOf(node: RuntimeNode): RuntimeOrigin | undefined;
+  registerAtomState(node: RuntimeNode, read: () => AtomStateReader): void;
+  atomState(node: RuntimeNode): AtomStateReader | undefined;
+  registerFlow(node: RuntimeNode, state: () => FlowDiagnosticsState): void;
+  flowState(node: RuntimeNode): FlowDiagnosticsState | undefined;
+  flows(graph: RuntimeGraph): readonly FlowSnapshot[];
+  inspect(runtime: StreamixRuntime): RuntimeInspection;
+  dispose(node: RuntimeNode): void;
+}
+
+const NOOP_EXECUTION_SNAPSHOT: FlowExecutionSnapshot = Object.freeze({
+  active: 0, started: 0, completed: 0, cancelled: 0, failed: 0, emitted: 0,
+});
+
+class NoopRuntimeDiagnostics implements RuntimeDiagnosticsPort {
+  readonly executions: RuntimeExecutionsPort = {
+    activeTokenOf: () => undefined,
+    start: () => 0,
+    next: () => {},
+    finish: () => {},
+    describe: () => undefined,
+    snapshotEntries: () => [],
+    snapshot: () => NOOP_EXECUTION_SNAPSHOT,
+    forget: () => {},
+  };
+  captureOrigin(): void {}
+  originOf(): undefined { return undefined; }
+  registerAtomState(): void {}
+  atomState(): undefined { return undefined; }
+  registerFlow(): void {}
+  flowState(): undefined { return undefined; }
+  flows(): readonly FlowSnapshot[] { return []; }
+  /** Graph and scheduler totals stay truthful; node rows need the introspection entry. */
+  inspect(runtime: StreamixRuntime): RuntimeInspection {
+    return Object.freeze({
+      graph: Object.freeze({ nodes: runtime.graph.size }),
+      scheduler: Object.freeze({
+        pending: runtime.scheduling.scheduler.pending ?? 0,
+        paused: runtime.scheduling.scheduler.isPaused === true,
+        transactionDepth: runtime.scheduling.transactionDepth,
+      }),
+      executions: NOOP_EXECUTION_SNAPSHOT,
+      nodes: Object.freeze([]),
+    });
+  }
+  dispose(): void {}
+}
+
+/** Swap in the real diagnostics port; called by the introspection entry. */
+export function installRuntimeDiagnostics(port: RuntimeDiagnosticsPort): void {
+  internalRuntime.diagnostics = port;
+}
 
 /** One live execution observed by diagnostics: accounting plus bus events. */
 export interface ExecutionSpan {
@@ -23,10 +204,22 @@ export class StreamixRuntime {
   readonly graph = new RuntimeGraph();
   readonly events = new RuntimeEventBus();
   /** Diagnostics-only state; the reactive core never reads it. */
-  readonly diagnostics = new RuntimeDiagnostics(this.events);
+  diagnostics: RuntimeDiagnosticsPort = new NoopRuntimeDiagnostics();
   readonly root = Object.freeze({ type: "root" as const });
+  private readonly flowNodes = new WeakSet<RuntimeNode>();
   private readonly invalidators = new Map<RuntimeNode, () => void>();
   private readonly schedulables = new WeakMap<RuntimeNode, SchedulableNode>();
+
+  /** Record a flow-backed atom's identity. Unconditional: the graph 'change'
+   * dedupe in `changed()` must not depend on instrumentation being enabled. */
+  markFlowNode(node: RuntimeNode): void {
+    this.flowNodes.add(node);
+  }
+
+  /** True when the node is a flow-backed atom (used to dedupe emissions). */
+  hasFlow(node: RuntimeNode): boolean {
+    return this.flowNodes.has(node);
+  }
 
   constructor(readonly scheduling: RuntimeScheduling = new RuntimeScheduling()) {}
 
@@ -60,7 +253,7 @@ export class StreamixRuntime {
   changed(source: RuntimeNode): void {
     // Flows report emissions as execution 'next' events; the valueless graph
     // 'change' would double-count each emission in diagnostics consumers.
-    if (this.events.observed && !this.diagnostics.hasFlow(source)) {
+    if (this.events.observed && !this.hasFlow(source)) {
       this.events.publish({ kind: "change", node: source });
     }
     // Iterate the live downstream set: every dependent runs an idempotent

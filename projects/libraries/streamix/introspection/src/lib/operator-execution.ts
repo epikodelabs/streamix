@@ -1,6 +1,6 @@
-import { internalRuntime, type ExecutionSpan } from './runtime';
-import { isRuntimeInstrumentationEnabled } from './diagnostics';
-import type { RuntimeOrigin } from './origin';
+import { __streamixRuntime as internalRuntime, isRuntimeInstrumentationEnabled, installStreamixOperatorTracking, type ExecutionSpan, type RuntimeOrigin } from '@epikodelabs/streamix';
+// Evaluating the rest of the introspection entry is part of this module's install.
+import './introspection';
 
 /**
  * Observe an operator iterator without changing its pull/push contract.
@@ -82,3 +82,9 @@ export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: str
   }
   return iterator;
 }
+
+// Self-install: evaluating this module swaps the core's pass-through
+// trackOperatorExecution stub for the real accounting wrapper. Lives at
+// module scope (not in the entry facade) because bundlers may flatten
+// re-export facades and skip their side effects.
+installStreamixOperatorTracking(trackOperatorExecution);

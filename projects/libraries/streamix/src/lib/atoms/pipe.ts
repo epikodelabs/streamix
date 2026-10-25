@@ -1,4 +1,4 @@
-import { __streamixPipeline } from '../runtime/introspection';
+import { __streamixPipeline } from '../runtime/introspection-hooks';
 import { isAsyncIterable, isAtomLike, isIterable } from "../utils/helpers";
 import { flow, trackDependencies, type Atom } from "./atom";
 import { isPromiseLike, type MaybePromise, type Operator } from "./operator";

@@ -1,4 +1,4 @@
-import { __streamixDebugDispose } from '../runtime/introspection';
+import { __streamixDebugDispose } from '../runtime/introspection-hooks';
 import type { MaybePromise } from "./operator";
 
 /**

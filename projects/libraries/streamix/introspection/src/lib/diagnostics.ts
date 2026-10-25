@@ -1,59 +1,33 @@
 /**
  * Runtime diagnostics: execution accounting, per-node self-description, and
  * the frozen snapshot builder. All state here is diagnostics-only — the
- * reactive core never reads it. Not exported from the package API.
+ * reactive core never reads it. This module ships in the introspection entry:
+ * until that entry is imported, the core runs with a no-op port and none of
+ * this code is downloaded. The shared flag and snapshot types live in the
+ * core (`runtime.ts`) so both sides compile against one shape.
  */
-import type { RuntimeGraph, RuntimeNode, StreamixRuntime } from "./runtime";
-import type { RuntimeEventBus } from "./events";
-import type { RuntimeOrigin } from "./origin";
-import type { SchedulableNode } from "./scheduling";
+import {
+  isRuntimeInstrumentationEnabled,
+  setRuntimeInstrumentationEnabled,
+  installRuntimeDiagnostics,
+  __streamixRuntime,
+  type RuntimeGraph,
+  type RuntimeNode,
+  type StreamixRuntime,
+  type RuntimeEventBus,
+  type RuntimeOrigin,
+  type SchedulableNode,
+  type FlowExit,
+  type FlowExecutionSnapshot,
+  type ExecutionRecordSnapshot,
+  type FlowDiagnosticsState,
+  type AtomStateReader,
+  type NodeDiagnostics,
+  type RuntimeInspection,
+  type RuntimeDiagnosticsPort,
+} from "@epikodelabs/streamix";
 
-/**
- * Execution accounting and per-node state readers are diagnostics-only. Dev
- * builds default to on; production bundles start with capture off and never
- * pay for a record, a counter, or a state-reader closure. Tests and tooling
- * may toggle the flag explicitly, mirroring {@link setOriginCapture}.
- */
-let instrumentationEnabled = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
-
-/** Enable or disable execution accounting and node state capture. */
-export function setRuntimeInstrumentationEnabled(next: boolean): void {
-  instrumentationEnabled = next;
-}
-
-/** True while execution accounting and node state capture are recorded. */
-export function isRuntimeInstrumentationEnabled(): boolean {
-  return instrumentationEnabled;
-}
-
-/** Exit kind of a finished execution. */
-export type FlowExit = "complete" | "cancel" | "error";
-
-export interface FlowExecutionSnapshot {
-  readonly active: number;
-  readonly started: number;
-  readonly completed: number;
-  readonly cancelled: number;
-  readonly failed: number;
-  readonly emitted: number;
-}
-
-/** Frozen per-node view of execution accounting, for diagnostics consumers. */
-export interface ExecutionRecordSnapshot {
-  readonly node: RuntimeNode;
-  readonly name?: string;
-  readonly origin?: RuntimeOrigin;
-  readonly active: boolean;
-  readonly runs: number;
-  readonly emitted: number;
-  readonly completed: number;
-  readonly cancelled: number;
-  readonly errors: number;
-  readonly lastExit?: FlowExit;
-  readonly lastError?: unknown;
-  /** Error of the current or most recently finished run; cleared on restart. */
-  readonly error?: unknown;
-}
+export { setRuntimeInstrumentationEnabled, isRuntimeInstrumentationEnabled };
 
 interface ExecutionRecord {
   name?: string;
@@ -80,7 +54,7 @@ export class RuntimeExecutions {
 
   /** A token prevents a late previous execution from closing a newer one. */
   start(node: RuntimeNode, name?: string, origin?: RuntimeOrigin): number {
-    if (!instrumentationEnabled) return 0;
+    if (!isRuntimeInstrumentationEnabled()) return 0;
     const previous = this.active.get(node);
     if (previous !== undefined) this.finish(node, previous, "cancel");
     const token = ++this.generation;
@@ -104,7 +78,7 @@ export class RuntimeExecutions {
   }
 
   next(node: RuntimeNode, token: number): void {
-    if (!instrumentationEnabled) return;
+    if (!isRuntimeInstrumentationEnabled()) return;
     if (this.active.get(node) !== token) return;
     this.emitted++;
     const record = this.records.get(node);
@@ -114,7 +88,7 @@ export class RuntimeExecutions {
   finish(node: RuntimeNode, token: number, exit: FlowExit, error?: unknown): void {
     // Still release an execution that was active when capture was disabled,
     // so the active map never strands a node after a mid-flight toggle.
-    if (!instrumentationEnabled) {
+    if (!isRuntimeInstrumentationEnabled()) {
       if (this.active.get(node) === token) this.active.delete(node);
       return;
     }
@@ -176,32 +150,16 @@ export class RuntimeExecutions {
   }
 }
 
-/** Producer state read without subscribing, pulling, or evaluating a formula. */
-export interface FlowDiagnosticsState {
-  readonly started: boolean;
-  readonly awaitingNext: boolean;
-  readonly subscribers: number;
-  readonly hasValue: boolean;
-  readonly value: unknown;
-}
-
-interface AtomStateReader {
-  hasValue: boolean;
-  value: unknown;
-  subscribers: number;
-  error: unknown;
-}
-
 /**
  * All diagnostics-only runtime state: origins, per-node state readers, and
  * execution records. Owns no reactive behavior — disposing the runtime must
- * stay correct with this whole class removed.
+ * stay correct with this whole class removed. Installed as the runtime's
+ * diagnostics port by this entry's index module.
  */
-export class RuntimeDiagnostics {
+export class RuntimeDiagnostics implements RuntimeDiagnosticsPort {
   private readonly origins = new WeakMap<RuntimeNode, RuntimeOrigin>();
   private readonly atomStates = new WeakMap<RuntimeNode, () => AtomStateReader>();
   private readonly flowStates = new Map<RuntimeNode, () => FlowDiagnosticsState>();
-  private readonly flowNodes = new WeakSet<RuntimeNode>();
   readonly executions = new RuntimeExecutions();
 
   constructor(private readonly events: RuntimeEventBus) {}
@@ -217,21 +175,15 @@ export class RuntimeDiagnostics {
   }
 
   registerAtomState(node: RuntimeNode, read: () => AtomStateReader): void {
-    if (!instrumentationEnabled) return;
+    if (!isRuntimeInstrumentationEnabled()) return;
     this.atomStates.set(node, read);
   }
 
   atomState(node: RuntimeNode) { return this.atomStates.get(node)?.(); }
 
-  /** Record a flow-backed atom's identity. Unconditional: the graph 'change'
-   * dedupe in `changed()` must not depend on instrumentation being enabled. */
-  markFlowNode(node: RuntimeNode): void {
-    this.flowNodes.add(node);
-  }
-
   /** Register a flow-backed atom independently of its execution starting. */
   registerFlow(node: RuntimeNode, state: () => FlowDiagnosticsState): void {
-    if (!instrumentationEnabled) return;
+    if (!isRuntimeInstrumentationEnabled()) return;
     this.flowStates.set(node, state);
     this.events.publish({ kind: "flow", node });
   }
@@ -239,11 +191,6 @@ export class RuntimeDiagnostics {
   flowState(node: RuntimeNode): FlowDiagnosticsState | undefined {
     const state = this.flowStates.get(node)?.();
     return state ? Object.freeze({ ...state }) : undefined;
-  }
-
-  /** True when the node is a flow-backed atom (used to dedupe emissions). */
-  hasFlow(node: RuntimeNode): boolean {
-    return this.flowNodes.has(node);
   }
 
   /** Live flows, including idle and recoverably failed producers; disposed flows are removed. */
@@ -262,55 +209,9 @@ export class RuntimeDiagnostics {
   }
 
   /** One frozen snapshot of graph, scheduler, transaction, and execution state. */
-  inspect(runtime: StreamixRuntime) {
+  inspect(runtime: StreamixRuntime): RuntimeInspection {
     return collectInspection(runtime, this);
   }
-}
-
-/** Per-node diagnostics merged from the graph, the scheduler, and execution records. */
-export interface NodeDiagnostics {
-  /** The node these diagnostics describe. */
-  readonly node: RuntimeNode;
-  /** Label captured at execution start (operator name) or read from the node's `name` property. */
-  readonly name?: string;
-  /** Creation site of the node, captured automatically in dev builds. */
-  readonly origin?: RuntimeOrigin;
-  /** Scheduler depth (shallow dependencies first). Present only for schedulable nodes. */
-  readonly depth?: number;
-  /** True when invalidation work is queued but not flushed yet. */
-  readonly queued: boolean;
-  /** True while an execution started by this node is still running. */
-  readonly active: boolean;
-  /** Number of executions started by this node since registration. */
-  readonly runs: number;
-  /** Values emitted across all executions of this node. */
-  readonly emitted: number;
-  /** Executions of this node that completed since registration. */
-  readonly completed: number;
-  /** Executions of this node cancelled since registration. */
-  readonly cancelled: number;
-  /** Executions of this node that failed since registration. */
-  readonly errors: number;
-  /** Exit kind of the most recently finished execution. */
-  readonly lastExit?: FlowExit;
-  /** Error captured by the most recently failed execution, if any. */
-  readonly lastError?: unknown;
-  /** Current upstream dependency count from the graph. */
-  readonly dependencies: number;
-  /** Current downstream dependent count from the graph. */
-  readonly dependents: number;
-}
-
-/** One frozen introspection snapshot of the whole runtime. */
-export interface RuntimeInspection {
-  readonly graph: { readonly nodes: number };
-  readonly scheduler: {
-    readonly pending: number;
-    readonly paused: boolean;
-    readonly transactionDepth: number;
-  };
-  readonly executions: FlowExecutionSnapshot;
-  readonly nodes: readonly NodeDiagnostics[];
 }
 
 function nodeName(node: RuntimeNode): string | undefined {
@@ -358,3 +259,8 @@ export function collectInspection(runtime: StreamixRuntime, diagnostics: Runtime
     nodes: Object.freeze(nodes),
   });
 }
+
+// Self-install: evaluating this module swaps the core's no-op diagnostics
+// port for the real ledger. Lives at module scope (not in the entry facade)
+// because bundlers may flatten re-export facades and skip their side effects.
+installRuntimeDiagnostics(new RuntimeDiagnostics(__streamixRuntime.events));

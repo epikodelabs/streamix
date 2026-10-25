@@ -94,6 +94,9 @@
       "@epikodelabs/streamix/vue": [
         "./projects/libraries/streamix/vue/src/lib/index.ts"
       ],
+      "@epikodelabs/streamix/introspection": [
+        "./projects/libraries/streamix/introspection/src/lib/index.ts"
+      ],
       "@epikodelabs/streamix": [
         "./projects/libraries/streamix/src/lib/index.ts"
       ]

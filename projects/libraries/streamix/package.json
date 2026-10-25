@@ -34,7 +34,10 @@
     "./react/editor/tsserver": "./react/editor/tsserver.cjs",
     "./vue/editor/tsserver": "./vue/editor/tsserver.cjs"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "**/introspection/**",
+    "**/epikodelabs-streamix-introspection*"
+  ],
   "homepage": "https://epikodelabs.github.io/streamix",
   "repository": {
     "type": "git",

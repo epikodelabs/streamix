@@ -1,5 +1,5 @@
-import { internalRuntime, type ExecutionSpan } from "../runtime/runtime";
-import { isRuntimeInstrumentationEnabled, type FlowExit } from "../runtime/diagnostics";
+import { internalRuntime, type ExecutionSpan, type FlowExit } from "../runtime/runtime";
+import { isRuntimeInstrumentationEnabled } from "../runtime/instrumentation";
 import { captureOrigin } from "../runtime/origin";
 import { DefaultScheduler, getScheduler, setScheduler, isTransactionActive, finalizeAfterTransaction, type Scheduler } from "../runtime/scheduling";
 export type { Scheduler } from "../runtime/scheduling";
@@ -998,7 +998,7 @@ function atomFromIteratorInternal<T>(
   // 'change' events against flow 'next' events in every configuration. The
   // read-only state reader closure is skipped in production builds, where
   // nothing observes it.
-  internalRuntime.diagnostics.markFlowNode(instance);
+  internalRuntime.markFlowNode(instance);
   if (isRuntimeInstrumentationEnabled()) {
     internalRuntime.diagnostics.registerFlow(instance, () => ({
       started, awaitingNext, subscribers: activeSubCount,
