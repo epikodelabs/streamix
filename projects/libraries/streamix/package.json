@@ -1,6 +1,6 @@
 {
   "name": "@epikodelabs/streamix",
-  "version": "3.0.9",
+  "version": "3.0.10",
   "description": "Pull-based reactive streams with async iterators",
   "license": "MIT",
   "keywords": [
@@ -51,7 +51,7 @@
     "@angular/core": ">=20.0.0",
     "react": ">=18.0.0",
     "vue": ">=3.4.0",
-    "typescript": ">=6.0.0"
+    "typescript": ">=5.9.3"
   },
   "peerDependenciesMeta": {
     "@angular-devkit/architect": {

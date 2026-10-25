@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.10 - 2026-10-25
+
+- **Dependency mitigation.** The published TypeScript peer floor drops from `>=6.0.0` to `>=5.9.3`, and the workspace toolchain steps down from Angular 22.1 / TypeScript 6.0 to Angular 21.1 / TypeScript 5.9 — including ng-packagr and the Angular CLI, build, and compiler packages. Adopting Streamix no longer pushes consumers onto the newest major toolchain: Angular peers stay at their `>=20.0.0` floor, so hosts on Angular 20 or 21 work unchanged.
+
 ## 3.0.9 - 2026-10-25
 
 - **Angular interpolation fixes.** Multi-part interpolations now update in zoneless apps, including combinations of standalone atoms, scoped atoms, literal text, and plain component values. Plain values are sampled initially and when an atom used by the binding emits.
