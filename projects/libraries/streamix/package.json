@@ -68,6 +68,12 @@
     },
     "typescript": {
       "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
     }
   }
 }
