@@ -1,8 +1,14 @@
 # Changelog
 
+## 3.0.8 - 2026-10-25
+
+- **Introspection moves behind its own entry.** The inspector, runtime diagnostics accounting, and operator execution tracking moved to `@epikodelabs/streamix/introspection`; the default core keeps only inert no-op seams, so applications that never enable introspection download and execute none of it (the root build dropped from ~134 KB to ~102 KB minified). The compiler injects the entry import into instrumented dev builds automatically, and `enableStreamixIntrospection` / `mountStreamixInspector` now come from the entry instead of the package root. In the inspector, scopes report as `live · N members` from the moment they exist instead of falling back to unevaluated.
+- **Compiled-template hardening.** Nested `@for` loops and richer bindings now compile cleanly: loop locals are proven before nested block expressions are embedded, local reads extract through component setup, lowered-value casts are restricted to compiler-owned literals, script-context-breaking characters in embedded literals are escaped, and the safe style allowlist covers common visual properties.
+- **Framework lifecycle fixes.** A completed Vue flow now serves its last value through the bridge instead of disposing its backing atom, so one finished flow can no longer freeze the rest of the component's template updates. React-owned callable scopes keep their scope classification in the introspection trace, and the Vue builder gained a Vite build and dev-server target that reuses each app's authored `vite.config.ts`.
+- Derived callbacks and the live metrics chart were modernized, and the published package metadata, public entry points, and README were aligned for the shipped 3.0.8 artifact.
+
 ## 3.0.7 - 2026-10-20
 
-- **Introspection is now an optional entry.** The inspector, runtime diagnostics accounting, and operator execution tracking moved to `@epikodelabs/streamix/introspection`; the default core keeps only inert no-op seams, so applications that never enable introspection stop downloading or executing any of it. The compiler injects the entry import into instrumented dev builds automatically; `enableStreamixIntrospection` and `mountStreamixInspector` now come from the entry instead of the package root. Dev builds without introspection also no longer run background execution accounting.
 - **Meet the inspector.😊** An in-app diagnostics overlay, mounted automatically in dev builds and shared by Angular, React, and Vue: live tabs for Scopes (member state), Atoms, Flows, and a Trace that names every write with its value and timing.
 - Fixed expand cancellation: it now closes the active child iterator, clears queued values, and ignores async results that arrive after cancellation. Errors also clean up the active child.
 - NO_INITIAL_VALUE is the only way to be empty. Value-less atoms and flows read it; deriveds wait for all inputs instead of seeing undefined; conditional dependencies swap edges cleanly.
