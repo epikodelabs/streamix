@@ -11,6 +11,10 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: bundle-size
+  cancel-in-progress: true
+
 jobs:
   badge:
     runs-on: ubuntu-latest
@@ -94,7 +98,6 @@ jobs:
           git config --local credential.helper ''
           git config --local --add credential.helper '!gh auth git-credential'
           git checkout main
-          git pull origin main
           git add projects/libraries/streamix/bundle-size.svg
 
           if git diff --staged --quiet; then
@@ -102,6 +105,10 @@ jobs:
           else
             echo "Committing badge update..."
             git commit -m "Update bundle size badge [skip ci]"
+            # Rebase onto any commits that landed while this run built; the
+            # badge commit is a single tracked file, so rebase conflicts
+            # resolve by keeping the freshly generated badge.
+            git pull --rebase origin main || (git rebase --abort && exit 1)
             echo "Pushing to repository..."
             git push origin HEAD:main
             echo "Badge updated successfully"
