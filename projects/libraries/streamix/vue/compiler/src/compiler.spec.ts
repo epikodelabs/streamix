@@ -1,6 +1,19 @@
 import { formatVueSfcDiagnostics, transformVueSfc } from './compiler';
 
 describe('Vue SFC compiler', () => {
+  it('preserves explicitly tracked sources with a named reader', () => {
+    const result = transformVueSfc(`
+      <script setup lang="ts">
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(2);
+      const total = derived(self => self(count) + self.read(count));
+      </script>
+      <template>{{ total }}</template>
+    `);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain('self(count) + self.read(count)');
+  });
+
   it('preserves CRLF source columns in diagnostic frames', () => {
     const source = '<template>\r\n  {{ count }}\r\n</template>';
     const formatted = formatVueSfcDiagnostics(source, 'Counter.vue', [{

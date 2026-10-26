@@ -1,6 +1,76 @@
 import { rewriteDerivedAtomReads } from './generate-project';
 
 describe('Angular derived shorthand', () => {
+  it('lowers chained derived and flow inputs, object members, and shorthand keys', () => {
+    const transformed = rewriteDerivedAtomReads(`
+      const count = atom(2);
+      const doubled = derived(() => count * 2);
+      const updates = flow([3]);
+      const profile = atom({ name: 'Ada' });
+      const summary = derived(() => ({ doubled, total: doubled + updates, name: profile.name }));
+    `);
+    expect(transformed).toContain('({ doubled: doubled.value, total: doubled.value + updates.value, name: profile.value.name })');
+  });
+
+  it('preserves explicit tracked reads regardless of the callback parameter name', () => {
+    const transformed = rewriteDerivedAtomReads(`
+      const count = atom(2);
+      const total = derived(self => self(count) + self.read(count));
+    `);
+    expect(transformed).toContain('self(count) + self.read(count)');
+  });
+
+  it('respects lexical shadowing and unrelated class fields', () => {
+    const transformed = rewriteDerivedAtomReads(`
+      const count = atom(2);
+      const total = derived(() => [1, 2].map(count => count * 2));
+      class Reactive { count = atom(1); }
+      class Plain { count = 4; total = derived(() => this.count * 2); }
+    `);
+    expect(transformed).toContain('map(count => count * 2)');
+    expect(transformed).toContain('derived(() => this.count * 2)');
+  });
+
+  it('recognizes aliased and namespace Streamix factories', () => {
+    const transformed = rewriteDerivedAtomReads(`
+      import { atom as state, derived as computed } from '@epikodelabs/streamix';
+      import * as sx from '@epikodelabs/streamix';
+      const count = state(2);
+      const total = computed(() => count * 2);
+      const other = sx.atom(3);
+      const label = sx.derived(() => other + total);
+    `);
+    expect(transformed).toContain('computed(() => count.value * 2)');
+    expect(transformed).toContain('sx.derived(() => other.value + total.value)');
+  });
+
+  it('preserves explicit reads and avoids overlapping nested formula edits', () => {
+    const transformed = rewriteDerivedAtomReads(`
+      const count = atom(2);
+      const summary = derived(() => {
+        type Source = typeof count;
+        return derived(() => count.value + count);
+      });
+    `);
+    expect(transformed).toContain('type Source = typeof count;');
+    expect(transformed).toContain('derived(() => count.value + count.value)');
+    expect(transformed).not.toContain('.value.value');
+  });
+
+  it('does not adopt unrelated imports or shadowed factory functions', () => {
+    const transformed = rewriteDerivedAtomReads(`
+      import { atom } from 'other-library';
+      const count = atom(2);
+      const total = derived(() => count * 2);
+      function plain(atom: (value: number) => number) {
+        const local = atom(3);
+        return derived(() => local * 2);
+      }
+    `);
+    expect(transformed).toContain('derived(() => count * 2)');
+    expect(transformed).toContain('derived(() => local * 2)');
+  });
+
   it('lowers raw local atom reads inside a derived callback', () => {
     const transformed = rewriteDerivedAtomReads(`
       class Counter {

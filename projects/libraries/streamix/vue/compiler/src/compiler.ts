@@ -811,12 +811,17 @@ function derivedAtomValueReadEdits(
     const callback = findNodeAt(file, derived.derivedCallbackStart!, derived.derivedCallbackEnd!);
     if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) continue;
     const body = callback.body;
-    const hasTrackerParameter = callback.parameters.some(parameter => containsBinding(parameter.name, '$'));
+    const trackerNames = new Set(callback.parameters.flatMap(parameter =>
+      ts.isIdentifier(parameter.name) ? [parameter.name.text] : []));
     const visit = (node: ts.Node): void => {
-      // `$` receives atom references and registers them as dependencies. Its
-      // arguments must not be lowered to `.value` reads.
-      if (hasTrackerParameter && ts.isCallExpression(node) &&
-          ts.isIdentifier(node.expression) && node.expression.text === '$') return;
+      // DerivedScope readers receive source references, whatever their name.
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const reader = ts.isPropertyAccessExpression(callee) &&
+          ['read', 'use'].includes(callee.name.text) ? callee.expression : callee;
+        if (ts.isIdentifier(reader) && trackerNames.has(reader.text) &&
+            !isShadowedIn(reader, callback.body, reader.text)) return;
+      }
       if (ts.isIdentifier(node) && atoms.has(node.text) &&
           isValueIdentifier(node) && !isShadowedIn(node, callback, node.text)) {
         const start = node.getStart(file);

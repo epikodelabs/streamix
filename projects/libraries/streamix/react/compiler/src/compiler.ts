@@ -307,11 +307,15 @@ export function transformReactJsx(
       const canRead = (id: ts.Identifier): boolean => reactiveNames.has(id.text) &&
         !callbackParameters.has(id.text) && !hidden(id) && !isShadowedName(id.text, id, boundary);
       const lower: ts.Visitor = child => {
-        // `$` is the DerivedScope tracker. Its arguments must remain source
-        // references so `$` can register them; lowering `$(count)` to
-        // `$(count.value)` would pass a plain value instead of an atom.
-        if (ts.isCallExpression(child) && ts.isIdentifier(child.expression) &&
-            child.expression.text === "$" && callbackParameters.has("$")) return child;
+        // DerivedScope readers consume source references, regardless of their
+        // parameter name; lowering their arguments would pass plain values.
+        if (ts.isCallExpression(child)) {
+          const callee = child.expression;
+          const reader = ts.isPropertyAccessExpression(callee) &&
+            ["read", "use"].includes(callee.name.text) ? callee.expression : callee;
+          if (ts.isIdentifier(reader) && callbackParameters.has(reader.text) &&
+              !isShadowedName(reader.text, reader, callback.body)) return child;
+        }
         if (ts.isPropertyAccessExpression(child) && child.name.text === "value" &&
             ts.isIdentifier(child.expression) && canRead(child.expression)) return child;
         if (ts.isShorthandPropertyAssignment(child) && canRead(child.name)) {

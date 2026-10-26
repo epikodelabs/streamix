@@ -410,10 +410,42 @@ function configPath(path: string): string {
  */
 export function rewriteDerivedAtomReads(source: string): string {
   const file = ts.createSourceFile('component.ts', source, ts.ScriptTarget.Latest, true);
-  const atomNames = new Set<string>();
-
-  const isFactory = (node: ts.Expression, name: string): boolean =>
-    ts.isIdentifier(node) && node.text === name;
+  // Bind the authored file so lexical locals and each class's fields have
+  // distinct identities. No module or library resolution is needed here.
+  const host = ts.createCompilerHost({ noLib: true, noResolve: true });
+  host.getSourceFile = name => name === file.fileName ? file : undefined;
+  const checker = ts.createProgram([file.fileName], { noLib: true, noResolve: true }, host).getTypeChecker();
+  const atoms = new Set<ts.Symbol>();
+  const factories = new Map<ts.Symbol, string>();
+  const namespaces = new Set<ts.Symbol>();
+  const factoryNames = new Set(['atom', 'derived', 'flow']);
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+        !/^@epikodelabs\/streamix(?:\/|$)/.test(statement.moduleSpecifier.text) ||
+        statement.importClause?.isTypeOnly) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings && ts.isNamedImports(bindings)) {
+      for (const item of bindings.elements) {
+        const symbol = checker.getSymbolAtLocation(item.name);
+        if (symbol && !item.isTypeOnly) factories.set(symbol, (item.propertyName ?? item.name).text);
+      }
+    } else if (bindings && ts.isNamespaceImport(bindings)) {
+      const symbol = checker.getSymbolAtLocation(bindings.name);
+      if (symbol) namespaces.add(symbol);
+    }
+  }
+  const factoryKind = (node: ts.Expression): string | undefined => {
+    if (ts.isIdentifier(node)) {
+      const symbol = checker.getSymbolAtLocation(node);
+      // Bare factory names remain supported for snippets without imports.
+      return symbol ? factories.get(symbol) : factoryNames.has(node.text) ? node.text : undefined;
+    }
+    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
+      const symbol = checker.getSymbolAtLocation(node.expression);
+      if (symbol && namespaces.has(symbol)) return node.name.text;
+    }
+    return undefined;
+  };
 
   const unwrapDebug = (node: ts.Expression): ts.Expression => ts.isCallExpression(node) &&
     ts.isIdentifier(node.expression) && node.expression.text.startsWith('__sxDebug') ? node.arguments[0] : node;
@@ -423,9 +455,10 @@ export function rewriteDerivedAtomReads(source: string): string {
       ts.isIdentifier(node.name) &&
       node.initializer &&
       ts.isCallExpression(unwrapDebug(node.initializer)) &&
-      isFactory((unwrapDebug(node.initializer) as ts.CallExpression).expression, 'atom')
+      factoryNames.has(factoryKind((unwrapDebug(node.initializer) as ts.CallExpression).expression) ?? '')
     ) {
-      atomNames.add(node.name.text);
+      const symbol = checker.getSymbolAtLocation(node.name);
+      if (symbol) atoms.add(symbol);
     }
     ts.forEachChild(node, collectAtoms);
   };
@@ -435,22 +468,28 @@ export function rewriteDerivedAtomReads(source: string): string {
   const visit = (node: ts.Node): void => {
     if (
       ts.isCallExpression(node) &&
-      isFactory(node.expression, 'derived') &&
+      factoryKind(node.expression) === 'derived' &&
       node.arguments.length > 0
     ) {
       const callback = node.arguments[0];
       if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
-        const hasTrackerParameter = callback.parameters.some(parameter =>
-          ts.isIdentifier(parameter.name) && parameter.name.text === '$');
+        const trackers = new Set(callback.parameters.flatMap(parameter =>
+          ts.isIdentifier(parameter.name) ? [checker.getSymbolAtLocation(parameter.name)] : []));
         const read = (child: ts.Node): void => {
-          // `$` receives source references and records derived dependencies.
-          // Rewriting `$(count)` to `$(count.value)` would lose that source.
-          if (hasTrackerParameter && ts.isCallExpression(child) &&
-              ts.isIdentifier(child.expression) && child.expression.text === '$') return;
+          if (ts.isTypeNode(child)) return;
+          // Nested formulas get their own pass below, avoiding overlapping edits.
+          if (ts.isCallExpression(child) && factoryKind(child.expression) === 'derived') return;
+          // Explicit tracker calls consume sources, whatever the reader's name.
+          if (ts.isCallExpression(child)) {
+            const callee = child.expression;
+            const reader = ts.isPropertyAccessExpression(callee) &&
+              ['read', 'use'].includes(callee.name.text) ? callee.expression : callee;
+            if (ts.isIdentifier(reader) && trackers.has(checker.getSymbolAtLocation(reader))) return;
+          }
           if (
             ts.isPropertyAccessExpression(child) &&
             child.expression.kind === ts.SyntaxKind.ThisKeyword &&
-            atomNames.has(child.name.text)
+            atoms.has(checker.getSymbolAtLocation(child.name)!)
           ) {
             // `this.price.value` is already explicit. Rewriting the inner
             // access would produce `this.price.value.value`.
@@ -468,16 +507,20 @@ export function rewriteDerivedAtomReads(source: string): string {
             });
             return;
           }
-          if (ts.isIdentifier(child) && atomNames.has(child.text)) {
+          if (ts.isIdentifier(child)) {
             const parent = child.parent;
-            const isPropertyName = ts.isPropertyAccessExpression(parent) && parent.name === child;
-            const isExplicitValue = ts.isPropertyAccessExpression(parent) && parent.expression === child;
             const isShorthand = ts.isShorthandPropertyAssignment(parent);
-            if (!isPropertyName && !isExplicitValue && !isShorthand) {
+            const symbol = isShorthand ? checker.getShorthandAssignmentValueSymbol(parent) : checker.getSymbolAtLocation(child);
+            if (!symbol || !atoms.has(symbol)) return;
+            const isPropertyName = ts.isPropertyAccessExpression(parent) && parent.name === child;
+            const isExplicitValue = ts.isPropertyAccessExpression(parent) && parent.expression === child && parent.name.text === 'value';
+            const isDeclaration = (ts.isVariableDeclaration(parent) || ts.isParameter(parent) ||
+              ts.isBindingElement(parent) || ts.isPropertyAssignment(parent)) && parent.name === child;
+            if (!isPropertyName && !isExplicitValue && !isDeclaration) {
               edits.push({
                 start: child.getStart(file),
                 end: child.end,
-                replacement: `${child.text}.value`,
+                replacement: isShorthand ? `${child.text}: ${child.text}.value` : `${child.text}.value`,
               });
             }
           }

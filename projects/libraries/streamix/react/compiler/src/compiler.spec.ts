@@ -1,6 +1,14 @@
 import { transformReactJsx } from "./compiler";
 
 describe("React JSX compiler", () => {
+  it("preserves explicitly tracked sources with a named reader", () => {
+    const result = transformReactJsx(`
+      const count = atom(2);
+      const total = derived(self => self(count) + self.read(count));
+    `);
+    expect(result.code).toContain('self(count) + self.read(count)');
+  });
+
   it("adopts direct atom and scoped JSX reads and rewrites atom assignment", () => {
     const result = transformReactJsx(`
       function Counter() {
