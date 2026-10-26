@@ -1,0 +1,12 @@
+{
+  "extends": "../../../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../../out-tsc/app",
+    "types": ["@webgpu/types"],
+    "allowJs": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "files": ["main.ts"],
+  "include": ["**/*.d.ts"]
+}

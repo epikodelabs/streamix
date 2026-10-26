@@ -102,6 +102,7 @@
       ]
     },
     "types": [
+      "@webgpu/types",
       "jasmine",
       "node"
     ]
