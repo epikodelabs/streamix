@@ -107,6 +107,7 @@ export const viteBuilder = createBuilder((options, context) => new Observable<Bu
         server = await createServer(config);
         await server.listen(port);
         context.logger.info(`Vite dev server running for ${relativeRoot}`);
+        server.printUrls();
         return;
       }
       context.logger.info(`Building ${relativeRoot} with Vite (${mode})`);
