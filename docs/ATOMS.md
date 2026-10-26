@@ -84,7 +84,21 @@ These represent computed values that automatically recalculate when their depend
 const fullName = derived(() => `${firstName} ${lastName}`);
 ```
 
-Framework compilers turn direct atom references in derived callbacks into tracked value reads. Without a framework compiler, read each atom through `.value` explicitly.
+The Streamix [Angular](./ANGULAR.md), [React](./REACT.md), and [Vue](./VUE.md)
+compilers turn direct atom references in derived callbacks into tracked value
+reads. This short form is only available through the Streamix builders —
+the Angular builder and the React/Vue build tooling run the compilers as part
+of the build. Stock tooling (a plain `ng build`, a `vite build` without the
+Streamix plugin) does not lower it, so in plain TypeScript use the callback's
+callable reader instead:
+
+```ts
+const fullName = derived(self => `${self(firstName)} ${self(lastName)}`);
+```
+
+Outside compiled value expressions, atom variables remain source objects.
+Use `.value` for explicit runtime snapshots; passing an atom to `pipe()`,
+`subscribe()`, or another source-consuming API keeps the source itself.
 
 `derived()` is intentionally synchronous — the type signature rejects promise-returning callbacks. For sequencing, a generator form may yield atoms or promises before returning the computed value; for full `await`, cancellation, or restart semantics, move that work into `flow()`.
 
@@ -225,8 +239,8 @@ const subscription = taskManager.subscribeTo("visibleTasks", tasks => {
   console.log("Tasks updated:", tasks);
 });
 
-// Reading the current value through the atom reference
-console.log(taskManager.get("visibleTasks").value);
+// Reading the current value directly through the scope
+console.log(taskManager.visibleTasks);
 ```
 
 ---

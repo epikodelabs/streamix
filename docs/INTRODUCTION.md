@@ -39,7 +39,7 @@ import { atom, derived, iterate, map, pipe, take } from '@epikodelabs/streamix';
 const count = atom(0);         // always has a value
 const label = atom<string>();  // value arrives later
 
-const summary = derived(() => `count is ${count.value}`);
+const summary = derived(() => `count is ${count}`);
 
 count.next(5);
 console.log(summary.value); // "count is 5"
@@ -47,6 +47,12 @@ console.log(summary.value); // "count is 5"
 const doubled = pipe(count, map(n => n * 2), take(1));
 for await (const value of doubled) console.log(value);
 ```
+
+The short atom references inside `derived()` require the Streamix
+[Angular](./ANGULAR.md), [React](./REACT.md), or [Vue](./VUE.md) compiler.
+In plain TypeScript, use `derived(self => 'count is ' + self(count))`
+instead. Outside compiled value expressions, an atom is still a source object;
+use `.value` for an explicit current-value read, as in the log above.
 
 ### Runtime model
 
@@ -72,6 +78,9 @@ executions. This keeps reactive state, async work, and cleanup under the same
 lifecycle boundary.
 
 ### Operators
+
+For pointer positions, scrolling, and location updates, see
+[DOM and browser streams](./DOM.md).
 
 Operators transform flows. Sync and async callbacks are both supported.
 

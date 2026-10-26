@@ -25,11 +25,16 @@ doubled.subscribe(console.log);
 ### v3 Style (New)
 ```ts
 const count = atom(0);
-const doubled = derived(() => count.value * 2);
+const doubled = derived(() => count * 2);
 
 count.set(5);
 console.log(doubled.value); // 10
 ```
+
+The short form in the derived callback requires a Streamix framework compiler;
+see the [Angular](./ANGULAR.md), [React](./REACT.md), or [Vue](./VUE.md) setup.
+Without a compiler, write `derived(self => self(count) * 2)`.
+The `.value` in the log is an explicit runtime read outside the compiled formula.
 
 For feature state, use **scopes**:
 

@@ -91,7 +91,9 @@ const form = scope({ name: '' });
 If the object must remain one atom, replace it from script instead:
 
 ```ts
-form.next({ ...form.value, name: 'Grace' });
+import { read, write } from '@epikodelabs/streamix/vue';
+
+write(form, { ...read(form), name: 'Grace' });
 ```
 
 ## 5. Derive values
