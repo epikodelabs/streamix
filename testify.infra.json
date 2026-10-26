@@ -33,6 +33,7 @@
   "outDir": "dist/.vite-jasmine-build-node",
   "browser": "node",
   "headless": true,
+  "suppressConsoleLogs": true,
   "viteBuildOptions": {
     "target": "es2022",
     "sourcemap": true,
