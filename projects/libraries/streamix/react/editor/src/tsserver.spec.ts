@@ -14,6 +14,10 @@ describe("Streamix React tsserver plugin", () => {
       jsx: ts.JsxEmit.ReactJSX,
       module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler,
+      // Without an explicit target, TypeScript 5 defaults to ES5 libs and the
+      // library sources lose Set/Proxy/Reflect/AsyncIterator, degrading the
+      // atom types until `.value` checks out as `any`.
+      target: ts.ScriptTarget.ES2022,
       baseUrl: process.cwd(),
       paths: { "@epikodelabs/streamix": ["projects/libraries/streamix/src/lib/index.ts"] },
       skipLibCheck: true,
