@@ -401,7 +401,11 @@ function visitElement(
     if (!publicName) {
       const analysis = analyzeInterpolation(input.value, state);
       if (!analysis) continue;
-      const attributeName = input.name;
+      // Angular 21+ parses interpolated data-* attributes into `inputs` with
+      // the `data-` prefix stripped from the node name; read the authored
+      // name from the source text instead so the sanitization allowlist and
+      // the emitted `[attr.<name>]` fallback keep the real attribute name.
+      const attributeName = /^\s*([^\s=]+)/.exec(raw)?.[1] ?? input.name;
       if (!/^(?:title|role|tabindex|aria-[\w-]+|data-[\w-]+)$/.test(attributeName)) {
         throw new Error(angularOwnedReadError(analysis.dependencies[0], 'This interpolated attribute requires Angular sanitization.'));
       }
