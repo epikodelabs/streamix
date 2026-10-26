@@ -1,6 +1,23 @@
 import { pipe, takeWhile } from '@epikodelabs/streamix';
 import { on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
+
+/**
+ * Waits until `predicate` holds, polling on the frame cadence.
+ *
+ * Headless browsers throttle `requestAnimationFrame` under load, so fixed
+ * `setTimeout` windows are not a reliable way to collect a frame count. The
+ * helper returns (without throwing) when the deadline passes and lets the
+ * following assertions report the actual emission count.
+ */
+async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+    const deadline = performance.now() + timeoutMs;
+    while (!predicate()) {
+        if (performance.now() >= deadline) return;
+        await new Promise(resolve => setTimeout(resolve, 16));
+    }
+}
+
 idescribe('onAnimationFrame', () => {
     it('should emit delta values with reasonable time intervals', async () => {
         const stream = on('animationFrame');
@@ -11,7 +28,7 @@ idescribe('onAnimationFrame', () => {
             emittedDeltas.push(delta);
         });
         try {
-            await new Promise((resolve) => setTimeout(resolve, 150));
+            await waitUntil(() => emittedDeltas.length >= 5);
             expect(emittedDeltas.length).toBe(5);
             // Each delta should be a positive number (milliseconds between frames)
             emittedDeltas.forEach(delta => {
@@ -33,8 +50,12 @@ idescribe('onAnimationFrame', () => {
             expect(delta).toBeGreaterThanOrEqual(0);
             emittedCount.push(delta);
         });
-        await new Promise(resolve => setTimeout(resolve, 200));
-        unsubscribe();
+        try {
+            await waitUntil(() => emittedCount.length >= 5);
+        }
+        finally {
+            unsubscribe();
+        }
         expect(emittedCount.length).toBe(5);
     });
     it('should emit multiple times when condition allows', async () => {
@@ -44,7 +65,7 @@ idescribe('onAnimationFrame', () => {
             emittedDeltas.push(delta);
         });
         try {
-            await new Promise((resolve) => setTimeout(resolve, 200));
+            await waitUntil(() => emittedDeltas.length >= 5);
             // Should have emitted multiple times with real delta values.
             // The exact count depends on the browser's frame scheduling, so we only
             // assert a reasonable range rather than an exact number.
