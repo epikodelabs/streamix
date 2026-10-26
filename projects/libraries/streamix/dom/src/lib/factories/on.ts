@@ -2,17 +2,20 @@ import type { Atom } from "@epikodelabs/streamix";
 import { animationFrame } from "./animationFrame";
 import { battery, type BatteryState } from "./battery";
 import { fullscreen } from "./fullscreen";
+import { geolocation, type GeolocationState } from "./geolocation";
 import { idle } from "./idle";
 import { intersection } from "./intersection";
 import { mediaQuery } from "./mediaQuery";
 import { mutation } from "./mutation";
 import { network, type NetworkState } from "./network";
 import { orientation } from "./orientation";
+import { pointer, type PointerPosition } from "./pointer";
 import { resize } from "./resize";
+import { scroll, type ScrollPosition } from "./scroll";
 import { viewportChange, type ViewportState } from "./viewportChange";
 import { visibilityChange } from "./visibilityChange";
 
-export type { BatteryState, NetworkState, ViewportState };
+export type { BatteryState, GeolocationState, NetworkState, PointerPosition, ScrollPosition, ViewportState };
 
 /**
  * Creates a reactive stream for a DOM or browser event source.
@@ -22,7 +25,9 @@ export type { BatteryState, NetworkState, ViewportState };
  *
  * @example
  * ```ts
- * const clicks = on('click', document);
+ * const pointer = on('pointer');
+ * const scroll = on('scroll', element);
+ * const location = on('geolocation', { maximumAge: 30_000 });
  * const battery = on('battery');
  * const matches = on('mediaQuery', '(min-width: 600px)');
  * const resized = on('resize', element);
@@ -31,6 +36,7 @@ export type { BatteryState, NetworkState, ViewportState };
 export function on(type: 'animationFrame'): Atom<number>;
 export function on(type: 'battery'): Atom<BatteryState>;
 export function on(type: 'fullscreen'): Atom<boolean>;
+export function on(type: 'geolocation', options?: PositionOptions): Atom<GeolocationState>;
 export function on(type: 'idle', timeout?: number): Atom<IdleDeadline>;
 export function on(
   type: 'intersection',
@@ -45,6 +51,8 @@ export function on(
 ): Atom<MutationRecord[]>;
 export function on(type: 'network'): Atom<NetworkState>;
 export function on(type: 'orientation'): Atom<'portrait' | 'landscape'>;
+export function on(type: 'pointer', target?: EventTarget): Atom<PointerPosition>;
+export function on(type: 'scroll', target?: Window | Document | Element): Atom<ScrollPosition>;
 export function on(
   type: 'resize',
   element: HTMLElement
@@ -66,6 +74,8 @@ export function on(type: string, ...args: any[]): Atom<any> {
       return battery();
     case 'fullscreen':
       return fullscreen();
+    case 'geolocation':
+      return geolocation(args[0] as PositionOptions | undefined);
     case 'idle':
       return idle(args[0] as number | undefined);
     case 'intersection':
@@ -84,6 +94,10 @@ export function on(type: string, ...args: any[]): Atom<any> {
       return network();
     case 'orientation':
       return orientation();
+    case 'pointer':
+      return pointer(args[0] as EventTarget | undefined);
+    case 'scroll':
+      return scroll(args[0] as Window | Document | Element | undefined);
     case 'resize':
       return resize(args[0] as HTMLElement);
     case 'viewportChange':

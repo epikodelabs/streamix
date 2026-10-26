@@ -49,6 +49,7 @@ export default defineConfig({
           items: [
             { text: 'Getting Started', link: '/' },
             { text: 'Atoms', link: '/ATOMS' },
+              { text: 'DOM and Browser Streams', link: '/DOM' },
             { text: 'Generators', link: '/GENERATORS' },
             { text: 'Migration', link: '/MIGRATION' },
             { text: 'Angular', link: '/ANGULAR' },
