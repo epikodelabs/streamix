@@ -49,12 +49,17 @@ export default defineConfig({
           items: [
             { text: 'Getting Started', link: '/' },
             { text: 'Atoms', link: '/ATOMS' },
-              { text: 'DOM and Browser Streams', link: '/DOM' },
+            { text: 'DOM', link: '/DOM' },
             { text: 'Generators', link: '/GENERATORS' },
+            { text: 'Runtime', link: '/RUNTIME' },
+            { text: 'Diagnostics', link: '/DIAGNOSTICS' },
+            { text: 'Introspection', link: '/INTROSPECTION' },
             { text: 'Migration', link: '/MIGRATION' },
             { text: 'Angular', link: '/ANGULAR' },
             { text: 'React', link: '/REACT' },
             { text: 'Vue', link: '/VUE' },
+            { text: 'Pricing', link: '/PRICING' },
+            { text: 'Changelog', link: '/CHANGELOG' },
           ]
         },
         {

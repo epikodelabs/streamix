@@ -22,7 +22,7 @@
 </p>
 
 
-# Get started with Streamix
+# Get started
 
 Configure your editor and build tools, then create your first reactive counter in Angular, React, or Vue. Start with an **existing application** and the Node.js and TypeScript versions supported by your framework.
 
@@ -380,7 +380,10 @@ Direct expressions such as `derived(() => count * 2)` in the framework guides re
 
 - [Atoms and scopes](./ATOMS.md): writable state, derived values, lifecycle ownership, and flows.
 - [Generators](./GENERATORS.md): create and consume async sequences.
-- [DOM and browser streams](./DOM.md): pointer, scroll, and location updates.
+- [DOM](./DOM.md): pointer, scroll, and location updates.
+- [Runtime](./RUNTIME.md): execution, scheduling, dependency graphs, and source lifecycles.
+- [Diagnostics](./DIAGNOSTICS.md): observability rules, accounting, and diagnostic guarantees.
+- [Introspection](./INTROSPECTION.md): instrument operators and factories for the inspector.
 - [Migration](./MIGRATION.md): move existing code to the current API.
 
 ## API Reference
