@@ -7,6 +7,16 @@
     "module": "ESNext",
     "moduleResolution": "Bundler"
   },
-  "files": ["main.ts"],
-  "include": ["**/*.d.ts"]
+  "files": [
+    "main.ts"
+  ],
+  "include": [
+    "**/*.ts",
+    "**/*.vue"
+  ],
+  "vueCompilerOptions": {
+    "plugins": [
+      "@epikodelabs/streamix/vue/editor/tsserver"
+    ]
+  }
 }

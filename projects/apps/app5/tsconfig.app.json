@@ -3,6 +3,9 @@
 {
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
+    "plugins": [
+      { "name": "@epikodelabs/streamix/react/editor/tsserver" }
+    ],
     "outDir": "../../out-tsc/app",
     "types": [],
     "jsx": "react-jsx"

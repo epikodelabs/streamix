@@ -3,6 +3,9 @@
 {
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
+    "plugins": [
+      { "name": "@epikodelabs/streamix/angular/editor/tsserver" }
+    ],
     "outDir": "../../out-tsc/spec",
     "types": [
       "jest"

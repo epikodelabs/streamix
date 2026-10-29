@@ -2,11 +2,23 @@
   "extends": "../../../../tsconfig.json",
   "compilerOptions": {
     "outDir": "../../out-tsc/app",
-    "types": ["@webgpu/types"],
+    "types": [
+      "@webgpu/types"
+    ],
     "allowJs": true,
     "module": "ESNext",
     "moduleResolution": "Bundler"
   },
-  "files": ["main.ts"],
-  "include": ["**/*.d.ts"]
+  "files": [
+    "main.ts"
+  ],
+  "include": [
+    "**/*.ts",
+    "**/*.vue"
+  ],
+  "vueCompilerOptions": {
+    "plugins": [
+      "@epikodelabs/streamix/vue/editor/tsserver"
+    ]
+  }
 }
