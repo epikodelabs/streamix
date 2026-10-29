@@ -14,7 +14,7 @@
     <img src="https://img.shields.io/npm/dt/@epikodelabs%2Fstreamix.svg?style=flat-square&color=0ea5e9">
   </a>
   <a href="https://epikodelabs.github.io/streamix/bundle-size.svg">
-    <img src="https://raw.githubusercontent.com/epikodelabs/streamix/refs/heads/main/projects/libraries/streamix/bundle-size.svg">
+    <img src="https://raw.githubusercontent.com/epikodelabs/epikodelabs.github.io/refs/heads/main/streamix/bundle-size.svg">
   </a>
   <a href="https://github.com/epikodelabs/streamix/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License">
