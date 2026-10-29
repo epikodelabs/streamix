@@ -31,8 +31,8 @@ You work with values in your component and template. Streamix handles the reacti
 
 The Angular adoption layer supports the template patterns most applications use every day:
 
-- text such as `{{ model.count }}`;
-- simple expressions such as `{{ count * 2 }}`;
+- text such as <code v-pre>{{ model.count }}</code>;
+- simple expressions such as <code v-pre>{{ count * 2 }}</code>;
 - native properties such as `[disabled]="model.busy"`;
 - classes, styles, and safe attributes;
 - events such as `(click)="save()"`;
@@ -48,7 +48,7 @@ You do not need a special template language or a manual subscription for each va
 Install @angular/language-service and configure Streamix as the Angular
 language-service plugin in the project tsconfig:
 
-\`\`\`json
+```json
 {
   "compilerOptions": {
     "plugins": [
@@ -56,22 +56,22 @@ language-service plugin in the project tsconfig:
     ]
   }
 }
-\`\`\`
+```
 
 It delegates to Angular's official language service after presenting inline
-\`@Component({ template: \`...\` })\` atom reads as current values. Thus
-\`{{ count * 2 }}\` type-checks \`count\` as a number when \`count = atom(1)\`.
+``@Component({ template: `...` })`` atom reads as current values. Thus
+<code v-pre>{{ count * 2 }}</code> type-checks `count` as a number when `count = atom(1)`.
 Restart the TypeScript server after changing this configuration.
 
 The current editor companion intentionally covers inline templates only.
-External \`templateUrl\` files still need explicit \`.value\` until an Angular
+External `templateUrl` files still need explicit `.value` until an Angular
 template-host virtual-file layer is added.
 
 Scope members are typed as ordinary values, so scope-based templates stay clean
 in the editor and in the build.
 
 With the Streamix editor plugin active for **inline templates**, expressions
-such as `{{ count * 2 }}` and `@if (count > 3)` are virtualized to `.value`
+such as <code v-pre>{{ count * 2 }}</code> and `@if (count > 3)` are virtualized to `.value`
 reads before Angular's language service checks them. Without this plugin,
 Angular sees the raw atom type and may underline the expression. External
 `templateUrl` files are not virtualized yet; use explicit `.value` there or
