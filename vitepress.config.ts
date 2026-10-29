@@ -76,7 +76,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the GNU AGPL v3 or later.',
+      message: 'Released under the MIT License.',
       copyright: 'Copyright © 2026 epikodelabs'
     },
 

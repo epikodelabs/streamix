@@ -20,7 +20,7 @@
     <img src="https://raw.githubusercontent.com/epikodelabs/epikodelabs.github.io/161dea3e83f7bb6c27dcee0e33d615ba91cc5c5b/streamix/bundle-size.svg" alt="Bundle Size">
   </a>
   <a href="https://github.com/epikodelabs/streamix/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg?style=flat-square" alt="License">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License">
   </a>
 </p>
 
@@ -139,7 +139,7 @@ The static site is output to `dist/.vitepress/dist/`.
 
 ## 📜 License
 
-GNU AGPL v3 or later
+MIT
 
 <p align="center">
   <br>

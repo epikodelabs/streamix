@@ -93,8 +93,8 @@ const PAGE_METADATA = {
 
   'PRICING.md': {
     title: 'Pricing & Licensing | streamix',
-    description: 'Explore streamix pricing. Free AGPL-3.0 open-source and $25/$30 one-time commercial licenses for individuals and teams.',
-    keywords: ['pricing', 'license', 'licensing', 'commercial', 'one-time payment', 'open source', 'agpl', 'enterprise', 'individual', 'team']
+    description: 'Explore streamix pricing. Free MIT-licensed open-source software and upcoming paid offerings.',
+    keywords: ['pricing', 'license', 'licensing', 'commercial', 'one-time payment', 'open source', 'mit', 'enterprise', 'individual', 'team']
   },
 
   // =================================================================

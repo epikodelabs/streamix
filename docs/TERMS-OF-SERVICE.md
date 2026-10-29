@@ -14,7 +14,7 @@ These Terms apply to:
 - Public documentation, examples, and related content
 - Links to the public GitHub repository and npm package pages
 
-The open-source software itself is also subject to the applicable license terms distributed with the package, including the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`) where provided.
+The open-source software itself is subject to the MIT License distributed with the package and repository.
 
 ## 2. Permitted use
 
