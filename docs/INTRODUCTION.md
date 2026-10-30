@@ -115,21 +115,19 @@ Use this standalone component in your application's component tree:
 
 ```ts
 import { Component } from '@angular/core';
-import { atom } from '@epikodelabs/streamix';
+import { scope } from '@epikodelabs/streamix';
 
 @Component({
   selector: 'app-counter',
   standalone: true,
-  template: '<button (click)="increment()">{{ count }}</button>',
+  template: '<button (click)="state.count += 1">{{ state.count }}</button>',
 })
 export class CounterComponent {
-  readonly count = atom(0);
-
-  increment(): void {
-    this.count.set(this.count.value + 1);
-  }
+  readonly state = scope({ count: 0 });
 }
 ```
+
+Scope fields support direct reads and writes in templates.
 
 For Zone.js applications, add `provideSxZoneScheduling()` from `@epikodelabs/streamix/angular` to your existing application providers. Zoneless applications need no provider.
 
@@ -353,21 +351,21 @@ Keep `introspection: true` on the builder/plugin for source metadata and diagnos
 
 Keep the option disabled for production. Setting it to `true` explicitly forces `import.meta.env.DEV` to `true`, even during a production build; it is not automatically restricted to the development server.
 
-## Plain TypeScript
+## Derived values
 
-Without a framework compiler, use explicit tracked reads inside `derived`:
+With the Streamix builder or Vite plugin configured above, use shorthand reads inside `derived`:
 
 ```ts
 import { atom, derived } from '@epikodelabs/streamix';
 
 const count = atom(0);
-const doubled = derived(self => self(count) * 2);
+const doubled = derived(() => count * 2);
 
 count.set(3);
 console.log(doubled.value); // 6
 ```
 
-Direct expressions such as `derived(() => count * 2)` in the framework guides require their Streamix compiler. Outside compiled expressions, use `.value` for an explicit current-value read.
+The compiler lowers `count` to a tracked value read inside the formula. Without Streamix preprocessing, use `derived(self => self(count) * 2)`. Outside compiled expressions, use `.value` for an explicit current-value read.
 
 ## If something does not work
 
