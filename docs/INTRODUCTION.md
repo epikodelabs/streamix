@@ -22,7 +22,7 @@
 </p>
 
 
-# Get started
+# Getting started
 
 Configure your editor and build tools, then create your first reactive counter in Angular, React, or Vue. Start with an **existing application** and the Node.js and TypeScript versions supported by your framework.
 
@@ -375,20 +375,6 @@ Direct expressions such as `derived(() => count * 2)` in the framework guides re
 - **The editor flags supported shorthand:** check the application's active tsconfig, install the matching language tooling, and restart the relevant language server.
 - **The editor accepts code that the build rejects:** follow the build diagnostic.
 - **An Architect builder cannot be resolved:** install a package release containing that builder, or build the Streamix package first when working from source.
-
-## Next steps
-
-- [Atoms and scopes](./ATOMS.md): writable state, derived values, lifecycle ownership, and flows.
-- [Generators](./GENERATORS.md): create and consume async sequences.
-- [DOM](./DOM.md): pointer, scroll, and location updates.
-- [Runtime](./RUNTIME.md): execution, scheduling, dependency graphs, and source lifecycles.
-- [Diagnostics](./DIAGNOSTICS.md): observability rules, accounting, and diagnostic guarantees.
-- [Introspection](./INTROSPECTION.md): instrument operators and factories for the inspector.
-- [Migration](./MIGRATION.md): move existing code to the current API.
-
-## API Reference
-
-Browse the [API reference](./api/) for the complete runtime and operator catalog.
 
 ## Resources
 
