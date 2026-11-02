@@ -8,6 +8,7 @@ import {
   syncPull
 } from "./helpers";
 import { normalizeError } from "../atoms/atom";
+import { createSourceReadiness, type SourceCapabilities, type StreamixSource, type SyncPoll } from "./source-protocol";
 
 type Observer<T> = {
   next: (value: T) => MaybePromise;
@@ -23,60 +24,50 @@ export type AsyncIteratorResult<T> =
   | { value: undefined; done: true };
 
 /**
- * Creates a factory that produces fresh `AsyncIterator` instances backed by
+ * Creates a factory that produces fresh `StreamixSource` instances backed by
  * an internal queue with producer-backpressure.
  *
  * The `register` callback receives an `Observer<T>` whose `next()`/`complete()`/
  * `error()` methods push into the iterator's queue. `next()` returns a
  * `Promise<void>` (or `void`) — the promise acts as a backpressure signal
  * from the consumer: it resolves only when the consumer pulls the value with
- * `next()` or `__tryNext()`.
+ * `next()` or `pollSync()`.
  *
  * Each call of the returned factory function creates an independent iterator
  * with its own buffer and subscription.
  *
- * When `lazy: true`, registration is deferred until the consumer actually pulls
- * (either `next()` or `__tryNext>`), which avoids hidden subscriptions for
+ * Registration is deferred until the consumer actually pulls
+ * (either `next()` or `pollSync()`), which avoids hidden subscriptions for
  * iterators that are constructed but never consumed.
  *
- * Each call of the returned factory function creates an independent iterator
- * with its own buffer and subscription.
- *
  * @template T Value type.
- * @param opts Registration function and lazy mode.
- * @returns A function that creates a fresh AsyncIterator per call.
+ * @param opts Producer registration function.
+ * @returns A function that creates a fresh iterator per call.
  */
 export function createAsyncIterator<T>(opts: {
   register: (observer: Observer<T>) => Subscription;
-  conflate?: boolean;
 }) {
   const { register } = opts;
-
-  const conflate = opts.conflate ?? false;
 
   return () => {
     const state = new AsyncIteratorState<T>();
     let unsubscribe: Subscription | null = null;
     let observer: Observer<T> | null = null;
 
-    const pendingPushes: Array<{
-      type: 'next' | 'complete' | 'error';
-      value?: T;
-      err?: any;
-    }> = [];
+    const readiness = createSourceReadiness();
 
     const ensureSubscribed = () => {
       if (state.completed) return;
       if (!unsubscribe && !observer) {
         const _observer: Observer<T> = {
           next(value: T) {
-            return pushValue(state, iterator, value, iterator.__onPush);
+            return pushValue(state, iterator, value, readiness.hasListeners ? readiness.notify : undefined);
           },
           complete() {
-            pushComplete(state, iterator, iterator.__onPush);
+            pushComplete(state, iterator, readiness.notify);
           },
           fail(err: any) {
-            pushError(state, iterator, err, iterator.__onPush);
+            pushError(state, iterator, err, readiness.notify);
           },
           get disposed() {
             return state.completed;
@@ -85,17 +76,6 @@ export function createAsyncIterator<T>(opts: {
 
         observer = _observer;
         unsubscribe = register(_observer);
-
-        for (const push of pendingPushes) {
-          if (push.type === 'next') {
-            _observer.next(push.value!);
-          } else if (push.type === 'complete') {
-            _observer.complete();
-          } else if (push.type === 'error') {
-            _observer.fail(push.err);
-          }
-        }
-        pendingPushes.length = 0;
       }
       return observer;
     };
@@ -109,14 +89,7 @@ export function createAsyncIterator<T>(opts: {
     };
 
 
-    const iterator: AsyncIterator<T, undefined, undefined> & {
-      __tryNext?: () => AsyncIteratorResult<T> | null;
-      __hasBufferedValues?: () => boolean;
-      __onPush?: () => void;
-      __pushNext?: (value: T) => void;
-      __pushComplete?: () => void;
-      __pushError?: (err: any) => void;
-    } = {
+    const iterator: AsyncIterator<T, undefined, undefined> & SourceCapabilities<T> = {
       next(): Promise<AsyncIteratorResult<T>> {
         ensureSubscribed();
         return asyncPull(state, iterator, handleDone) as Promise<AsyncIteratorResult<T>>;
@@ -151,43 +124,25 @@ export function createAsyncIterator<T>(opts: {
           await unsubscribe$;
         } catch {}
         return Promise.reject(error);
-      }
+      },
+
+      pollSync(): SyncPoll<T> {
+        ensureSubscribed();
+        return syncPull(state, iterator, handleDone);
+      },
+
+      // Held events only — terminal completion is reported by `isTerminal`.
+      hasBufferedEvents(): boolean {
+        return state.queue.some(item => !item.result.done) || state.pendingError != null;
+      },
+
+      isTerminal(): boolean {
+        return state.completed;
+      },
+
+      onReady: readiness.onReady,
     };
 
-    iterator.__hasBufferedValues = () =>
-      state.hasBufferedValues() || pendingPushes.length > 0;
-
-    iterator.__tryNext = () => {
-      ensureSubscribed();
-      return syncPull(state, iterator, handleDone) as AsyncIteratorResult<T> | null;
-    };
-
-    iterator.__pushNext = (value: T) => {
-      if (observer) {
-        observer.next(value);
-      } else if (conflate && pendingPushes.length > 0) {
-        pendingPushes[pendingPushes.length - 1] = { type: 'next', value };
-      } else {
-        pendingPushes.push({ type: 'next', value });
-      }
-    };
-
-    iterator.__pushComplete = () => {
-      if (observer) {
-        observer.complete();
-      } else {
-        pendingPushes.push({ type: 'complete' });
-      }
-    };
-
-    iterator.__pushError = (err: any) => {
-      if (observer) {
-        observer.fail(err);
-      } else {
-        pendingPushes.push({ type: 'error', err });
-      }
-    };
-
-    return iterator;
+    return iterator as AsyncIterator<T, undefined, undefined> & StreamixSource<T>;
   };
 }

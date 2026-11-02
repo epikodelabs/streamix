@@ -10,11 +10,17 @@ import {
   syncPull
 } from "./helpers";
 import { normalizeError } from "../atoms/atom";
+import { createSourceReadiness, type SourceCapabilities, type SyncPoll } from "./source-protocol";
 
 /**
- * Async iterator augmented with push methods, passed to operator setup callbacks.
+ * Async iterator augmented with push methods and the full source protocol
+ * capability set, passed to operator setup callbacks.
  */
 export type AsyncPushable<R> = AsyncIterator<R> & AsyncIterable<R> & {
+  pollSync(): SyncPoll<R>;
+  hasBufferedEvents(): boolean;
+  isTerminal(): boolean;
+  onReady(listener: () => void): () => void;
   push(value: R): void | Promise<void>;
   fail(err: any): void;
   dispose(): void;
@@ -29,31 +35,30 @@ export function createAsyncPushable<R>(options?: { conflate?: boolean }): AsyncP
   const state = new AsyncIteratorState<R>();
   const conflate = options?.conflate ?? false;
 
+  const readiness = createSourceReadiness();
+
   // Create the receiver that will handle pushes
   const receiver = {
     next(value: R) {
-      return pushValue(state, iterator, value, iterator.__onPush);
+      return pushValue(state, iterator, value, readiness.notify);
     },
-    
+
     dispose() {
-      pushComplete(state, iterator, iterator.__onPush);
+      pushComplete(state, iterator, readiness.notify);
     },
-    
+
     error(err: any) {
-      pushError(state, iterator, err, iterator.__onPush);
+      pushError(state, iterator, err, readiness.notify);
     },
-    
+
     get disposed() {
       return state.completed;
     }
   };
 
   // Create the iterator
-  const iterator: AsyncIterator<R> & {
+  const iterator: AsyncIterator<R> & SourceCapabilities<R> & {
     [Symbol.asyncIterator]?: () => AsyncIterator<R>;
-    __tryNext?: () => IteratorResult<R> | null;
-    __hasBufferedValues?: () => boolean;
-    __onPush?: () => void;
     push?: any;
     error?: any;
     fail?: any;
@@ -63,12 +68,12 @@ export function createAsyncPushable<R>(options?: { conflate?: boolean }): AsyncP
     next() {
       return asyncPull(state, iterator);
     },
-    
+
     async return() {
       state.markCompleted();
       return Promise.resolve(DONE);
     },
-    
+
     async throw(err) {
       const error = normalizeError(err);
       state.completed = true;
@@ -82,14 +87,21 @@ export function createAsyncPushable<R>(options?: { conflate?: boolean }): AsyncP
       state.clear();
       return Promise.reject(error);
     },
-    
-    __tryNext() {
+
+    pollSync(): SyncPoll<R> {
       return syncPull(state, iterator);
     },
-    
-    __hasBufferedValues() {
-      return state.hasBufferedValues();
-    }
+
+    // Held events only — terminal completion is reported by `isTerminal`.
+    hasBufferedEvents(): boolean {
+      return state.queue.some(item => !item.result.done) || state.pendingError != null;
+    },
+
+    isTerminal(): boolean {
+      return state.completed;
+    },
+
+    onReady: readiness.onReady,
   };
 
   // Make it iterable
@@ -107,14 +119,14 @@ export function createAsyncPushable<R>(options?: { conflate?: boolean }): AsyncP
         const r = state.pullResolve;
         state.pullResolve = state.pullReject = null;
         r({ done: false, value });
-        iterator.__onPush?.();
+        readiness.notify();
         return;
       }
 
       // Consumer is behind: keep only the latest buffered value.
       if (state.queue.length > 0) {
         state.queue[state.queue.length - 1] = { result: { done: false, value } };
-        iterator.__onPush?.();
+        readiness.notify();
         return;
       }
     }
@@ -137,9 +149,6 @@ export function createAsyncPushable<R>(options?: { conflate?: boolean }): AsyncP
   Object.defineProperty(iterator, "disposed", {
     get: () => receiver.disposed
   });
-
-  // Add optional hook for push notifications
-  iterator.__onPush = () => {};
 
   return iterator as AsyncPushable<R>;
 }

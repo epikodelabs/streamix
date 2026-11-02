@@ -5,7 +5,8 @@ import './introspection';
 /**
  * Observe an operator iterator without changing its pull/push contract.
  * Execution begins at the first pull, not when the operator is composed.
- * In-place instrumentation preserves __tryNext, __onPush and other iterator hooks.
+ * In-place instrumentation preserves the source protocol capabilities
+ * (pollSync, onReady and the state probes).
  * The optional name and origin label the execution record for runtime diagnostics.
  */
 export function trackOperatorExecution<T>(iterator: AsyncIterator<T>, name?: string, origin?: RuntimeOrigin): AsyncIterator<T> {

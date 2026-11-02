@@ -6,6 +6,7 @@ import { createAsyncPushable } from "../utils";
 import { normalizeError } from "../atoms";
 import { SwitchingInnerExecution } from "../runtime/inner-execution";
 import { isAsyncIterable } from "../utils/helpers";
+import { asStreamixSource, type SyncPoll } from "../utils/source-protocol";
 import { trackOperatorExecution } from "../runtime/introspection-hooks";
 import { __streamixBeginLifetime, type StreamixLifetimeSpan, __streamixOperatorExecution } from "../runtime/introspection-hooks";
 
@@ -43,17 +44,34 @@ export function switchMap<T = any, R = any>(
     let index = 0;
     let stopped = false;
     let lifetime: StreamixLifetimeSpan | undefined;
+    let stopReady: (() => void) | undefined;
+    let readinessStopped = false;
+
+    const stopSourceReadiness = () => {
+      readinessStopped = true;
+      const unsubscribe = stopReady;
+      stopReady = undefined;
+      try { unsubscribe?.(); } catch { /* Best-effort cleanup. */ }
+    };
 
     const checkComplete = () => {
       if (!stopped && inputCompleted && !execution.active && !pendingProjection) {
         stopped = true;
+        stopSourceReadiness();
         output.dispose();
       }
+    };
+
+    const completeInput = () => {
+      inputCompleted = true;
+      stopSourceReadiness();
+      checkComplete();
     };
 
     const fail = (error: unknown) => {
       if (stopped) return;
       stopped = true;
+      stopSourceReadiness();
       lifetime?.finish('error');
       void execution.close();
       output.fail(normalizeError(error));
@@ -128,33 +146,42 @@ export function switchMap<T = any, R = any>(
       }
     };
 
-    const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
-    if (typeof tryNext === 'function') {
+    const sourceView = asStreamixSource(source);
+    const pollSync = sourceView.pollSync;
+    if (typeof pollSync === 'function' && sourceView.onReady) {
       const drain = () => {
-        while (!stopped) {
-          let item: IteratorResult<T> | null;
-          try { item = tryNext.call(source); }
+        while (!stopped && !inputCompleted) {
+          let poll: SyncPoll<T>;
+          try { poll = pollSync.call(source); }
           catch (error) { fail(error); return; }
-          if (!item) return;
+          if (poll.status === 'unavailable') return;
+          const item = poll.result;
           if (item.done) {
-            inputCompleted = true;
-            checkComplete();
+            completeInput();
             return;
           }
           processOuterValue(item.value);
         }
       };
-      (source as any).__onPush = drain;
-      drain();
+      try {
+        const unsubscribe = sourceView.onReady(drain);
+        // A source may signal completion synchronously while registering.
+        if (readinessStopped) unsubscribe();
+        else stopReady = unsubscribe;
+        drain();
+      } catch (error) { fail(error); }
     } else {
       void (async () => {
         try {
           while (!stopped) {
-            const item = await source.next();
-            if (stopped || item.done) break;
+            // Drain synchronous bursts before yielding to inner work, while
+            // retaining async pull when polling cannot produce an event.
+            const poll = pollSync?.call(source);
+            const item = poll?.status === 'available' ? poll.result : await source.next();
+            if (stopped) break;
+            if (item.done) { completeInput(); break; }
             processOuterValue(item.value);
           }
-          if (!stopped) { inputCompleted = true; checkComplete(); }
         } catch (error) { fail(error); }
       })();
     }
@@ -163,6 +190,7 @@ export function switchMap<T = any, R = any>(
     const baseThrow = output.throw?.bind(output);
     output.return = async () => {
       stopped = true;
+      stopSourceReadiness();
       lifetime?.finish('cancel');
       await execution.close();
       try { await source.return?.(); } catch { /* best effort */ }
@@ -170,6 +198,7 @@ export function switchMap<T = any, R = any>(
     };
     output.throw = async (error: unknown) => {
       stopped = true;
+      stopSourceReadiness();
       lifetime?.finish('error');
       await execution.close();
       try { await source.return?.(); } catch { /* best effort */ }

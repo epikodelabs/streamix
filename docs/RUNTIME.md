@@ -202,7 +202,7 @@ pending next() of A resolves ────► stale slot generation, ignored
 
 Coordinator reads preserve earlier consumer demand even inside `batch()`.
 When an earlier waiter consumes the available event, a later `next()` waits
-for another event or completion; `__tryNext()` returns `null` while still active.
+for another event or completion; `pollSync()` reports `unavailable` while still active.
 
 Once a source's completion event is consumed, the coordinator releases its
 iterator, push hook, key mapping, and pull ownership. Completed dynamic slots

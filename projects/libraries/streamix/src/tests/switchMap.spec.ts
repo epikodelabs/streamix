@@ -1,5 +1,6 @@
 import { collect } from './helpers/operator';
 import { atom, DONE, flow, from, iterate, NEXT, pipe, switchMap } from '@epikodelabs/streamix';
+import type { StreamixSource, SyncPoll } from '../lib/utils/source-protocol';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -131,18 +132,25 @@ describe('switchMap', () => {
     await expectAsync(reader).toBeRejectedWithError('boom');
   });
 
-  it('supports push-based sources via __tryNext and __onPush', async () => {
+  it('supports push-based sources via pollSync and onReady', async () => {
     const buffer: number[] = [1];
     let done = false;
+    let notify: (() => void) | undefined;
 
-    const sourceIterator: any = {
-      __tryNext() {
-        if (buffer.length > 0) return NEXT(buffer.shift()!);
-        if (done) return DONE;
-        return null;
+    const sourceIterator = {
+      pollSync(): { status: 'available'; result: IteratorResult<number> } | { status: 'unavailable' } {
+        if (buffer.length > 0) return { status: 'available', result: NEXT(buffer.shift()!) };
+        if (done) return { status: 'available', result: DONE };
+        return { status: 'unavailable' };
+      },
+      onReady(listener: () => void) {
+        notify = listener;
+        return () => {
+          if (notify === listener) notify = undefined;
+        };
       },
       next: async () => {
-        throw new Error('next() should not be used when __tryNext is present');
+        throw new Error('next() should not be used when pollSync is present');
       },
     };
 
@@ -156,11 +164,113 @@ describe('switchMap', () => {
     })();
 
     buffer.push(2, 3);
-    sourceIterator.__onPush();
+    notify!();
     done = true;
-    sourceIterator.__onPush();
+    notify!();
 
     expect(await valuesPromise).toEqual([3, 30]);
+    expect(notify).toBeUndefined();
+  });
+
+  it('uses async pull when a polling source has no readiness notifications', async () => {
+    let calls = 0;
+    const next = jasmine.createSpy('next').and.callFake(async () => ++calls === 1 ? NEXT(7) : DONE);
+    const source: StreamixSource<number> = {
+      pollSync: () => ({ status: 'unavailable' }),
+      next,
+    };
+    const iterator = switchMap<number, number>(value => [value]).apply(source);
+
+    try {
+      expect(await iterator.next()).toEqual(NEXT(7));
+      expect(await iterator.next()).toEqual(DONE);
+      expect(next).toHaveBeenCalledTimes(2);
+    } finally {
+      await iterator.return?.();
+    }
+  });
+
+  for (const outcome of ['complete', 'error', 'return', 'throw'] as const) {
+    it(`unsubscribes from source readiness on ${outcome}`, async () => {
+      let poll: SyncPoll<number> = { status: 'unavailable' };
+      let pollError: Error | undefined;
+      let notify: (() => void) | undefined;
+      const unsubscribe = jasmine.createSpy('unsubscribe').and.callFake(() => { notify = undefined; });
+      const source: StreamixSource<number> = {
+        pollSync() {
+          if (pollError) throw pollError;
+          return poll;
+        },
+        onReady(listener) { notify = listener; return unsubscribe; },
+        next: async () => { throw new Error('push source should be polled'); },
+        return: async () => DONE,
+      };
+      const iterator = switchMap<number, number>(value => [value]).apply(source);
+
+      expect(unsubscribe).not.toHaveBeenCalled();
+      if (outcome === 'complete') {
+        poll = { status: 'available', result: DONE };
+        notify!();
+        expect(await iterator.next()).toEqual(DONE);
+      } else if (outcome === 'error') {
+        pollError = new Error('outer failed');
+        notify!();
+        await expectAsync(iterator.next()).toBeRejectedWithError('outer failed');
+      } else if (outcome === 'return') {
+        expect(await iterator.return?.()).toEqual(DONE);
+      } else {
+        await expectAsync(iterator.throw?.(new Error('stop'))).toBeRejectedWithError('stop');
+      }
+
+      expect(notify).toBeUndefined();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      await iterator.return?.();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  it('unsubscribes from a completed outer source while its projection is pending', async () => {
+    let resolve!: (value: number) => void;
+    const pending = new Promise<number>(release => { resolve = release; });
+    const buffer = [1];
+    let done = false;
+    let notify: (() => void) | undefined;
+    const unsubscribe = jasmine.createSpy('unsubscribe').and.callFake(() => { notify = undefined; });
+    const source: StreamixSource<number> = {
+      pollSync: () => buffer.length
+        ? { status: 'available', result: NEXT(buffer.shift()!) }
+        : done ? { status: 'available', result: DONE } : { status: 'unavailable' },
+      onReady(listener) { notify = listener; return unsubscribe; },
+      next: async () => { throw new Error('push source should be polled'); },
+    };
+    const iterator = switchMap<number, number>(() => pending).apply(source);
+
+    try {
+      done = true;
+      notify!();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      resolve(42);
+      expect(await iterator.next()).toEqual(NEXT(42));
+      expect(await iterator.next()).toEqual(DONE);
+    } finally {
+      resolve(42);
+      await iterator.return?.();
+    }
+  });
+
+  it('releases a readiness subscription when registration signals completion', async () => {
+    const unsubscribe = jasmine.createSpy('unsubscribe');
+    const source: StreamixSource<number> = {
+      pollSync: () => ({ status: 'available', result: DONE }),
+      onReady(listener) { listener(); return unsubscribe; },
+      next: async () => DONE,
+    };
+    const iterator = switchMap<number, number>(value => [value]).apply(source);
+
+    expect(await iterator.next()).toEqual(DONE);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    await iterator.return?.();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it('returns and throws cleanly', async () => {

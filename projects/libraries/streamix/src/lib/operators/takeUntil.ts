@@ -2,6 +2,7 @@ import { createOperator, DONE, NEXT, normalizeError, type Operator } from "../at
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
+import type { SourceCapabilities, SyncPoll } from "../utils/source-protocol";
 
 /**
  * Take values from the source until a notifier emits.
@@ -50,10 +51,7 @@ export function takeUntil<T = any, N = any>(
       return DONE;
     };
 
-    const iterator: AsyncIterator<T> & {
-      __tryNext?: () => IteratorResult<T> | null;
-      __hasBufferedValues?: () => boolean;
-    } = {
+    const iterator: AsyncIterator<T> & SourceCapabilities<T> = {
       async next() {
         if (isDone) return DONE;
 
@@ -82,15 +80,15 @@ export function takeUntil<T = any, N = any>(
         }
       },
 
-      __tryNext: () => {
-        if (isDone) return DONE;
-        if (!runner.__tryNext) return null;
+      pollSync(): SyncPoll<T> {
+        if (isDone) return { status: "available", result: DONE };
 
         while (true) {
-          const result = runner.__tryNext();
-          if (!result || result.done) break;
+          const poll = runner.pollSync();
+          if (poll.status === 'unavailable') break;
+          if (poll.result.done) return { status: "available", result: closeSync() };
 
-          const event = result.value;
+          const event = poll.result.value;
 
           if (event.type === 'error') {
             closeSync();
@@ -98,18 +96,20 @@ export function takeUntil<T = any, N = any>(
           }
 
           if (event.type === 'complete') {
-            if (event.sourceIndex === SOURCE_INDEX) return closeSync();
+            if (event.sourceIndex === SOURCE_INDEX) return { status: "available", result: closeSync() };
             continue;
           }
 
-          if (event.sourceIndex === SOURCE_INDEX) return NEXT(event.value as T);
-          return closeSync();
+          if (event.sourceIndex === SOURCE_INDEX) return { status: "available", result: NEXT(event.value as T) };
+          return { status: "available", result: closeSync() };
         }
         
-        return isDone ? DONE : null;
+        return isDone ? { status: "available", result: DONE } : { status: "unavailable" };
       },
 
-      __hasBufferedValues: () => runner.__hasBufferedValues?.() ?? false,
+      hasBufferedEvents: () => runner.hasBufferedEvents?.() ?? false,
+
+      isTerminal: () => isDone,
 
       async return(value?: any) {
         if (isDone) return value !== undefined ? { value, done: true } : DONE;

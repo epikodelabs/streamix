@@ -3,6 +3,7 @@ import type { Atom } from "../atoms/atom";
 import { normalizeError } from "../atoms";
 import { getProducerCompletion } from "../atoms/delivery";
 import { isAtomLike, isAsyncIterable, isIterable } from "../utils/helpers";
+import type { SourceCapabilities, SyncPoll } from "../utils/source-protocol";
 
 
 /**
@@ -81,12 +82,12 @@ export function from<R = any>(
   };
 
   // Use the native flow wrapper to inherit dependency tracking and scope mechanics
-  const innerFlow = flow<R>(streamProvider) as any;
+  const innerFlow = flow<R>(streamProvider);
 
   // Overwrite Symbol.asyncIterator to guarantee replay arrays work identically to the original test requirements
   innerFlow[Symbol.asyncIterator] = function (): AsyncIterator<R> {
     let started = false;
-    let completedIterator: AsyncIterableIterator<R> | undefined;
+    let completedIterator: (AsyncIterableIterator<R> & SourceCapabilities<R>) | undefined;
     const selectCompletedIterator = () => {
       if (!started) {
         started = true;
@@ -108,10 +109,7 @@ export function from<R = any>(
       return true;
     };
 
-    const iterator: AsyncIterator<R> & {
-      __tryNext?: () => IteratorResult<R> | null;
-      __hasBufferedValues?: () => boolean;
-    } = {
+    const iterator: AsyncIterator<R> & SourceCapabilities<R> = {
       async next(): Promise<IteratorResult<R>> {
         if (done) return { value: undefined as any, done: true };
         const completed = selectCompletedIterator();
@@ -120,7 +118,9 @@ export function from<R = any>(
         if (error) throw error;
         if (asyncSource) {
           asyncIterator ??= asyncSource[Symbol.asyncIterator]();
-          return asyncIterator.next();
+          const result = await asyncIterator.next();
+          if (result.done) done = true;
+          return result;
         }
         if (done) return { value: undefined as any, done: true };
         if (index < items.length) {
@@ -129,26 +129,36 @@ export function from<R = any>(
         done = true;
         return { value: undefined as any, done: true };
       },
-      __tryNext(): IteratorResult<R> | null {
-        if (done) return { value: undefined as any, done: true };
+      pollSync(): SyncPoll<R> {
+        const completedResult: SyncPoll<R> = {
+          status: "available",
+          result: { value: undefined as any, done: true }
+        };
+        if (done) return completedResult;
         const completed = selectCompletedIterator();
-        if (completed) return (completed as any).__tryNext();
-        if (!resolveSynchronousArray()) return null;
-        if (done) return { value: undefined as any, done: true };
+        if (completed) return completed.pollSync?.() ?? { status: "unavailable" };
+        // A synchronous array is pulled lazily by index here: items are
+        // produced on demand, not held in a buffer (see `hasBufferedEvents`).
+        if (!resolveSynchronousArray()) return { status: "unavailable" };
+        if (done) return completedResult;
         if (index < items.length) {
-          return { value: items[index++], done: false };
+          return { status: "available", result: { value: items[index++], done: false } };
         }
         done = true;
-        return { value: undefined as any, done: true };
+        return completedResult;
       },
-      __hasBufferedValues(): boolean {
-        if (completedIterator) return (completedIterator as any).__hasBufferedValues();
+      hasBufferedEvents(): boolean {
+        if (completedIterator) return completedIterator.hasBufferedEvents?.() ?? false;
         // This flag means values are already buffered by the iterator, not
         // merely that a synchronous iterable *could* produce another value.
-        // `__tryNext()` is the capability probe used by the coordinator for
+        // `pollSync()` is the capability probe used by the coordinator for
         // synchronous sequences. Treating all remaining iterable items as
         // backlog breaks gating operators such as skipUntil.
         return false;
+      },
+      isTerminal(): boolean {
+        if (completedIterator) return completedIterator.isTerminal?.() ?? false;
+        return done;
       },
       async return(value?: any) {
         done = true;

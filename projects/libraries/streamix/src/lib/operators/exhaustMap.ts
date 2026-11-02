@@ -4,6 +4,7 @@ import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { normalizeError } from "../atoms";
 import { SerialInnerExecution } from "../runtime/serial-inner-execution";
+import { asStreamixSource } from "../utils/source-protocol";
 
 /**
  * Maps each value from the source stream to an inner stream, ignoring
@@ -37,13 +38,13 @@ export const exhaustMap = <T = any, R = any>(
     // running: exhaustMap ignores them by definition. Returns without a value;
     // the only observable effects are the drain and the done flag.
     const discardBufferedOuterValues = (): void => {
-      const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
-      if (!tryNext) return;
+      const pollSync = asStreamixSource(source).pollSync;
+      if (!pollSync) return;
 
       while (true) {
-        const r = tryNext.call(source);
-        if (!r) return;
-        if (r.done) {
+        const poll = pollSync.call(source);
+        if (poll.status === 'unavailable') return;
+        if (poll.result.done) {
           isSourceDone = true;
           return;
         }

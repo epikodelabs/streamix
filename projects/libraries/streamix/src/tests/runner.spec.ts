@@ -35,29 +35,32 @@ describe("runner", () => {
         ]);
     });
 
-    it("should support synchronous draining via __tryNext", () => {
+    it("should support synchronous draining via pollSync", () => {
         let pushed = false;
         const source0: any = {
-            __tryNext: () => {
+            pollSync: () => {
                 if (!pushed) {
                     pushed = true;
-                    return NEXT('sync-val');
+                    return { status: 'available', result: NEXT('sync-val') };
                 }
-                return { done: true };
+                return { status: 'available', result: { done: true, value: undefined } };
             },
-            __onPush: null
+            onReady: () => () => { }
         };
 
         const runner = createAsyncCoordinator([source0]);
 
         // Test synchronous behavior
-        const res = runner.__tryNext?.();
-        expect(res?.done).toBe(false);
-        expect(res?.value).toEqual({ type: 'value', value: 'sync-val', sourceIndex: 0 });
+        const poll = runner.pollSync();
+        expect(poll.status).toBe('available');
+        expect(poll.status === 'available' && poll.result.done).toBe(false);
+        expect(poll.status === 'available' && poll.result.value)
+            .toEqual({ type: 'value', value: 'sync-val', sourceIndex: 0 });
 
         // Next sync pull should show completion for that source
-        const completion = runner.__tryNext?.();
-        expect(completion?.value).toEqual({ type: 'complete', sourceIndex: 0 });
+        const completion = runner.pollSync();
+        expect(completion.status === 'available' && completion.result.value)
+            .toEqual({ type: 'complete', sourceIndex: 0 });
     });
 
     it("should propagate errors from sources as error events", async () => {

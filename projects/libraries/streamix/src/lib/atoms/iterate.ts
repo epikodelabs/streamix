@@ -1,6 +1,7 @@
 import type { Atom } from "./atom";
 import { ANALOG_DELIVERY, getProducerCompletion } from "./delivery";
 import type { MaybePromise } from "./operator";
+import { createSourceReadiness, type SourceCapabilities, type SyncPoll } from "../utils/source-protocol";
 
 /**
  * Creates an async iterable from an atom.
@@ -55,19 +56,13 @@ export function iterate<T>(
   let resolveNext: ((res: IteratorResult<T>) => void) | null = null;
   let rejectNext: ((e: any) => void) | null = null;
   let done = false;
-  let onPush: (() => void) | undefined;
+  const readiness = createSourceReadiness();
   let finish: (() => MaybePromise<void>) | undefined;
   let checkError: (() => any) | undefined;
   let errorUnsubscribe: any;
 
   const notifyPush = () => {
-    if (onPush && !initializing) {
-      try {
-        onPush();
-      } catch {
-        // ignore consumer errors
-      }
-    }
+    if (!initializing) readiness.notify();
   };
 
   const ensureInit = () => {
@@ -90,7 +85,7 @@ export function iterate<T>(
       }
       // Initial replay happens inside subscribe(), before error and disposal
       // handlers are installed. Let the initiating pull drain that replay;
-      // reentering __tryNext here would observe a partially initialized iterator.
+      // reentering pollSync here would observe a partially initialized iterator.
       if (!subscribing) notifyPush();
     });
     subscribing = false;
@@ -152,7 +147,7 @@ export function iterate<T>(
     initializing = false;
   };
 
-  const iterator: AsyncIterableIterator<T> = {
+  const iterator: AsyncIterableIterator<T> & SourceCapabilities<T> = {
     [Symbol.asyncIterator]() {
       return this;
     },
@@ -200,48 +195,46 @@ export function iterate<T>(
       buffer.length = 0;
       return { value: undefined as any, done: true };
     },
-  };
+    pollSync(): SyncPoll<T> {
+      ensureInit();
+      if (done) return { status: "available", result: { value: undefined as any, done: true } };
 
-  (iterator as any).__tryNext = (): IteratorResult<T> | null => {
-    ensureInit();
-    if (done) return { value: undefined as any, done: true };
-
-    // Drain buffered values first
-    if (buffer.length > 0) {
-      const val = buffer.shift()!;
-      if (sourceEnded() && buffer.length === 0) {
-        const err = checkError!();
-        if (!err) {
-          done = true;
+      // Drain buffered values first
+      if (buffer.length > 0) {
+        const val = buffer.shift()!;
+        if (sourceEnded() && buffer.length === 0) {
+          const err = checkError!();
+          if (!err) {
+            done = true;
+          }
         }
+        return { status: "available", result: { value: val, done: false } };
       }
-      return { value: val, done: false };
-    }
 
-    // Buffer is empty — surface any pending error.
-    const err = checkError!();
-    if (err) {
-      done = true;
-      throw err;
-    }
-    if (sourceEnded()) {
-      done = true;
-      return { value: undefined as any, done: true };
-    }
-    return null;
+      // Buffer is empty — surface any pending error.
+      const err = checkError!();
+      if (err) {
+        done = true;
+        throw err;
+      }
+      if (sourceEnded()) {
+        done = true;
+        return { status: "available", result: { value: undefined as any, done: true } };
+      }
+      return { status: "unavailable" };
+    },
+
+    // Held values only — terminal completion is reported by `isTerminal`.
+    hasBufferedEvents(): boolean {
+      return buffer.length > 0 || (!done && atom.error !== undefined);
+    },
+
+    isTerminal(): boolean {
+      return sourceEnded();
+    },
+
+    onReady: readiness.onReady,
   };
-
-  (iterator as any).__hasBufferedValues = () => buffer.length > 0;
-
-  Object.defineProperty(iterator, "__onPush", {
-    get() {
-      return onPush;
-    },
-    set(cb: () => void) {
-      onPush = cb;
-    },
-    configurable: true,
-  });
 
   return iterator;
 }
