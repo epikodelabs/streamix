@@ -100,8 +100,8 @@ Inspection is read-only over live objects, and it must not change their
 behavior:
 
 - Reading a value through diagnostics serves the cached state. It never
-  evaluates a derived formula, never starts an idle flow, never subscribes,
-  never marks anything dirty.
+  evaluates a derived formula, never starts or stops a flow, never subscribes,
+  never marks anything dirty. Diagnostics reads never trigger lifecycle work.
 - Previews are getter-free: `streamixPreview` reads own property *value*
   descriptors only, prints `[getter]` instead of invoking accessors, and is
   bounded (240 characters, 12 keys, depth 2, circular-safe). Inspecting an

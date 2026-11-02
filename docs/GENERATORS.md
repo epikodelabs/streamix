@@ -12,7 +12,7 @@ npm install @epikodelabs/streamix
 
 ✅ **What you get:**
 - Familiar operators: `pipe`, `map`, `filter`, `merge`, `debounce`, etc.
-- Same pull-based execution—the source is only pulled while something is subscribed
+- Shared flow producers—activation and cleanup follow the source lifecycle; `dispose()` explicitly stops a flow
 - Operators work with sync/async/promises without distinction
 - Two consumption styles: `for await...of` or `subscribe()`
 - Multicast when you need shared execution
@@ -300,7 +300,7 @@ for await (const line of errors) {
 
 The core idea: **add operator pipelines to async generators.**
 
-streamix keeps the pull-based iteration you get from native async generators — lazy start, cancellation by abandoning the iterator, and production that stops when nobody is listening — while adding the composability of reactive operators.
+streamix adds composable operator pipelines to async generators. Flow-backed atoms share one producer, activated by subscription or scope observation. The last subscription leaving disposes the flow; source completion and explicit `dispose()` also release its resources. Shared event sources stop when their last consumer leaves and may reconnect when observed again.
 
 ```typescript
 // Before: nested functions
