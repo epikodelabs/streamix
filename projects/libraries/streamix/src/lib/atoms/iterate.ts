@@ -1,12 +1,13 @@
 import type { Atom } from "./atom";
-import { ANALOG_DELIVERY } from "./delivery";
+import { ANALOG_DELIVERY, getProducerCompletion } from "./delivery";
 import type { MaybePromise } from "./operator";
 
 /**
  * Creates an async iterable from an atom.
  *
  * Yields the current value immediately, then yields subsequent values
- * whenever the atom emits. The iterable completes when the atom is disposed.
+ * whenever the atom emits. Producer completion ends iteration after buffered
+ * values drain; atom disposal and iterator closure also end iteration.
  *
  * @param source - The atom or async iterable to iterate over.
  * @returns An async iterable iterator that yields source values.
@@ -43,7 +44,13 @@ export function iterate<T>(
   const atom = source as Atom<T>;
   const conflate = (atom as any)[ANALOG_DELIVERY] === true;
 
+  const completion = getProducerCompletion(atom);
   let initialized = false;
+  let initializing = false;
+  let finished = false;
+  let stopCompletion: (() => void) | undefined;
+  let stopDisposal: (() => void) | undefined;
+  const sourceEnded = () => finished || atom.disposed || completion?.completed === true;
   let buffer: T[] = [];
   let resolveNext: ((res: IteratorResult<T>) => void) | null = null;
   let rejectNext: ((e: any) => void) | null = null;
@@ -54,7 +61,7 @@ export function iterate<T>(
   let errorUnsubscribe: any;
 
   const notifyPush = () => {
-    if (onPush) {
+    if (onPush && !initializing) {
       try {
         onPush();
       } catch {
@@ -66,6 +73,7 @@ export function iterate<T>(
   const ensureInit = () => {
     if (initialized) return;
     initialized = true;
+    initializing = true;
 
     let subscribing = true;
     const unsubscribe = atom.subscribe((value) => {
@@ -88,11 +96,15 @@ export function iterate<T>(
     subscribing = false;
 
     finish = () => {
-      if (done) return;
+      if (finished) return;
+      finished = true;
       // Remove ourselves from the atom's dispose handlers: iteration can end
       // (return()/error) long before the atom is disposed, and every finished
       // iterator left here would otherwise leak until the atom's disposal.
-      (atom as any)._onDispose?.delete(finish);
+      stopDisposal?.();
+      stopDisposal = undefined;
+      stopCompletion?.();
+      stopCompletion = undefined;
       const cleanup = unsubscribe();
       if (errorUnsubscribe) {
         errorUnsubscribe();
@@ -124,20 +136,20 @@ export function iterate<T>(
       return cleanup;
     };
 
+    checkError = () => atom.error;
+    stopDisposal = completion?.onDispose?.(() => { finish?.(); });
     errorUnsubscribe = atom.onError(() => {
-      if (done) return;
-      if (finish) finish();
+      if (!done) finish?.();
     });
-
-    (atom as any)._onDispose?.add(finish);
-
-    checkError = () => {
-      const err = atom.error;
-      if (err !== undefined) {
-        return err;
-      }
-      return undefined;
-    };
+    if (finished) {
+      errorUnsubscribe();
+      errorUnsubscribe = undefined;
+    } else {
+      stopCompletion = completion?.onComplete(() => { finish?.(); });
+      if (finished) { stopCompletion?.(); stopCompletion = undefined; }
+    }
+    if (atom.disposed && !finished) finish();
+    initializing = false;
   };
 
   const iterator: AsyncIterableIterator<T> = {
@@ -152,7 +164,7 @@ export function iterate<T>(
       // disposed, so that no values are silently dropped before an error.
       if (buffer.length > 0) {
         const val = buffer.shift()!;
-        if (atom.disposed && buffer.length === 0) {
+        if (sourceEnded() && buffer.length === 0) {
           const err = checkError!();
           if (!err) {
             done = true;
@@ -171,7 +183,7 @@ export function iterate<T>(
         throw err;
       }
 
-      if (atom.disposed) {
+      if (sourceEnded()) {
         done = true;
         return { value: undefined as any, done: true };
       }
@@ -185,6 +197,7 @@ export function iterate<T>(
       ensureInit();
       if (finish) await finish();
       done = true;
+      buffer.length = 0;
       return { value: undefined as any, done: true };
     },
   };
@@ -196,7 +209,7 @@ export function iterate<T>(
     // Drain buffered values first
     if (buffer.length > 0) {
       const val = buffer.shift()!;
-      if (atom.disposed && buffer.length === 0) {
+      if (sourceEnded() && buffer.length === 0) {
         const err = checkError!();
         if (!err) {
           done = true;
@@ -211,7 +224,7 @@ export function iterate<T>(
       done = true;
       throw err;
     }
-    if (atom.disposed) {
+    if (sourceEnded()) {
       done = true;
       return { value: undefined as any, done: true };
     }

@@ -116,13 +116,19 @@ describe('runtime inspection', () => {
 
   it('labels operator executions and clears their records on finish', async () => {
     const values: number[] = [];
-    const iterable = pipe(from([1, 2, 3]), map(value => value * 10));
-    for await (const value of iterable) values.push(value);
-    expect(values).toEqual([10, 20, 30]);
+    const input = from([1, 2, 3]);
+    const iterable = pipe(input, map(value => value * 10));
+    try {
+      for await (const value of iterable) values.push(value);
+      expect(values).toEqual([10, 20, 30]);
 
-    const record = internalRuntime.diagnostics.executions.snapshotEntries().find(entry => entry.name === 'map');
-    expect(record).toBeUndefined();
-    expect(internalRuntime.diagnostics.inspect(internalRuntime).executions.completed).toBeGreaterThan(0);
+      const record = internalRuntime.diagnostics.executions.snapshotEntries().find(entry => entry.name === 'map');
+      expect(record).toBeUndefined();
+      expect(internalRuntime.diagnostics.inspect(internalRuntime).executions.completed).toBeGreaterThan(0);
+    } finally {
+      iterable.dispose();
+      input.dispose();
+    }
   });
 
   it('shows an active labeled operator execution while a pull is pending', async () => {
@@ -144,7 +150,7 @@ describe('runtime inspection', () => {
     expect(internalRuntime.diagnostics.executions.snapshotEntries().find(entry => entry.name === 'map')).toBeUndefined();
   });
 
-  it('tracks a flow execution from active through completion', async () => {
+  it('retains completed flow state and execution records until explicit disposal', async () => {
     let release!: (value: number) => void;
     const source = flow<number>(async function* () {
       yield 1;
@@ -152,21 +158,31 @@ describe('runtime inspection', () => {
     });
     const seen: number[] = [];
     const sub = source.subscribe(value => seen.push(value));
-    for (let i = 0; i < 10 && seen.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 0));
+    try {
+      for (let i = 0; i < 10 && seen.length === 0; i++) await tick();
+      expect(internalRuntime.diagnostics.executions.describe(source))
+        .toEqual(jasmine.objectContaining({ active: true, runs: 1, emitted: 1 }));
 
-    expect(internalRuntime.diagnostics.executions.describe(source))
-      .toEqual(jasmine.objectContaining({ active: true, runs: 1, emitted: 1 }));
+      release(2);
+      for (let i = 0; i < 10 && internalRuntime.diagnostics.executions.describe(source)?.active; i++) await tick();
+      expect(seen).toEqual([1, 2]);
+      expect(source.disposed).toBeFalse();
+      expect(source.value).toBe(2);
+      expect(sub.unsubscribed).toBeFalse();
+      expect(internalRuntime.diagnostics.executions.describe(source)).toEqual(jasmine.objectContaining({
+        active: false, emitted: 2, lastExit: 'complete',
+      }));
+      expect(internalRuntime.diagnostics.inspect(internalRuntime).executions.completed).toBeGreaterThan(0);
 
-    // Resolving the pending yield ends the generator, completing the flow.
-    release(2);
-    for (let i = 0; i < 10 && !source.disposed; i++) await new Promise(resolve => setTimeout(resolve, 0));
-    expect(seen).toEqual([1, 2]);
-    expect(source.disposed).toBe(true);
-
-    // The record is released together with the atom; global accounting remains.
-    expect(internalRuntime.diagnostics.executions.describe(source)).toBeUndefined();
-    expect(internalRuntime.diagnostics.inspect(internalRuntime).executions.completed).toBeGreaterThan(0);
-    await sub();
+      await sub();
+      expect(source.disposed).toBeFalse();
+      expect(internalRuntime.diagnostics.executions.describe(source)).toBeDefined();
+      source.dispose();
+      expect(internalRuntime.diagnostics.executions.describe(source)).toBeUndefined();
+    } finally {
+      await sub();
+      source.dispose();
+    }
   });
 
   it('captures the last error on a recoverable failed flow', async () => {
@@ -282,8 +298,9 @@ describe('runtime self-description', () => {
       expect(internalRuntime.diagnostics.flows(internalRuntime.graph).find(state => state.node === source)?.origin).toBeDefined();
     } finally {
       release({ value: 2, done: false });
-      for (let i = 0; i < 20 && !source.disposed; i++) await tick();
+      for (let i = 0; i < 20 && internalRuntime.diagnostics.executions.describe(source)?.active; i++) await tick();
       await stop();
+      source.dispose();
     }
   });
 

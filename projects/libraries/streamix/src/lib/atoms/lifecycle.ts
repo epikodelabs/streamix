@@ -27,7 +27,8 @@ export class AtomLifecycle {
   private generation = 0;
   private subscribers = 0;
   private references = 0;
-  private completed = false;
+  private terminalReason?: "complete" | "error";
+  private readonly completionListeners = new Set<() => void>();
   private disposal?: Promise<void>;
   private releases = new Set<Promise<void>>();
   private activated = false;
@@ -39,14 +40,15 @@ export class AtomLifecycle {
 
   get disposed(): boolean { return this.disposal !== undefined; }
   get started(): boolean { return this.activated; }
+  get completed(): boolean { return this.terminalReason === "complete"; }
   get subscriberCount(): number { return this.subscribers; }
 
   canEmit(session: AtomLifecycleSession): boolean {
-    return !this.disposed && !this.completed && this.current === session && session.active;
+    return !this.disposed && !this.terminalReason && this.current === session && session.active;
   }
 
   activate(): void {
-    if (this.disposed || this.completed || this.current) return;
+    if (this.disposed || this.terminalReason || this.current) return;
     const session: Session = { generation: ++this.generation, active: true };
     this.current = session;
     this.activated = true;
@@ -86,9 +88,23 @@ export class AtomLifecycle {
     return this.retireIfIdle();
   }
 
+  onComplete(listener: () => void): () => void {
+    if (this.completed) { try { listener(); } catch {} }
+    else if (!this.disposed && !this.terminalReason) this.completionListeners.add(listener);
+    return () => { this.completionListeners.delete(listener); };
+  }
+
   complete(reason: "complete" | "error" = "complete"): Promise<void> {
-    this.completed = true;
-    return this.retire(reason);
+    if (this.terminalReason || this.disposed) return this.settled();
+    this.terminalReason = reason;
+    const released = this.retire(reason);
+    if (reason === "complete") {
+      for (const listener of [...this.completionListeners]) {
+        try { listener(); } catch { /* Completion observers cannot prevent teardown. */ }
+      }
+    }
+    this.completionListeners.clear();
+    return released;
   }
 
   dispose(reason: AtomRetirement = "dispose"): Promise<void> {
@@ -97,6 +113,7 @@ export class AtomLifecycle {
     this.disposal = new Promise<void>(resolve => { finish = resolve; });
     this.subscribers = 0;
     this.references = 0;
+    this.completionListeners.clear();
     const released = this.retire(reason);
     let cleanup: MaybePromise<void>;
     try { cleanup = this.adapter.dispose?.(released); } catch { cleanup = undefined; }
@@ -110,6 +127,8 @@ export class AtomLifecycle {
   }
 
   private retireIfIdle(): Promise<void> {
+    // Detaching a terminal consumer must not dispose retained successful state.
+    if (this.completed) return this.settled();
     if (this.subscribers || this.references || this.onIdle === "keepAlive") return Promise.resolve();
     return this.onIdle === "dispose" ? this.dispose("idle") : this.retire("idle");
   }

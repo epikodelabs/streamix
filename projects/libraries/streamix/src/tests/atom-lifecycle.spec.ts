@@ -95,9 +95,10 @@ describe('AtomLifecycle', () => {
   it('latches completion without disposing retained atom state or restarting', async () => {
     const cleanup = jasmine.createSpy('cleanup');
     const start = jasmine.createSpy('start').and.returnValue(cleanup);
-    const lifecycle = new AtomLifecycle({ start }, 'stop');
+    const lifecycle = new AtomLifecycle({ start });
     lifecycle.addSubscriber();
     await lifecycle.complete();
+    expect(lifecycle.completed).toBeTrue();
     await lifecycle.removeSubscriber();
     lifecycle.addSubscriber();
     expect(start).toHaveBeenCalledTimes(1);

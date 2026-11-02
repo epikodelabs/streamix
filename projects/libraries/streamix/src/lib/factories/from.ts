@@ -1,6 +1,7 @@
-import { flow, isPromiseLike, PipeInput, toAsyncIterable, type MaybePromise } from "../atoms";
+import { flow, isPromiseLike, iterate, PipeInput, toAsyncIterable, type MaybePromise } from "../atoms";
 import type { Atom } from "../atoms/atom";
 import { normalizeError } from "../atoms";
+import { getProducerCompletion } from "../atoms/delivery";
 import { isAtomLike, isAsyncIterable, isIterable } from "../utils/helpers";
 
 
@@ -82,30 +83,17 @@ export function from<R = any>(
   // Use the native flow wrapper to inherit dependency tracking and scope mechanics
   const innerFlow = flow<R>(streamProvider) as any;
 
-  // Enhance the returned atom to support the original sequence replay semantics on direct subscription
-  const originalSubscribe = innerFlow.subscribe.bind(innerFlow);
-  innerFlow.subscribe = (callback?: (value: R) => MaybePromise) => {
-    if (innerFlow.disposed) {
-      if (!error && !asyncSource) {
-        for (const item of items) {
-          try {
-            callback?.(item);
-          } catch {
-            // ignore user callback errors
-          }
-        }
-      }
-      return { unsubscribe: () => {} };
-    }
-
-    // While the atom is still active, the upstream flow generator reads from the
-    // cached `items` array and emits each value exactly once. We must not replay
-    // manually here, or consumers like `iterate(atom)` would see every value twice.
-    return originalSubscribe(callback);
-  };
-
   // Overwrite Symbol.asyncIterator to guarantee replay arrays work identically to the original test requirements
   innerFlow[Symbol.asyncIterator] = function (): AsyncIterator<R> {
+    let started = false;
+    let completedIterator: AsyncIterableIterator<R> | undefined;
+    const selectCompletedIterator = () => {
+      if (!started) {
+        started = true;
+        if (getProducerCompletion(innerFlow)?.completed) completedIterator = iterate(innerFlow);
+      }
+      return completedIterator;
+    };
     let index = 0;
     let done = false;
     let asyncIterator: AsyncIterator<R> | undefined;
@@ -125,6 +113,9 @@ export function from<R = any>(
       __hasBufferedValues?: () => boolean;
     } = {
       async next(): Promise<IteratorResult<R>> {
+        if (done) return { value: undefined as any, done: true };
+        const completed = selectCompletedIterator();
+        if (completed) return completed.next();
         await resolveItems();
         if (error) throw error;
         if (asyncSource) {
@@ -139,6 +130,9 @@ export function from<R = any>(
         return { value: undefined as any, done: true };
       },
       __tryNext(): IteratorResult<R> | null {
+        if (done) return { value: undefined as any, done: true };
+        const completed = selectCompletedIterator();
+        if (completed) return (completed as any).__tryNext();
         if (!resolveSynchronousArray()) return null;
         if (done) return { value: undefined as any, done: true };
         if (index < items.length) {
@@ -148,6 +142,7 @@ export function from<R = any>(
         return { value: undefined as any, done: true };
       },
       __hasBufferedValues(): boolean {
+        if (completedIterator) return (completedIterator as any).__hasBufferedValues();
         // This flag means values are already buffered by the iterator, not
         // merely that a synchronous iterable *could* produce another value.
         // `__tryNext()` is the capability probe used by the coordinator for
@@ -157,6 +152,7 @@ export function from<R = any>(
       },
       async return(value?: any) {
         done = true;
+        if (completedIterator) return completedIterator.return!();
         await asyncIterator?.return?.();
         return value !== undefined ? { value, done: true } : { value: undefined as any, done: true };
       },

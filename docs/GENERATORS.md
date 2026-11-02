@@ -102,9 +102,9 @@ With `subscribe()` on a flow-backed atom, the callback does not pace the produce
 
 ---
 
-## 🔁 / 🔂 Multicast vs Unicast
+## 🔁 / 🔂 Shared Execution and Replay
 
-**Unicast** (`pipe` from an async generator): one shared run and no history replay. `pipe(...)` builds its iterator up front, so a second consumer joins the same execution instead of getting a fresh one; it receives only the atom's current value (if any), then live emissions. Once the source completes, the atom disposes, so a consumer that arrives after the run has finished sees nothing.
+`pipe(...)` and `flow(...)` share one producer across consumers. A consumer joining during execution receives the current value and subsequent emissions. Successful completion retains the final value: a later iterator yields it once and finishes without restarting the producer. An empty completed source yields nothing.
 
 ```typescript
 const piped = pipe(
@@ -112,11 +112,11 @@ const piped = pipe(
   map(toy => toy.toUpperCase())
 );
 
-for await (const toy of piped) { /* chain 1 */ }
-for await (const toy of piped) { /* chain 2 */ }
+for await (const toy of piped) { /* all values */ }
+for await (const toy of piped) { /* retained final value, if any */ }
 ```
 
-**Multicast** ([`flow`](/ATOMS) / [`addListener`](/api/src/public-api/functions/addListener)): shared execution across subscribers.
+Callback subscriptions also share the producer:
 
 ```typescript
 import { flow } from '@epikodelabs/streamix';
@@ -300,7 +300,7 @@ for await (const line of errors) {
 
 The core idea: **add operator pipelines to async generators.**
 
-streamix adds composable operator pipelines to async generators. Flow-backed atoms share one producer, activated by subscription or scope observation. The last subscription leaving disposes the flow; source completion and explicit `dispose()` also release its resources. Shared event sources stop when their last consumer leaves and may reconnect when observed again.
+streamix adds composable operator pipelines to async generators. Flow-backed atoms share one producer, activated by subscription or scope observation. While the producer is running, the last subscription leaving disposes the flow. Successful source completion releases the producer but retains the atom's final value; later consumers can read it without restarting production. Explicit `dispose()` releases the atom and its observers. Shared event sources stop when their last consumer leaves and may reconnect when observed again.
 
 ```typescript
 // Before: nested functions

@@ -8,7 +8,7 @@ import { isAtom } from "../utils/helpers";
 import { iterate } from "./iterate";
 import { DONE, isPromiseLike, NEXT, type MaybePromise } from "./operator";
 
-import { ANALOG_DELIVERY } from "./delivery";
+import { ANALOG_DELIVERY, bindProducerCompletion, forwardProducerCompletion } from "./delivery";
 import {
   hasAtomEmitted,
   markAtomAsEmitted,
@@ -95,7 +95,7 @@ export interface Atom<T = any> {
   onError(handler: (error: any) => void): Subscription;
   /** Stops the atom and releases all subscribers/resources. */
   dispose(): void;
-  /** Iterates emitted values until the atom is disposed or iteration is closed. */
+  /** Iterates values until producer completion, disposal, or iterator closure. */
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
@@ -413,6 +413,7 @@ export function asReadable<A>(atom: Atom<A>): Readable<A> {
     [Symbol.asyncIterator]: atom[Symbol.asyncIterator].bind(atom),
   };
 
+  forwardProducerCompletion(view, atom);
   meta.readableView = view;
   return view;
 }
@@ -457,6 +458,7 @@ function createTrackedAtomView<A>(owner: EvaluationOwner, atom: Atom<A>): Atom<A
     configurable: true,
   });
 
+  forwardProducerCompletion(view, atom);
   return view as unknown as Atom<A>;
 }
 
@@ -811,7 +813,8 @@ export interface AtomFromIteratorOptions<T> extends AtomOptions {
  * Creates a readable atom backed by an async iterable.
  *
  * The source starts when the first subscriber attaches and is closed when the
- * atom is disposed. Values yielded by the iterable become atom emissions.
+ * atom is disposed. Completion releases the producer and retains the final value.
+ * Values yielded by the iterable become atom emissions.
  */
 function atomFromIteratorInternal<T>(
   source: AsyncIterable<T>,
@@ -921,7 +924,9 @@ function atomFromIteratorInternal<T>(
       }
       if (lifecycle.canEmit(session)) {
         executionExit = "complete";
-        await lifecycle.dispose("complete");
+        // Deliver the final analog value before consumers finish iteration.
+        if (conflate) broadcastLatest();
+        await lifecycle.complete();
       }
     } catch (err) {
       executionExit = "error";
@@ -1000,6 +1005,7 @@ function atomFromIteratorInternal<T>(
     },
     dispose: released => disposeInstance(released),
   });
+  bindProducerCompletion(instance, lifecycle);
   // Flow identity is tracked unconditionally so `changed()` can dedupe graph
   // 'change' events against flow 'next' events in every configuration. The
   // read-only state reader closure is skipped in production builds, where
