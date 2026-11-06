@@ -54,10 +54,11 @@ export default defineConfig({
             { text: 'Runtime', link: '/RUNTIME' },
             { text: 'Diagnostics', link: '/DIAGNOSTICS' },
             { text: 'Introspection', link: '/INTROSPECTION' },
-            { text: 'Migration', link: '/MIGRATION' },
+            { text: 'FAQ', link: '/FAQ' },
             { text: 'Angular', link: '/ANGULAR' },
             { text: 'React', link: '/REACT' },
             { text: 'Vue', link: '/VUE' },
+            { text: 'Migration', link: '/MIGRATION' },
             { text: 'Pricing', link: '/PRICING' },
             { text: 'Changelog', link: '/CHANGELOG' },
           ]
