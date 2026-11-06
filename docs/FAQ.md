@@ -6,7 +6,7 @@ in the runtime's actual behavior (current main / v3 atom & flow model).
 ## Contents
 
 1. [Cancellation and teardown: what happens when a consumer stops early, an Angular component is destroyed, or an async iterator is abandoned?](#1-cancellation-and-teardown)
-2. [Backpressure: whether producers can outpace consumers, and how buffering or coalescing is selected.](#2-backpressure)
+2. [Backpressure: which sources pace their producers, and how buffering or coalescing is selected.](#2-backpressure)
 3. [Error and completion: how exceptions, terminal states, and retries map from an RxJS mental model to the iterator model.](#3-error-and-completion)
 4. [Hot versus cold behavior, multicasting, and scheduling/time-based operators.](#4-hot-versus-cold-multicasting-and-scheduling)
 
@@ -188,14 +188,22 @@ has other owners.
 
 ## 2. Backpressure
 
-**Yes, producers can outpace consumers.** A producer is never paced by its
-consumers: it runs at the source’s pace. Slow consumers accumulate values in
-their own delivery queues (or see coalesced values). The atom’s `.value`
-always reflects the newest emission. Consumers cannot block a producer.
+**It depends on the source model.** Flow-backed atoms run at the source’s
+pace: consumers cannot block the producer. Shared sources are push-based —
+their `connect` function receives an awaitable `push` — so a producer that
+awaits it **is** paced by consumers. That is the runtime’s only blocking
+backpressure.
+
+| Source kind                                                                   | Producer paced by consumers?                      | Slow consumer behavior                                                                                                             |
+| ----------------------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Flow-backed (`flow`, `pipe`, `from`, …)                                        | No                                                 | Per-subscriber FIFO queue (unbounded); `mode: "analog"` keeps only the latest pending value                                         |
+| Shared source (`createSharedSource`, `timer`, `interval`, `addListener`, DOM)  | Yes, when `connect` awaits `push` in discrete mode | `push` waits for buffer space and for subscriber callbacks to finish; async iterators queue values instead of applying backpressure |
+
+The atom’s `.value` always reflects the newest emission.
 
 ### Delivery mode (the primary control)
 
-Shared sources and flows expose an explicit delivery mode:
+Flows and shared sources expose the same delivery mode:
 
 ```ts
 const positions = flow(pointerPositions(), { mode: "analog" }); // latest pending value
@@ -207,23 +215,70 @@ const clicks    = flow(clickEvents(),      { mode: "discrete" }); // every event
   scroll, or other high-frequency signals where intermediate values do not
   matter).
 
-`createSharedSource` uses the same modes and, under the hood, a cyclic buffer
-(default capacity 16 for discrete, 1 for analog). Analog overwrites the single
-slot; discrete tries to preserve values.
+Shared sources also own a single cyclic buffer with an optional `capacity`:
+
+| Mode       | Default capacity | Full-buffer behavior                          |
+| ---------- | ---------------- | --------------------------------------------- |
+| `discrete` | 16               | `push` waits for a free slot (producer waits) |
+| `analog`   | 1                | Overwrites the pending slot (latest wins)     |
+
+Flows have no source-side buffer — `mode: "analog"` conflates each
+subscriber’s pending queue instead. Keeping the queue per-subscriber preserves
+fan-out isolation: one slow subscriber on a flow does not stall the source or
+the other subscribers.
 
 There is **no public per-consumer `capacity` / `overflow` option** on
 `subscribe()` or `iterate()` in the current API. Buffering and coalescing are
-handled by the delivery mode and the runtime’s internal event buffers.
+handled by the delivery mode and the runtime’s internal buffers.
 
-### There is no blocking backpressure
+### Blocking backpressure (shared sources only)
 
-If a slow consumer must not lose values, do not rely on the producer to
-pause. Prefer:
+A push-based producer can be paced, but only cooperatively:
 
-- an analog source when only the latest value matters, or
-- operator-level shaping (`buffer`, `bufferCount`, `debounce`, `throttle`,
-  `sample`) which changes the rate downstream without blocking the source, or
-- making the producer itself pace (await inside the generator).
+- In **discrete** mode, `push(value)` settles after the ring buffer accepts
+  the value and subscriber callbacks finish processing it. Promise-returning
+  callbacks are awaited, so a slow async subscriber delays `push` — and, for
+  `timer` / `interval`, the next tick. Because distribution is shared, that
+  subscriber also delays every other consumer.
+- In **analog** mode, `push` overwrites the latest pending value and returns
+  immediately; consumers never slow the producer.
+
+DOM event sources cannot be paced by the browser: `addEventListener` ignores
+the listener’s returned promise. Awaiting `push` in discrete mode preserves
+events by queueing pending listener invocations, so memory grows with the
+backlog regardless of the ring-buffer `capacity`. Use `mode: "analog"` for
+high-frequency streams; pointer and scroll streams already do.
+
+### Subscriber queues and iterators
+
+On atom-backed sources (writable atoms, flows, derived atoms), each
+subscription owns a private pending queue:
+
+- An async callback is **never re-entered**; later values wait until the
+  previous invocation settles.
+- Default (discrete) delivery is FIFO and lossless for the life of the
+  subscription.
+- Analog delivery keeps only the latest pending value for a busy subscriber.
+
+`atom.next()` / `.set()` are synchronous and never wait for subscribers.
+
+`iterate()` and `for await` own a separate per-iterator buffer: discrete values
+queue without a bound, analog atoms conflate into it. Consuming slowly never
+pressures a flow producer, and it does not pressure a shared-source producer
+either — a shared source’s ring buffer drains into this queue, so only async
+subscriber callbacks suspend its producer.
+
+### Choosing a mode
+
+- **Every event matters and the producer can wait:** keep the default
+  `discrete` mode. Built-in timer sources await `push`; a custom `connect`
+  should do the same so a full buffer suspends the producer.
+- **Only the latest value matters, or the producer cannot wait (DOM):** use
+  `analog`; intermediate values are conflated and the producer never blocks.
+- **A flow producer must not outrun its consumer:** do not rely on the runtime
+  to pause it. Use `mode: "analog"`, operator-level shaping (`buffer`,
+  `bufferCount`, `debounce`, `throttle`, `sample`), or make the producer pace
+  itself (await inside the generator).
 
 ## 3. Error and completion
 
