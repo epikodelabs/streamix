@@ -40,7 +40,7 @@ source iterators ──► private coordinator bus ──► consumers
 ## Runtime composition
 
 `internalRuntime` is the shared instance in `src/lib/runtime/runtime.ts`. It
-contains four runtime services:
+contains three reactive services and a diagnostics port:
 
 | Service | Purpose |
 | --- | --- |
@@ -51,6 +51,10 @@ contains four runtime services:
 
 It also has a root identity used by the atom/scope layer. This root is not a
 public global store and does not expose an application-facing lifecycle API.
+
+`graph` and `scheduling` are the reactive core. `executions` is supplied by the
+diagnostics port; without the introspection entry the runtime installs a no-op
+implementation, so execution accounting is development-only.
 
 ## Dependency graph
 

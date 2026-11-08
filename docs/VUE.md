@@ -13,7 +13,7 @@ npm install -D typescript vite @vitejs/plugin-vue
 
 The compiler, Vite plugin, Volar integration, and Angular-hosted builder are
 subpaths of the same Streamix package. Streamix requires Vue 3.4 or newer and
-TypeScript 5.5 or newer.
+TypeScript 5.9.3 or newer.
 
 ## 2. Configure Vite
 

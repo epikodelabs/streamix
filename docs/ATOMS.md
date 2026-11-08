@@ -15,13 +15,13 @@ Every atom—whether created via `atom`, `derived`, `flow`, or `pipe`—implemen
 ```ts
 interface Atom<T> {
   readonly type: "atom";
-  readonly value: T;         // Current value (throws while the atom is in an error state)
-  readonly safeValue: T;     // Current value; falls back to the last value before an error
+  readonly value: T;         // Current value (throws in an error state or after disposal)
+  readonly safeValue: T;     // Current value, or the last retained value while errored
   readonly previous: T;      // Previously emitted value
   readonly disposed: boolean;
   readonly dirty: boolean;   // True when reactive work is queued but not flushed yet
   readonly error?: any;      // Last error captured by this atom, if any
-  subscribe(callback?: (current: T, previous: T) => void): Subscription;
+  subscribe(callback?: (current: T, previous: T) => void | Promise<void>): Subscription;
   onError(handler: (error: any) => void): Subscription;
   dispose(): void;
   [Symbol.asyncIterator](): AsyncIterator<T>;
@@ -32,7 +32,7 @@ interface Atom<T> {
 
 > **Note:** Writable atoms extend this base interface with mutation methods: `.next(value)`, its alias `.set(value)`, `.fail(error, { terminate?: boolean })` to enter an error state, and optional `.recover()` / `.clearError()` to leave a recoverable error state.
 
-Subscriptions are **stateful**. If an atom already has a current value, `subscribe()` synchronously delivers that value once before future emissions. This applies equally to writable atoms, derived atoms, and flows. An atom or flow that has not produced a value yet stays silent until its first real emission; no placeholder `undefined` is invented. Explicit state is still state, so `atom(undefined)` does replay `undefined`.
+Subscriptions are **stateful**. If a non-disposed atom already has a current value, `subscribe()` synchronously delivers that value once before future emissions. This applies to writable atoms, derived atoms, and flows. A disposed writable, derived, or flow atom returns a no-op subscription instead. An atom or flow that has not produced a value yet stays silent until its first real emission; no placeholder `undefined` is invented. Explicit state is still state, so `atom(undefined)` does replay `undefined`.
 
 ```ts
 const count = atom(3);
@@ -51,14 +51,14 @@ Errors surface through `onError` handlers rather than one-off `try/catch` around
 
 ```ts
 const status = atom("idle", {
-  onError: handler,          // receives errors raised by the source or subscribers
+  onError: handler,          // receives producer / formula failures
   terminateOnError: false,   // true disposes the atom after an error instead of staying recoverable
   propagateErrors: false,    // true rethrows after handlers run
-  maxSubscribers: 1000,      // soft leak-detection limit; exceeding it still works but may warn
+  maxSubscribers: 1000,      // hard limit: subscribe() throws once this many are active
 });
 ```
 
-`derived()` always records errors and reports them through `onError` handlers; `propagateErrors` applies to writable atoms and flow-backed sources.
+The `onError` option observes producer/formula failures on writable atoms and flows. `atom.onError(handler)` observers additionally see subscriber-callback failures. `derived()` records errors and reports them through `atom.onError()` observers; `propagateErrors` applies to writable atoms.
 
 ---
 
@@ -138,7 +138,7 @@ const positions = flow(pointerPositions(), { mode: "analog" }); // latest pendin
 const clicks = flow(clickEvents(), { mode: "discrete" });       // every event matters
 ```
 
-`mode` defaults to `"discrete"`. All other atom options (`onError`, `terminateOnError`, `propagateErrors`, `maxSubscribers`) apply to flows as well.
+`mode` defaults to `"discrete"`. `onError`, `terminateOnError`, and `maxSubscribers` apply to flows as well; `propagateErrors` is wired for writable atoms only.
 
 ---
 

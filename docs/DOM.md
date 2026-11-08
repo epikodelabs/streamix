@@ -19,6 +19,11 @@ stopPointer();
 stopScroll();
 ```
 
+A shared source supports multiple callback subscribers but only one active
+async iterator at a time: a second `for await` over the same atom finishes
+immediately. Use `subscribe()`, or `iterate(atom)` (which subscribes), when
+several consumers need iterator-style access.
+
 ## Pointer position
 
 `on('pointer', target?)` observes `pointermove`, `pointerdown`,

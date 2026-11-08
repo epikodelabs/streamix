@@ -144,22 +144,23 @@ const form = scope({
 
 **Async Data**
 ```ts
-const user = scope({
-  userId: "",
-  profile: (self: any) => {
-    const userId = self.userId;
+import { flow, pipe, scope, switchMap } from '@epikodelabs/streamix';
 
-    return flow(async function* (signal) {
-      if (!userId) {
-        yield null;
-        return;
-      }
+const user = scope({ userId: "" });
 
-      const res = await fetch(`/api/users/${userId}`, { signal });
-      yield await res.json();
-    });
-  },
-});
+// switchMap cancels the previous request when userId changes.
+const profile = pipe(
+  user.get("userId"),
+  switchMap(userId => flow(async function* (signal) {
+    if (!userId) {
+      yield null;
+      return;
+    }
+
+    const res = await fetch(`/api/users/${userId}`, { signal });
+    yield await res.json();
+  })),
+);
 ```
 
 ---

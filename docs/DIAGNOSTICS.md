@@ -144,6 +144,8 @@ Diagnostics must not become the leak it exists to find.
 
 - Trace: the last 1000 events, oldest discarded. The inspector panel mirrors
   this bound with its DOM rows, so the two never drift apart.
+- Framework devtools trace: the last 250 events (`runtime/devtools.ts`), also
+  oldest-first discarded.
 - Inspector entries: `WeakRef` plus a `FinalizationRegistry`, with an
   incremental sweep (16 entries per appended event) so dead metadata releases
   even where finalization is delayed.

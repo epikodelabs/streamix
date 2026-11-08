@@ -13,7 +13,7 @@ npm install @epikodelabs/streamix @angular/core @angular/common
 npm install -D typescript @angular/cli @angular/language-service
 ```
 
-Streamix requires Angular 20 or newer and TypeScript 5.5 or newer. The
+Streamix requires Angular 20 or newer and TypeScript 5.9.3 or newer. The
 compiled-template runtime, the builder, and the editor plugin ship in the same
 package; there is nothing else to install.
 

@@ -28,9 +28,9 @@ Configure your editor and build tools, then create your first reactive counter i
 
 | Framework | Requirements | Source preprocessing |
 | --- | --- | --- |
-| [Angular](#angular) | Angular 20+, TypeScript 5.5+ compatible with your Angular version | Angular builder |
-| [React](#react) | React 18+, TypeScript 5.5+ | Vite plugin: `sx()` before `react()` |
-| [Vue](#vue) | Vue 3.4+, TypeScript 5.5+ | Vite plugin: `sxVue()` before `vue()` |
+| [Angular](#angular) | Angular 20+, TypeScript 5.9.3+ compatible with your Angular version | Angular builder |
+| [React](#react) | React 18+, TypeScript 5.9.3+ | Vite plugin: `sx()` before `react()` |
+| [Vue](#vue) | Vue 3.4+, TypeScript 5.9.3+ | Vite plugin: `sxVue()` before `vue()` |
 
 Install `@epikodelabs/streamix` once; no separate compiler, builder, or editor packages are needed. Configure both the build and editor before using the examples below.
 

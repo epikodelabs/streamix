@@ -5,17 +5,19 @@ in the runtime's actual behavior (current main / v3 atom & flow model).
 
 ## Contents
 
-1. [Cancellation and teardown: what happens when a consumer stops early, an Angular component is destroyed, or an async iterator is abandoned?](#1-cancellation-and-teardown)
-2. [Backpressure: which sources pace their producers, and how buffering or coalescing is selected.](#2-backpressure)
-3. [Error and completion: how exceptions, terminal states, and retries map from an RxJS mental model to the iterator model.](#3-error-and-completion)
-4. [Hot versus cold behavior, multicasting, and scheduling/time-based operators.](#4-hot-versus-cold-multicasting-and-scheduling)
+1. [Cancellation and teardown: what happens when a consumer stops early, and what survives after the last owner leaves?](#1-cancellation-and-teardown)
+2. [Backpressure: which sources pace their producers, and how is buffering or coalescing selected?](#2-backpressure)
+3. [Error and completion: how exceptions, terminal states, and completion replay map from the RxJS mental model.](#3-error-and-completion)
+4. [Hot versus cold, multicasting, and scheduling: when is a producer shared, and how do time-based operators behave?](#4-hot-versus-cold-multicasting-and-scheduling)
 
 ## 1. Cancellation and teardown
 
 Streamix treats cancellation as a question of **ownership**. A consumer can
 detach without shutting down a source that others still use. When the last
-owner leaves, production stops for ordinary flows and shared sources; the
-atom retains its last state.
+owner leaves, production stops for flow-backed atoms and shared sources. What
+survives afterwards depends on the source kind: a flow atom is disposed, a
+shared source can reconnect for a new consumer, and a writable atom stays
+alive.
 
 | Situation                                 | What happens                                                                         | What you need to do                                                                 |
 | ----------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
@@ -52,13 +54,35 @@ Later calls are no-ops.
 Removing one consumer does not necessarily stop the pipeline. If another
 subscriber still owns the output, production continues.
 
-For **flow-backed atoms** and **shared sources**, the last subscriber leaving
-stops the producer (the underlying iterator is closed). The atom retains its
-last value; a later subscriber receives that retained value but does **not**
-restart the producer.
+What happens after the last consumer leaves depends on the source kind:
 
-Plain **writable atoms** do not auto-stop or auto-dispose when the last
-subscriber leaves; they stay alive until you call `dispose()`.
+| Source kind      | What stops                                       | A later subscriber                                                                                                                       |
+| ---------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Flow-backed atom | The producer stops; the flow atom is disposed    | Gets nothing and does not restart it. `.safeValue` keeps the last value; `.value` throws `Atom has been disposed`.                        |
+| Shared source    | The underlying resource stops; the source stays alive | Gets the current value and reconnects the resource. If the source already completed, it gets the current value but no reconnect.         |
+| Writable atom    | Nothing — the atom stays alive                   | Gets the current value; the atom remains writable.                                                                                       |
+
+A pipeline that is actively consuming the atom counts as one of its consumers:
+`pipe(atom, ...)` holds an active consumer on the source while the output atom
+is consumed, so the source stops only after every pipeline and direct
+subscriber has detached (a flow atom is then disposed; a shared source stays
+available for a later consumer). Two caveats:
+
+- A `pipe()` over a flow or writable atom does not subscribe to it until the
+  output atom is consumed, so constructing the pipeline alone does not keep
+  the source alive. Pipes over shared sources, and operators that connect
+  eagerly such as `share()` and `observeOn`, start pulling at construction
+  instead. If the source disposes before an unstarted pipeline consumes it,
+  the pipeline starts from `done`.
+- A `derived()` dependency is tracked through change handlers, not a
+  subscription, so it neither counts as an owner nor starts a flow or shared
+  source by itself.
+
+If a flow atom is disposed manually while another pipeline still consumes it,
+the disposal propagates as completion: the downstream iterator ends with
+`done` (after draining already-buffered values) and the pipeline disposes
+itself. Disposing a shared source rejects its pending iterator pulls with
+`Source disposed`; later pulls finish with `done`.
 
 ### How cleanup travels through a pipeline
 
@@ -287,7 +311,7 @@ the atom carries**, and termination is a policy:
 
 ```ts
 const status = atom("idle", {
-  onError: handler,           // source and subscriber failures
+  onError: handler,           // producer / formula failures
   terminateOnError: false,    // true disposes the atom after a producer/formula failure
   propagateErrors: false,     // true rethrows after handlers run
 });
@@ -296,16 +320,18 @@ const status = atom("idle", {
 ### Failure
 
 - A producer or formula failure sets `.error`, makes `.value` throw, and
-  notifies `onError` handlers. The atom stays undisposed unless
-  `terminateOnError: true`.
+  notifies `atom.onError()` observers (writable atoms and flows also call the
+  constructor `onError` option). The atom stays undisposed unless
+  `terminateOnError: true`; a flow atom’s producer stops.
 - `.safeValue` never throws; it returns the last retained value (or the
   `NO_INITIAL_VALUE` sentinel before the first emission).
 - Subscriber callback failures are isolated: other subscribers keep receiving
-  values and the atom’s `.error` stays empty. For compatibility, `onError`
-  handlers also observe subscriber failures.
-- Writable atoms and flows leave the error state through `recover()` /
-  `clearError()`; `next(value)` after recovery publishes normally.
-  `fail(error, { terminate: true })` enters the state terminally.
+  values and the atom’s `.error` stays empty. `atom.onError()` observers see
+  them; the constructor `onError` option does not.
+- Writable atoms leave the error state through `recover()` / `clearError()`;
+  `next(value)` after recovery publishes normally. `fail(error, { terminate:
+  true })` enters the state terminally. Flow atoms expose no recovery API: a
+  failed producer has stopped, so create a new flow (or use `retry`).
 - Derived atoms always record errors; the first failure invalidates downstream
   formulas, whose reads rethrow. The next successful upstream emission restores
   them.
@@ -319,18 +345,25 @@ deterministically while the atom keeps serving others.
 
 ### Completion
 
-A completed producer ends iteration with `{ done: true }`; it does not
-dispose the atom. The atom retains its final value, late subscribers replay
-it, and late iterators replay it once before finishing. A completed
-`from([1, 2, 3])` gives a late consumer only `3` — the current value, not a
-replay of the sequence.
+A completed producer ends iteration with `{ done: true }`. What a late
+consumer observes depends on the source kind:
+
+| Completed source | Late `subscribe()`              | Late `for await` (direct)                  |
+| ---------------- | ------------------------------- | ------------------------------------------ |
+| Flow-backed atom | Nothing — the atom is disposed  | Finishes immediately with `{ done: true }` |
+| Shared source    | The current value once (if any) | Finishes immediately; no replay            |
+| `from([...])`    | Replays the whole sequence      | Replays the whole sequence                 |
+
+`flow()` completion disposes the atom, but `.safeValue` still returns the final
+value. `from([...])` deliberately caches its resolved items and replays them
+to late consumers; that is the exception to the “current value only” rule.
 
 ### Mapping RxJS error handling
 
 | RxJS mental model                  | Streamix                                                                                                                                                        |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `subscribe(next, error, complete)` | `subscribe(value => …)`; failures through `onError`; completion through iterator `done`                                                                         |
-| An error terminates the stream     | Failure sets `.error`; the atom stays usable unless `terminateOnError`                                                                                          |
+| An error terminates the stream     | Failure sets `.error`; writable atoms stay usable, flow atoms stop their producer unless `terminateOnError`                                                     |
 | `throwError(err)` as a source      | `throwError(message)` is an **operator** that errors when the source emits                                                                                      |
 | `catchError(() => of(fallback))`   | `catchError(handler)` runs the handler on the first error and completes without a value; wrap the source in a generator to emit a fallback                      |
 | `retry(n)` operator                | `retry(factory, maxRetries = 3, delay = 1000)` restarts the whole factory per attempt; values from failed attempts stay visible; its wait observes cancellation |
@@ -342,9 +375,10 @@ replay of the sequence.
 
 Streamix has no separate Observable type: `pipe()` and every factory produce
 an atom, and **atoms are stateful**. Every non-disposed atom that has emitted
-replays its current value to a new subscriber before future emissions. A plain
-atom therefore behaves more like an RxJS `BehaviorSubject` (or a source shared
-with `shareReplay(1)`) than like a cold Observable.
+replays its current value to a new subscriber before future emissions
+(`from([...])` is the exception: it replays its cached sequence). A plain atom
+therefore behaves more like an RxJS `BehaviorSubject` (or a source shared with
+`shareReplay(1)`) than like a cold Observable.
 
 ### One producer per atom
 
@@ -355,9 +389,10 @@ with `shareReplay(1)`) than like a cold Observable.
 - Cold behaviour lives in the *factory call*: each call to `flow(...)`,
   `interval(...)`, `from(...)`, etc. creates a separate cold-to-hot instance
   with its own producer and state.
-- After the last consumer leaves (or the producer completes), the producer
-  stops and the atom freezes. A later subscriber replays the retained value
-  but does **not** restart the producer.
+- After the last consumer leaves, an ordinary flow-backed atom is disposed: a
+  later subscriber gets no replay and does not restart the producer
+  (`.safeValue` still exposes the final value). `from([...])` is the exception:
+  it replays its cached sequence.
 
 ### Multicasting
 
@@ -371,27 +406,35 @@ Streamix multicasts in three related ways:
 2. **Shared sources (resource-level multicasting)**  
    Factories such as `timer`, `interval`, `addListener`, DOM `on`, and the
    lower-level `createSharedSource` own one underlying resource. They are
-   ref-counted:
-   - first consumer starts the resource,
-   - last consumer leaving stops it and runs cleanup.
+   ref-counted: the first consumer starts the resource, the last consumer
+   leaving stops it and runs cleanup, and a new consumer reconnects it (unless
+   the source already completed).
+
    Delivery mode (`analog` / `discrete`) and an optional ring-buffer capacity
-   are configured once on the shared source; every consumer sees the same
-   sequence (or the same coalesced latest value).
+   are configured once on the shared source; concurrently attached consumers
+   see the same sequence (or the same coalesced latest value). A late consumer
+   sees only the current value, and a shared source allows **one active async
+   iterator at a time** — a second `for await` over the source finishes
+   immediately. Use multiple `subscribe()` callbacks, or `iterate()` (which
+   subscribes), for concurrent iterator-style consumers.
 
 3. **Pipeline operators `share()` and `shareReplay()`**  
-   - `share()` connects to the upstream source the first time the shared
-     pipeline is consumed. It disconnects (calls upstream `return()`) only
-     when the *last* consumer calls `return()`.  
+   - `share()` connects when the operator is applied during `pipe()`
+     construction, so it starts pulling the upstream source immediately —
+     before the output atom gets its first subscriber. It disconnects (calls
+     upstream `return()`) only when the shared iterator is returned, normally
+     when the output atom loses its last subscriber.  
      Important: a consumer-injected `throw()` does **not** release the
      shared connection — only `return()` is treated as definitive teardown,
      because an injected error may be recoverable. An upstream failure, by
      contrast, fails and disposes the shared atom.
-   - `shareReplay(n)` does the same connection/disconnection bookkeeping and
-     additionally keeps a bounded history so late consumers receive the last
-     *n* values before live emissions.
-   - Without `share` / `shareReplay`, each independent `for await` (or each
-     `pipe` that is not shared) over a cold iterable obtains its own upstream
-     iterator.
+   - `shareReplay(n)` connects on the first pull and keeps a replay history so
+     late consumers receive the last *n* values before live emissions (`n`
+     defaults to `Infinity`, so the history is unbounded unless you pass a
+     size).
+   - Without `share` / `shareReplay`, separate `pipe()` calls over a cold
+     iterable each create their own upstream iterator. Multiple consumers of
+     the same pipe atom still share that pipe’s single producer.
 
 Multi-source topologies are provided by factories and higher-order operators:
 `merge`, `concat`, `zip`, `combineLatest`, `race`, `forkJoin`, and
@@ -402,7 +445,7 @@ are atoms or shared sources.
 ### Scheduling and time
 
 - Time operators use the real clock: `timer(delay, interval?)` and
-  `interval(ms)` are shared sources over `setTimeout` / `setInterval`;
+  `interval(ms)` are shared sources over recursive `setTimeout`;
   `debounce`, `throttle`, `delay`, and `sample` use real timers too.
 - There is **no RxJS-style scheduler parameter** on those operators. For
   deterministic tests, install fake timers (`jasmine.clock()`,

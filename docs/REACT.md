@@ -16,7 +16,7 @@ npm install -D typescript vite @vitejs/plugin-react
 The compiler, Vite plugin, editor plugin, and Angular-hosted builder are
 subpaths of `@epikodelabs/streamix`; importing one makes TypeScript a required
 application dependency. Streamix requires React 18 or newer and TypeScript
-5.5 or newer — including JSX-only projects.
+5.9.3 or newer — including JSX-only projects.
 
 ## 2. Configure Vite
 

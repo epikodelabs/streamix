@@ -4,7 +4,7 @@ Async generators are great. What if we just add operator pipelines to them?
 
 That's Streamix—a library that wraps async generators with composable operators while keeping the pull-based semantics intact.
 
-The examples below use the current atom-based API: [`pipe`](/api/src/public-api/functions/pipe) / [`from`](/api/src/public-api/functions/from) for operator pipelines, and [`flow`](/ATOMS) / [`loop`](/api/src/public-api/functions/loop) / [`addListener`](/api/src/public-api/functions/addListener) for shared hot sources.
+The examples below use the current atom-based API: [`pipe`](/api/src/public-api/functions/pipe) / [`from`](/api/src/public-api/functions/from) for operator pipelines, [`flow`](/ATOMS) / [`loop`](/api/src/public-api/functions/loop) for generator-backed atoms, and [`addListener`](/api/src/public-api/functions/addListener) for shared hot sources.
 
 ```bash
 npm install @epikodelabs/streamix
@@ -98,13 +98,13 @@ for await (const fish of fishingTrip()) {
 }
 ```
 
-The iteration underneath stays pull-based with `subscribe()` too, but a callback does not pace the producer: values that arrive while a callback is still running queue up in an internal buffer, which is unbounded (see the note on queue growth below).
+With `subscribe()` on a flow-backed atom, the callback does not pace the producer: values that arrive while a callback is still running queue up in an internal buffer, which is unbounded (see the note on queue growth below). Shared sources differ — an async callback can pace their producer (see [Backpressure](./FAQ.md#2-backpressure)).
 
 ---
 
 ## 🔁 / 🔂 Multicast vs Unicast
 
-**Unicast** (`pipe` from an async generator): one shared run, and no replay. `pipe(...)` builds its iterator up front, so a second consumer joins the same execution instead of getting a fresh one — and once the source completes, the atom disposes, so a consumer that arrives after the run has finished sees nothing.
+**Unicast** (`pipe` from an async generator): one shared run and no history replay. `pipe(...)` builds its iterator up front, so a second consumer joins the same execution instead of getting a fresh one; it receives only the atom's current value (if any), then live emissions. Once the source completes, the atom disposes, so a consumer that arrives after the run has finished sees nothing.
 
 ```typescript
 const piped = pipe(
@@ -131,7 +131,7 @@ shared.subscribe(toy => console.log("Kid 2:", toy));
 
 ## ⏳ Backpressure
 
-A producer is not paced by its consumers — it runs at the source's pace, and values that arrive while the consumer works buffer up:
+A flow-backed producer is not paced by its consumers — it runs at the source's pace, and values that arrive while the consumer works buffer up:
 
 ```typescript
 async function* candyMachine(signal: AbortSignal) {
@@ -148,14 +148,17 @@ for await (const candy of candies) {
 }
 ```
 
-When a producer outpaces a consumer, values accumulate in an internal queue. The queue is unbounded—monitor memory if the producer is consistently faster.
+For flow-backed atoms, when a producer outpaces a consumer, values accumulate in an internal queue. The queue is unbounded—monitor memory if the producer is consistently faster. (Shared sources instead use a bounded ring buffer and may suspend the producer in discrete mode; see [Backpressure](./FAQ.md#2-backpressure).)
 
-**Managing queue growth:**
+**Managing queue growth:** each returned atom still needs a consumer (`for await` or `subscribe`) for its pipeline to run.
 
 ```typescript
-pipe(candies, take(100));
-pipe(candies, throttle(100));
-pipe(candies, filter((_, i) => i % 10 === 0));
+const firstHundred = pipe(candies, take(100));
+for await (const candy of firstHundred) { /* ... */ }
+
+for await (const candy of pipe(candies, throttle(100))) { /* ... */ }
+
+for await (const everyTenth of pipe(candies, filter((_, i) => i % 10 === 0))) { /* ... */ }
 ```
 
 ---
@@ -287,7 +290,7 @@ for await (const line of errors) {
 | Simple iteration | Plain async generators |
 | Operator pipelines | [`pipe`](/api/src/public-api/functions/pipe) |
 | Hot sources (events, WebSockets) | [`addListener`](/api/src/public-api/functions/addListener) / [`flow`](/ATOMS) |
-| Fast producers outrunning consumers | streamix — values buffer, or drop them with `throttle` / `filter` |
+| Fast producers outrunning consumers | Flow atoms buffer values; shared sources suspend or coalesce; `throttle` / `filter` drop |
 | Multiple consumers | [`flow`](/ATOMS) with shared async generators |
 | Small bundle size matters | streamix (~9KB) |
 
