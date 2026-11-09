@@ -1,5 +1,5 @@
 import {
-  createSharedSource,
+  fromPush,
   type Atom,
 } from "@epikodelabs/streamix";
 
@@ -32,7 +32,7 @@ export function intersection(
   element: Element,
   options?: IntersectionObserverInit
 ): Atom<boolean> {
-  return createSharedSource<boolean>((push) => {
+  return fromPush<boolean>((sink) => {
     let cleaned = false;
     let io: IntersectionObserver | null = null;
     let mo: MutationObserver | null = null;
@@ -44,7 +44,7 @@ export function intersection(
       if (cleaned || value === lastValue) return;
       lastValue = value;
       hasEmitted = true;
-      await push(value);
+      await sink.next(value);
     };
 
     const cleanup = () => {

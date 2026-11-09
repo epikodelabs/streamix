@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the visual viewport.
@@ -27,7 +27,7 @@ export type ViewportState = {
  * @returns {Atom<ViewportState>}
  */
 export function viewportChange(): Atom<ViewportState> {
-  return createSharedSource<ViewportState>((push) => {
+  return fromPush<ViewportState>((sink) => {
     let cleaned = false;
     let target: VisualViewport | Window | null = null;
 
@@ -76,7 +76,7 @@ export function viewportChange(): Atom<ViewportState> {
 
     const emit = async () => {
       if (cleaned) return;
-      await push(snapshot());
+      await sink.next(snapshot());
     };
 
     // SSR guard

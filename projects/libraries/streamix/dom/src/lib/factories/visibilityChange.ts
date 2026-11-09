@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the document's visibility state
@@ -20,7 +20,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  * @returns {Atom<DocumentVisibilityState>}
  */
 export function visibilityChange(): Atom<DocumentVisibilityState> {
-  return createSharedSource<DocumentVisibilityState>((push) => {
+  return fromPush<DocumentVisibilityState>((sink) => {
     let cleaned = false;
 
     const cleanup = () => {
@@ -45,7 +45,7 @@ export function visibilityChange(): Atom<DocumentVisibilityState> {
 
     const emit = async () => {
       if (cleaned) return;
-      await push(getState());
+      await sink.next(getState());
     };
 
     // SSR / unsupported guard

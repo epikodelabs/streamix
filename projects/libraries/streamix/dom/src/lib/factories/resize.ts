@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the dimensions of a given DOM element
@@ -21,7 +21,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 export function resize(
   element: HTMLElement
 ): Atom<{ width: number; height: number }> {
-  return createSharedSource<{ width: number; height: number }>((push) => {
+  return fromPush<{ width: number; height: number }>((sink) => {
     let cleaned = false;
     let resolvedElement: HTMLElement | null = null;
     let observer: ResizeObserver | null = null;
@@ -74,7 +74,7 @@ export function resize(
         );
       }
 
-      await push({ width, height });
+      await sink.next({ width, height });
     };
 
     // SSR / unsupported

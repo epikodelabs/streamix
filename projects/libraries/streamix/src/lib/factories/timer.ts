@@ -1,5 +1,5 @@
 import type { Atom } from '../atoms/atom';
-import { createSharedSource } from '../utils/sharedSource';
+import { fromPush } from './fromPush';
 
 /**
  * Creates a hot timer atom that emits numbers starting from 0.
@@ -21,56 +21,49 @@ import { createSharedSource } from '../utils/sharedSource';
  * @returns {Atom<number>} An atom that emits incrementing numbers (0, 1, 2, ...).
  */
 export function timer(delayMs: number = 0, intervalMs?: number): Atom<number> {
-  return createSharedSource<number>(
-    (push) => {
-      let cancelled = false;
-      let timeoutId: any = null;
-      let count = 0;
+  return fromPush<number>((sink, signal) => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let wake: (() => void) | undefined;
+    let count = 0;
 
-      const sleep = (ms: number) =>
-        new Promise<void>((resolve) => {
-          timeoutId = setTimeout(() => {
-            timeoutId = null;
-            if (!cancelled) resolve();
-          }, ms);
-        });
+    const sleep = (ms: number) =>
+      new Promise<boolean>((resolve) => {
+        const finish = () => {
+          wake = undefined;
+          timeoutId = undefined;
+          resolve(!signal.aborted);
+        };
+        wake = finish;
+        timeoutId = setTimeout(finish, ms);
+      });
 
-      const clearPending = () => {
-        if (timeoutId !== null) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
-      };
+    const run = async () => {
+      const resolvedInterval = intervalMs ?? delayMs;
 
-      const run = async () => {
-        const resolvedDelay = delayMs;
-        const resolvedInterval = intervalMs ?? resolvedDelay;
+      if (delayMs > 0) {
+        if (!(await sleep(delayMs))) return;
+      } else {
+        await Promise.resolve();
+        if (signal.aborted) return;
+      }
 
-        if (cancelled) return;
+      while (!signal.aborted) {
+        await sink.next(count++);
+        if (signal.aborted) return;
+        if (!(await sleep(resolvedInterval))) return;
+      }
+    };
 
-        if (resolvedDelay > 0) {
-          await sleep(resolvedDelay);
-        } else {
-          await Promise.resolve();
-        }
+    void run();
 
-        if (cancelled) return;
-        await push(count++);
-
-        while (!cancelled) {
-          await sleep(resolvedInterval);
-          if (cancelled) return;
-          await push(count++);
-        }
-      };
-
-      void run();
-
-      return () => {
-        cancelled = true;
-        clearPending();
-      };
-    },
-    { name: "timer" }
-  );
+    return () => {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+        timeoutId = undefined;
+      }
+      const pending = wake;
+      wake = undefined;
+      pending?.();
+    };
+  }, { name: 'timer' });
 }

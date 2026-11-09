@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `IdleDeadline` objects whenever
@@ -22,7 +22,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  * @returns {Atom<IdleDeadline>} An atom emitting idle deadlines.
  */
 export function idle(timeout?: number): Atom<IdleDeadline> {
-  return createSharedSource<IdleDeadline>((push) => {
+  return fromPush<IdleDeadline>((sink) => {
     let cleaned = false;
     let idleId: number | null = null;
 
@@ -61,7 +61,7 @@ export function idle(timeout?: number): Atom<IdleDeadline> {
 
     const emit = async (value: IdleDeadline) => {
       if (cleaned) return;
-      await push(value);
+      await sink.next(value);
     };
 
     const tick = async (deadline: IdleDeadline) => {

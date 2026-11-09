@@ -4,7 +4,7 @@ Async generators are great. What if we just add operator pipelines to them?
 
 That's Streamix—a library that wraps async generators with composable operators while keeping the pull-based semantics intact.
 
-The examples below use the current atom-based API: [`pipe`](/api/src/public-api/functions/pipe) / [`from`](/api/src/public-api/functions/from) for operator pipelines, [`flow`](/ATOMS) / [`loop`](/api/src/public-api/functions/loop) for generator-backed atoms, and [`addListener`](/api/src/public-api/functions/addListener) for shared hot sources.
+The examples below use the current atom-based API: [`pipe`](/api/src/public-api/functions/pipe) / [`from`](/api/src/public-api/functions/from) for operator pipelines, [`flow`](/ATOMS) / [`unfold`](/api/src/public-api/functions/unfold) for generator-backed sources, and [`addListener`](/api/src/public-api/functions/addListener) for shared hot sources.
 
 ```bash
 npm install @epikodelabs/streamix

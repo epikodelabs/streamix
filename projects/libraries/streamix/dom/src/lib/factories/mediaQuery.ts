@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` or `false` whenever a CSS media
@@ -28,10 +28,10 @@ export function mediaQuery(
 
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     console.warn('matchMedia is not supported in this environment');
-    return createSharedSource<boolean>(() => () => {}, { name: 'mediaQuery' });
+    return fromPush<boolean>(() => () => {}, { name: 'mediaQuery' });
   }
 
-  return createSharedSource<boolean>((push) => {
+  return fromPush<boolean>((sink) => {
     let cleaned = false;
     let mql: MediaQueryList | null = null;
     let listener: ((e: MediaQueryListEvent) => void) | null = null;
@@ -54,7 +54,7 @@ export function mediaQuery(
 
     const emit = async (value: boolean) => {
       if (cleaned) return;
-      await push(value);
+      await sink.next(value);
     };
 
     mql = window.matchMedia(query);

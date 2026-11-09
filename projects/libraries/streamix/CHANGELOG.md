@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.11 - 2026-11-09
+
+- **Lenses and pull-shaped unfolds.** `lens(source, path)` creates a focused atom over a property or nested path: reads stay dependency-tracked, unrelated source updates do not emit, and writes copy only the containers along the path so untouched branches keep their identity and frozen snapshots are never mutated. A writable source produces a writable lens; a read-only source produces a read-only one, and disposing a lens never disposes its source. `unfold(initialState, step)` produces a genuinely pull-driven async iterable: each `iterator.next()` evaluates at most one step, the transition is deferred until the following pull, and `return()`/`throw()` abort the signal supplied to the step. Wrap it in `flow()` when an atom is needed.
+- **`fromPush()` replaces the shared-source utility.** `fromPush(connect, options)` adapts callback-driven APIs to a shared Atom: `connect` receives a backpressure-aware `PushSink` (`next`, `error`, `complete`) and an `AbortSignal`, with discrete/analog modes, bounded capacity, and block/drop/error overflow policies. `timer()`, `addListener()`, and the DOM factories are built on it, and `createSharedSource` is no longer exported.
+- **Breaking:** the `loop()` factory is removed. Use `unfold()` wrapped in `flow()`, or an async generator, instead. The generators guide now points at `unfold`.
+
 ## 3.0.10 - 2026-10-25
 
 - **Dependency mitigation.** The published TypeScript peer floor drops from `>=6.0.0` to `>=5.9.3`, and the workspace toolchain steps down from Angular 22.1 / TypeScript 6.0 to Angular 21.1 / TypeScript 5.9 — including ng-packagr and the Angular CLI, build, and compiler packages. Adopting Streamix no longer pushes consumers onto the newest major toolchain: Angular peers stay at their `>=20.0.0` floor, so hosts on Angular 20 or 21 work unchanged.

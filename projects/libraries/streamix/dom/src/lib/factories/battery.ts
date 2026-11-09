@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Represents the current battery status.
@@ -26,7 +26,7 @@ export type BatteryState = {
  * @returns {Atom<BatteryState>}
  */
 export function battery(): Atom<BatteryState> {
-  return createSharedSource<BatteryState>((push) => {
+  return fromPush<BatteryState>((sink) => {
     let cleaned = false;
     let battery: any = null;
 
@@ -53,7 +53,7 @@ export function battery(): Atom<BatteryState> {
 
     const emit = async () => {
       if (cleaned) return;
-      await push(snapshot());
+      await sink.next(snapshot());
     };
 
     // SSR / unsupported API guard

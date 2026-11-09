@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /** Scroll offsets in CSS pixels, preserving fractional and negative values. */
 export type ScrollPosition = { x: number; y: number };
@@ -11,7 +11,7 @@ export type ScrollPosition = { x: number; y: number };
  * Safe to construct and consume without a browser.
  */
 export function scroll(target?: Window | Document | Element): Atom<ScrollPosition> {
-  return createSharedSource<ScrollPosition>((push) => {
+  return fromPush<ScrollPosition>((sink) => {
     const source = target ?? (typeof window !== "undefined" ? window : undefined);
     if (!source) return () => {};
 
@@ -25,7 +25,7 @@ export function scroll(target?: Window | Document | Element): Atom<ScrollPositio
     };
     let cleaned = false;
     const emit = () => {
-      if (!cleaned) void push(snapshot());
+      if (!cleaned) void sink.next(snapshot());
     };
     source.addEventListener("scroll", emit, { passive: true });
     emit();

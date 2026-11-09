@@ -214,14 +214,14 @@ has other owners.
 
 **It depends on the source model.** Flow-backed atoms run at the source’s
 pace: consumers cannot block the producer. Shared sources are push-based —
-their `connect` function receives an awaitable `push` — so a producer that
-awaits it **is** paced by consumers. That is the runtime’s only blocking
-backpressure.
+their `connect` function receives a `PushSink` whose `next()` is awaitable —
+so a producer that awaits it **is** paced by consumers. That is the runtime’s
+only blocking backpressure.
 
 | Source kind                                                                   | Producer paced by consumers?                      | Slow consumer behavior                                                                                                             |
 | ----------------------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Flow-backed (`flow`, `pipe`, `from`, …)                                        | No                                                 | Per-subscriber FIFO queue (unbounded); `mode: "analog"` keeps only the latest pending value                                         |
-| Shared source (`createSharedSource`, `timer`, `interval`, `addListener`, DOM)  | Yes, when `connect` awaits `push` in discrete mode | `push` waits for buffer space and for subscriber callbacks to finish; async iterators queue values instead of applying backpressure |
+| Shared source (`fromPush`, `timer`, `interval`, `addListener`, DOM)            | Yes, when `connect` awaits `sink.next()` in discrete mode | `next()` waits for buffer space and for subscriber callbacks to finish; async iterators queue values instead of applying backpressure |
 
 The atom’s `.value` always reflects the newest emission.
 
@@ -405,7 +405,7 @@ Streamix multicasts in three related ways:
 
 2. **Shared sources (resource-level multicasting)**  
    Factories such as `timer`, `interval`, `addListener`, DOM `on`, and the
-   lower-level `createSharedSource` own one underlying resource. They are
+   lower-level `fromPush` own one underlying resource. They are
    ref-counted: the first consumer starts the resource, the last consumer
    leaving stops it and runs cleanup, and a new consumer reconnects it (unless
    the source already completed).

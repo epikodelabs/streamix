@@ -1,5 +1,5 @@
 import type { Atom } from "../atoms/atom";
-import { createSharedSource } from "../utils/sharedSource";
+import { fromPush } from "./fromPush";
 
 /**
  * Creates an atom that emits events of the specified type from the given EventTarget.
@@ -15,35 +15,20 @@ export function addListener<T extends Event = Event>(
   event: string,
   options?: AddEventListenerOptions | boolean
 ): Atom<T> {
-  return createSharedSource<T>((push) => {
+  return fromPush<T>((sink) => {
     let cleaned = false;
-    let listener: ((ev: Event) => void) | null = null;
-    let resolvedTarget: EventTarget | null = null;
-    let resolvedEvent: string | null = null;
 
-    const cleanup = () => {
+    const listener = (ev: Event) => {
+      if (cleaned) return;
+      void sink.next(ev as T);
+    };
+
+    target.addEventListener(event, listener, options);
+
+    return () => {
       if (cleaned) return;
       cleaned = true;
-
-      if (listener && resolvedTarget && resolvedEvent) {
-        resolvedTarget.removeEventListener(resolvedEvent, listener, options);
-      }
-
-      listener = null;
-      resolvedTarget = null;
-      resolvedEvent = null;
+      target.removeEventListener(event, listener, options);
     };
-
-    resolvedTarget = target;
-    resolvedEvent = event;
-
-    listener = async (ev: Event) => {
-      if (cleaned) return;
-      await push(ev as T);
-    };
-
-    resolvedTarget.addEventListener(resolvedEvent, listener, options);
-
-    return cleanup;
   }, { name: "fromEvent" });
 }

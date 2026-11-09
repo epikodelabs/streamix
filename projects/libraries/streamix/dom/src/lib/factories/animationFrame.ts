@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the time delta (in milliseconds) between
@@ -17,7 +17,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  * @returns {Atom<number>} An atom emitting frame-to-frame time deltas.
  */
 export function animationFrame(): Atom<number> {
-  return createSharedSource<number>((push) => {
+  return fromPush<number>((sink) => {
     let cleaned = false;
     // Declared before the SSR guard: `cleanup` closes over these bindings, so
     // they must be initialized before `cleanup` can ever run (a TDZ access
@@ -63,7 +63,7 @@ export function animationFrame(): Atom<number> {
 
     const emit = async (value: number) => {
       if (cleaned) return;
-      await push(value);
+      await sink.next(value);
     };
 
     const tick = async (now: number) => {

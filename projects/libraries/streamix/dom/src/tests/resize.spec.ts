@@ -249,7 +249,7 @@ idescribe('onResize', () => {
     const unsubscribe = on('resize', div).subscribe();
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    // createSharedSource swallows cleanup errors
+    // fromPush swallows cleanup errors
     let didThrow = false;
     try {
       unsubscribe();

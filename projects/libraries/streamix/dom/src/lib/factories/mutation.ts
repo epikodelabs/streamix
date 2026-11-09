@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits arrays of `MutationRecord` objects
@@ -23,7 +23,7 @@ export function mutation(
   element: Element,
   options?: MutationObserverInit
 ): Atom<MutationRecord[]> {
-  return createSharedSource<MutationRecord[]>((push) => {
+  return fromPush<MutationRecord[]>((sink) => {
     let cleaned = false;
     let observer: MutationObserver | null = null;
 
@@ -37,7 +37,7 @@ export function mutation(
 
     const emit = async (value: MutationRecord[]) => {
       if (cleaned) return;
-      await push(value);
+      await sink.next(value);
     };
 
     // SSR / unsupported guard

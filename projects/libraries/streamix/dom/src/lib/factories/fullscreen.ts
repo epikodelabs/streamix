@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits fullscreen state changes.
@@ -17,7 +17,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  * @returns {Atom<boolean>}
  */
 export function fullscreen(): Atom<boolean> {
-  return createSharedSource<boolean>((push) => {
+  return fromPush<boolean>((sink) => {
     let cleaned = false;
 
     const cleanup = () => {
@@ -48,7 +48,7 @@ export function fullscreen(): Atom<boolean> {
 
     const emit = async () => {
       if (cleaned) return;
-      await push(isFullscreen());
+      await sink.next(isFullscreen());
     };
 
     // SSR guard

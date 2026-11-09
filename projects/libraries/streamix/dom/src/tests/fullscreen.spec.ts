@@ -401,7 +401,7 @@ idescribe("fullscreen", () => {
       throw new Error('removeEventListener error');
     });
 
-    // createSharedSource swallows cleanup errors
+    // fromPush swallows cleanup errors
     let didThrow = false;
     try {
       unsubscribe();

@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the current screen orientation,
@@ -15,7 +15,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  * @returns {Atom<"portrait" | "landscape">}
  */
 export function orientation(): Atom<"portrait" | "landscape"> {
-  return createSharedSource<"portrait" | "landscape">((push) => {
+  return fromPush<"portrait" | "landscape">((sink) => {
     let cleaned = false;
     let orientation: ScreenOrientation | null = null;
 
@@ -41,7 +41,7 @@ export function orientation(): Atom<"portrait" | "landscape"> {
 
     const emit = async () => {
       if (cleaned) return;
-      await push(getOrientation());
+      await sink.next(getOrientation());
     };
 
     if (typeof window === "undefined" || !window.screen) {

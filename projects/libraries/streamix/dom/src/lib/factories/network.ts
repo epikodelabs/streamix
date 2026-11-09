@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the current network state.
@@ -31,7 +31,7 @@ export type NetworkState = {
  * @returns {Atom<NetworkState>}
  */
 export function network(): Atom<NetworkState> {
-  return createSharedSource<NetworkState>((push) => {
+  return fromPush<NetworkState>((sink) => {
     let cleaned = false;
     let connection: any = null;
 
@@ -60,7 +60,7 @@ export function network(): Atom<NetworkState> {
 
     const emit = async () => {
       if (cleaned) return;
-      await push(snapshot());
+      await sink.next(snapshot());
     };
 
     // SSR / unsupported guard

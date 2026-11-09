@@ -1,4 +1,4 @@
-import { createSharedSource, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Atom } from "@epikodelabs/streamix";
 
 /** A pointer snapshot. `x` and `y` are viewport coordinates in CSS pixels. */
 export type PointerPosition = {
@@ -21,7 +21,7 @@ export type PointerPosition = {
  * Safe to construct and consume without a browser.
  */
 export function pointer(target?: EventTarget): Atom<PointerPosition> {
-  return createSharedSource<PointerPosition>((push) => {
+  return fromPush<PointerPosition>((sink) => {
     const source = target ?? (typeof window !== "undefined" ? window : undefined);
     if (!source) return () => {};
 
@@ -29,7 +29,7 @@ export function pointer(target?: EventTarget): Atom<PointerPosition> {
     const listener = (event: Event) => {
       if (cleaned) return;
       const pointer = event as PointerEvent;
-      void push({
+      void sink.next({
         x: pointer.clientX,
         y: pointer.clientY,
         pageX: pointer.pageX,

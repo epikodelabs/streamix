@@ -7,14 +7,17 @@ export * from './EMPTY';
 export * from './firstValueFrom';
 export * from './forkJoin';
 export * from './from';
+export * from './fromPush';
 export * from './iif';
 export * from './interval';
 export * from './lastValueFrom';
-export * from './loop';
+export * from './lens';
 export * from './merge';
 export * from './of';
 export * from './race';
 export * from './range';
 export * from './retry';
 export * from './timer';
+export * from './unfold';
 export * from './zip';
+
