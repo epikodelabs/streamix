@@ -22,6 +22,22 @@
 </p>
 
 
+# Workspace
+
+This repository is an Angular CLI monorepo that hosts **Angular, React, and Vue** application projects side by side under `projects/apps/`. The Streamix builders compile React (JSX adoption) and Vue sources as first-class citizens of the workspace:
+
+| Projects | Framework |
+| --- | --- |
+| `app1` – `app4` | Angular |
+| `app5` – `app7` | React |
+| `app8` – `app9` | Vue |
+
+Run any of them with the Angular CLI:
+
+```sh
+npx ng serve app1   # ... through app9
+```
+
 # Getting started
 
 Configure your editor and build tools, then create your first reactive counter in Angular, React, or Vue. Start with an **existing application** and the Node.js and TypeScript versions supported by your framework.
