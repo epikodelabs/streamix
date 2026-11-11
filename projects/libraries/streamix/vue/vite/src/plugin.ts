@@ -14,7 +14,7 @@ export interface StreamixVueViteOptions {
   /**
    * Builds the app with the inspector, mirroring the Angular builder's flag:
    * factory calls in SFC scripts and TS modules register with `__streamixDebug`
-   * and the entry gets `__sxEnable()`/`__sxMount()`. Off (default) —
+   * and the entry gets first-import activation/`__sxMount()`. Off (default) —
    * completely without.
    */
   readonly introspection?: boolean;

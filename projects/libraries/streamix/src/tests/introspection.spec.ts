@@ -1,16 +1,61 @@
 import { atom, derived, flow } from '../lib/atoms/atom';
-import { scope } from '../lib/atoms/scope';
+import { method, scope } from '../lib/atoms/scope';
 import { pipe } from '../lib/atoms/pipe';
 import { map } from '../lib/operators/map';
 import { internalRuntime } from '../lib/runtime/runtime';
-import { __streamixDebug, __streamixSubscribe, enableStreamixIntrospection, streamixInspector, streamixPreview,
+import { __streamixDebug, __streamixDebugDispose, __streamixSubscribe, enableStreamixIntrospection, streamixInspector, streamixPreview,
   type StreamixSourceMetadata } from '@epikodelabs/streamix/introspection';
 
 const metadata = (name: string, kind: StreamixSourceMetadata['kind'] = 'atom'): StreamixSourceMetadata =>
   ({ name, kind, file: 'src/store.ts', line: 12, column: 3 });
 
+// Created before enableStreamixIntrospection() installs its observer.
+const preArmNode = atom(987654321);
+
 describe('debug runtime introspection', () => {
   beforeAll(() => enableStreamixIntrospection());
+  it('keeps optional subscription wrappers null-safe', () => {
+    expect(__streamixSubscribe(undefined as { subscribe?: () => void } | undefined, metadata('missing'))).toBeUndefined();
+    expect(__streamixSubscribe({ subscribe: undefined as (() => void) | undefined }, metadata('missing-method'))).toBeUndefined();
+  });
+  it('backfills pre-arm nodes without duplicate register announcements', () => {
+    const before = streamixInspector.trace().filter(event => event.kind === 'register').length;
+    __streamixDebug(preArmNode, metadata('pre-armed'));
+    const after = streamixInspector.trace().filter(event => event.kind === 'register').length;
+    expect(after).toBe(before);
+    expect(streamixInspector.inspect({ name: 'pre-armed' }).length).toBe(1);
+  });
+  it('discovers uncompiled writable and derived nodes without executing formulas', () => {
+    let evaluations = 0;
+    const before = new Set(streamixInspector.inspect().map(row => row.id));
+    const input = atom(3);
+    const computation = derived(() => { evaluations++; return input.value * 2; });
+    const source = __streamixDebug(atom(0), metadata('introspection-source-change', 'source'));
+    try {
+      const rows = streamixInspector.inspect().filter(row => !before.has(row.id));
+      expect(rows.some(row => row.kind === 'atom')).toBeTrue();
+      expect(rows.some(row => row.kind === 'derived')).toBeTrue();
+      expect(evaluations).toBe(0);
+      const sourceId = streamixInspector.inspect({ name: 'introspection-source-change' })[0].id;
+      source.next(1);
+      expect(streamixInspector.trace().some(event => event.id === sourceId && event.kind === 'change')).toBeFalse();
+      input.set(4);
+      const changed = streamixInspector.trace().filter(event => event.kind === 'change' && event.value === '4');
+      expect(changed.length).toBeGreaterThan(0);
+      expect(evaluations).toBe(0);
+    } finally { input.dispose(); computation.dispose(); source.dispose(); }
+  });
+  it('reports scope membership via a diagnostics reader without running getters', () => {
+    const model = scope({ count: 1, label: (self: any) => String(self.count) });
+    try {
+      const snapshot = internalRuntime.diagnostics.scopeState(model);
+      expect(snapshot?.disposed).toBeFalse();
+      expect(snapshot?.members.some(member => member.name === 'count')).toBeTrue();
+      expect(snapshot?.members.some(member => member.name === 'label')).toBeTrue();
+    } finally { model.dispose(); }
+    expect(internalRuntime.diagnostics.scopeState(model)?.disposed).toBeTrue();
+  });
+
   it('discovers uninstrumented flows and nested pipes without starting producers', () => {
     let starts = 0;
     const source = flow(async function* () { starts++; yield 1; });
@@ -88,32 +133,45 @@ describe('debug runtime introspection', () => {
   it('never evaluates a derived formula or starts an idle producer', () => {
     let evaluations = 0, starts = 0;
     const value = __streamixDebug(derived(() => { evaluations++; return 7; }), metadata('lazy', 'derived'));
-    const producer = __streamixDebug(flow(async function* () { starts++; yield 1; }), metadata('idle', 'flow'));
+    const failing = __streamixDebug(atom(0), metadata('introspection-cached-error-regression'));
+    failing.fail(new Error('cached atom failure'));
+    const producerName = 'introspection-idle-producer-regression-check';
+    const producer = __streamixDebug(flow(async function* () { starts++; yield 1; }), metadata(producerName, 'flow'));
     try {
       expect(streamixInspector.inspect({ name: 'lazy' })[0].value).toBe('unevaluated');
-      expect(streamixInspector.inspect({ name: 'idle' })[0].state).toBe('idle');
+      expect(streamixInspector.inspect({ name: 'introspection-cached-error-regression' })[0].error).toBe('cached atom failure');
+      expect(internalRuntime.diagnostics.flowState(producer)?.started).toBeFalse();
+      const idleRows = streamixInspector.inspect({ name: producerName });
+      expect(idleRows.length).toBe(1);
+      expect(idleRows[0].kind).toBe('flow');
+      expect(idleRows[0].state).toBe('idle');
       expect(evaluations).toBe(0);
       expect(starts).toBe(0);
       expect(value.value).toBe(7);
       expect(streamixInspector.inspect({ name: 'lazy' })[0].value).toBe('7');
-    } finally { value.dispose(); producer.dispose(); }
+    } finally { value.dispose(); failing.dispose(); producer.dispose(); }
   });
   it('labels scope members and relates them to their owner without snapshot reads', () => {
-    const model = __streamixDebug(scope({ count: 0, doubled: (self: any) => self.count * 2 }), {
+    const model = __streamixDebug(scope({ count: 0, doubled: (self: any) => self.count * 2, action: method(() => {}) }), {
       ...metadata('model', 'scope'), members: { count: { ...metadata('model.count'), line: 13 }, doubled: metadata('model.doubled', 'derived') },
+    });
+    const fallback = __streamixDebug({ type: 'scope' }, {
+      ...metadata('introspection-fallback-scope', 'scope'), members: { missing: metadata('introspection-fallback-scope.missing') },
     });
     try {
       const owner = streamixInspector.inspect({ kind: 'scope', name: 'model' })[0];
       const count = streamixInspector.inspect({ name: 'model.count' })[0];
       // The pill counts every listed member, including the scope's internal
       // loading/dirty atoms — the same set the members list shows.
-      expect(owner.state).toBe('live · 4 members');
+      expect(owner.state).toBe('live · 5 members');
       expect(count.owner).toBe(owner.id);
       expect(count.source.line).toBe(13);
+      expect(streamixInspector.inspect({ name: 'introspection-fallback-scope' })[0].members[0].state).toBe('unevaluated');
       model.count = 3;
       expect(streamixInspector.details(count.id)?.value).toBe('3');
       expect(owner.members.some(member => member.name === 'doubled')).toBe(true);
-    } finally { model.dispose(); }
+      expect(owner.members.some(member => member.name === 'action' && member.state === 'method')).toBe(true);
+    } finally { model.dispose(); __streamixDebugDispose(fallback); }
     expect(streamixInspector.inspect({ name: 'model' }).length).toBe(0);
   });
   it('captures real pipeline values and bounded terminal history without retaining disposed objects', async () => {
