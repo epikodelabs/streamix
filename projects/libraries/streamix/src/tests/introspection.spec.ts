@@ -3,7 +3,7 @@ import { scope } from '../lib/atoms/scope';
 import { pipe } from '../lib/atoms/pipe';
 import { map } from '../lib/operators/map';
 import { internalRuntime } from '../lib/runtime/runtime';
-import { __streamixDebug, __streamixSubscribe, enableStreamixIntrospection, streamixInspector, streamixPreview,
+import { __streamixDebug, __streamixDebugDispose, __streamixSubscribe, enableStreamixIntrospection, streamixInspector, streamixPreview,
   type StreamixSourceMetadata } from '@epikodelabs/streamix/introspection';
 
 const metadata = (name: string, kind: StreamixSourceMetadata['kind'] = 'atom'): StreamixSourceMetadata =>
@@ -151,6 +151,9 @@ describe('debug runtime introspection', () => {
     const model = __streamixDebug(scope({ count: 0, doubled: (self: any) => self.count * 2 }), {
       ...metadata('model', 'scope'), members: { count: { ...metadata('model.count'), line: 13 }, doubled: metadata('model.doubled', 'derived') },
     });
+    const fallback = __streamixDebug({ type: 'scope' }, {
+      ...metadata('introspection-fallback-scope', 'scope'), members: { missing: metadata('introspection-fallback-scope.missing') },
+    });
     try {
       const owner = streamixInspector.inspect({ kind: 'scope', name: 'model' })[0];
       const count = streamixInspector.inspect({ name: 'model.count' })[0];
@@ -159,10 +162,11 @@ describe('debug runtime introspection', () => {
       expect(owner.state).toBe('live · 4 members');
       expect(count.owner).toBe(owner.id);
       expect(count.source.line).toBe(13);
+      expect(streamixInspector.inspect({ name: 'introspection-fallback-scope' })[0].members[0].state).toBe('unevaluated');
       model.count = 3;
       expect(streamixInspector.details(count.id)?.value).toBe('3');
       expect(owner.members.some(member => member.name === 'doubled')).toBe(true);
-    } finally { model.dispose(); }
+    } finally { model.dispose(); __streamixDebugDispose(fallback); }
     expect(streamixInspector.inspect({ name: 'model' }).length).toBe(0);
   });
   it('captures real pipeline values and bounded terminal history without retaining disposed objects', async () => {
