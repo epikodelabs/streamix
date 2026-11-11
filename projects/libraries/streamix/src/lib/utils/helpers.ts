@@ -1,6 +1,7 @@
 import { DONE } from "../atoms";
 import { normalizeError } from "../atoms/atom";
 import type { Atom } from "../atoms/atom";
+import type { SyncPoll } from "./source-protocol";
 
 /**
  * Shared queue item structure used across all async iterator implementations
@@ -80,13 +81,15 @@ export class AsyncIteratorState<T> {
 }
 
 /**
- * Synchronous pull handler - implements __tryNext logic
+ * Synchronous poll over an iterator state - implements the protocol's
+ * `pollSync` semantics: a buffered value or completion is `available`, a
+ * pending error throws, an empty non-completed state is `unavailable`.
  */
 export function syncPull<T>(
   state: AsyncIteratorState<T>,
   _iterator: any,
   onDone?: () => void
-): IteratorResult<T> | null {
+): SyncPoll<T> {
   // Check queue first
   if (state.queue.length > 0) {
     const { result } = state.queue.shift()!;
@@ -96,7 +99,7 @@ export function syncPull<T>(
       onDone?.();
     }
     
-    return result;
+    return { status: "available", result };
   }
 
   // Check pending error
@@ -109,10 +112,10 @@ export function syncPull<T>(
   // Check completion
   if (state.completed) {
     onDone?.();
-    return DONE;
+    return { status: "available", result: DONE };
   }
 
-  return null;
+  return { status: "unavailable" };
 }
 
 /**
@@ -206,6 +209,7 @@ export function pushComplete<T>(
     const r = state.pullResolve;
     state.pullResolve = state.pullReject = null;
     r(DONE);
+    onPush?.();
     return;
   }
 
@@ -233,6 +237,7 @@ export function pushError<T>(
     const r = state.pullReject;
     state.pullResolve = state.pullReject = null;
     r(error);
+    onPush?.();
     return;
   }
 

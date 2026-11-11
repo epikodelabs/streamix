@@ -93,17 +93,21 @@ describe('runtime instrumentation gating', () => {
       expect(kinds).toContain('next');
       expect(kinds).not.toContain('change');
       release(2);
-      for (let i = 0; i < 20 && !source.disposed; i++) await tick();
+      for (let i = 0; i < 20 && source.safeValue !== 2; i++) await tick();
+      await tick();
+      expect(source.disposed).toBeFalse();
+      expect(source.value).toBe(2);
       await sub();
     } finally {
       stop();
+      source.dispose();
       setRuntimeInstrumentationEnabled(true);
     }
   });
 
   it('leaves no flow entry or execution record while disabled', async () => {
-    // Stay mid-flight so the flow remains registered and its record would be
-    // observable; a completed flow disposes and forgets records on its own.
+    // Compare active producer accounting with instrumentation disabled/enabled.
+    // Completed atoms retain their final state until explicit disposal.
     const hold = (yielded: number) => {
       let release!: (value: number) => void;
       const source = flow<number>(async function* () {
@@ -124,8 +128,9 @@ describe('runtime instrumentation gating', () => {
       expect(internalRuntime.diagnostics.executions.describe(quiet.source)).toBeUndefined();
     } finally {
       quiet.release(0);
-      for (let i = 0; i < 20 && !quiet.source.disposed; i++) await tick();
+      for (let i = 0; i < 20 && quiet.source.safeValue !== 0; i++) await tick();
       await stop();
+      quiet.source.dispose();
     }
 
     setRuntimeInstrumentationEnabled(true);
@@ -138,8 +143,9 @@ describe('runtime instrumentation gating', () => {
       expect(internalRuntime.diagnostics.flows(internalRuntime.graph).find(state => state.node === loud.source)).toBeDefined();
     } finally {
       loud.release(0);
-      for (let i = 0; i < 20 && !loud.source.disposed; i++) await tick();
+      for (let i = 0; i < 20 && internalRuntime.diagnostics.executions.describe(loud.source)?.active; i++) await tick();
       await loudStop();
+      loud.source.dispose();
     }
   });
 });

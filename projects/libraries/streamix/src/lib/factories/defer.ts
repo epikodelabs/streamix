@@ -2,17 +2,15 @@ import { flow, type Atom } from '../atoms/atom';
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
- * Creates an atom that defers the creation of an inner stream until it is
- * subscribed to.
+ * Creates an atom that instantiates its inner stream through a factory.
  *
- * This operator ensures that the `factory` function is called only when
- * a consumer subscribes to the atom, making it a good choice for
- * creating "cold" atoms. Each new subscription will trigger a new
- * call to the `factory` and create a fresh stream instance.
+ * The `factory` function is called when the flow producer is activated by a
+ * subscription or scope observation. Subscribers share that producer. Source
+ * completion, explicit disposal, or the last unsubscribe releases its resources.
  *
  * @template T The type of the values in the inner stream.
- * @param factory A function that returns the source to be subscribed to.
- * @returns {Atom<T>} A new atom that defers subscription to the inner stream.
+ * @param factory A function that returns the source to be consumed.
+ * @returns {Atom<T>} A new atom backed by the inner stream returned by `factory`.
  */
 export function defer<T = any>(factory: () => PipeInput<T>): Atom<T> {
   return flow<T>(async function* () {

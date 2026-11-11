@@ -8,13 +8,14 @@ import { isAtom } from "../utils/helpers";
 import { iterate } from "./iterate";
 import { DONE, isPromiseLike, NEXT, type MaybePromise } from "./operator";
 
-import { ANALOG_DELIVERY } from "./delivery";
+import { ANALOG_DELIVERY, bindProducerCompletion, forwardProducerCompletion } from "./delivery";
 import {
   hasAtomEmitted,
   markAtomAsEmitted,
   registerWithCurrentScope,
 } from "./scope";
 import { createSubscription, type Subscription } from "./subscription";
+import { AtomLifecycle, type AtomLifecycleSession } from "./lifecycle";
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * Architectural Symbols
@@ -94,7 +95,7 @@ export interface Atom<T = any> {
   onError(handler: (error: any) => void): Subscription;
   /** Stops the atom and releases all subscribers/resources. */
   dispose(): void;
-  /** Iterates emitted values until the atom is disposed or iteration is closed. */
+  /** Iterates values until producer completion, disposal, or iterator closure. */
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
@@ -412,6 +413,7 @@ export function asReadable<A>(atom: Atom<A>): Readable<A> {
     [Symbol.asyncIterator]: atom[Symbol.asyncIterator].bind(atom),
   };
 
+  forwardProducerCompletion(view, atom);
   meta.readableView = view;
   return view;
 }
@@ -456,6 +458,7 @@ function createTrackedAtomView<A>(owner: EvaluationOwner, atom: Atom<A>): Atom<A
     configurable: true,
   });
 
+  forwardProducerCompletion(view, atom);
   return view as unknown as Atom<A>;
 }
 
@@ -810,7 +813,8 @@ export interface AtomFromIteratorOptions<T> extends AtomOptions {
  * Creates a readable atom backed by an async iterable.
  *
  * The source starts when the first subscriber attaches and is closed when the
- * atom is disposed. Values yielded by the iterable become atom emissions.
+ * atom is disposed. Completion releases the producer and retains the final value.
+ * Values yielded by the iterable become atom emissions.
  */
 function atomFromIteratorInternal<T>(
   source: AsyncIterable<T>,
@@ -824,8 +828,7 @@ function atomFromIteratorInternal<T>(
   let current: T = hasInitialValue ? options!.initialValue as T : NO_INITIAL_VALUE as T;
   let previous: T = current;
   let disposed = false;
-  let started = false;
-  let activeSubCount = 0;
+  let lifecycle!: AtomLifecycle;
   let errorValue: any = undefined;
   let isErrorState = false;
   let hasNewValue = false;
@@ -834,7 +837,6 @@ function atomFromIteratorInternal<T>(
   let instance!: Atom<T> & InternalAtomContainer & { fail(err: any, options?: { terminate?: boolean }): void };
   const subscriptions = new Set<Subscription>();
   let iterator: AsyncIterator<T> | undefined;
-  let runPromise: Promise<void> | null = null;
   let awaitingNext = false;
   let execution: ExecutionSpan | undefined;
   let executionExit: FlowExit = "cancel";
@@ -860,8 +862,7 @@ function atomFromIteratorInternal<T>(
   };
 
   const stopIterator = async () => {
-    // Claim the iterator before awaiting cleanup: disposeInstance() and the
-    // producer's finally block can otherwise invoke return() concurrently.
+    // Detach before awaiting return() so reentrant shutdown cannot close it twice.
     const closing = iterator;
     iterator = undefined;
     if (closing && typeof (closing as any).return === "function") {
@@ -869,20 +870,15 @@ function atomFromIteratorInternal<T>(
     }
   };
 
-  const disposeInstance = async (): Promise<void> => {
+  const disposeInstance = async (released: Promise<void>): Promise<void> => {
     if (disposed) return;
     disposed = true;
-    if (execution !== undefined) {
-      execution.finish(executionExit, executionExit === "error" ? errorValue : undefined);
-      execution = undefined;
-    }
     internalRuntime.dispose(instance);
     setDirty(false);
     node.version++;
     subs.clear();
-    activeSubCount = 0;
 
-    await stopIterator();
+    await released;
 
     for (const handler of instance[META].disposeHandlers) await Promise.resolve(handler()).catch(() => {});
     instance[META].disposeHandlers.clear();
@@ -894,61 +890,59 @@ function atomFromIteratorInternal<T>(
     cleanupRuntime();
   };
 
-  const run = async () => {
-    if (runPromise) return runPromise;
+  const run = async (session: AtomLifecycleSession) => {
     executionExit = "cancel";
     const span = internalRuntime.beginExecution(instance, instance.name, internalRuntime.diagnostics.originOf(instance));
     execution = span;
-    runPromise = (async () => {
-      try {
-        iterator = source[Symbol.asyncIterator]();
-        while (!disposed) {
-          awaitingNext = true;
-          const requestedAt = span.reports ? performance.now() : undefined;
-          let result: IteratorResult<T>;
-          try { result = await iterator.next(); }
-          finally { awaitingNext = false; }
-          if (disposed || result.done) break;
+    try {
+      iterator = source[Symbol.asyncIterator]();
+      while (lifecycle.canEmit(session)) {
+        awaitingNext = true;
+        const requestedAt = span.reports ? performance.now() : undefined;
+        let result: IteratorResult<T>;
+        try { result = await iterator.next(); }
+        finally { awaitingNext = false; }
+        if (!lifecycle.canEmit(session) || result.done) break;
 
-          span.next(result.value, requestedAt);
-          previous = current;
-          current = result.value;
-          hasNewValue = true;
-          isErrorState = false;
-          errorValue = undefined;
-          markAtomAsEmitted(instance as any);
-          notifyEmitHandlers(instance as any);
-          notifyChangeHandlers(instance);
+        span.next(result.value, requestedAt);
+        previous = current;
+        current = result.value;
+        hasNewValue = true;
+        isErrorState = false;
+        errorValue = undefined;
+        markAtomAsEmitted(instance as any);
+        notifyEmitHandlers(instance as any);
+        notifyChangeHandlers(instance);
 
-          if (conflate) {
-            if (subs.size > 0) instance[MARK_DIRTY]();
-          } else {
-            broadcast(current);
-          }
-          // Settle downstream derived nodes synchronously with the emission.
-          getScheduler().flush();
+        if (conflate) {
+          if (subs.size > 0) instance[MARK_DIRTY]();
+        } else {
+          broadcast(current);
         }
-        if (!disposed) {
-          executionExit = "complete";
-          await disposeInstance();
-        }
-      } catch (err) {
-        executionExit = "error";
-        if (!disposed) {
-          errorValue = normalizeError(err);
-          isErrorState = true;
-          instance.fail(errorValue, { terminate: options?.terminateOnError });
-        }
-      } finally {
-        if (execution === span) {
-          span.finish(executionExit, executionExit === "error" ? errorValue : undefined);
-          execution = undefined;
-        }
-        await stopIterator();
-        runPromise = null;
+        // Settle downstream derived nodes synchronously with the emission.
+        getScheduler().flush();
       }
-    })();
-    return runPromise;
+      if (lifecycle.canEmit(session)) {
+        executionExit = "complete";
+        // Deliver the final analog value before consumers finish iteration.
+        if (conflate) broadcastLatest();
+        await lifecycle.complete();
+      }
+    } catch (err) {
+      executionExit = "error";
+      if (lifecycle.canEmit(session)) {
+        errorValue = normalizeError(err);
+        isErrorState = true;
+        instance.fail(errorValue, { terminate: options?.terminateOnError });
+      }
+    } finally {
+      if (execution === span) {
+        span.finish(executionExit, executionExit === "error" ? errorValue : undefined);
+        execution = undefined;
+      }
+      await lifecycle.complete(executionExit === "error" ? "error" : "complete");
+    }
+
   };
 
   const node: AtomNode = {
@@ -968,7 +962,7 @@ function atomFromIteratorInternal<T>(
 
   const base = createAtomBase<T>({
     getCachedValue: () => current,
-    getSubscriberCount: () => activeSubCount,
+    getSubscriberCount: () => lifecycle?.subscriberCount ?? 0,
     conflate,
     maxSubscribers,
     node,
@@ -988,23 +982,30 @@ function atomFromIteratorInternal<T>(
       getScheduler().queueFlush(node);
     },
     onSubscribed: (_callback, unsubscribe) => {
-      if (!started) {
-        started = true;
-        run().catch(() => {});
-      }
       subscriptions.add(unsubscribe);
-      activeSubCount++;
+      lifecycle.addSubscriber();
     },
     onUnsubscribe: async (_callback, unsubscribe) => {
       if (!subscriptions.delete(unsubscribe)) return;
-      activeSubCount = Math.max(0, activeSubCount - 1);
-      if (activeSubCount === 0) await disposeInstance();
+      await lifecycle.removeSubscriber();
     },
-    onDispose: () => disposeInstance(),
+    onDispose: () => lifecycle.dispose(),
   });
 
   const { instance: baseInstance, errorHandlers, subs } = base;
   instance = baseInstance as typeof instance;
+  lifecycle = new AtomLifecycle({
+    start: session => { void run(session).catch(() => {}); },
+    release: async () => {
+      if (execution !== undefined) {
+        execution.finish(executionExit, executionExit === "error" ? errorValue : undefined);
+        execution = undefined;
+      }
+      await stopIterator();
+    },
+    dispose: released => disposeInstance(released),
+  });
+  bindProducerCompletion(instance, lifecycle);
   // Flow identity is tracked unconditionally so `changed()` can dedupe graph
   // 'change' events against flow 'next' events in every configuration. The
   // read-only state reader closure is skipped in production builds, where
@@ -1012,7 +1013,7 @@ function atomFromIteratorInternal<T>(
   internalRuntime.markFlowNode(instance);
   if (isRuntimeInstrumentationEnabled()) {
     internalRuntime.diagnostics.registerFlow(instance, () => ({
-      started, awaitingNext, subscribers: activeSubCount,
+      started: lifecycle.started, awaitingNext, subscribers: lifecycle.subscriberCount,
       hasValue: current !== NO_INITIAL_VALUE, value: current === NO_INITIAL_VALUE ? undefined : current,
     }));
   }
@@ -1020,12 +1021,7 @@ function atomFromIteratorInternal<T>(
     markAtomAsEmitted(instance as any);
     notifyEmitHandlers(instance as any);
   }
-  instance[META].startOnEmitObserve = () => {
-    if (!started) {
-      started = true;
-      run().catch(() => {});
-    }
-  };
+  instance[META].startOnEmitObserve = () => lifecycle.activate();
   if (instance[META].emitHandlers.size > 0) {
     instance[META].startOnEmitObserve();
   }
@@ -1039,7 +1035,7 @@ function atomFromIteratorInternal<T>(
       if (options?.onError) try { options.onError(errorValue); } catch {}
 
       if (errorOptions?.terminate ?? false) {
-        void disposeInstance();
+        void lifecycle.dispose("error");
       }
     }
   });

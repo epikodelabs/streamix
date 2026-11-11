@@ -1,4 +1,4 @@
-import { atom, from, iterate, pipe, skipUntil } from '@epikodelabs/streamix';
+import { atom, from, iterate, pipe, skipUntil, type SourceCapabilities } from '@epikodelabs/streamix';
 
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -72,14 +72,34 @@ describe('skipUntil', () => {
   });
 
   it('supports iterator teardown helpers directly', async () => {
-    const iterator = skipUntil(from([true])).apply(from([1, 2])[Symbol.asyncIterator]()) as AsyncIterator<number> & {
-      __tryNext?: () => IteratorResult<number> | null;
-      __hasBufferedValues?: () => boolean;
-    };
+    const iterator = skipUntil(from([true])).apply(from([1, 2])[Symbol.asyncIterator]()) as AsyncIterator<number> & SourceCapabilities<number>;
 
-    expect(iterator.__hasBufferedValues?.()).toBeFalse();
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
     expect(await iterator.return?.(123)).toEqual({ value: 123, done: true });
     expect(await iterator.next()).toEqual({ value: undefined, done: true });
-    expect(iterator.__tryNext?.()).toEqual({ value: undefined, done: true });
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: undefined, done: true } });
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
+    expect(iterator.isTerminal?.()).toBeTrue();
+  });
+
+  it('polls lazy synchronous inputs without treating completion as buffered data', async () => {
+    const iterator = skipUntil(from([true])).apply(from([1, 2])[Symbol.asyncIterator]()) as AsyncIterator<number> & SourceCapabilities<number>;
+
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: 2, done: false } });
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: undefined, done: true } });
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
+    expect(iterator.isTerminal?.()).toBeTrue();
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    await iterator.return?.();
+  });
+
+  it('reports empty terminal state without buffered events', async () => {
+    const iterator = skipUntil(from([])).apply(from<number>([])[Symbol.asyncIterator]()) as AsyncIterator<number> & SourceCapabilities<number>;
+
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: undefined, done: true } });
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
+    expect(iterator.isTerminal?.()).toBeTrue();
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    await iterator.return?.();
   });
 });

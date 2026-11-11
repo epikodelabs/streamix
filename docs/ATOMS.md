@@ -104,7 +104,17 @@ Use `.value` for explicit runtime snapshots; passing an atom to `pipe()`,
 
 #### C. Flow Atoms (`flow`)
 
-Flows wrap async generators, standard iterables, or stream factories. Flows respect cooperative cancellation via an `AbortSignal` and tie their cleanup directly to atom disposal.
+Flows wrap async generators, standard iterables, or stream factories. Flows respect cooperative cancellation via an `AbortSignal`. Successful source completion releases the producer without disposing the atom; explicit disposal cancels any remaining work and releases its observers.
+
+Producer completion and atom disposal are separate:
+
+- After successful completion, `.value`, `.safeValue`, and `.previous` remain available, and `.disposed` stays `false`.
+- Existing iterators drain buffered values and finish. A later iterator replays the final value once, then finishes; an empty completed source yields nothing.
+- Callback subscriptions keep their handles. Later subscriptions receive the final value without restarting the producer.
+- Unsubscribing after successful completion does not dispose the retained atom. Dispose it explicitly, or dispose its owning scope, when the state is no longer needed.
+- Source failures retain the existing error policy: `.value` throws, and `terminateOnError: true` disposes the atom.
+
+An empty completed source settles its scope's initial loading without inventing a value. Writable atoms without an initial value remain pending until they emit or are disposed.
 
 ```ts
 const ticks = flow(async function* (signal) {
@@ -173,7 +183,7 @@ const combined = pipe([atom(1), atom("hello")]);
 type CombinedValue = AtomValue<typeof combined>; // [number, string]
 ```
 
-Atoms are also async iterable, so `for await (const value of count)` consumes emissions until the atom is disposed or the loop breaks.
+Atoms are also async iterable, so `for await (const value of count)` consumes emissions until the producer completes, the atom is disposed, or the loop breaks.
 
 ---
 

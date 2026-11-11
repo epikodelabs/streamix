@@ -68,19 +68,27 @@ describe('flattening emission lifetimes', () => {
 
   it('switchMap cancels a pending projection at replacement and ignores its late failure', async () => {
     const first = deferred<number>(), second = deferred<number>();
-    const buffer = [1];
+    const buffer: number[] = [1];
     let done = false;
+    let notify: (() => void) | undefined;
     const source = {
-      __onPush: () => {},
-      __tryNext: () => buffer.length ? NEXT(buffer.shift()!) : done ? DONE : null,
+      pollSync: () => buffer.length
+        ? { status: 'available' as const, result: NEXT(buffer.shift()!) }
+        : done
+          ? { status: 'available' as const, result: DONE }
+          : { status: 'unavailable' as const },
+      onReady: (listener: () => void) => {
+        notify = listener;
+        return () => { if (notify === listener) notify = undefined; };
+      },
       next: async () => DONE,
     };
     const op = instrument('lifetime-switch', switchMap<number, number>(value => value === 1 ? first.promise : second.promise));
     const iterator = op.apply(source);
     const reading = collect(iterator);
-    now = 20; buffer.push(2); source.__onPush();
+    now = 20; buffer.push(2); notify!();
     expect(summaries('lifetime-switch')[0]).toEqual(jasmine.objectContaining({ emission: 1, durationMs: 20, outcome: 'cancel' }));
-    now = 55; first.reject(new Error('obsolete')); second.resolve(2); done = true; source.__onPush();
+    now = 55; first.reject(new Error('obsolete')); second.resolve(2); done = true; notify!();
     expect(await reading).toEqual([2]);
     const rows = summaries('lifetime-switch');
     expect(rows.length).toBe(2);
@@ -136,10 +144,14 @@ describe('flattening emission lifetimes', () => {
 
   it('exhaustMap reports buffered values as dropped without running projections', async () => {
     const pending = deferred<number>();
-    const buffer = [1];
+    const buffer: number[] = [1];
     let done = false, projected = 0;
     const source = {
-      __tryNext: () => buffer.length ? NEXT(buffer.shift()!) : done ? DONE : null,
+      pollSync: () => buffer.length
+        ? { status: 'available' as const, result: NEXT(buffer.shift()!) }
+        : done
+          ? { status: 'available' as const, result: DONE }
+          : { status: 'unavailable' as const },
       next: async () => buffer.length ? NEXT(buffer.shift()!) : DONE,
     };
     const op = instrument('drop-exhaust', exhaustMap<number, number>(() => { projected++; return pending.promise; }));
