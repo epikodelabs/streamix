@@ -35,7 +35,7 @@ describe('lens factory', () => {
   });
 
   it('writes nested values immutably and preserves unrelated branches', () => {
-    const profile = atom({
+    const profile = atom<{ address: { city: string; zip: number }; metadata: { active: boolean } }>({
       address: Object.freeze({ city: 'Kyiv', zip: 10000 }),
       metadata: Object.freeze({ active: true }),
     });

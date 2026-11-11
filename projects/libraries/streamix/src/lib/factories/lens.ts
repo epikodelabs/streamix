@@ -103,6 +103,10 @@ function writePath(root: unknown, keys: readonly PropertyKey[], value: unknown, 
 export function lens<T extends object, const P extends LensPath>(
   source: Writable<T>, path: P,
 ): Lens<LensValue<T, P>>;
+/** Composing writable lenses keeps the write-through API. */
+export function lens<T extends object, const P extends LensPath>(
+  source: Lens<T>, path: P,
+): Lens<LensValue<T, P>>;
 export function lens<T extends object, const P extends LensPath>(
   source: Readable<T>, path: P,
 ): Atom<LensValue<T, P>>;
