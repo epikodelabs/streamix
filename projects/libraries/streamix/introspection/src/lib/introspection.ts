@@ -94,6 +94,12 @@ const listeners = new Set<(event: StreamixInspectionEvent) => void>();
 let sequence = 0;
 let enabled = false;
 const events: StreamixInspectionEvent[] = [];
+// Registration fires before a factory finishes attaching its API: atom()
+// installs next()/set() after the base instance registers. Defer discovery
+// until the next inspector read, when the node's shape is final. Compiler
+// metadata registered in the meantime wins; the pending node is then skipped
+// because identities already holds it.
+const pendingDiscovery = new Set<WeakRef<object>>();
 const object = (value: unknown): value is object => value !== null && (typeof value === 'object' || typeof value === 'function');
 
 /** Bounded, getter-free previews. Inspecting an object must not execute user getters. */
@@ -200,13 +206,14 @@ function details(id: number): StreamixObjectDetails | undefined {
 }
 export const streamixInspector: StreamixInspectorAPI = Object.freeze({
   inspect: (filter: StreamixInspectionFilter = {}) => {
+    flushPendingDiscovery();
     return [...entries.keys()].map(details).filter((row): row is StreamixObjectDetails =>
     !!row && (!filter.name || row.name.includes(filter.name)) && (!filter.file || row.source.file.includes(filter.file)) &&
     (!filter.kind || row.kind === filter.kind));
   },
-  details,
+  details: (id: number) => { flushPendingDiscovery(); return details(id); },
   observe: (callback: (event: StreamixInspectionEvent) => void) => { listeners.add(callback); return () => { listeners.delete(callback); }; },
-  trace: () => Object.freeze([...events]),
+  trace: () => { flushPendingDiscovery(); return Object.freeze([...events]); },
 });
 
 /** Marker identity for events that describe no runtime node. */
@@ -225,7 +232,7 @@ export function enableStreamixIntrospection(): void {
   // One subscription over the single runtime bus: graph lifecycle, execution
   // lifecycle, and devtools traces all arrive here in order.
   internalRuntime.events.observe(event => {
-    if (event.kind === 'register') discoverRuntimeNode(event.node);
+    if (event.kind === 'register') pendingDiscovery.add(new WeakRef(event.node));
     if (event.kind === 'flow') discoverFlow(event.node);
     const entry = identities.get(event.node);
     if (!entry) {
@@ -395,6 +402,17 @@ function discoverFlow(node: object): void {
 function discoverExistingNodes(): void {
   for (const node of internalRuntime.graph.nodes()) discoverRuntimeNode(node);
   for (const { node } of internalRuntime.diagnostics.flows(internalRuntime.graph)) discoverFlow(node);
+}
+
+/** Classify nodes whose registration arrived before construction finished. */
+function flushPendingDiscovery(): void {
+  if (pendingDiscovery.size === 0) return;
+  const pending = [...pendingDiscovery];
+  pendingDiscovery.clear();
+  for (const ref of pending) {
+    const node = ref.deref();
+    if (node) discoverRuntimeNode(node);
+  }
 }
 
 /** Compiler helper: returns the exact input, preserving overloads and lazy semantics. */
