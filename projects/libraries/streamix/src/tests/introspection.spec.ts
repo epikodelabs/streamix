@@ -9,8 +9,49 @@ import { __streamixDebug, __streamixSubscribe, enableStreamixIntrospection, stre
 const metadata = (name: string, kind: StreamixSourceMetadata['kind'] = 'atom'): StreamixSourceMetadata =>
   ({ name, kind, file: 'src/store.ts', line: 12, column: 3 });
 
+// Created before enableStreamixIntrospection() installs its observer.
+const preArmNode = atom(987654321);
+
 describe('debug runtime introspection', () => {
   beforeAll(() => enableStreamixIntrospection());
+  it('keeps optional subscription wrappers null-safe', () => {
+    expect(__streamixSubscribe(undefined as { subscribe?: () => void } | undefined, metadata('missing'))).toBeUndefined();
+    expect(__streamixSubscribe({ subscribe: undefined as (() => void) | undefined }, metadata('missing-method'))).toBeUndefined();
+  });
+  it('backfills pre-arm nodes without duplicate register announcements', () => {
+    const before = streamixInspector.trace().filter(event => event.kind === 'register').length;
+    __streamixDebug(preArmNode, metadata('pre-armed'));
+    const after = streamixInspector.trace().filter(event => event.kind === 'register').length;
+    expect(after).toBe(before);
+    expect(streamixInspector.inspect({ name: 'pre-armed' }).length).toBe(1);
+  });
+  it('discovers uncompiled writable and derived nodes without executing formulas', () => {
+    let evaluations = 0;
+    const before = new Set(streamixInspector.inspect().map(row => row.id));
+    const input = atom(3);
+    const computation = derived(() => { evaluations++; return input.value * 2; });
+    try {
+      const rows = streamixInspector.inspect().filter(row => !before.has(row.id));
+      expect(rows.some(row => row.kind === 'atom')).toBeTrue();
+      expect(rows.some(row => row.kind === 'derived')).toBeTrue();
+      expect(evaluations).toBe(0);
+      input.set(4);
+      const changed = streamixInspector.trace().filter(event => event.kind === 'change' && event.value === '4');
+      expect(changed.length).toBeGreaterThan(0);
+      expect(evaluations).toBe(0);
+    } finally { input.dispose(); computation.dispose(); }
+  });
+  it('reports scope membership via a diagnostics reader without running getters', () => {
+    const model = scope({ count: 1, label: (self: any) => String(self.count) });
+    try {
+      const snapshot = internalRuntime.diagnostics.scopeState(model);
+      expect(snapshot?.disposed).toBeFalse();
+      expect(snapshot?.members.some(member => member.name === 'count')).toBeTrue();
+      expect(snapshot?.members.some(member => member.name === 'label')).toBeTrue();
+    } finally { model.dispose(); }
+    expect(internalRuntime.diagnostics.scopeState(model)?.disposed).toBeTrue();
+  });
+
   it('discovers uninstrumented flows and nested pipes without starting producers', () => {
     let starts = 0;
     const source = flow(async function* () { starts++; yield 1; });

@@ -117,12 +117,13 @@ export function streamixPreview(value: unknown): string {
   try { return (typeof value === 'string' ? value : JSON.stringify(summarize(value, 2)) ?? String(value)).slice(0, 240); }
   catch { return '[unavailable]'; }
 }
-function publish(entry: Entry, kind: string, value?: unknown, error?: unknown, pullMs?: number, count?: number): void {
+function publish(entry: Entry, kind: string, value?: unknown, error?: unknown, pullMs?: number, count?: number,
+  valuePresent = value !== undefined): void {
   const emission = count ?? entry.metrics.total;
   const event = Object.freeze({ id: entry.id, name: entry.source.name, kind, time: Date.now(), objectKind: entry.source.kind,
     ...(pullMs === undefined ? {} : { pullMs }),
     ...((kind === 'next' || kind === 'change') && emission > 0 ? { emission } : {}),
-    ...(value !== undefined ? { value: streamixPreview(value) } : {}),
+    ...(valuePresent ? { value: streamixPreview(value) } : {}),
     ...(error !== undefined ? { error: error instanceof Error ? error.message.slice(0, 240) : streamixPreview(error) } : {}) });
   appendEvent(event);
 }
@@ -153,12 +154,17 @@ function emissionMetrics(entry: Entry): StreamixEmissionMetrics {
 function details(id: number): StreamixObjectDetails | undefined {
   const entry = entries.get(id);
   const node = entry?.ref.deref() as any;
-  if (!entry || !node || (entry.source.kind === 'scope' ? node._disposed === true : node.disposed === true || (entry.source.kind === 'subscription' && node.unsubscribed === true))) { entries.delete(id); return undefined; }
+  if (!entry || !node) { entries.delete(id); return undefined; }
+  const scopeState = entry.source.kind === 'scope' ? internalRuntime.diagnostics.scopeState(node) : undefined;
+  if ((entry.source.kind === 'scope' ? scopeState?.disposed === true : node.disposed === true) ||
+      (entry.source.kind === 'subscription' && node.unsubscribed === true)) {
+    entries.delete(id); return undefined;
+  }
   const cached = internalRuntime.diagnostics.atomState(node);
   const execution = internalRuntime.diagnostics.executions.describe(node);
   const flow = internalRuntime.diagnostics.flowState(node);
-  const raw = entry.source.kind === 'scope' ? node._rawState ?? {} : {};
-  const memberCount = entry.source.kind === 'scope' ? Object.keys(raw).length : 0;
+  const scopeMembers = scopeState?.members ?? Object.keys(entry.source.members ?? {}).map(name => ({ name, value: undefined }));
+  const memberCount = scopeMembers.length;
   // Record-backed nodes take their counters from the runtime's own record;
   // record-less nodes (atoms, deriveds, definitions) use the ledger counters.
   const metrics = execution
@@ -186,15 +192,14 @@ function details(id: number): StreamixObjectDetails | undefined {
     composition: Object.freeze([...entry.composition]),
     pipeline: pipelines.has(node),
     pipedSource: isPipedSource(node),
-    members: Object.freeze(Object.keys(raw).map(key => ({ name: key, id: object(raw[key]) ? idOf(raw[key]) : undefined,
-      state: object(raw[key]) && idOf(raw[key]) !== undefined ? 'materialized' : typeof raw[key] === 'function' ? 'method' : 'unevaluated' }))),
+    members: Object.freeze(scopeMembers.map(({ name, value }) => ({ name, id: object(value) ? idOf(value) : undefined,
+      state: object(value) && idOf(value) !== undefined ? 'materialized' : typeof value === 'function' ? 'method' : 'unevaluated' }))),
     error: cached?.error !== undefined ? (cached.error instanceof Error ? cached.error.message : streamixPreview(cached.error))
       : execution?.error !== undefined ? streamixPreview(execution.error) : undefined,
   });
 }
 export const streamixInspector: StreamixInspectorAPI = Object.freeze({
   inspect: (filter: StreamixInspectionFilter = {}) => {
-    if (enabled) for (const { node } of internalRuntime.diagnostics.flows(internalRuntime.graph)) discoverFlow(node);
     return [...entries.keys()].map(details).filter((row): row is StreamixObjectDetails =>
     !!row && (!filter.name || row.name.includes(filter.name)) && (!filter.file || row.source.file.includes(filter.file)) &&
     (!filter.kind || row.kind === filter.kind));
@@ -220,7 +225,8 @@ export function enableStreamixIntrospection(): void {
   // One subscription over the single runtime bus: graph lifecycle, execution
   // lifecycle, and devtools traces all arrive here in order.
   internalRuntime.events.observe(event => {
-    if (event.kind === 'flow' && !identities.has(event.node)) discoverFlow(event.node);
+    if (event.kind === 'register') discoverRuntimeNode(event.node);
+    if (event.kind === 'flow') discoverFlow(event.node);
     const entry = identities.get(event.node);
     if (!entry) {
       // Events without a runtime node (devtools read/write/render lines) are
@@ -234,6 +240,8 @@ export function enableStreamixIntrospection(): void {
     }
     switch (event.kind) {
       case 'register':
+        // discoverRuntimeNode/__streamixDebug already publishes one register.
+        return;
       case 'dependencies':
       case 'flow':
         publish(entry, event.kind);
@@ -258,7 +266,12 @@ export function enableStreamixIntrospection(): void {
         // 'next' event with the value. Their valueless 'change' would
         // duplicate each emission and let an always-ticking source flood the
         // trace with counter lines.
-        if (entry.source.kind !== 'flow' && entry.source.kind !== 'source') publish(entry, 'change');
+        if (entry.source.kind !== 'flow' && entry.source.kind !== 'source') {
+          const cached = internalRuntime.diagnostics.atomState(event.node);
+          if (cached?.hasValue) entry.latest = streamixPreview(cached.value);
+          publish(entry, 'change', cached?.hasValue ? cached.value : undefined,
+            undefined, undefined, undefined, cached?.hasValue === true);
+        }
         return;
       case 'next':
       case 'complete':
@@ -283,6 +296,9 @@ export function enableStreamixIntrospection(): void {
       }
     }
   });
+  // Register the observer before scanning so late activation cannot lose new
+  // registrations; scanning never evaluates an atom or starts a flow.
+  discoverExistingNodes();
   // Framework bridge events enter the same bus; seed the trace history first
   // so events recorded before introspection was enabled are not lost.
   const bridge = (event: StreamixDevtoolsEvent) =>
@@ -350,14 +366,35 @@ function isPipedSource(node: object): boolean {
   return users.size > 0;
 }
 
-/** Discover runtime-created flows without evaluating or subscribing to them. */
-function discoverFlow(node: object): void {
+/** Classify only known Streamix objects. Never call .value or .subscribe. */
+function discoverRuntimeNode(node: object): void {
   if (identities.has(node)) return;
+  const type = (node as { type?: unknown }).type;
+  if (type !== 'atom' && type !== 'scope') return;
+  const kind: StreamixSourceMetadata['kind'] = type === 'scope' ? 'scope'
+    : internalRuntime.hasFlow(node) ? 'flow'
+    : typeof (node as { next?: unknown }).next === 'function' ? 'atom' : 'derived';
   const origin = internalRuntime.diagnostics.originOf(node);
-  const name = typeof (node as { name?: unknown }).name === 'string'
-    ? (node as { name: string }).name : origin?.fn ?? 'flow';
-  __streamixDebug(node, { kind: 'flow', name: name || 'flow',
-    file: origin?.file ?? '[runtime]', line: origin?.line ?? 0, column: origin?.column ?? 0 });
+  const explicitName = (node as { name?: unknown }).name;
+  const name = typeof explicitName === 'string' && explicitName
+    ? explicitName : origin?.fn || kind;
+  __streamixDebug(node, { kind, name, file: origin?.file ?? '[runtime]',
+    line: origin?.line ?? 0, column: origin?.column ?? 0 });
+}
+
+/** Flows first register as atoms, then announce their flow diagnostics. */
+function discoverFlow(node: object): void {
+  discoverRuntimeNode(node);
+  const entry = identities.get(node);
+  if (entry?.source.kind === 'derived' && internalRuntime.hasFlow(node)) {
+    __streamixDebug(node, { ...entry.source, kind: 'flow' });
+  }
+}
+
+/** Backfill nodes created before the observer, including uncompiled libraries. */
+function discoverExistingNodes(): void {
+  for (const node of internalRuntime.graph.nodes()) discoverRuntimeNode(node);
+  for (const { node } of internalRuntime.diagnostics.flows(internalRuntime.graph)) discoverFlow(node);
 }
 
 /** Compiler helper: returns the exact input, preserving overloads and lazy semantics. */
@@ -375,7 +412,9 @@ export function __streamixDebug<T>(value: T, metadata: StreamixSourceMetadata): 
   } else { entry.source = immutableMetadata(metadata); entries.set(entry.id, entry); }
   if (metadata.kind === 'scope') {
     const scope = value as any;
-    for (const key of Object.keys(scope._rawState ?? {})) __streamixScopeMember(scope, key, scope._rawState[key]);
+    for (const { name, value: member } of internalRuntime.diagnostics.scopeState(scope)?.members ?? []) {
+      __streamixScopeMember(scope, name, member);
+    }
   }
   const inputs = pipelines.get(value);
   if (inputs) {
@@ -423,14 +462,22 @@ export function __streamixDebugDispose(node: object, kind = 'dispose'): void {
 /** Preserve subscribe's receiver/signature and return the original subscription handle. */
 export function __streamixSubscribe<T extends { subscribe: (...args: any[]) => any }>(
   source: T, metadata: StreamixSourceMetadata,
-): T['subscribe'] {
-  const subscribe = source.subscribe;
+): T['subscribe'];
+export function __streamixSubscribe<T extends { subscribe?: (...args: any[]) => any }>(
+  source: T | null | undefined, metadata: StreamixSourceMetadata,
+): T['subscribe'] | undefined;
+export function __streamixSubscribe(
+  source: { subscribe?: (...args: any[]) => any } | null | undefined,
+  metadata: StreamixSourceMetadata,
+): ((...args: any[]) => any) | undefined {
+  const subscribe = source?.subscribe;
+  if (typeof subscribe !== 'function') return undefined;
   return ((...args: any[]) => {
     const result = Reflect.apply(subscribe, source, args);
     __streamixDebug(result, metadata);
     if (object(result)) {
       const handle = identities.get(result);
-      const target = identities.get(source);
+      const target = source ? identities.get(source) : undefined;
       if (handle && target) {
         handle.target = target.id;
         (target.subscriptions ??= new Set()).add(handle.id);
@@ -439,7 +486,7 @@ export function __streamixSubscribe<T extends { subscribe: (...args: any[]) => a
       }
     }
     return result;
-  }) as T['subscribe'];
+  }) as (...args: any[]) => any;
 }
 export function __streamixPipeline(result: object, inputs: readonly unknown[]): void {
   if (!enabled) return;

@@ -20,7 +20,7 @@ export type {
   RuntimeNode, RuntimeGraph, StreamixRuntime, ExecutionSpan, FlowExit,
   RuntimeDiagnosticsPort, RuntimeExecutionsPort,
   ExecutionRecordSnapshot, FlowExecutionSnapshot, FlowDiagnosticsState, AtomStateReader, FlowSnapshot,
-  NodeDiagnostics, RuntimeInspection,
+  NodeDiagnostics, RuntimeInspection, ScopeDiagnosticsState,
 } from './runtime';
 export type { SchedulableNode } from './scheduling';
 export type { RuntimeEvent, RuntimeEventKind, RuntimeEventBus } from './events';
@@ -52,7 +52,7 @@ export interface StreamixLifetimeSpan {
 /** Real implementations installed by the introspection entry. */
 export interface StreamixIntrospectionHooks {
   debug<T>(value: T, metadata: StreamixSourceMetadata): T;
-  subscribe<T extends { subscribe: (...args: any[]) => any }>(source: T, metadata: StreamixSourceMetadata): T['subscribe'];
+  subscribe<T extends { subscribe?: (...args: any[]) => any }>(source: T | null | undefined, metadata: StreamixSourceMetadata): T['subscribe'] | undefined;
   scopeMember(scope: object, key: PropertyKey, value: unknown): void;
   debugDispose(node: object, kind?: string): void;
   beginLifetime(operator: object): StreamixLifetimeSpan | undefined;
@@ -69,7 +69,8 @@ function identityDebug<T>(value: T): T {
 const hooks: StreamixIntrospectionHooks = {
   debug: identityDebug,
   subscribe(source, _metadata) {
-    const subscribe = source.subscribe;
+    const subscribe = source?.subscribe;
+    if (typeof subscribe !== 'function') return undefined;
     return ((...args: any[]) => Reflect.apply(subscribe, source, args)) as any;
   },
   scopeMember() {},
@@ -104,7 +105,14 @@ export function __streamixDebug<T>(value: T, metadata: StreamixSourceMetadata): 
 /** Preserve subscribe's receiver/signature and return the original subscription handle. */
 export function __streamixSubscribe<T extends { subscribe: (...args: any[]) => any }>(
   source: T, metadata: StreamixSourceMetadata,
-): T['subscribe'] {
+): T['subscribe'];
+export function __streamixSubscribe<T extends { subscribe?: (...args: any[]) => any }>(
+  source: T | null | undefined, metadata: StreamixSourceMetadata,
+): T['subscribe'] | undefined;
+export function __streamixSubscribe(
+  source: { subscribe?: (...args: any[]) => any } | null | undefined,
+  metadata: StreamixSourceMetadata,
+): ((...args: any[]) => any) | undefined {
   return hooks.subscribe(source, metadata);
 }
 

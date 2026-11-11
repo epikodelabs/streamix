@@ -132,12 +132,20 @@ export interface RuntimeExecutionsPort {
  * the introspection entry and is swapped in via
  * {@link installRuntimeDiagnostics} when that entry is imported.
  */
+/** Read-only scope member view used by development tools; never evaluates properties. */
+export interface ScopeDiagnosticsState {
+  readonly disposed: boolean;
+  readonly members: readonly { readonly name: string; readonly value: unknown }[];
+}
+
 export interface RuntimeDiagnosticsPort {
   readonly executions: RuntimeExecutionsPort;
   captureOrigin(node: RuntimeNode, origin: RuntimeOrigin): void;
   originOf(node: RuntimeNode): RuntimeOrigin | undefined;
   registerAtomState(node: RuntimeNode, read: () => AtomStateReader): void;
   atomState(node: RuntimeNode): AtomStateReader | undefined;
+  registerScopeState(node: RuntimeNode, read: () => ScopeDiagnosticsState): void;
+  scopeState(node: RuntimeNode): ScopeDiagnosticsState | undefined;
   registerFlow(node: RuntimeNode, state: () => FlowDiagnosticsState): void;
   flowState(node: RuntimeNode): FlowDiagnosticsState | undefined;
   flows(graph: RuntimeGraph): readonly FlowSnapshot[];
@@ -164,6 +172,8 @@ class NoopRuntimeDiagnostics implements RuntimeDiagnosticsPort {
   originOf(): undefined { return undefined; }
   registerAtomState(): void {}
   atomState(): undefined { return undefined; }
+  registerScopeState(): void {}
+  scopeState(): undefined { return undefined; }
   registerFlow(): void {}
   flowState(): undefined { return undefined; }
   flows(): readonly FlowSnapshot[] { return []; }

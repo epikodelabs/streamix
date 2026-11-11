@@ -22,6 +22,7 @@ import {
   type ExecutionRecordSnapshot,
   type FlowDiagnosticsState,
   type AtomStateReader,
+  type ScopeDiagnosticsState,
   type NodeDiagnostics,
   type RuntimeInspection,
   type RuntimeDiagnosticsPort,
@@ -159,6 +160,7 @@ export class RuntimeExecutions {
 export class RuntimeDiagnostics implements RuntimeDiagnosticsPort {
   private readonly origins = new WeakMap<RuntimeNode, RuntimeOrigin>();
   private readonly atomStates = new WeakMap<RuntimeNode, () => AtomStateReader>();
+  private readonly scopeStates = new WeakMap<RuntimeNode, () => ScopeDiagnosticsState>();
   private readonly flowStates = new Map<RuntimeNode, () => FlowDiagnosticsState>();
   readonly executions = new RuntimeExecutions();
 
@@ -180,6 +182,12 @@ export class RuntimeDiagnostics implements RuntimeDiagnosticsPort {
   }
 
   atomState(node: RuntimeNode) { return this.atomStates.get(node)?.(); }
+
+  registerScopeState(node: RuntimeNode, read: () => ScopeDiagnosticsState): void {
+    if (!isRuntimeInstrumentationEnabled()) return;
+    this.scopeStates.set(node, read);
+  }
+  scopeState(node: RuntimeNode) { return this.scopeStates.get(node)?.(); }
 
   /** Register a flow-backed atom independently of its execution starting. */
   registerFlow(node: RuntimeNode, state: () => FlowDiagnosticsState): void {
