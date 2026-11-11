@@ -30,16 +30,20 @@ describe('debug runtime introspection', () => {
     const before = new Set(streamixInspector.inspect().map(row => row.id));
     const input = atom(3);
     const computation = derived(() => { evaluations++; return input.value * 2; });
+    const source = __streamixDebug(atom(0), metadata('introspection-source-change', 'source'));
     try {
       const rows = streamixInspector.inspect().filter(row => !before.has(row.id));
       expect(rows.some(row => row.kind === 'atom')).toBeTrue();
       expect(rows.some(row => row.kind === 'derived')).toBeTrue();
       expect(evaluations).toBe(0);
+      const sourceId = streamixInspector.inspect({ name: 'introspection-source-change' })[0].id;
+      source.next(1);
+      expect(streamixInspector.trace().some(event => event.id === sourceId && event.kind === 'change')).toBeFalse();
       input.set(4);
       const changed = streamixInspector.trace().filter(event => event.kind === 'change' && event.value === '4');
       expect(changed.length).toBeGreaterThan(0);
       expect(evaluations).toBe(0);
-    } finally { input.dispose(); computation.dispose(); }
+    } finally { input.dispose(); computation.dispose(); source.dispose(); }
   });
   it('reports scope membership via a diagnostics reader without running getters', () => {
     const model = scope({ count: 1, label: (self: any) => String(self.count) });
