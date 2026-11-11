@@ -129,10 +129,15 @@ describe('debug runtime introspection', () => {
   it('never evaluates a derived formula or starts an idle producer', () => {
     let evaluations = 0, starts = 0;
     const value = __streamixDebug(derived(() => { evaluations++; return 7; }), metadata('lazy', 'derived'));
-    const producer = __streamixDebug(flow(async function* () { starts++; yield 1; }), metadata('idle', 'flow'));
+    const producerName = 'introspection-idle-producer-regression-check';
+    const producer = __streamixDebug(flow(async function* () { starts++; yield 1; }), metadata(producerName, 'flow'));
     try {
       expect(streamixInspector.inspect({ name: 'lazy' })[0].value).toBe('unevaluated');
-      expect(streamixInspector.inspect({ name: 'idle' })[0].state).toBe('idle');
+      expect(internalRuntime.diagnostics.flowState(producer)?.started).toBeFalse();
+      const idleRows = streamixInspector.inspect({ name: producerName });
+      expect(idleRows.length).toBe(1);
+      expect(idleRows[0].kind).toBe('flow');
+      expect(idleRows[0].state).toBe('idle');
       expect(evaluations).toBe(0);
       expect(starts).toBe(0);
       expect(value.value).toBe(7);
