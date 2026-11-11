@@ -1,5 +1,5 @@
 import { atom, derived, flow } from '../lib/atoms/atom';
-import { scope } from '../lib/atoms/scope';
+import { method, scope } from '../lib/atoms/scope';
 import { pipe } from '../lib/atoms/pipe';
 import { map } from '../lib/operators/map';
 import { internalRuntime } from '../lib/runtime/runtime';
@@ -148,7 +148,7 @@ describe('debug runtime introspection', () => {
     } finally { value.dispose(); failing.dispose(); producer.dispose(); }
   });
   it('labels scope members and relates them to their owner without snapshot reads', () => {
-    const model = __streamixDebug(scope({ count: 0, doubled: (self: any) => self.count * 2 }), {
+    const model = __streamixDebug(scope({ count: 0, doubled: (self: any) => self.count * 2, action: method(() => {}) }), {
       ...metadata('model', 'scope'), members: { count: { ...metadata('model.count'), line: 13 }, doubled: metadata('model.doubled', 'derived') },
     });
     const fallback = __streamixDebug({ type: 'scope' }, {
@@ -159,13 +159,14 @@ describe('debug runtime introspection', () => {
       const count = streamixInspector.inspect({ name: 'model.count' })[0];
       // The pill counts every listed member, including the scope's internal
       // loading/dirty atoms — the same set the members list shows.
-      expect(owner.state).toBe('live · 4 members');
+      expect(owner.state).toBe('live · 5 members');
       expect(count.owner).toBe(owner.id);
       expect(count.source.line).toBe(13);
       expect(streamixInspector.inspect({ name: 'introspection-fallback-scope' })[0].members[0].state).toBe('unevaluated');
       model.count = 3;
       expect(streamixInspector.details(count.id)?.value).toBe('3');
       expect(owner.members.some(member => member.name === 'doubled')).toBe(true);
+      expect(owner.members.some(member => member.name === 'action' && member.state === 'method')).toBe(true);
     } finally { model.dispose(); __streamixDebugDispose(fallback); }
     expect(streamixInspector.inspect({ name: 'model' }).length).toBe(0);
   });
