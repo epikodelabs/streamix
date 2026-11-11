@@ -52,6 +52,13 @@ function local(state: (v: number) => number) { return state(2); }`;
     expect(result).toContain('"name":"count"');
     expect(result).toContain('"line":3,"column":15');
   });
+  it('ignores custom subscribe-shaped objects without a Streamix discriminator', () => {
+    const source = `const plain = { subscribe() {} };
+plain.subscribe();
+const custom = { type: 'custom', subscribe() {} };
+custom.subscribe();`;
+    expect(transform(source)).toBe(source);
+  });
   it('captures nested calls and scope member locations without changing their order', () => {
     const source = `import { scope, pipe, map, atom } from '@epikodelabs/streamix';
 class App {
