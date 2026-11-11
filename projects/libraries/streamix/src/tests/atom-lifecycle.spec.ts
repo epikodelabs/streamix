@@ -92,6 +92,23 @@ describe('AtomLifecycle', () => {
     await lifecycle.dispose();
   });
 
+  it('retires after synchronous startup failure even if the error handler throws', () => {
+    const startupError = new Error('startup failed');
+    const release = jasmine.createSpy('release');
+    const error = jasmine.createSpy('error').and.throwError('error handler failed');
+    const lifecycle = new AtomLifecycle({
+      start: () => { throw startupError; },
+      release,
+      error,
+    }, 'stop');
+
+    lifecycle.activate();
+
+    expect(error.calls.argsFor(0)[0]).toBe(startupError);
+    expect(release).toHaveBeenCalledWith(jasmine.anything(), 'error');
+    expect(lifecycle.started).toBeTrue();
+  });
+
   it('latches completion without disposing retained atom state or restarting', async () => {
     const cleanup = jasmine.createSpy('cleanup');
     const start = jasmine.createSpy('start').and.returnValue(cleanup);
