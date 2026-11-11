@@ -40,14 +40,14 @@ describe("Streamix React Vite plugin", () => {
     const define = (on.config as any)?.call(on, {}, { command: "build" });
     expect(define.define["import.meta.env.DEV"]).toBe("true");
     const enabled = transformOf(on).call(context, source, entry) as { code: string };
-    expect(enabled.code).toContain("__sxEnable();");
+    expect(enabled.code).toContain("import '@epikodelabs/streamix/introspection/activate';");
     expect(enabled.code).toContain("__sxMount();");
     expect(enabled.code).toContain("__sxDebug(atom(0)");
 
     const off = sx();
     expect((off.config as any)?.call(off, {}, { command: "build" })).toBeUndefined();
     const plain = transformOf(off).call(context, source, entry) as { code: string };
-    expect(plain.code).not.toContain("__sxEnable");
+    expect(plain.code).not.toContain('introspection/activate');
     expect(plain.code).not.toContain("__sxDebug");
   });
 });

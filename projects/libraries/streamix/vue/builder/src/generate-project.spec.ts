@@ -81,20 +81,20 @@ describe('Vue builder introspection injection', () => {
 
       const virtualRoot = await generateVueProject(workspace, sourceRoot, true);
       const generated = await readFile(generatedPath, 'utf8');
-      expect(generated).toContain('__sxEnable();');
+      expect(generated).toContain('introspection/activate');
       expect(generated).toContain('__sxMount();');
-      expect(generated.indexOf('__sxEnable();')).toBeLessThan(generated.indexOf('createApp'));
+      expect(generated.indexOf('introspection/activate')).toBeLessThan(generated.indexOf('createApp'));
       // Authored source stays clean: injection lives only in the generated tree.
       expect(await readFile(join(source, 'main.ts'), 'utf8')).toBe(authored);
 
       // A watch edit of the entry must keep the activation.
       await regenerateVueFile(workspace, sourceRoot, 'main.ts', true);
-      expect(await readFile(generatedPath, 'utf8')).toContain('__sxEnable();');
+      expect(await readFile(generatedPath, 'utf8')).toContain('introspection/activate');
       // Dropping the flag regenerates without it.
       await generateVueProject(workspace, sourceRoot, false);
-      expect(await readFile(join(virtualRoot, 'main.ts'), 'utf8')).not.toContain('__sxEnable');
+      expect(await readFile(join(virtualRoot, 'main.ts'), 'utf8')).not.toContain('introspection/activate');
       await regenerateVueFile(workspace, sourceRoot, 'main.ts', false);
-      expect(await readFile(generatedPath, 'utf8')).not.toContain('__sxEnable');
+      expect(await readFile(generatedPath, 'utf8')).not.toContain('introspection/activate');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -109,7 +109,7 @@ describe('Vue builder introspection injection', () => {
       await writeFile(join(source, 'index.html'), '<div id="app"></div>');
       await writeFile(join(source, 'src', 'main.ts'), `createApp({}).mount('#app');\n`);
       const output = await generateVueProject(workspace, sourceRoot, true);
-      expect(await readFile(join(output, 'src', 'main.ts'), 'utf8')).toContain('__sxEnable();');
+      expect(await readFile(join(output, 'src', 'main.ts'), 'utf8')).toContain('introspection/activate');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

@@ -13,7 +13,7 @@ export interface StreamixReactViteOptions {
   /**
    * Builds the app with the inspector, mirroring the Angular builder's flag:
    * factory calls register with `__streamixDebug` and the entry gets
-   * `__sxEnable()`/`__sxMount()`. Off (default) — completely without.
+   * first-import activation/`__sxMount()`. Off (default) — completely without.
    */
   readonly introspection?: boolean;
 }
