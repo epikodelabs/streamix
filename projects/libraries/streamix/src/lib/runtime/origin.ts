@@ -35,7 +35,7 @@ const INTERNAL_FRAME = [
 // helper wrapping atom() is external and stops the walk correctly.
 const INTERNAL_FN = new Set([
   "captureOrigin", "register", "finalizeAtomInstance", "createAtomBase",
-  "atomFromIteratorInternal", "atom", "derived", "flow", "pipe", "scope",
+  "fromIteratorInternal", "atom", "derived", "flow", "pipe", "scope",
   "createScopeInternal", "evaluateExprMarker", "createOperator",
   "createPushOperator", "apply", "trackOperatorExecution",
 ]);

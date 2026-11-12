@@ -79,7 +79,7 @@ return the cached field, nothing else.
 
 Flow internals are invisible to the choke point, so a flow-backed factory
 adds three pieces to the run loop. The canonical form is
-`atomFromIteratorInternal` in `atoms/atom.ts`; copy its shape:
+`fromIteratorInternal` in `atoms/atom.ts`; copy its shape:
 
 **1. Register the flow state — gated, so production builds allocate no
 closure:**

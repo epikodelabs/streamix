@@ -144,8 +144,8 @@ export interface Writable<T = any> extends Readable<T> {
 }
 
 /**
- * @deprecated Use {@link Readable}. Kept as an alias so existing type
- * annotations continue to compile.
+ * A writable atom returned by {@link atom}: readable state plus mutation
+ * methods. Equivalent to {@link Writable}.
  */
 export type Atom<T = any> = Writable<T>;
 
@@ -790,10 +790,10 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * atomFromIterator() - Atom runtime over an async iterable
+ * fromIterator() - Atom runtime over an async iterable
  * ───────────────────────────────────────────────────────────────────────────*/
 
-export interface AtomFromIteratorOptions<T> extends AtomOptions {
+export interface FromIteratorOptions<T> extends AtomOptions {
   /** Value exposed before the source async iterable emits for the first time. */
   initialValue?: T;
 }
@@ -804,9 +804,9 @@ export interface AtomFromIteratorOptions<T> extends AtomOptions {
  * The source starts when the first subscriber attaches and is closed when the
  * atom is disposed. Values yielded by the iterable become atom emissions.
  */
-function atomFromIteratorInternal<T>(
+function fromIteratorInternal<T>(
   source: AsyncIterable<T>,
-  options: AtomFromIteratorOptions<T> | undefined,
+  options: FromIteratorOptions<T> | undefined,
   conflate: boolean,
 ): Readable<T> {
   const maxSubscribers = options?.maxSubscribers ?? 1000;
@@ -1043,11 +1043,11 @@ function atomFromIteratorInternal<T>(
  * Creates a readable atom backed by an async iterable. Atom state itself has no
  * analog/discrete delivery mode; every source value is observable.
  */
-export function atomFromIterator<T>(
+export function fromIterator<T>(
   source: AsyncIterable<T>,
-  options?: AtomFromIteratorOptions<T>,
+  options?: FromIteratorOptions<T>,
 ): Readable<T> {
-  return atomFromIteratorInternal(source, options, false);
+  return fromIteratorInternal(source, options, false);
 }
 
 function watchDependencies(
@@ -1237,7 +1237,7 @@ export function flow<T>(
     }
   };
 
-  return atomFromIteratorInternal(
+  return fromIteratorInternal(
     iterable,
     hasInitialValue ? { ...atomOptions, initialValue } : atomOptions,
     mode === "analog",
