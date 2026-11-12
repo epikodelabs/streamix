@@ -1,4 +1,4 @@
-import { concatMap, flow, from, iterate, atom as makeAtom, pipe, type Atom, type Writable } from '@epikodelabs/streamix';
+import { concatMap, flow, from, iterate, atom as makeAtom, pipe, type Readable, type Writable } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
   it('does not project or pull again when cancelled during an outer pull', async () => {
@@ -320,7 +320,7 @@ describe('concatMap', () => {
 });
 
 // Error Handling Stream using library's `flow`
-export function errorInnerSource(): Atom {
+export function errorInnerSource(): Readable {
   return flow(async function* () {
     throw new Error('Inner Stream Error');
   });

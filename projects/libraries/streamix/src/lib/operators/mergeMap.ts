@@ -21,7 +21,7 @@ import { ConcurrentInnerExecution } from '../runtime/concurrent-inner-execution'
  * @template T The type of values in the source stream.
  * @template R The type of values emitted by the inner and output streams.
  * @param project A function that maps a source value and its index to either:
- *   - an {@link Atom | Atom<R>},
+ *   - an {@link Readable | Readable<R>},
  *   - a {@link MaybePromise<R>},
  *   - or an array of `R`.
  * @param concurrent Maximum number of concurrent inner streams (default: Infinity).

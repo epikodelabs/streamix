@@ -7,7 +7,7 @@ import {
   NO_INITIAL_VALUE,
   trackDependencies,
   transaction,
-  type Atom,
+  type Readable,
   type DerivedScope,
 } from '@epikodelabs/streamix';
 
@@ -319,7 +319,7 @@ describe('Atom System', () => {
     });
 
     it('should throw on circular dependency', () => {
-      let derivedAtom: Atom<any>;
+      let derivedAtom: Readable<any>;
       const source = atom(0);
 
       expect(() => {

@@ -20,7 +20,7 @@ import { SerialInnerExecution } from "../runtime/serial-inner-execution";
  * @template R The type of values emitted by the inner streams and the output.
  * @param project A function that takes a value from the source stream and its index,
  * and returns either:
- *   - an {@link Atom | Atom<R>},
+ *   - an {@link Readable | Readable<R>},
  *   - a {@link MaybePromise<R>},
  *   - or an array of `R`.
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.

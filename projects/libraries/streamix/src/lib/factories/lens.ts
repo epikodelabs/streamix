@@ -1,8 +1,8 @@
 import {
   derived,
   NO_INITIAL_VALUE,
-  type Atom,
   type Readable,
+  type ReadonlyAtom,
   type SyncOnly,
   type Writable,
 } from '../atoms/atom';
@@ -10,7 +10,7 @@ import {
 export type LensPath = PropertyKey | readonly PropertyKey[];
 
 /** A writable, focused view of a source atom. */
-export interface Lens<T> extends Atom<T> {
+export interface Lens<T> extends Readable<T> {
   set(value: T): void;
   next(value: T): void;
 }
@@ -108,11 +108,11 @@ export function lens<T extends object, const P extends LensPath>(
   source: Lens<T>, path: P,
 ): Lens<LensValue<T, P>>;
 export function lens<T extends object, const P extends LensPath>(
-  source: Readable<T>, path: P,
-): Atom<LensValue<T, P>>;
+  source: ReadonlyAtom<T>, path: P,
+): Readable<LensValue<T, P>>;
 export function lens<T extends object, const P extends LensPath>(
-  source: Readable<T>, path: P,
-): Atom<LensValue<T, P>> {
+  source: ReadonlyAtom<T>, path: P,
+): Readable<LensValue<T, P>> {
   const keys = keysOf(path);
   type V = LensValue<T, P>;
 

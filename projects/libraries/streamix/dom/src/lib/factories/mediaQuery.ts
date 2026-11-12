@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` or `false` whenever a CSS media
@@ -17,11 +17,11 @@ import { fromPush, type Atom } from "@epikodelabs/streamix";
  * - Fully compatible with async iteration.
  *
  * @param mediaQueryString A CSS media query string.
- * @returns {Atom<boolean>} An atom emitting match state.
+ * @returns {Readable<boolean>} An atom emitting match state.
  */
 export function mediaQuery(
   query: string
-): Atom<boolean> {
+): Readable<boolean> {
   /* -------------------------------------------------- */
   /* Immediate environment check (required by tests)    */
   /* -------------------------------------------------- */

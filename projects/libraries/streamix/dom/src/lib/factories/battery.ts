@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Represents the current battery status.
@@ -23,9 +23,9 @@ export type BatteryState = {
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Atom<BatteryState>}
+ * @returns {Readable<BatteryState>}
  */
-export function battery(): Atom<BatteryState> {
+export function battery(): Readable<BatteryState> {
   return fromPush<BatteryState>((sink) => {
     let cleaned = false;
     let battery: any = null;

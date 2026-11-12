@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /** A pointer snapshot. `x` and `y` are viewport coordinates in CSS pixels. */
 export type PointerPosition = {
@@ -20,7 +20,7 @@ export type PointerPosition = {
  * Pending positions use analog delivery: the latest snapshot wins.
  * Safe to construct and consume without a browser.
  */
-export function pointer(target?: EventTarget): Atom<PointerPosition> {
+export function pointer(target?: EventTarget): Readable<PointerPosition> {
   return fromPush<PointerPosition>((sink) => {
     const source = target ?? (typeof window !== "undefined" ? window : undefined);
     if (!source) return () => {};

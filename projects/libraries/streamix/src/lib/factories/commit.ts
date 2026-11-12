@@ -1,4 +1,4 @@
-import { flow, type Atom } from "../atoms/atom";
+import { flow, type Readable } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
@@ -27,7 +27,7 @@ export function commit<T = any>(
   factory: () => PipeInput<T>,
   maxRetries: number = 3,
   delay: number = 1000
-): Atom<T> {
+): Readable<T> {
   return flow<T>(async function* () {
     let retryCount = 0;
     let lastError: Error | null = null;

@@ -1,6 +1,6 @@
 import {
   fromPush,
-  type Atom,
+  type Readable,
 } from "@epikodelabs/streamix";
 
 /**
@@ -26,12 +26,12 @@ import {
  *
  * @param element The DOM element to observe.
  * @param options Optional IntersectionObserver options.
- * @returns {Atom<boolean>} An atom emitting intersection state.
+ * @returns {Readable<boolean>} An atom emitting intersection state.
  */
 export function intersection(
   element: Element,
   options?: IntersectionObserverInit
-): Atom<boolean> {
+): Readable<boolean> {
   return fromPush<boolean>((sink) => {
     let cleaned = false;
     let io: IntersectionObserver | null = null;

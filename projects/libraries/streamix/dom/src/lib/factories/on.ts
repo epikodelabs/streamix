@@ -1,4 +1,4 @@
-import type { Atom } from "@epikodelabs/streamix";
+import type { Readable } from "@epikodelabs/streamix";
 import { animationFrame } from "./animationFrame";
 import { battery, type BatteryState } from "./battery";
 import { fullscreen } from "./fullscreen";
@@ -33,32 +33,32 @@ export type { BatteryState, GeolocationState, NetworkState, PointerPosition, Scr
  * const resized = on('resize', element);
  * ```
  */
-export function on(type: 'animationFrame'): Atom<number>;
-export function on(type: 'battery'): Atom<BatteryState>;
-export function on(type: 'fullscreen'): Atom<boolean>;
-export function on(type: 'geolocation', options?: PositionOptions): Atom<GeolocationState>;
-export function on(type: 'idle', timeout?: number): Atom<IdleDeadline>;
+export function on(type: 'animationFrame'): Readable<number>;
+export function on(type: 'battery'): Readable<BatteryState>;
+export function on(type: 'fullscreen'): Readable<boolean>;
+export function on(type: 'geolocation', options?: PositionOptions): Readable<GeolocationState>;
+export function on(type: 'idle', timeout?: number): Readable<IdleDeadline>;
 export function on(
   type: 'intersection',
   element: Element,
   options?: IntersectionObserverInit
-): Atom<boolean>;
-export function on(type: 'mediaQuery', query: string): Atom<boolean>;
+): Readable<boolean>;
+export function on(type: 'mediaQuery', query: string): Readable<boolean>;
 export function on(
   type: 'mutation',
   element: Element,
   options?: MutationObserverInit
-): Atom<MutationRecord[]>;
-export function on(type: 'network'): Atom<NetworkState>;
-export function on(type: 'orientation'): Atom<'portrait' | 'landscape'>;
-export function on(type: 'pointer', target?: EventTarget): Atom<PointerPosition>;
-export function on(type: 'scroll', target?: Window | Document | Element): Atom<ScrollPosition>;
+): Readable<MutationRecord[]>;
+export function on(type: 'network'): Readable<NetworkState>;
+export function on(type: 'orientation'): Readable<'portrait' | 'landscape'>;
+export function on(type: 'pointer', target?: EventTarget): Readable<PointerPosition>;
+export function on(type: 'scroll', target?: Window | Document | Element): Readable<ScrollPosition>;
 export function on(
   type: 'resize',
   element: HTMLElement
-): Atom<{ width: number; height: number }>;
-export function on(type: 'viewportChange'): Atom<ViewportState>;
-export function on(type: 'visibilityChange'): Atom<DocumentVisibilityState>;
+): Readable<{ width: number; height: number }>;
+export function on(type: 'viewportChange'): Readable<ViewportState>;
+export function on(type: 'visibilityChange'): Readable<DocumentVisibilityState>;
 
 /**
  * Creates a reactive stream for a DOM or browser event source.
@@ -66,7 +66,7 @@ export function on(type: 'visibilityChange'): Atom<DocumentVisibilityState>;
  * `on` is a single entry point that dispatches to the appropriate DOM adapter
  * based on the requested source type.
  */
-export function on(type: string, ...args: any[]): Atom<any> {
+export function on(type: string, ...args: any[]): Readable<any> {
   switch (type) {
     case 'animationFrame':
       return animationFrame();

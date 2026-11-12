@@ -1,6 +1,6 @@
 import { DONE } from "../atoms";
 import { normalizeError } from "../atoms/atom";
-import type { Atom } from "../atoms/atom";
+import type { Readable } from "../atoms/atom";
 
 /**
  * Shared queue item structure used across all async iterator implementations
@@ -251,11 +251,11 @@ export function pushError<T>(
  * helpers with numbered suffixes in the FESM bundle.
  */
 
-export function isAtomLike(value: unknown): value is Atom<any> {
+export function isAtomLike(value: unknown): value is Readable<any> {
   return value != null && (value as any).type === "atom";
 }
 
-export function isAtom(value: unknown): value is Atom<any> {
+export function isAtom(value: unknown): value is Readable<any> {
   return value !== null && typeof value === "object" && (value as any).type === "atom";
 }
 

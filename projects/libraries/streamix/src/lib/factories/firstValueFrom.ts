@@ -1,4 +1,4 @@
-import { iterate, type Atom } from "../atoms";
+import { iterate, type Readable } from "../atoms";
 import { isAtomLike } from "../utils/helpers";
 
 /**
@@ -12,7 +12,7 @@ import { isAtomLike } from "../utils/helpers";
  * @param source The source stream or atom to listen to.
  * @returns A promise that resolves with the first value from the source or rejects on error or completion without a value.
  */
-export function firstValueFrom<T = any>(source: Atom<T> | AsyncIterable<T>): Promise<T> {
+export function firstValueFrom<T = any>(source: Readable<T> | AsyncIterable<T>): Promise<T> {
   const iterator = isAtomLike(source)
     ? iterate(source)[Symbol.asyncIterator]()
     : (source as AsyncIterable<T>)[Symbol.asyncIterator]();

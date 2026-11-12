@@ -1,5 +1,5 @@
 import type {
-  Atom,
+  Readable,
   DependencySource,
   Writable,
 } from '@epikodelabs/streamix';
@@ -18,6 +18,6 @@ export function write<T>(source: Writable<T>, value: T): void {
 }
 
 /** Marks an atom reference intended to cross a component boundary. */
-export function atomRef<T extends Atom<any>>(source: T): T {
+export function atomRef<T extends Readable<any>>(source: T): T {
   return source;
 }

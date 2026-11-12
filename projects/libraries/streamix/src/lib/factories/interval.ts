@@ -1,4 +1,4 @@
-import type { Atom } from '../atoms/atom';
+import type { Readable } from '../atoms/atom';
 import { timer } from './timer';
 
 /**
@@ -15,8 +15,8 @@ import { timer } from './timer';
  * first tick arrives after `intervalMs`.
  *
  * @param intervalMs The time in milliseconds between each emission.
- * @returns {Atom<number >} An atom that emits incrementing numbers (0, 1, 2, ...).
+ * @returns {Readable<number >} An atom that emits incrementing numbers (0, 1, 2, ...).
  */
-export function interval(intervalMs: number): Atom<number > {
+export function interval(intervalMs: number): Readable<number > {
   return timer(0, intervalMs);
 }

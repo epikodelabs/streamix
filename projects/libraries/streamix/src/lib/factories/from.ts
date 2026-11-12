@@ -1,5 +1,5 @@
 import { flow, isPromiseLike, PipeInput, toAsyncIterable, type MaybePromise } from "../atoms";
-import type { Atom } from "../atoms/atom";
+import type { Readable } from "../atoms/atom";
 import { normalizeError } from "../atoms";
 import { isAtomLike, isAsyncIterable, isIterable } from "../utils/helpers";
 
@@ -9,7 +9,7 @@ import { isAtomLike, isAsyncIterable, isIterable } from "../utils/helpers";
  */
 export function from<R = any>(
   value: PipeInput<R> | ((signal?: AbortSignal) => MaybePromise<R>)
-): Atom<R> {
+): Readable<R> {
   if (isAtomLike(value)) {
     return value;
   }

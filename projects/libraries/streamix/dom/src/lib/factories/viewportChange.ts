@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the visual viewport.
@@ -24,9 +24,9 @@ export type ViewportState = {
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Atom<ViewportState>}
+ * @returns {Readable<ViewportState>}
  */
-export function viewportChange(): Atom<ViewportState> {
+export function viewportChange(): Readable<ViewportState> {
   return fromPush<ViewportState>((sink) => {
     let cleaned = false;
     let target: VisualViewport | Window | null = null;

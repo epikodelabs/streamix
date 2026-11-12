@@ -2,7 +2,7 @@ import {
   atom,
   isPromiseLike,
   NO_INITIAL_VALUE,
-  type Atom,
+  type Readable,
   type MaybePromise,
   type Writable,
 } from '../atoms';
@@ -63,7 +63,7 @@ type Session<T> = {
 };
 
 /**
- * Adapts an externally pushed event source to a shared Streamix Atom.
+ * Adapts an externally pushed event source to a shared Streamix Readable.
  *
  * Connection is lazy and shared among callback subscribers and one active async
  * iterator. The source disconnects when the last consumer leaves. Reconnecting
@@ -80,7 +80,7 @@ type Session<T> = {
  * This implementation intentionally supports one active async iterator, matching
  * the existing Streamix shared-source contract. Callback subscribers multicast.
  */
-export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}): Atom<T> {
+export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}): Readable<T> {
   const mode = options.mode ?? 'discrete';
   const analog = mode === 'analog';
   const capacity = options.capacity ?? (analog ? 1 : 16);

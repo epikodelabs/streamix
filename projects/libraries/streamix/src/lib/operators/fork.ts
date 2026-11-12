@@ -1,7 +1,7 @@
 import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection-hooks';
 import { SerialInnerExecution } from '../runtime/serial-inner-execution';
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
-import type { Atom } from "../atoms/atom";
+import type { Readable } from "../atoms/atom";
 import { from } from '../factories';
 import { normalizeError } from "../atoms";
 
@@ -11,7 +11,7 @@ import { normalizeError } from "../atoms";
  * TypeScript infers the emitted element type rather than the wrapper type.
  */
 type ForkHandlerResult<R> =
-  | Atom<R>
+  | Readable<R>
   | AsyncIterable<R>
   | Iterable<R>
   | MaybePromise<R>;
@@ -40,7 +40,7 @@ export interface ForkOption<T = any, R = any> {
    * Handler function called for values that match the predicate.
    *
    * Can return:
-   * - an {@link Atom<R>}
+   * - an {@link Readable<R>}
    * - an {@link AsyncIterable<R>}
    * - an {@link Iterable<R>} (including arrays)
    * - a {@link MaybePromise<R>}

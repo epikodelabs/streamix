@@ -1,12 +1,12 @@
-import { flow, type Atom } from '../atoms/atom';
+import { flow, type Readable } from '../atoms/atom';
 
 /**
  * Creates an empty atom that emits no values and completes immediately.
  *
  * @template T The type of the atom's values (will never be emitted).
- * @returns {Atom<T>} An empty atom.
+ * @returns {Readable<T>} An empty atom.
  */
-export const empty = <T = any>(): Atom<T> => {
+export const empty = <T = any>(): Readable<T> => {
   return flow<T>(async function* () {});
 };
 

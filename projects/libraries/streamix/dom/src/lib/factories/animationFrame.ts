@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the time delta (in milliseconds) between
@@ -14,9 +14,9 @@ import { fromPush, type Atom } from "@epikodelabs/streamix";
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Atom<number>} An atom emitting frame-to-frame time deltas.
+ * @returns {Readable<number>} An atom emitting frame-to-frame time deltas.
  */
-export function animationFrame(): Atom<number> {
+export function animationFrame(): Readable<number> {
   return fromPush<number>((sink) => {
     let cleaned = false;
     // Declared before the SSR guard: `cleanup` closes over these bindings, so

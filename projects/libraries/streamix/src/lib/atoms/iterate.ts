@@ -1,4 +1,4 @@
-import type { Atom } from "./atom";
+import type { Readable } from "./atom";
 import { ANALOG_DELIVERY } from "./delivery";
 import type { MaybePromise } from "./operator";
 
@@ -25,7 +25,7 @@ import type { MaybePromise } from "./operator";
  */
 export interface IterateOptions {
   /**
-   * Whether an Atom's current value should be delivered when iteration starts.
+   * Whether an Readable's current value should be delivered when iteration starts.
    * Defaults to true. Internal adapters can disable this when they already
    * captured the same current value and only need future emissions.
    */
@@ -33,14 +33,14 @@ export interface IterateOptions {
 }
 
 export function iterate<T>(
-  source: Atom<T> | AsyncIterable<T>,
+  source: Readable<T> | AsyncIterable<T>,
   options?: IterateOptions,
 ): AsyncIterableIterator<T> {
   if (!("type" in source) || (source as any).type !== "atom") {
     return source as AsyncIterableIterator<T>;
   }
 
-  const atom = source as Atom<T>;
+  const atom = source as Readable<T>;
   const conflate = (atom as any)[ANALOG_DELIVERY] === true;
 
   let initialized = false;

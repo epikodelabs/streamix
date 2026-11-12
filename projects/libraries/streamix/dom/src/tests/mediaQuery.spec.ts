@@ -1,4 +1,4 @@
-import type { Atom } from '@epikodelabs/streamix';
+import type { Readable } from '@epikodelabs/streamix';
 import { on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
@@ -33,7 +33,7 @@ idescribe('onMediaQuery', () => {
   });
 
   it('should emit initial value immediately', async () => {
-    const stream: Atom<boolean> = on('mediaQuery', '(min-width: 600px)');
+    const stream: Readable<boolean> = on('mediaQuery', '(min-width: 600px)');
     const callback = jasmine.createSpy('callback');
 
     stream.subscribe(callback);
@@ -46,7 +46,7 @@ idescribe('onMediaQuery', () => {
 
   it('should call callback on media query change', async () => {
     const query = '(min-width: 600px)';
-    const stream: Atom<boolean> = on('mediaQuery', query);
+    const stream: Readable<boolean> = on('mediaQuery', query);
     const callback = jasmine.createSpy('callback');
     stream.subscribe(callback);
 
@@ -70,7 +70,7 @@ idescribe('onMediaQuery', () => {
 
   it('should clean up listener on unsubscribe', async () => {
     const query = '(min-width: 600px)';
-    const stream: Atom<boolean> = on('mediaQuery', query);
+    const stream: Readable<boolean> = on('mediaQuery', query);
     const callback = jasmine.createSpy('callback');
 
     const unsubscribe = stream.subscribe(callback);
@@ -93,7 +93,7 @@ idescribe('onMediaQuery', () => {
     (window as any).matchMedia = undefined;
     spyOn(console, 'warn');
 
-    const stream: Atom<boolean> = on('mediaQuery', '(min-width: 600px)');
+    const stream: Readable<boolean> = on('mediaQuery', '(min-width: 600px)');
     expect(console.warn).toHaveBeenCalledWith('matchMedia is not supported in this environment');
 
     const callback = jasmine.createSpy('callback');
@@ -148,7 +148,7 @@ idescribe('onMediaQuery', () => {
       };
     });
 
-    const stream: Atom<boolean> = on('mediaQuery', query);
+    const stream: Readable<boolean> = on('mediaQuery', query);
     const callback = jasmine.createSpy('callback');
     const unsubscribe = stream.subscribe(callback);
 
@@ -179,7 +179,7 @@ idescribe('onMediaQuery', () => {
       };
     });
 
-    const stream: Atom<boolean> = on('mediaQuery', query);
+    const stream: Readable<boolean> = on('mediaQuery', query);
     const cb1 = jasmine.createSpy('cb1');
     const cb2 = jasmine.createSpy('cb2');
 

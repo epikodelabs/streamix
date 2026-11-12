@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /** Native location updates and recoverable failures, without a placeholder fix. */
 export type GeolocationState =
@@ -12,7 +12,7 @@ export type GeolocationState =
  * context and permission to use geolocation. SSR/unsupported APIs stay silent.
  * Errors are emitted as state, allowing a later successful fix to recover.
  */
-export function geolocation(options?: PositionOptions): Atom<GeolocationState> {
+export function geolocation(options?: PositionOptions): Readable<GeolocationState> {
   return fromPush<GeolocationState>((sink) => {
     const source = typeof navigator !== "undefined" ? navigator.geolocation : undefined;
     if (!source || typeof source.watchPosition !== "function") return () => {};

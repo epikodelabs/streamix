@@ -1,4 +1,4 @@
-import { flow, type Atom } from '../atoms/atom';
+import { flow, type Readable } from '../atoms/atom';
 
 /**
  * Creates an atom that emits a single value and then completes.
@@ -10,9 +10,9 @@ import { flow, type Atom } from '../atoms/atom';
  *
  * @template T The type of the value to be emitted.
  * @param value The single value to emit.
- * @returns {Atom<T>} A new atom that emits the value and then completes.
+ * @returns {Readable<T>} A new atom that emits the value and then completes.
  */
-export function of<T = any>(value: T): Atom<T> {
+export function of<T = any>(value: T): Readable<T> {
   return flow<T>(async function* () {
     yield value;
   });

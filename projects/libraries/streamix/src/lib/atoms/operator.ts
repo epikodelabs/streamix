@@ -2,7 +2,7 @@ import { __streamixOperatorExecution } from '../runtime/introspection-hooks';
 import { captureOrigin } from '../runtime/origin';
 import { trackOperatorExecution } from "../runtime/introspection-hooks";
 import { AsyncPushable, createAsyncPushable } from "../utils/pushable";
-import { normalizeError, type Atom } from "./atom";
+import { normalizeError, type Readable } from "./atom";
 
 /**
  * Represents a value that can either be a synchronous return or a promise that
@@ -259,12 +259,12 @@ export function createPushOperator<T, R = T>(
  * @template Ops The tuple of operators to apply.
  */
 export type PipeResult<T, Ops extends readonly Operator<any, any>[]> =
-  Ops extends [] ? Atom<T> :
+  Ops extends [] ? Readable<T> :
   Ops extends [Operator<T, infer A>, ...infer Rest]
     ? Rest extends Operator<any, any>[]
       ? PipeResult<A, Rest>
-      : Atom<any>
-    : Atom<any>;
+      : Readable<any>
+    : Readable<any>;
 
 /**
  * A type representing a chain of stream operators.

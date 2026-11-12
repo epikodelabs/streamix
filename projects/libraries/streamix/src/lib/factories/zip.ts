@@ -1,5 +1,5 @@
 import { normalizeError } from '../atoms';
-import { flow, type Atom } from '../atoms/atom';
+import { flow, type Readable } from '../atoms/atom';
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 import { createAsyncCoordinator } from '../utils';
 
@@ -10,11 +10,11 @@ import { createAsyncCoordinator } from '../utils';
  *
  * @template T
  * @param sources - The input atoms, streams, or values (including promises) to zip.
- * @returns {Atom<T>} An atom emitting arrays of values from each input.
+ * @returns {Readable<T>} An atom emitting arrays of values from each input.
  */
 export function zip<T extends readonly unknown[] = any[]>(
   ...sources: { [K in keyof T]: PipeInput<T[K]> }
-): Atom<T> {
+): Readable<T> {
   return flow<T>(async function* (): AsyncGenerator<T, void, unknown> {
     if (sources.length === 0) return;
 

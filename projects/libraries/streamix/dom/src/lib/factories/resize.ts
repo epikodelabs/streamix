@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the dimensions of a given DOM element
@@ -16,11 +16,11 @@ import { fromPush, type Atom } from "@epikodelabs/streamix";
  * - Fully compatible with async iteration.
  *
  * @param element The DOM element to observe.
- * @returns {Atom<{ width: number; height: number }>}
+ * @returns {Readable<{ width: number; height: number }>}
  */
 export function resize(
   element: HTMLElement
-): Atom<{ width: number; height: number }> {
+): Readable<{ width: number; height: number }> {
   return fromPush<{ width: number; height: number }>((sink) => {
     let cleaned = false;
     let resolvedElement: HTMLElement | null = null;

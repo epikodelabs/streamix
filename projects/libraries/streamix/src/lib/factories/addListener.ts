@@ -1,4 +1,4 @@
-import type { Atom } from "../atoms/atom";
+import type { Readable } from "../atoms/atom";
 import { fromPush } from "./fromPush";
 
 /**
@@ -14,7 +14,7 @@ export function addListener<T extends Event = Event>(
   target: EventTarget,
   event: string,
   options?: AddEventListenerOptions | boolean
-): Atom<T> {
+): Readable<T> {
   return fromPush<T>((sink) => {
     let cleaned = false;
 

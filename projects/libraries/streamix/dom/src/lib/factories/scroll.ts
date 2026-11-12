@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /** Scroll offsets in CSS pixels, preserving fractional and negative values. */
 export type ScrollPosition = { x: number; y: number };
@@ -10,7 +10,7 @@ export type ScrollPosition = { x: number; y: number };
  * Pending snapshots use analog delivery; descendants' scrolls are not observed.
  * Safe to construct and consume without a browser.
  */
-export function scroll(target?: Window | Document | Element): Atom<ScrollPosition> {
+export function scroll(target?: Window | Document | Element): Readable<ScrollPosition> {
   return fromPush<ScrollPosition>((sink) => {
     const source = target ?? (typeof window !== "undefined" ? window : undefined);
     if (!source) return () => {};
