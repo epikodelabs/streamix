@@ -1,29 +1,28 @@
-import { __streamixScopeMember, __streamixDebugDispose } from '../runtime/introspection-hooks';
+import { __streamixDebugDispose, __streamixScopeMember } from '../runtime/introspection-hooks';
 import { isAtom, isAtomLike } from "../utils/helpers";
 import {
-  atom,
-  derived,
-  getCurrentFormulaContext,
-  NO_INITIAL_VALUE,
-  normalizeError,
-  onAtomDirtyChange,
-  onAtomEmit,
-  trackDependencies,
-  Writable,
-  type DependencySource,
-  type Readable,
-  type ReadonlyAtom,
+    atom,
+    derived,
+    getCurrentFormulaContext,
+    NO_INITIAL_VALUE,
+    normalizeError,
+    onAtomDirtyChange,
+    onAtomEmit,
+    trackDependencies,
+    Writable,
+    type DependencySource,
+    type Readable
 } from "./atom";
 import {
-  isAtomExpr,
-  isDerivedExpr,
-  isExprMarker as isExprMarkerBase,
-  isFlowExpr,
-  isPipeExpr,
-  type AtomExpr,
-  type DerivedExpr,
-  type FlowExpr,
-  type PipeExpr,
+    isAtomExpr,
+    isDerivedExpr,
+    isExprMarker as isExprMarkerBase,
+    isFlowExpr,
+    isPipeExpr,
+    type AtomExpr,
+    type DerivedExpr,
+    type FlowExpr,
+    type PipeExpr,
 } from "./expr";
 import { getGlobalScope, isScope, type RootScope } from "./root";
 import type { Subscription } from "./subscription";
@@ -266,13 +265,13 @@ export type AtomOf<T> = T extends Writable<infer U> ? Writable<U> : T extends Re
 /**
  * Extracts the runtime value type from an atom.
  */
-export type AtomValueOf<T> = T extends Readable<infer U> ? U : T extends ReadonlyAtom<infer U> ? U : never;
+export type AtomValueOf<T> = T extends Readable<infer U> ? U : T extends Readable<infer U> ? U : never;
 
 type ScopeAtomOf<T> =
   T extends Scope<infer U> ? ScopeAtoms<U>
   : T extends Writable<infer U> ? Writable<U>
   : T extends Readable<infer U> ? Readable<U>
-  : T extends ReadonlyAtom<infer U> ? ReadonlyAtom<U>
+  : T extends Readable<infer U> ? Readable<U>
   : never;
 
 /**
@@ -368,8 +367,8 @@ type ScopeSetupCallback<TSelf, TScope, TResult extends ScopeSetupResult = ScopeS
  * Built-in atoms that every scope owns in addition to user-defined state.
  */
 export type ScopeReservedAtoms = {
-  loading: ReadonlyAtom<boolean>;
-  dirty: ReadonlyAtom<boolean>;
+  loading: Readable<boolean>;
+  dirty: Readable<boolean>;
 };
 
 type IsReadonlyScopeConfigValue<T> =

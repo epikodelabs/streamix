@@ -1,12 +1,12 @@
-import { internalRuntime, type ExecutionSpan, type FlowExit } from "../runtime/runtime";
 import { isRuntimeInstrumentationEnabled } from "../runtime/instrumentation";
 import { captureOrigin } from "../runtime/origin";
-import { DefaultScheduler, getScheduler, setScheduler, isTransactionActive, finalizeAfterTransaction, type Scheduler } from "../runtime/scheduling";
-export type { Scheduler } from "../runtime/scheduling";
+import { internalRuntime, type ExecutionSpan, type FlowExit } from "../runtime/runtime";
+import { DefaultScheduler, finalizeAfterTransaction, getScheduler, isTransactionActive, setScheduler, type Scheduler } from "../runtime/scheduling";
 import { createAsyncCoordinator, getIterator, raceNext, type AsyncCoordinator } from "../utils/coordinator";
 import { isAtom } from "../utils/helpers";
 import { iterate } from "./iterate";
 import { DONE, isPromiseLike, NEXT, type MaybePromise } from "./operator";
+export type { Scheduler } from "../runtime/scheduling";
 
 import { ANALOG_DELIVERY } from "./delivery";
 import {
@@ -102,25 +102,6 @@ export interface Readable<T = any> {
 }
 
 /**
- * Read-only atom projection that preserves observation APIs while hiding
- * mutation and disposal controls.
- */
-export interface ReadonlyAtom<T = any> {
-  readonly type: "atom";
-  readonly name?: string;
-  readonly value: T;
-  readonly safeValue: T;
-  readonly previous: T;
-  readonly disposed: boolean;
-  readonly dirty: boolean;
-  readonly error?: any;
-  readonly subscriberCount?: number;
-  subscribe(callback?: (current: T, previous: T) => MaybePromise): Subscription;
-  onError(handler: (error: any) => void): Subscription;
-  [Symbol.asyncIterator](): AsyncIterator<T>;
-}
-
-/**
  * Minimal reactive dependency contract accepted by derived formulas.
  *
  * This intentionally supports foreign/read-only atom-like sources that expose
@@ -202,7 +183,7 @@ interface AtomRuntimeMeta {
   emitHandlers: Set<() => void>;
   disposeHandlers: Set<DisposeHandler>;
   startOnEmitObserve?: () => void;
-  readableView?: ReadonlyAtom<any>;
+  readableView?: Readable<any>;
 }
 
 /** Engine Interface */
@@ -402,12 +383,12 @@ function tryGetAtomRuntimeMeta(atom: unknown): AtomRuntimeMeta | null {
   return (atom as InternalAtomContainer)[META] ?? null;
 }
 
-export function asReadable<A>(atom: Readable<A>): ReadonlyAtom<A> {
+export function asReadable<A>(atom: Readable<A>): Readable<A> {
   const meta = getAtomRuntimeMeta(atom);
-  const existing = meta.readableView as ReadonlyAtom<A> | undefined;
+  const existing = meta.readableView as Readable<A> | undefined;
   if (existing) return existing;
 
-  const view: ReadonlyAtom<A> = {
+  const view: Readable<A> = {
     get type() { return atom.type; },
     get name() { return atom.name; },
     get value() { return atom.value; },
@@ -419,6 +400,7 @@ export function asReadable<A>(atom: Readable<A>): ReadonlyAtom<A> {
     get subscriberCount() { return atom.subscriberCount; },
     subscribe: atom.subscribe.bind(atom),
     onError: atom.onError.bind(atom),
+    dispose: atom.dispose.bind(atom),
     [Symbol.asyncIterator]: atom[Symbol.asyncIterator].bind(atom),
   };
 
