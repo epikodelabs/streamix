@@ -8,12 +8,12 @@ Atoms are **streamix**'s primitive for live, reactive values. The `atom()`, `der
 
 An atom is a reactive value that you can read from synchronously, subscribe to for updates, consume as an async iterable, or pipe through operators.
 
-### The Core Atom Interface
+### The Core Readable Interface
 
-Every atom—whether created via `atom`, `derived`, `flow`, or `pipe`—implements this interface:
+Every value produced by `atom`, `derived`, `flow`, or `pipe` is a `Readable<T>`:
 
 ```ts
-interface Atom<T> {
+interface Readable<T> {
   readonly type: "atom";
   readonly value: T;         // Current value (throws in an error state or after disposal)
   readonly safeValue: T;     // Current value, or the last retained value while errored
@@ -30,7 +30,7 @@ interface Atom<T> {
 
 `value` throws while the atom is in an error state; `safeValue` never does. Subscriptions can be released by calling the returned `Subscription`, and `dispose()` stops the atom and releases every subscriber and resource it owns.
 
-> **Note:** Writable atoms extend this base interface with mutation methods: `.next(value)`, its alias `.set(value)`, `.fail(error, { terminate?: boolean })` to enter an error state, and optional `.recover()` / `.clearError()` to leave a recoverable error state.
+> **Note:** `derived()` and `flow()` return `Readable<T>`. `Writable<T>` extends `Readable<T>` with mutation methods: `.next(value)`, its alias `.set(value)`, `.fail(error, { terminate?: boolean })` to enter an error state, and optional `.recover()` / `.clearError()` to leave a recoverable error state. `atom()` returns `Atom<T>`, which is both `Readable<T>` and `Writable<T>`.
 
 Subscriptions are **stateful**. If a non-disposed atom already has a current value, `subscribe()` synchronously delivers that value once before future emissions. This applies to writable atoms, derived atoms, and flows. A disposed writable, derived, or flow atom returns a no-op subscription instead. An atom or flow that has not produced a value yet stays silent until its first real emission; no placeholder `undefined` is invented. Explicit state is still state, so `atom(undefined)` does replay `undefined`.
 
