@@ -1,5 +1,5 @@
 import { isPromiseLike, type MaybePromise } from '../atoms';
-import { flow, type Atom } from '../atoms/atom';
+import { flow, type Readable } from '../atoms/atom';
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
@@ -12,13 +12,13 @@ import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
  * @param condition A function that returns a boolean to determine which stream to use. It is called when the iif atom is subscribed to.
  * @param trueStream The source to use if the condition is `true`.
  * @param falseStream The source to use if the condition is `false`.
- * @returns {Atom<T>} A new atom that emits values from either `trueStream` or `falseStream` based on the condition.
+ * @returns {Readable<T>} A new atom that emits values from either `trueStream` or `falseStream` based on the condition.
  */
 export function iif<T = any>(
   condition: () => MaybePromise<boolean>,
   trueStream: PipeInput<T>,
   falseStream: PipeInput<T>
-): Atom<T> {
+): Readable<T> {
   return flow<T>(async function* generator(): AsyncGenerator<T, void, unknown> {
     // Evaluate condition lazily when the stream starts
     const conditionResult = condition();

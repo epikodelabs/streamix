@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the current network state.
@@ -28,9 +28,9 @@ export type NetworkState = {
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Atom<NetworkState>}
+ * @returns {Readable<NetworkState>}
  */
-export function network(): Atom<NetworkState> {
+export function network(): Readable<NetworkState> {
   return fromPush<NetworkState>((sink) => {
     let cleaned = false;
     let connection: any = null;

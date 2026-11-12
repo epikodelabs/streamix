@@ -1,4 +1,4 @@
-import { atom, derived, NO_INITIAL_VALUE, atomFromIterator } from '../lib/atoms/atom';
+import { atom, derived, NO_INITIAL_VALUE, fromIterator } from '../lib/atoms/atom';
 
 describe('runtime value availability and dynamic dependencies', () => {
   it('waits for each required atom without treating undefined as unavailable', () => {
@@ -38,7 +38,7 @@ describe('runtime value availability and dynamic dependencies', () => {
         yield first;
       }
     };
-    const input = atomFromIterator(source);
+    const input = fromIterator(source);
     const doubled = derived(() => input.value * 2);
     expect(doubled.value).toBe(NO_INITIAL_VALUE as any);
     const sub = input.subscribe(() => {});

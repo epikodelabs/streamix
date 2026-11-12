@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `IdleDeadline` objects whenever
@@ -19,9 +19,9 @@ import { fromPush, type Atom } from "@epikodelabs/streamix";
  * - Fully compatible with async iteration.
  *
  * @param timeout Optional timeout (ms) after which idle callback must fire.
- * @returns {Atom<IdleDeadline>} An atom emitting idle deadlines.
+ * @returns {Readable<IdleDeadline>} An atom emitting idle deadlines.
  */
-export function idle(timeout?: number): Atom<IdleDeadline> {
+export function idle(timeout?: number): Readable<IdleDeadline> {
   return fromPush<IdleDeadline>((sink) => {
     let cleaned = false;
     let idleId: number | null = null;

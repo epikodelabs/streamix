@@ -18,7 +18,7 @@ import { SerialInnerExecution } from "../runtime/serial-inner-execution";
  *
  * @template T The type of values emitted by the source stream.
  * @template R The type of values emitted by the produced inner streams.
- * @param project A function that transforms a source value into an {@link Atom | Atom<R>},
+ * @param project A function that transforms a source value into an {@link Readable | Readable<R>},
  * a {@link MaybePromise<R>}, or an array. It receives the source value and a
  * zero-based index of the emission.
  * @returns An {@link Operator} that performs the "exhaust" transformation.

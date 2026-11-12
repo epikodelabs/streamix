@@ -1,4 +1,4 @@
-import { flow, type Atom } from '../atoms/atom';
+import { flow, type Readable } from '../atoms/atom';
 
 /**
  * Creates an atom that emits a sequence of numbers, starting from `start`,
@@ -11,9 +11,9 @@ import { flow, type Atom } from '../atoms/atom';
  * @param start - The first number to emit in the sequence.
  * @param count - The total number of values to emit. Must be a non-negative number.
  * @param step - The amount to increment or decrement the value in each step.
- * @returns {Atom<number >} An atom that emits a sequence of numbers.
+ * @returns {Readable<number >} An atom that emits a sequence of numbers.
  */
-export function range(start: number, count: number, step: number = 1): Atom<number > {
+export function range(start: number, count: number, step: number = 1): Readable<number > {
   return flow<number >(async function* () {
     for (let i = 0; i < count; i++) {
       yield start + i * step;

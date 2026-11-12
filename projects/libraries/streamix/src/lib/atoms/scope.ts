@@ -1,29 +1,28 @@
-import { __streamixScopeMember, __streamixDebugDispose } from '../runtime/introspection-hooks';
+import { __streamixDebugDispose, __streamixScopeMember } from '../runtime/introspection-hooks';
 import { isAtom, isAtomLike } from "../utils/helpers";
 import {
-  atom,
-  derived,
-  getCurrentFormulaContext,
-  NO_INITIAL_VALUE,
-  normalizeError,
-  onAtomDirtyChange,
-  onAtomEmit,
-  trackDependencies,
-  Writable,
-  type Atom,
-  type DependencySource,
-  type Readable,
+    atom,
+    derived,
+    getCurrentFormulaContext,
+    NO_INITIAL_VALUE,
+    normalizeError,
+    onAtomDirtyChange,
+    onAtomEmit,
+    trackDependencies,
+    Writable,
+    type DependencySource,
+    type Readable
 } from "./atom";
 import {
-  isAtomExpr,
-  isDerivedExpr,
-  isExprMarker as isExprMarkerBase,
-  isFlowExpr,
-  isPipeExpr,
-  type AtomExpr,
-  type DerivedExpr,
-  type FlowExpr,
-  type PipeExpr,
+    isAtomExpr,
+    isDerivedExpr,
+    isExprMarker as isExprMarkerBase,
+    isFlowExpr,
+    isPipeExpr,
+    type AtomExpr,
+    type DerivedExpr,
+    type FlowExpr,
+    type PipeExpr,
 } from "./expr";
 import { getGlobalScope, isScope, type RootScope } from "./root";
 import type { Subscription } from "./subscription";
@@ -48,7 +47,7 @@ const RESERVED_ATOM_KEYS = new Set<PropertyKey>(["loading", "dirty"]);
 
 interface DynamicExpr<T = any, Self = any> {
   [DYNAMIC_EXPR]: true;
-  fn: (self: Self, atoms?: any) => Atom<T> | T;
+  fn: (self: Self, atoms?: any) => Readable<T> | T;
 }
 
 type MethodCallback<TSelf = any, TArgs extends any[] = any[], TResult = any> = (self: TSelf, ...args: TArgs) => TResult;
@@ -63,7 +62,7 @@ function isDynamicExpr(value: any): value is DynamicExpr {
   return value?. [DYNAMIC_EXPR] === true;
 }
 
-function dynamicExpr<T, Self = any>(fn: (self: Self, atoms?: any) => Atom<T> | T): DynamicExpr<T, Self> {
+function dynamicExpr<T, Self = any>(fn: (self: Self, atoms?: any) => Readable<T> | T): DynamicExpr<T, Self> {
   return { [DYNAMIC_EXPR]: true, fn };
 }
 
@@ -84,11 +83,11 @@ function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | Pi
   return isExprMarkerBase(value) || isDynamicExpr(value);
 }
 
-function unwrapDynamicValue<T>(value: T | Atom<T>): T {
+function unwrapDynamicValue<T>(value: T | Readable<T>): T {
   return isAtom(value) ? value.value : value as T;
 }
 
-type ScopeAtomReader = <T>(atom: Atom<T>) => T;
+type ScopeAtomReader = <T>(atom: Readable<T>) => T;
 
 /**
  * Reads an atom's current value. When called while evaluating a derived scope
@@ -110,8 +109,8 @@ export function set<T>(target: Writable<T>, value: T): void {
   target.next(value);
 }
 
-function isRuntimeAtom(value: unknown): value is Atom<any> {
-  return isAtom(value) && typeof (value as Atom<any>).dispose === "function";
+function isRuntimeAtom(value: unknown): value is Readable<any> {
+  return isAtom(value) && typeof (value as Readable<any>).dispose === "function";
 }
 
 function createTrackedScope(scopeRef: Scope, reader: ScopeAtomReader): any {
@@ -167,7 +166,7 @@ function evaluateExprMarker(
   marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr,
   scopeRef: Scope,
   atoms?: any,
-): Atom<any> {
+): Readable<any> {
   if (isAtomExpr(marker)) {
     return atom(marker.initialValue === undefined ? NO_INITIAL_VALUE : marker.initialValue, marker.options);
   }
@@ -178,8 +177,8 @@ function evaluateExprMarker(
   if (isFlowExpr(marker)) return marker.fn(scopeRef as any, atoms);
   if (isDynamicExpr(marker)) {
     const initialDependencies = new Set<DependencySource<any>>();
-    const initialScope = createTrackedScope(scopeRef, <T>(atomInstance: Atom<T>) => {
-      initialDependencies.add(atomInstance as Atom<any>);
+    const initialScope = createTrackedScope(scopeRef, <T>(atomInstance: Readable<T>) => {
+      initialDependencies.add(atomInstance as Readable<any>);
       // Scope construction may seed from a flow that has not emitted yet.
       // The derived node installed below still tracks its first emission.
       return atomInstance.safeValue;
@@ -246,7 +245,7 @@ export type ScopeInstance<T> = T extends Record<string, any>
   ? Simplify<{
       [K in keyof T]:
         T[K] extends Scope<infer U> ? ScopeInstance<U>
-        : T[K] extends Atom<infer U> ? U
+        : T[K] extends Readable<infer U> ? U
         : T[K] extends Writable<infer U> ? U
         : T[K];
     }>
@@ -256,27 +255,27 @@ export type ScopeInstance<T> = T extends Record<string, any>
  * Converts atom-backed scope members into their public value shape.
  */
 export type UnwrapScopeValues<T> = {
-  [K in keyof T]: T[K] extends Atom<infer U> ? WidenValue<U> : T[K];
+  [K in keyof T]: T[K] extends Readable<infer U> ? WidenValue<U> : T[K];
 };
 
 /**
  * Resolves the atom type associated with a scope field.
  */
-export type AtomOf<T> = T extends Writable<infer U> ? Writable<U> : T extends Atom<infer U> ? Atom<U> : never;
+export type AtomOf<T> = T extends Writable<infer U> ? Writable<U> : T extends Readable<infer U> ? Readable<U> : never;
 /**
  * Extracts the runtime value type from an atom.
  */
-export type AtomValueOf<T> = T extends Atom<infer U> ? U : T extends Readable<infer U> ? U : never;
+export type AtomValueOf<T> = T extends Readable<infer U> ? U : T extends Readable<infer U> ? U : never;
 
 type ScopeAtomOf<T> =
   T extends Scope<infer U> ? ScopeAtoms<U>
   : T extends Writable<infer U> ? Writable<U>
-  : T extends Atom<infer U> ? Atom<U>
+  : T extends Readable<infer U> ? Readable<U>
   : T extends Readable<infer U> ? Readable<U>
   : never;
 
 /**
- * Atom graph available to scope expressions. Scope properties are the atoms;
+ * Readable graph available to scope expressions. Scope properties are the atoms;
  * nested scopes retain their own atom graph.
  */
 export type ScopeAtoms<T> = { [K in keyof T]: ScopeAtomOf<T[K]> } &
@@ -285,9 +284,9 @@ export type ScopeAtoms<T> = { [K in keyof T]: ScopeAtomOf<T[K]> } &
 type DefinedScopeAtoms<Shape extends Record<string, any>> = {
   [K in keyof Shape]: Shape[K] extends Record<string, any>
     ? DefinedScopeAtoms<Shape[K]>
-    : Atom<Shape[K]>;
+    : Readable<Shape[K]>;
 } & (<K extends keyof Shape>(key: K) =>
-  Shape[K] extends Record<string, any> ? DefinedScopeAtoms<Shape[K]> : Atom<Shape[K]>);
+  Shape[K] extends Record<string, any> ? DefinedScopeAtoms<Shape[K]> : Readable<Shape[K]>);
 
 type DefinedValue<Top extends Record<string, any>, T> =
   | T
@@ -296,18 +295,18 @@ type DefinedValue<Top extends Record<string, any>, T> =
   | DerivedExpr<T, Top>
   | PipeExpr<T, Top>
   | FlowExpr<T, Top>
-  | ((self: Top, atoms: DefinedScopeAtoms<Top>) => T | Atom<T>);
+  | ((self: Top, atoms: DefinedScopeAtoms<Top>) => T | Readable<T>);
 
 type ScopeValue<T> =
   | T extends ScopeReturn<any> ? T
-  : T extends Atom<any> ? T
+  : T extends Readable<any> ? T
   : T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
   : T extends Method<infer TFn> ? MethodReturn<TFn>
   : T extends (...args: any[]) => any ? T
   : T extends readonly any[] ? Writable<T>
-  : T extends DerivedExpr<infer U, any> ? Atom<U>
-  : T extends PipeExpr<infer U, any> ? Atom<U>
-  : T extends FlowExpr<infer U, any> ? Atom<U>
+  : T extends DerivedExpr<infer U, any> ? Readable<U>
+  : T extends PipeExpr<infer U, any> ? Readable<U>
+  : T extends FlowExpr<infer U, any> ? Readable<U>
   : T extends AtomExpr<infer U> ? Writable<U>
   : T extends Record<string, any> ? ScopeReturn<ScopeOf<T>>
   : Writable<T>;
@@ -318,23 +317,23 @@ type ScopeResolvedFunctionValue<TResult> =
   Awaited<TResult> extends ScopeReturn<any> ? Awaited<TResult>
   : Awaited<TResult> extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
   : Awaited<TResult> extends Writable<any> ? Awaited<TResult>
-  : Awaited<TResult> extends Atom<any> ? Awaited<TResult>
+  : Awaited<TResult> extends Readable<any> ? Awaited<TResult>
   : Awaited<TResult> extends AtomExpr<infer U> ? Writable<WidenValue<U>>
-  : Awaited<TResult> extends DerivedExpr<infer U, any> ? Atom<U>
-  : Awaited<TResult> extends PipeExpr<infer U, any> ? Atom<U>
-  : Awaited<TResult> extends FlowExpr<infer U, any> ? Atom<U>
-  : Atom<WidenValue<Awaited<TResult>>>;
+  : Awaited<TResult> extends DerivedExpr<infer U, any> ? Readable<U>
+  : Awaited<TResult> extends PipeExpr<infer U, any> ? Readable<U>
+  : Awaited<TResult> extends FlowExpr<infer U, any> ? Readable<U>
+  : Readable<WidenValue<Awaited<TResult>>>;
 
 type ScopeResolvedValue<T> =
   T extends ScopeReturn<any> ? T
   : T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
   : T extends Method<infer TFn> ? MethodReturn<TFn>
   : T extends Writable<any> ? T
-  : T extends Atom<any> ? T
+  : T extends Readable<any> ? T
   : T extends AtomExpr<infer U> ? Writable<WidenValue<U>>
-  : T extends DerivedExpr<infer U, any> ? Atom<U>
-  : T extends PipeExpr<infer U, any> ? Atom<U>
-  : T extends FlowExpr<infer U, any> ? Atom<U>
+  : T extends DerivedExpr<infer U, any> ? Readable<U>
+  : T extends PipeExpr<infer U, any> ? Readable<U>
+  : T extends FlowExpr<infer U, any> ? Readable<U>
   : T extends (...args: any[]) => infer TResult ? ScopeResolvedFunctionValue<TResult>
   : T extends readonly any[] ? Writable<WidenValue<T>>
   : T extends Record<string, any> ? ScopeReturnFromDefinition<T>
@@ -347,7 +346,7 @@ export type ScopeOfConfig<T extends Record<string, any>> = { [K in keyof T]: Sco
 /**
  * Converts an atom-backed member into the value shape exposed on the scope proxy.
  */
-export type ScopePublicValue<T> = T extends Atom<infer U> ? WidenValue<U> : T;
+export type ScopePublicValue<T> = T extends Readable<infer U> ? WidenValue<U> : T;
 /**
  * Return type allowed from the optional `scope(..., setup)` callback.
  */
@@ -379,7 +378,7 @@ type IsReadonlyScopeConfigValue<T> =
   : T extends (...args: any[]) => any ? true
   : T extends AtomExpr<any> ? false
   : T extends Writable<any> ? false
-  : T extends Atom<any> ? true
+  : T extends Readable<any> ? true
   : false;
 
 type ReadonlyScopeConfigKeys<T extends Record<string, any>> = {
@@ -397,7 +396,7 @@ type WritableKeysOf<T extends Record<string, any>> = Exclude<keyof T, ReadonlyKe
 type ScopeRuntimeValueFromPublicValue<T, TReadonly extends boolean> =
   T extends Scope<any> ? T
   : T extends (...args: any[]) => any ? T
-  : TReadonly extends true ? Atom<WidenValue<T>> : Writable<WidenValue<T>>;
+  : TReadonly extends true ? Readable<WidenValue<T>> : Writable<WidenValue<T>>;
 type ScopeRuntimeFromPublicShape<T extends Record<string, any>> = Simplify<{
   readonly [K in ReadonlyKeysOf<T>]: ScopeRuntimeValueFromPublicValue<T[K], true>;
 } & {
@@ -464,7 +463,7 @@ export type ScopeReturn<T extends Record<string, any>> = NormalizedScope<T>;
  */
 export type ScopeReturnFromConfig<T extends Record<string, any>> = ConfiguredScope<T>;
 
-type ScopeAtomValue<T> = T extends Atom<infer U> ? U : never;
+type ScopeAtomValue<T> = T extends Readable<infer U> ? U : never;
 
 /**
  * Runtime scope instance.
@@ -473,8 +472,8 @@ type ScopeAtomValue<T> = T extends Atom<infer U> ? U : never;
  * values as properties, and provides lifecycle cleanup through {@link dispose}.
  */
 export interface Scope<T extends Record<string, any> = Record<string, any>> {
-  <A extends Atom<any>>(atom: A): ScopeAtomValue<A>;
-  <A extends Atom<any>[]>(...atoms: A): { [K in keyof A]: ScopeAtomValue<A[K]> };
+  <A extends Readable<any>>(atom: A): ScopeAtomValue<A>;
+  <A extends Readable<any>[]>(...atoms: A): { [K in keyof A]: ScopeAtomValue<A[K]> };
   type: "scope";
   cleanups: Set<() => void>;
   parent: Scope | RootScope | null;
@@ -487,7 +486,7 @@ export interface Scope<T extends Record<string, any> = Record<string, any>> {
   _exports: Set<string | symbol>;
   _disposed: boolean;
   _rawState: Record<string | symbol, any>;
-  _ownedAtoms: Set<Atom<any> | Scope>;
+  _ownedAtoms: Set<Readable<any> | Scope>;
 }
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
@@ -510,8 +509,8 @@ type DefinedInput<Top extends Record<string, any>, Shape extends Record<string, 
 export type ScopeConfig<T extends Record<string, any>> = DefinedInput<T> & ThisType<ScopeReturn<ScopeOf<T>>>;
 
 let currentScope: Scope | null = null;
-const atomScopeRegistry = new WeakMap<Atom<any>, Scope>();
-const emittedAtomsRegistry = new WeakSet<Atom<any>>();
+const atomScopeRegistry = new WeakMap<Readable<any>, Scope>();
+const emittedAtomsRegistry = new WeakSet<Readable<any>>();
 
 /**
  * Returns the scope currently being constructed or evaluated.
@@ -1006,7 +1005,7 @@ export function disposeScope(sc: Scope): void {
 /**
  * Attaches a newly created atom to the current scope for lifecycle and state tracking.
  */
-export function registerWithCurrentScope(atomInstance: Atom<any>): void {
+export function registerWithCurrentScope(atomInstance: Readable<any>): void {
   if (!currentScope) return;
 
   const targetContext = currentScope;
@@ -1043,7 +1042,7 @@ export function registerWithCurrentScope(atomInstance: Atom<any>): void {
 /**
  * Marks an atom as having produced its first value for scope loading bookkeeping.
  */
-export function markAtomAsEmitted(atomInstance: Atom<any>): void {
+export function markAtomAsEmitted(atomInstance: Readable<any>): void {
   if (emittedAtomsRegistry.has(atomInstance)) return;
   emittedAtomsRegistry.add(atomInstance);
 
@@ -1054,12 +1053,12 @@ export function markAtomAsEmitted(atomInstance: Atom<any>): void {
 /**
  * Returns whether an atom has emitted at least once.
  */
-export function hasAtomEmitted(atomInstance: Atom<any>): boolean {
+export function hasAtomEmitted(atomInstance: Readable<any>): boolean {
   return emittedAtomsRegistry.has(atomInstance);
 }
 
 function trackReferencedWritableLoading(scopeRef: Scope): void {
-  const tracked = new Set<Atom<any>>();
+  const tracked = new Set<Readable<any>>();
 
   for (const item of Object.values(scopeRef._rawState)) {
     if (!isAtom(item) || typeof (item as Writable<any>).next !== "function") continue;

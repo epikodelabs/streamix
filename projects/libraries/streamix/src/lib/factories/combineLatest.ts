@@ -1,5 +1,5 @@
 import { normalizeError } from "../atoms";
-import { flow, type Atom } from "../atoms/atom";
+import { flow, type Readable } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 import { createAsyncCoordinator } from "../utils";
 
@@ -14,11 +14,11 @@ import { createAsyncCoordinator } from "../utils";
  *
  * @template {unknown[]} T A tuple type representing the combined values from the sources.
  * @param sources Atoms, streams, or values (including promises) to combine.
- * @returns {Atom<T>} A new atom that emits a tuple of the latest values from all source sources.
+ * @returns {Readable<T>} A new atom that emits a tuple of the latest values from all source sources.
  */
 export function combineLatest<T extends unknown[] = any[]>(
   ...sources: Array<PipeInput<T[number]>>
-): Atom<T> {
+): Readable<T> {
   return flow<T>(async function* () {
     if (sources.length === 0) return;
 

@@ -1,5 +1,5 @@
 import { atom, derived, transaction } from '@epikodelabs/streamix';
-import { atomFromIterator } from '../lib/atoms/atom';
+import { fromIterator } from '../lib/atoms/atom';
 
 describe('runtime graph propagation', () => {
   it('settles each ordinary write synchronously without intermediate diamond values', async () => {
@@ -64,7 +64,7 @@ describe('runtime graph propagation', () => {
     let finish!: () => void;
     const finished = new Promise<void>(resolve => { finish = resolve; });
     let pulls = 0;
-    const source = atomFromIterator<number>({
+    const source = fromIterator<number>({
       [Symbol.asyncIterator]() {
         return {
           next() {

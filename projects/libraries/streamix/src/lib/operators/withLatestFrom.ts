@@ -1,5 +1,5 @@
 import { createPushOperator, isPromiseLike, normalizeError, type Operator } from "../atoms";
-import type { Atom } from '../atoms/atom';
+import type { Readable } from '../atoms/atom';
 import { toAsyncIterable } from '../atoms/pipe';
 import { createAsyncCoordinator } from '../utils';
 import { isAtomLike } from '../utils/helpers';
@@ -12,12 +12,12 @@ type WithLatestScalar<T> = T extends AsyncIterable<any>
   ? never
   : T extends Iterable<any>
   ? never
-  : T extends Atom<any>
+  : T extends Readable<any>
   ? never
   : T;
 
 type WithLatestInput<T> =
-  | Atom<T>
+  | Readable<T>
   | AsyncIterable<T>
   | Iterable<T>
   | Promise<WithLatestInput<T>>

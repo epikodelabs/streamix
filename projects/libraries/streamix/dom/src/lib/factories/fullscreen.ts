@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits fullscreen state changes.
@@ -14,9 +14,9 @@ import { fromPush, type Atom } from "@epikodelabs/streamix";
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Atom<boolean>}
+ * @returns {Readable<boolean>}
  */
-export function fullscreen(): Atom<boolean> {
+export function fullscreen(): Readable<boolean> {
   return fromPush<boolean>((sink) => {
     let cleaned = false;
 

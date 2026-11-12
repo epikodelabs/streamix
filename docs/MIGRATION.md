@@ -66,7 +66,7 @@ What carries over and what changes:
 * **The source can be an atom, a flow, or any async iterable** — not just subjects.
 * **The result is an `Atom`.** You can still `subscribe(...)` and `for await ... of` it, and you additionally get a synchronous `.value` read.
 * **Sources no longer have a `.pipe` method.** Every pipeline starts at the `pipe()` function.
-* **Up to 16 operators keep full type inference**; beyond that the result falls back to `Atom<any>`. Split long chains or pre-group them with `compose()`.
+* **Up to 16 operators keep full type inference**; beyond that the result falls back to `Readable<any>`. Split long chains or pre-group them with `compose()`.
 
 For reusable chains, compose operators once and apply them to any source:
 

@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the current screen orientation,
@@ -12,9 +12,9 @@ import { fromPush, type Atom } from "@epikodelabs/streamix";
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Atom<"portrait" | "landscape">}
+ * @returns {Readable<"portrait" | "landscape">}
  */
-export function orientation(): Atom<"portrait" | "landscape"> {
+export function orientation(): Readable<"portrait" | "landscape"> {
   return fromPush<"portrait" | "landscape">((sink) => {
     let cleaned = false;
     let orientation: ScreenOrientation | null = null;

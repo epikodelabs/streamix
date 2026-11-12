@@ -94,7 +94,7 @@ export function instrumentStreamixSource({ file, checker, sourcePath, enabled }:
       const factory = ts.isCallExpression(initializer) ? imported(initializer.expression) : undefined;
       const kind = ts.isObjectLiteralExpression(initializer) || factory === 'scope' ? 'scope'
         : ['derived', 'derivedExpr'].includes(factory ?? '') || ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer) ? 'derived'
-        : ['flow', 'flowExpr', 'pipe', 'pipeExpr', 'atomFromIterator'].includes(factory ?? '') ? 'flow' : 'atom';
+        : ['flow', 'flowExpr', 'pipe', 'pipeExpr', 'fromIterator'].includes(factory ?? '') ? 'flow' : 'atom';
       result[key] = { kind, name, ...location(property), ...(ts.isObjectLiteralExpression(initializer) ? { members: members(initializer, name) } : {}) };
     }
     return result;
@@ -121,7 +121,7 @@ export function instrumentStreamixSource({ file, checker, sourcePath, enabled }:
         const runtimeKind = discriminator && checker.typeToString(checker.getTypeOfSymbolAtLocation(discriminator, node));
         // A scope is callable and has Function.apply. Ownership hooks return
         // that same scope; do not overwrite its metadata as an operator.
-        const kind = factory === 'scope' || runtimeKind === '"scope"' ? 'scope' : ['pipe', 'flow', 'atomFromIterator'].includes(factory) ? 'flow'
+        const kind = factory === 'scope' || runtimeKind === '"scope"' ? 'scope' : ['pipe', 'flow', 'fromIterator'].includes(factory) ? 'flow'
           : factory === 'derived' ? 'derived' : factory === 'atom' ? 'atom'
           : type.getProperty('apply') ? 'operator' : type.getProperty('subscribe') && type.getProperty('value') ? 'source' : undefined;
         if (kind) {

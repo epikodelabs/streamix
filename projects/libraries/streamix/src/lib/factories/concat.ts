@@ -1,4 +1,4 @@
-import { flow, type Atom } from "../atoms/atom";
+import { flow, type Readable } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
@@ -13,14 +13,14 @@ import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
  *
  * @template T Value type.
  * @param sources Atoms, streams, or values (including promises) to concatenate.
- * @returns {Atom<T>} A new atom that emits values from all input sources in order.
+ * @returns {Readable<T>} A new atom that emits values from all input sources in order.
  *
  * @example
  * const s = concat(from([1, 2]), from([3]), 4);
  * // emits: 1, 2, 3, 4
  */
 
-export function concat<T = any>(...sources: PipeInput<T>[]): Atom<T> {
+export function concat<T = any>(...sources: PipeInput<T>[]): Readable<T> {
   return flow<T>(async function* () {
     for (const source of sources) {
       const iterator = toAsyncIterable(source)[Symbol.asyncIterator]() as AsyncIterator<T>;

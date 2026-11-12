@@ -1,4 +1,4 @@
-import { flow, type Atom } from "../atoms/atom";
+import { flow, type Readable } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 import { createAsyncCoordinator } from "../utils";
 import { normalizeError } from "../atoms";
@@ -25,7 +25,7 @@ import { normalizeError } from "../atoms";
  */
 export function forkJoin<R extends readonly unknown[] = any[]>(
   ...sources: { [K in keyof R]: PipeInput<R[K]> }
-): Atom<R >;
+): Readable<R >;
 
 /**
  * Overload that accepts an array/tuple of sources.
@@ -36,7 +36,7 @@ export function forkJoin<R extends readonly unknown[] = any[]>(
  */
 export function forkJoin<R extends readonly unknown[] = any[]>(
   sources: { [K in keyof R]: PipeInput<R[K]> }
-): Atom<R >;
+): Readable<R >;
 
 /**
  * Implementation signature.
@@ -45,7 +45,7 @@ export function forkJoin<R extends readonly unknown[] = any[]>(
  */
 export function forkJoin<R extends readonly unknown[] = any[]>(
   ...sources: any[]
-): Atom<R > {
+): Readable<R > {
   return flow<R >(async function* () {
     const normalizedSources = sources.length === 1 && Array.isArray(sources[0]) ? sources[0] : sources;
 

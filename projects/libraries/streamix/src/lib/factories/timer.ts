@@ -1,4 +1,4 @@
-import type { Atom } from '../atoms/atom';
+import type { Readable } from '../atoms/atom';
 import { fromPush } from './fromPush';
 
 /**
@@ -6,7 +6,7 @@ import { fromPush } from './fromPush';
  *
  * The underlying timer is shared between all subscribers. It starts on the
  * first subscription and stops when the last subscriber unsubscribes. As with
- * every Atom, a new subscriber receives the timer atom's current value first
+ * every Readable, a new subscriber receives the timer atom's current value first
  * when one exists; earlier history is not replayed.
  *
  * In analog mode each subscriber keeps only the latest value (skipping
@@ -18,9 +18,9 @@ import { fromPush } from './fromPush';
  * If not provided, it defaults to `delayMs`, which means `timer(100)` keeps
  * emitting every 100 ms indefinitely. (RxJS `timer(due)` emits once and
  * completes; use `take(1)` for that behavior here.)
- * @returns {Atom<number>} An atom that emits incrementing numbers (0, 1, 2, ...).
+ * @returns {Readable<number>} An atom that emits incrementing numbers (0, 1, 2, ...).
  */
-export function timer(delayMs: number = 0, intervalMs?: number): Atom<number> {
+export function timer(delayMs: number = 0, intervalMs?: number): Readable<number> {
   return fromPush<number>((sink, signal) => {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let wake: (() => void) | undefined;

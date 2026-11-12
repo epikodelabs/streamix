@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits arrays of `MutationRecord` objects
@@ -17,12 +17,12 @@ import { fromPush, type Atom } from "@epikodelabs/streamix";
  *
  * @param element The DOM element to observe.
  * @param options Optional MutationObserver options.
- * @returns {Atom<MutationRecord[]>} An atom of mutation records.
+ * @returns {Readable<MutationRecord[]>} An atom of mutation records.
  */
 export function mutation(
   element: Element,
   options?: MutationObserverInit
-): Atom<MutationRecord[]> {
+): Readable<MutationRecord[]> {
   return fromPush<MutationRecord[]>((sink) => {
     let cleaned = false;
     let observer: MutationObserver | null = null;

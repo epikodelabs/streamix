@@ -9,7 +9,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import type { Atom, DependencySource, Writable } from "@epikodelabs/streamix";
+import type { Readable, DependencySource, Writable } from "@epikodelabs/streamix";
 import { recordStreamixDevtoolsEvent } from "./devtools";
 
 export type AtomSnapshot = Record<string, unknown>;
@@ -237,7 +237,7 @@ export function write<T>(source: Writable<T>, value: T): void {
 }
 
 /** Marks an atom reference intended to cross a component boundary. */
-export function atomRef<T extends Atom<any>>(source: T): T {
+export function atomRef<T extends Readable<any>>(source: T): T {
   return source;
 }
 
@@ -273,7 +273,7 @@ export function useWritable<T>(source: Writable<T>): [T, (value: WritableUpdate<
  * the same component, so a simulated Strict-Mode teardown never disposes an
  * atom the committed component still holds.
  */
-export function useAtom<T extends Atom<any>>(factory: () => T): T {
+export function useAtom<T extends Readable<any>>(factory: () => T): T {
   return useStreamixLocal(factory);
 }
 
@@ -450,9 +450,9 @@ export function serializeAtomSnapshot(sources: Record<string, DependencySource<u
   try {
     json = JSON.stringify(payload);
   } catch (error) {
-    throw new Error(`Atom snapshot is not serializable: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Readable snapshot is not serializable: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (json === undefined) throw new Error("Atom snapshot is not serializable");
+  if (json === undefined) throw new Error("Readable snapshot is not serializable");
   // Safe for embedding in a non-executable <script type="application/json">.
   return json.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 }
@@ -485,7 +485,7 @@ export function hydrateAtomPayload(
   const expected = Object.keys(targets).sort();
   const received = Object.keys(payload.atoms).sort();
   if (expected.length !== received.length || expected.some((name, index) => name !== received[index])) {
-    throw new Error(`Atom snapshot keys do not match hydration targets (expected: ${expected.join(", ")}; received: ${received.join(", ")})`);
+    throw new Error(`Readable snapshot keys do not match hydration targets (expected: ${expected.join(", ")}; received: ${received.join(", ")})`);
   }
   hydrateAtomSnapshot(targets, payload.atoms);
 }

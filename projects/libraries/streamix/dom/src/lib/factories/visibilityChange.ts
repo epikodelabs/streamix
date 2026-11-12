@@ -1,4 +1,4 @@
-import { fromPush, type Atom } from "@epikodelabs/streamix";
+import { fromPush, type Readable } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the document's visibility state
@@ -17,9 +17,9 @@ import { fromPush, type Atom } from "@epikodelabs/streamix";
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Atom<DocumentVisibilityState>}
+ * @returns {Readable<DocumentVisibilityState>}
  */
-export function visibilityChange(): Atom<DocumentVisibilityState> {
+export function visibilityChange(): Readable<DocumentVisibilityState> {
   return fromPush<DocumentVisibilityState>((sink) => {
     let cleaned = false;
 

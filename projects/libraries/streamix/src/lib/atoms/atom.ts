@@ -1,12 +1,12 @@
-import { internalRuntime, type ExecutionSpan, type FlowExit } from "../runtime/runtime";
 import { isRuntimeInstrumentationEnabled } from "../runtime/instrumentation";
 import { captureOrigin } from "../runtime/origin";
-import { DefaultScheduler, getScheduler, setScheduler, isTransactionActive, finalizeAfterTransaction, type Scheduler } from "../runtime/scheduling";
-export type { Scheduler } from "../runtime/scheduling";
+import { internalRuntime, type ExecutionSpan, type FlowExit } from "../runtime/runtime";
+import { DefaultScheduler, finalizeAfterTransaction, getScheduler, isTransactionActive, setScheduler, type Scheduler } from "../runtime/scheduling";
 import { createAsyncCoordinator, getIterator, raceNext, type AsyncCoordinator } from "../utils/coordinator";
 import { isAtom } from "../utils/helpers";
 import { iterate } from "./iterate";
 import { DONE, isPromiseLike, NEXT, type MaybePromise } from "./operator";
+export type { Scheduler } from "../runtime/scheduling";
 
 import { ANALOG_DELIVERY } from "./delivery";
 import {
@@ -56,12 +56,15 @@ export interface AtomOptions {
 }
 
 /**
- * Readable reactive value.
+ * Readable reactive value produced by {@link atom}, {@link derived}, and
+ * {@link flow}.
  *
- * Atoms expose the current value synchronously through {@link value}, can be
- * subscribed to, and are also async iterable for `for await...of` consumers.
+ * Readable values expose the current value synchronously through
+ * {@link value}, can be subscribed to, and are async iterable for
+ * `for await...of` consumers. Only {@link atom} returns a value that is also
+ * {@link Writable}.
  */
-export interface Atom<T = any> {
+export interface Readable<T = any> {
   /** Runtime discriminator for atom-like values. */
   readonly type: "atom";
   /** Optional human-readable name used by integrations and diagnostics. */
@@ -99,25 +102,6 @@ export interface Atom<T = any> {
 }
 
 /**
- * Read-only atom projection that preserves observation APIs while hiding
- * mutation and disposal controls.
- */
-export interface Readable<T = any> {
-  readonly type: "atom";
-  readonly name?: string;
-  readonly value: T;
-  readonly safeValue: T;
-  readonly previous: T;
-  readonly disposed: boolean;
-  readonly dirty: boolean;
-  readonly error?: any;
-  readonly subscriberCount?: number;
-  subscribe(callback?: (current: T, previous: T) => MaybePromise): Subscription;
-  onError(handler: (error: any) => void): Subscription;
-  [Symbol.asyncIterator](): AsyncIterator<T>;
-}
-
-/**
  * Minimal reactive dependency contract accepted by derived formulas.
  *
  * This intentionally supports foreign/read-only atom-like sources that expose
@@ -143,9 +127,10 @@ export interface DependencySource<T = any> {
 export type AtomValue<A> = A extends { value: infer T } ? T : never;
 
 /**
- * Writable atom returned by {@link atom}.
+ * Writable atom returned by {@link atom}. Extends {@link Readable}, so a
+ * writable atom can be used anywhere a readable value is expected.
  */
-export interface Writable<T = any> extends Atom<T> {
+export interface Writable<T = any> extends Readable<T> {
   /** Emits a new value. */
   next(value: T): void;
   /** Alias for {@link next}. */
@@ -157,6 +142,12 @@ export interface Writable<T = any> extends Atom<T> {
   /** Clears the stored error without emitting a value, when supported. */
   clearError?(): void;
 }
+
+/**
+ * A writable atom returned by {@link atom}: readable state plus mutation
+ * methods. Equivalent to {@link Writable}.
+ */
+export type Atom<T = any> = Writable<T>;
 
 /** Internal Node State */
 /**
@@ -221,7 +212,7 @@ interface FormulaContext {
 const activeFormulaStack: FormulaContext[] = [];
 
 function pushFormulaContext(context?: FormulaContext): FormulaContext {
-  const ctx: FormulaContext = context ?? { dependencies: new Set<Atom<any>>() };
+  const ctx: FormulaContext = context ?? { dependencies: new Set<Readable<any>>() };
   activeFormulaStack.push(ctx);
   return ctx;
 }
@@ -265,7 +256,7 @@ export function trackDependencies<T>(
 class EvaluationOwner {
   private ctx: FormulaContext | null = null;
   private generation = 0;
-  private atomViews = new WeakMap<Atom<any>, Atom<any>>();
+  private atomViews = new WeakMap<Readable<any>, Readable<any>>();
 
   /** Read an atom and record it as a dependency of the active evaluation. */
   read<A>(atom: DependencySource<A>): A {
@@ -283,8 +274,8 @@ class EvaluationOwner {
   }
 
   /** Return a cached atom facade that tracks `.value` reads without a Proxy. */
-  wrapAtom<A>(atom: Atom<A>): Atom<A> {
-    let view = this.atomViews.get(atom) as Atom<A> | undefined;
+  wrapAtom<A>(atom: Readable<A>): Readable<A> {
+    let view = this.atomViews.get(atom) as Readable<A> | undefined;
     if (!view) {
       view = createTrackedAtomView(this, atom);
       this.atomViews.set(atom, view);
@@ -295,7 +286,7 @@ class EvaluationOwner {
   /** Begin a new evaluation generation and return its context. */
   enter(): { context: FormulaContext; generation: number } {
     this.generation++;
-    const context: FormulaContext = { dependencies: new Set<Atom<any>>() };
+    const context: FormulaContext = { dependencies: new Set<Readable<any>>() };
     this.ctx = context;
     return { context, generation: this.generation };
   }
@@ -380,7 +371,7 @@ function createAtomRuntimeMeta(): AtomRuntimeMeta {
   };
 }
 
-function getAtomRuntimeMeta(atom: Atom<any>): AtomRuntimeMeta {
+function getAtomRuntimeMeta(atom: Readable<any>): AtomRuntimeMeta {
   return (atom as unknown as InternalAtomContainer)[META];
 }
 
@@ -392,7 +383,7 @@ function tryGetAtomRuntimeMeta(atom: unknown): AtomRuntimeMeta | null {
   return (atom as InternalAtomContainer)[META] ?? null;
 }
 
-export function asReadable<A>(atom: Atom<A>): Readable<A> {
+export function asReadable<A>(atom: Readable<A>): Readable<A> {
   const meta = getAtomRuntimeMeta(atom);
   const existing = meta.readableView as Readable<A> | undefined;
   if (existing) return existing;
@@ -409,6 +400,7 @@ export function asReadable<A>(atom: Atom<A>): Readable<A> {
     get subscriberCount() { return atom.subscriberCount; },
     subscribe: atom.subscribe.bind(atom),
     onError: atom.onError.bind(atom),
+    dispose: atom.dispose.bind(atom),
     [Symbol.asyncIterator]: atom[Symbol.asyncIterator].bind(atom),
   };
 
@@ -416,7 +408,7 @@ export function asReadable<A>(atom: Atom<A>): Readable<A> {
   return view;
 }
 
-function createTrackedAtomView<A>(owner: EvaluationOwner, atom: Atom<A>): Atom<A> {
+function createTrackedAtomView<A>(owner: EvaluationOwner, atom: Readable<A>): Readable<A> {
   const view = {} as Record<PropertyKey, unknown>;
 
   for (const key of Object.getOwnPropertyNames(atom)) {
@@ -456,10 +448,10 @@ function createTrackedAtomView<A>(owner: EvaluationOwner, atom: Atom<A>): Atom<A
     configurable: true,
   });
 
-  return view as unknown as Atom<A>;
+  return view as unknown as Readable<A>;
 }
 
-function finalizeAtomInstance<T extends Atom<any> & InternalAtomContainer>(instance: T, conflate: boolean): T {
+function finalizeAtomInstance<T extends Readable<any> & InternalAtomContainer>(instance: T, conflate: boolean): T {
   Object.defineProperty(instance, "_onDispose", {
     get: () => instance[META].disposeHandlers,
     enumerable: false,
@@ -602,7 +594,7 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
   };
 }
 
-function notifyChangeHandlers(atom: Atom<any>): void {
+function notifyChangeHandlers(atom: Readable<any>): void {
   internalRuntime.changed(atom);
   const handlers = getAtomRuntimeMeta(atom).changeHandlers;
   for (const h of Array.from(handlers)) {
@@ -610,20 +602,20 @@ function notifyChangeHandlers(atom: Atom<any>): void {
   }
 }
 
-export function onAtomDirtyChange(atom: Atom<any>, handler: (dirty: boolean) => void): () => void {
+export function onAtomDirtyChange(atom: Readable<any>, handler: (dirty: boolean) => void): () => void {
   const handlers = getAtomRuntimeMeta(atom).dirtyHandlers;
   handlers.add(handler);
   return () => handlers?.delete(handler);
 }
 
-function notifyDirtyHandlers(atom: Atom<any>, dirty: boolean): void {
+function notifyDirtyHandlers(atom: Readable<any>, dirty: boolean): void {
   const handlers = getAtomRuntimeMeta(atom).dirtyHandlers;
   for (const h of Array.from(handlers)) {
     try { h(dirty); } catch { /* suppress dirty observers */ }
   }
 }
 
-export function onAtomEmit(atom: Atom<any>, handler: () => void): () => void {
+export function onAtomEmit(atom: Readable<any>, handler: () => void): () => void {
   const meta = getAtomRuntimeMeta(atom);
   meta.startOnEmitObserve?.();
   const handlers = meta.emitHandlers;
@@ -631,7 +623,7 @@ export function onAtomEmit(atom: Atom<any>, handler: () => void): () => void {
   return () => handlers.delete(handler);
 }
 
-function notifyEmitHandlers(atom: Atom<any>): void {
+function notifyEmitHandlers(atom: Readable<any>): void {
   const handlers = getAtomRuntimeMeta(atom).emitHandlers;
   for (const h of Array.from(handlers)) {
     try { h(); } catch { /* suppress emit observers */ }
@@ -674,26 +666,26 @@ interface AtomBaseConfig<T> {
   getDisposed: () => boolean;
   getDirty: () => boolean;
   getError: () => any;
-  getValue: (instance: Atom<T> & InternalAtomContainer) => T;
-  getSafeValue?: (instance: Atom<T> & InternalAtomContainer) => T;
-  getPrevious: (instance: Atom<T> & InternalAtomContainer) => T;
-  markDirty: (instance: Atom<T> & InternalAtomContainer) => void;
-  beforeSubscribe?: (instance: Atom<T> & InternalAtomContainer) => void;
+  getValue: (instance: Readable<T> & InternalAtomContainer) => T;
+  getSafeValue?: (instance: Readable<T> & InternalAtomContainer) => T;
+  getPrevious: (instance: Readable<T> & InternalAtomContainer) => T;
+  markDirty: (instance: Readable<T> & InternalAtomContainer) => void;
+  beforeSubscribe?: (instance: Readable<T> & InternalAtomContainer) => void;
   onSubscribed?: (
     callback: AtomSubscriber<T> | undefined,
     unsubscribe: Subscription,
-    instance: Atom<T> & InternalAtomContainer,
+    instance: Readable<T> & InternalAtomContainer,
   ) => void;
   onUnsubscribe?: (
     callback: AtomSubscriber<T> | undefined,
     unsubscribe: Subscription,
-    instance: Atom<T> & InternalAtomContainer,
+    instance: Readable<T> & InternalAtomContainer,
   ) => MaybePromise<void>;
-  onDispose: (instance: Atom<T> & InternalAtomContainer) => MaybePromise<void>;
+  onDispose: (instance: Readable<T> & InternalAtomContainer) => MaybePromise<void>;
 }
 
 interface AtomBaseResult<T> {
-  instance: Atom<T> & InternalAtomContainer;
+  instance: Readable<T> & InternalAtomContainer;
   meta: AtomRuntimeMeta;
   errorHandlers: Set<(error: any) => void>;
   subs: ReturnType<typeof createSubscriberSet<T>>;
@@ -704,7 +696,7 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
   const errorHandlers = new Set<(error: any) => void>();
   const subs = createSubscriberSet<T>(errorHandlers, config.conflate);
 
-  const instance: Atom<T> & InternalAtomContainer = {
+  const instance: Readable<T> & InternalAtomContainer = {
     type: "atom",
     [META]: meta,
 
@@ -798,10 +790,10 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * atomFromIterator() - Atom runtime over an async iterable
+ * fromIterator() - Atom runtime over an async iterable
  * ───────────────────────────────────────────────────────────────────────────*/
 
-export interface AtomFromIteratorOptions<T> extends AtomOptions {
+export interface FromIteratorOptions<T> extends AtomOptions {
   /** Value exposed before the source async iterable emits for the first time. */
   initialValue?: T;
 }
@@ -812,11 +804,11 @@ export interface AtomFromIteratorOptions<T> extends AtomOptions {
  * The source starts when the first subscriber attaches and is closed when the
  * atom is disposed. Values yielded by the iterable become atom emissions.
  */
-function atomFromIteratorInternal<T>(
+function fromIteratorInternal<T>(
   source: AsyncIterable<T>,
-  options: AtomFromIteratorOptions<T> | undefined,
+  options: FromIteratorOptions<T> | undefined,
   conflate: boolean,
-): Atom<T> {
+): Readable<T> {
   const maxSubscribers = options?.maxSubscribers ?? 1000;
 
   const hasInitialValue = options != null
@@ -831,7 +823,7 @@ function atomFromIteratorInternal<T>(
   let hasNewValue = false;
   let dirty = false;
 
-  let instance!: Atom<T> & InternalAtomContainer & { fail(err: any, options?: { terminate?: boolean }): void };
+  let instance!: Readable<T> & InternalAtomContainer & { fail(err: any, options?: { terminate?: boolean }): void };
   const subscriptions = new Set<Subscription>();
   let iterator: AsyncIterator<T> | undefined;
   let runPromise: Promise<void> | null = null;
@@ -1051,11 +1043,11 @@ function atomFromIteratorInternal<T>(
  * Creates a readable atom backed by an async iterable. Atom state itself has no
  * analog/discrete delivery mode; every source value is observable.
  */
-export function atomFromIterator<T>(
+export function fromIterator<T>(
   source: AsyncIterable<T>,
-  options?: AtomFromIteratorOptions<T>,
-): Atom<T> {
-  return atomFromIteratorInternal(source, options, false);
+  options?: FromIteratorOptions<T>,
+): Readable<T> {
+  return fromIteratorInternal(source, options, false);
 }
 
 function watchDependencies(
@@ -1130,7 +1122,7 @@ export interface FlowOptions extends AtomOptions {
 export function flow<T>(
   source: AsyncIterable<T> | Iterable<T> | ((signal: AbortSignal) => AsyncIterable<T> | Iterable<T>),
   options?: FlowOptions
-): Atom<T> {
+): Readable<T> {
   const { mode = "discrete", ...atomOptions } = options ?? {};
   let initialValue: T | undefined;
   let hasInitialValue = false;
@@ -1245,7 +1237,7 @@ export function flow<T>(
     }
   };
 
-  return atomFromIteratorInternal(
+  return fromIteratorInternal(
     iterable,
     hasInitialValue ? { ...atomOptions, initialValue } : atomOptions,
     mode === "analog",
@@ -1265,11 +1257,11 @@ export function flow<T>(
  * const user = atom<User>();
  * ```
  */
-export function atom<T = any>(): Writable<T>;
+export function atom<T = any>(): Atom<T>;
 /**
  * Creates a writable atom that intentionally starts without an initial value.
  */
-export function atom<T = any>(noInitialValue: typeof NO_INITIAL_VALUE, options?: AtomOptions): Writable<T>;
+export function atom<T = any>(noInitialValue: typeof NO_INITIAL_VALUE, options?: AtomOptions): Atom<T>;
 /**
  * Creates a writable atom with an initial value.
  *
@@ -1278,11 +1270,11 @@ export function atom<T = any>(noInitialValue: typeof NO_INITIAL_VALUE, options?:
  * count.set(count.value + 1);
  * ```
  */
-export function atom<T = any>(initialValue: T, options?: AtomOptions): Writable<T>;
+export function atom<T = any>(initialValue: T, options?: AtomOptions): Atom<T>;
 export function atom<T = any>(
   initialValue?: T | typeof NO_INITIAL_VALUE,
   options?: AtomOptions
-): Writable<T> {
+): Atom<T> {
   const resolvedOptions = options;
 
   const maxSubscribers = resolvedOptions?.maxSubscribers ?? 1000;
@@ -1584,14 +1576,14 @@ export type SyncOnly<T> = T extends PromiseLike<any> ? never : Awaited<T>;
  * `derived()` is intentionally synchronous. If the computation needs `await`,
  * cancellation, or restart semantics, model it as a `flow()` instead.
  */
-export function derived<T>(fn: (self: DerivedScope) => SyncOnly<T>, options?: AtomOptions): Atom<T>;
+export function derived<T>(fn: (self: DerivedScope) => SyncOnly<T>, options?: AtomOptions): Readable<T>;
 /**
  * Creates a readonly atom from a generator-based computation.
  *
  * The generator may yield atoms or promises before returning the computed value.
  */
-export function derived<T>(fn: (self: DerivedScope) => Generator<Atom<any> | Promise<any>, T, any>, options?: AtomOptions): Atom<T>;
-export function derived<T>(...args: any[]): Atom<T> {
+export function derived<T>(fn: (self: DerivedScope) => Generator<Readable<any> | Promise<any>, T, any>, options?: AtomOptions): Readable<T>;
+export function derived<T>(...args: any[]): Readable<T> {
   let computableFactory: () => ComputableInstance;
   let options: AtomOptions | undefined;
 
@@ -1636,7 +1628,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   let dirty = false;
   let transactionTouched = false;
 
-  let instance!: Atom<T> & InternalAtomContainer;
+  let instance!: Readable<T> & InternalAtomContainer;
   const dependencies = new Set<DependencySource<any>>();
   const depSubscriptions = new Map<DependencySource<any>, Subscription>();
   let stopGraphInvalidation: (() => void) | undefined;
