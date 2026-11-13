@@ -54,6 +54,7 @@ export type GateOptions =
  *
  * @example
  * ```ts
+ * // `source` is the value stream; `paused` emits the boolean control.
  * // Keep at most 100 values while paused, then release them in order.
  * const gated = pipe(source, gate(paused, {
  *   closed: 'buffer',

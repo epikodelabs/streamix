@@ -56,6 +56,7 @@ export interface Correlated<Q, A> { request: Q; response: A }
  *
  * @example
  * ```ts
+ * // `outgoing` is the request stream; `incoming` is the response stream.
  * const pairs = pipe(outgoing, correlate(incoming, {
  *   requestKey: request => request.id,
  *   responseKey: response => response.id,

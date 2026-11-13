@@ -44,6 +44,11 @@ export interface HandoffOptions<T, R> {
  * is aborted through its signal and the half-built resource is disposed
  * without ever being emitted — latest wins.
  *
+ * The source is the stream passed to `pipe`; `handoff` is the operator
+ * applied to it. Source values are not retained: each value is handed to
+ * `prepare`, and only prepared resources are kept — the active one plus any
+ * replacement still being prepared.
+ *
  * Lifecycle of one source value:
  *
  * 1. `prepare(value, signal)` builds the replacement; the current resource
@@ -83,12 +88,17 @@ export interface HandoffOptions<T, R> {
  *
  * @example
  * ```ts
- * // Keep the current image on screen until its successor is decoded.
- * const image = pipe(selectedUrl, handoff({
+ * // `selectedUrl` is the source stream of values to hand off from.
+ * const selectedUrl = atom('/image-a.png');
+ *
+ * const displayed = pipe(selectedUrl, handoff({
  *   prepare: (url, signal) => loadImage(url, signal),
  *   ready: (image) => image.decode(),
  *   dispose: (image) => image.close(),
  * }));
+ *
+ * // The old image stays on screen until the new one is decoded.
+ * selectedUrl.set('/image-b.png');
  * ```
  */
 export function handoff<T, R>(options: HandoffOptions<T, R>) {
