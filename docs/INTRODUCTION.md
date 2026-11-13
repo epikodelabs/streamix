@@ -22,15 +22,50 @@
 </p>
 
 
+# Workspace
+
+This repository is an Angular CLI monorepo that hosts **Angular, React, and Vue** application projects side by side under `projects/apps/`. The Streamix builders compile React (JSX adoption) and Vue sources as first-class citizens of the workspace:
+
+| Projects | Framework |
+| --- | --- |
+| `app1` – `app4` | Angular |
+| `app5` – `app7` | React |
+| `app8` – `app9` | Vue |
+
+Run any of them with the Angular CLI:
+
+```sh
+npx ng serve app1   # ... through app9
+```
+
+## Builder not found after cloning
+
+Starting an application in a fresh checkout can fail with:
+
+```text
+Error: Could not find the '@epikodelabs/streamix/angular/builder:application' builder's node package.
+```
+
+**Cause:** the workspace applications and the Streamix builder resolve `@epikodelabs/streamix` from `node_modules`. There, the package is linked to `dist/streamix`, which does not exist until the library has been built. `npm install` installs dependencies but does not produce that build output.
+
+**Solution:** build the package once, then start the application:
+
+```sh
+npm run build
+npx ng serve app1
+```
+
+`npm run build` compiles the library into `dist/streamix` and links it into `node_modules/@epikodelabs/streamix`, so the Angular CLI can resolve the builder. Re-run `npm run build` after changing library sources. Running `npm install` replaces the link with the published release, so build again before serving.
+
 # Getting started
 
 Configure your editor and build tools, then create your first reactive counter in Angular, React, or Vue. Start with an **existing application** and the Node.js and TypeScript versions supported by your framework.
 
 | Framework | Requirements | Source preprocessing |
 | --- | --- | --- |
-| [Angular](#angular) | Angular 20+, TypeScript 5.9.3+ compatible with your Angular version | Angular builder |
-| [React](#react) | React 18+, TypeScript 5.9.3+ | Vite plugin: `sx()` before `react()` |
-| [Vue](#vue) | Vue 3.4+, TypeScript 5.9.3+ | Vite plugin: `sxVue()` before `vue()` |
+| [Angular](#angular) | Angular 20+, TypeScript 5.5+ compatible with your Angular version | Angular builder |
+| [React](#react) | React 18+, TypeScript 5.5+ | Vite plugin: `sx()` before `react()` |
+| [Vue](#vue) | Vue 3.4+, TypeScript 5.5+ | Vite plugin: `sxVue()` before `vue()` |
 
 Install `@epikodelabs/streamix` once; no separate compiler, builder, or editor packages are needed. Configure both the build and editor before using the examples below.
 
@@ -372,7 +407,7 @@ The compiler lowers `count` to a tracked value read inside the formula. Without 
 - **The UI shows an atom object:** check that the Streamix builder is active, or that the Streamix Vite plugin runs before the framework plugin.
 - **The editor flags supported shorthand:** check the application's active tsconfig, install the matching language tooling, and restart the relevant language server.
 - **The editor accepts code that the build rejects:** follow the build diagnostic.
-- **An Architect builder cannot be resolved:** install a package release containing that builder, or build the Streamix package first when working from source.
+- **An Architect builder cannot be resolved:** build the Streamix package first when working from source, or install a package release containing that builder. See [Builder not found after cloning](#builder-not-found-after-cloning).
 
 ## Resources
 

@@ -57,7 +57,9 @@
     "ScopeWithSetup",
     "ScopeSetupCallback",
     "ByteSource",
-    "TextSource"
+    "TextSource",
+    "OptionalAt",
+    "Connect"
   ],
   "sort": [
     "source-order"
