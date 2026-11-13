@@ -13,7 +13,15 @@ import { ANALOG_DELIVERY } from '../atoms/delivery';
 
 /** The write-only producer interface for adapting callback-driven APIs. */
 export interface PushSink<T> {
-  /** Delivers a value. Await this for cooperative backpressure in discrete mode. */
+  /**
+   * Delivers a value. Await this for cooperative backpressure in discrete
+   * mode.
+   *
+   * Resolves when the value is accepted into the bounded buffer, or when the
+   * overflow policy drops it — it does not wait for delivery, the atom's
+   * current value update, or subscriber callbacks. Awaiting applies
+   * backpressure only while the buffer is full.
+   */
   next(value: T): Promise<void>;
   /** Terminates the source with an error; queued values are discarded. */
   error(reason: unknown): void;
@@ -72,10 +80,13 @@ type Session<T> = {
  * Subscribers receive the latest current value immediately when available.
  * The async iterator receives new events (not a replay of the current snapshot).
  *
- * `next()` awaits delivery to all callback subscribers, including async callbacks.
- * In discrete mode, it also waits when the bounded iterator queue is full.
- * External APIs that ignore `next()` promises cannot be flow-controlled; select
- * a dropping/error overflow policy for those APIs if memory must remain bounded.
+ * `next()` resolves when the value is accepted into the bounded buffer, or
+ * when the overflow policy drops it. It does not wait for delivery, the
+ * current value update, or callback subscribers; those happen asynchronously
+ * in the pump. In discrete mode, awaiting `next()` applies backpressure only
+ * while the buffer is full. External APIs that ignore `next()` promises
+ * cannot be flow-controlled; select a dropping/error overflow policy for
+ * those APIs if memory must remain bounded.
  *
  * This implementation intentionally supports one active async iterator, matching
  * the existing Streamix shared-source contract. Callback subscribers multicast.
@@ -183,7 +194,10 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
 
   const admitBlocked = (session: Session<T>) => {
     while (!session.stopped && session.queued.length < capacity && session.blocked.length) {
-      session.queued.push(session.blocked.shift()!);
+      const record = session.blocked.shift()!;
+      session.queued.push(record);
+      // Admission ends producer backpressure; delivery happens later.
+      record.resolve();
     }
   };
 
@@ -236,7 +250,6 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
           }
         }
         if (pending.length) await Promise.all(pending);
-        item.resolve();
       }
     } catch (error) {
       fail(session, error);
@@ -263,15 +276,19 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
     if (closed || completed || session.stopped || session.finishing) return Promise.resolve();
     return new Promise<void>(resolve => {
       const delivery: Delivery<T> = { value, resolve: () => resolve() };
+      let admitted = false;
       if (analog && session.queued.length >= capacity) {
         const replaced = session.queued.pop()!;
         replaced.resolve();
         session.queued.push(delivery);
+        admitted = true;
       } else if (session.queued.length < capacity) {
         session.queued.push(delivery);
+        admitted = true;
       } else if (overflow === 'drop-oldest') {
         session.queued.shift()!.resolve();
         session.queued.push(delivery);
+        admitted = true;
       } else if (overflow === 'drop-newest') {
         resolve();
         return;
@@ -285,6 +302,9 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
         session.blocked.push(delivery);
       }
       schedulePump(session);
+      // Admission ends producer backpressure. Delivery, the atom value, and
+      // subscriber callbacks happen later in the pump.
+      if (admitted) delivery.resolve();
     });
   };
 
