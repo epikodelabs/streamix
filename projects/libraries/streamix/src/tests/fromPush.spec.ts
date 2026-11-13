@@ -43,19 +43,30 @@ describe('fromPush()', () => {
     let sink!: PushSink<number>;
     const source = fromPush<number>(s => { sink = s; });
     const order: string[] = [];
+    let finished = 0;
+    let markFinished!: () => void;
+    const allFinished = new Promise<void>(resolve => { markFinished = resolve; });
     const first = source.subscribe(async value => {
       order.push(`start ${value}`);
       await tick();
       order.push(`end ${value}`);
+      if (++finished === 2) markFinished();
     });
     await Promise.all([sink.next(1), sink.next(2)]);
+    await allFinished;
     expect(order).toEqual(['start 1', 'end 1', 'start 2', 'end 2']);
 
     const replay: Array<[number, number]> = [];
-    const second = source.subscribe((current, previous) => replay.push([current, previous]));
+    let markReplayed!: () => void;
+    const replayed = new Promise<void>(resolve => { markReplayed = resolve; });
+    const second = source.subscribe((current, previous) => {
+      replay.push([current, previous]);
+      if (replay.length === 2) markReplayed();
+    });
     expect(replay).toEqual([[2, 2]]);
     expect(source.value).toBe(2);
     await sink.next(3);
+    await replayed;
     expect(replay).toEqual([[2, 2], [3, 3]]);
     await first();
     await second();
@@ -101,18 +112,45 @@ describe('fromPush()', () => {
     source.dispose();
   });
 
-  it('enforces iterator backpressure when values are discrete', async () => {
+  it('resolves next() once the value is buffered, without waiting for async subscribers', async () => {
+    let sink!: PushSink<number>;
+    const source = fromPush<number>(s => { sink = s; }, { capacity: 2 });
+    let release!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
+    const subscription = source.subscribe(async () => {
+      markStarted();
+      await new Promise<void>(resolve => { release = resolve; });
+    });
+
+    let resolved = false;
+    const pushed = sink.next(1).then(() => { resolved = true; });
+    await started;
+    expect(resolved).toBeTrue();
+
+    release();
+    await pushed;
+    await subscription();
+    source.dispose();
+  });
+
+  it('applies backpressure only when the bounded buffer is full', async () => {
     let sink!: PushSink<number>;
     const source = fromPush<number>(s => { sink = s; }, { capacity: 1 });
     const iterator = source[Symbol.asyncIterator]();
     await sink.next(1);
-    let delivered = false;
-    const second = sink.next(2).then(() => { delivered = true; });
+    // Admission, not delivery: this resolves without waiting for the consumer.
+    await sink.next(2);
+
+    let thirdResolved = false;
+    const third = sink.next(3).then(() => { thirdResolved = true; });
     await tick();
-    expect(delivered).toBeFalse();
+    expect(thirdResolved).toBeFalse();
+
     expect(await iterator.next()).toEqual({ done: false, value: 1 });
-    await second;
+    await third;
     expect(await iterator.next()).toEqual({ done: false, value: 2 });
+    expect(await iterator.next()).toEqual({ done: false, value: 3 });
     await iterator.return?.();
     source.dispose();
   });
