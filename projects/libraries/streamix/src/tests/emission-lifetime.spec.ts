@@ -248,6 +248,7 @@ describe('flattening emission lifetimes', () => {
         [Symbol.asyncIterator]: () => ({ next: () => pending.promise, return: async () => { returned++; return DONE; } }),
       })));
       const iterator = op.apply(from([1])[Symbol.asyncIterator]());
+      if (name === 'expand') expect(await iterator.next()).toEqual(NEXT(1));
       const reading = iterator.next();
       await tick(); now = 30; await iterator.return?.();
       expect(returned).toBe(1);
@@ -300,6 +301,7 @@ describe('flattening emission lifetimes', () => {
         [Symbol.asyncIterator]: () => ({ next: () => pending.promise, return: async () => { returned++; return DONE; } }),
       })));
       const iterator = op.apply(from([1])[Symbol.asyncIterator]());
+      if (name === 'expand') expect(await iterator.next()).toEqual(NEXT(1));
       const reading = iterator.next();
       const rejected = expectAsync(reading).toBeRejectedWithError('inner failed');
       await tick(); now = 17; pending.reject(new Error('inner failed'));

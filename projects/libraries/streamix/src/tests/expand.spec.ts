@@ -2,6 +2,131 @@ import { collect } from './helpers/operator';
 import {expand, from, map, pipe, iterate} from '@epikodelabs/streamix';
 
 describe('expand', () => {
+  for (const traversal of ['depth', 'breadth'] as const) {
+    it(`streams a non-terminating child incrementally (${traversal})`, async () => {
+      let pulls = 0;
+      let returned = 0;
+      let release: ((result: IteratorResult<number>) => void) | undefined;
+      const children = {
+        [Symbol.asyncIterator]: () => ({
+          next: (): Promise<IteratorResult<number>> => ++pulls === 1
+            ? Promise.resolve({ value: 7, done: false })
+            : new Promise(resolve => { release = resolve; }),
+          return: async () => { returned++; release?.({ value: undefined, done: true }); return { value: undefined, done: true } as const; },
+        }),
+      };
+      const output = expand<number>(() => children, { traversal, maxDepth: 1 })
+        .apply(from([1])[Symbol.asyncIterator]());
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const first = await Promise.race([
+          output.next(),
+          new Promise<null>(resolve => { timeout = setTimeout(() => resolve(null), 100); }),
+        ]);
+        expect(first).toEqual({ value: 1, done: false });
+        if (first === null) return;
+        expect(pulls).toBe(0);
+        expect(await output.next()).toEqual({ value: 7, done: false });
+        expect(pulls).toBe(1);
+      } finally {
+        clearTimeout(timeout);
+        await output.return?.();
+      }
+      expect(returned).toBe(1);
+    });
+  }
+
+  it('does not materialize an infinite synchronous child iterable', async () => {
+    let pulls = 0;
+    let closed = false;
+    function* children() {
+      try { while (true) yield ++pulls; }
+      finally { closed = true; }
+    }
+    const output = expand<number>(() => children(), { maxDepth: 1 })
+      .apply(from([0])[Symbol.asyncIterator]());
+    const values: number[] = [];
+    try {
+      for (let i = 0; i < 5; i++) values.push((await output.next()).value);
+      expect(values).toEqual([0, 1, 2, 3, 4]);
+      expect(pulls).toBe(4);
+    } finally { await output.return?.(); }
+    expect(closed).toBeTrue();
+  });
+
+  it('preserves breadth-first order across a branching tree and separate roots', async () => {
+    const children: Record<string, string[]> = {
+      A: ['B', 'C'], B: ['D', 'E'], C: ['F'], X: ['Y'],
+    };
+    expect(await collect(iterate(pipe(from(['A', 'X']), expand<string>(
+      node => children[node] ?? [], { traversal: 'breadth' },
+    ))))).toEqual(['A', 'B', 'C', 'D', 'E', 'F', 'X', 'Y']);
+  });
+
+  for (const traversal of ['depth', 'breadth'] as const) {
+    it(`closes a pending child pull and ignores its late result (${traversal})`, async () => {
+      let release!: (value: IteratorResult<number>) => void;
+      let returned = 0;
+      const child = { [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<number>>(resolve => { release = resolve; }),
+        return: async () => { returned++; return { done: true, value: undefined } as const; },
+      }) };
+      const output = expand<number>(() => child, { traversal, maxDepth: 1 })
+        .apply(from([1])[Symbol.asyncIterator]());
+      expect(await output.next()).toEqual({ done: false, value: 1 });
+      const pending = output.next();
+      await Promise.resolve();
+      await output.return?.();
+      expect(returned).toBe(1);
+      release({ done: false, value: 99 });
+      expect(await pending).toEqual({ done: true, value: undefined });
+      await output.return?.();
+      expect(returned).toBe(1);
+    });
+  }
+
+  for (const method of ['return', 'throw'] as const) {
+    it(`closes suspended ancestors and the source on ${method}`, async () => {
+      const returned: number[] = [];
+      const child = (value: number) => ({ [Symbol.asyncIterator]: () => ({
+        next: async () => ({ done: false, value }),
+        return: async () => { returned.push(value); return { done: true, value: undefined } as const; },
+      }) });
+      const source = {
+        next: async () => ({ done: false, value: 1 }),
+        return: async () => { returned.push(1); return { done: true, value: undefined } as const; },
+      };
+      const output = expand<number>(value => child(value + 1)).apply(source);
+      expect((await output.next()).value).toBe(1);
+      expect((await output.next()).value).toBe(2);
+      if (method === 'throw') await expectAsync(output.throw!('stop')).toBeRejectedWithError('stop');
+      else await output.return?.();
+      expect(returned.sort()).toEqual([1, 2, 3]);
+      await output.return?.();
+      expect(returned.length).toBe(3);
+    });
+  }
+
+  it('closes the source and suspended child when a nested projection fails', async () => {
+    let sourceClosed = false;
+    let childClosed = false;
+    const child = { [Symbol.asyncIterator]: () => ({
+      next: async () => ({ done: false, value: 2 }),
+      return: async () => { childClosed = true; return { done: true, value: undefined } as const; },
+    }) };
+    const output = expand<number>(value => {
+      if (value === 2) throw new Error('nested failure');
+      return child;
+    }).apply({
+      next: async () => ({ done: false, value: 1 }),
+      return: async () => { sourceClosed = true; return { done: true, value: undefined } as const; },
+    });
+    expect((await output.next()).value).toBe(1);
+    await expectAsync(output.next()).toBeRejectedWithError('nested failure');
+    expect(childClosed).toBeTrue();
+    expect(sourceClosed).toBeTrue();
+  });
+
   it('expand depth traversal explores children before siblings', async () => {
     // Tree: A -> [B, C]; B -> [D]. Depth-first visits A, B, D, C.
     const children: Record<string, string[]> = { A: ['B', 'C'], B: ['D'], C: [], D: [] };

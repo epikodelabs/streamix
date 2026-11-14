@@ -1,9 +1,9 @@
 import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection-hooks';
-import { SerialInnerExecution } from '../runtime/serial-inner-execution';
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
-import type { PipeInput } from "../atoms/pipe";
+import { toAsyncIterable, type PipeInput } from "../atoms/pipe";
 import { from } from '../factories';
 import { normalizeError } from "../atoms";
+import { isAsyncIterable, isIterable } from '../utils/helpers';
 
 /**
  * Options for the expand operator.
@@ -23,6 +23,11 @@ export type ExpandOptions = {
  * function to it, which must return a new stream. It then recursively applies
  * the same logic to each value emitted by that new stream, effectively
  * flattening an infinitely deep, asynchronous data structure.
+ * Each value is emitted after its projection resolves, before pulling any of
+ * its children. Child iterators are consumed incrementally rather than being
+ * collected to completion. Traversal applies to each source root in order.
+ * Depth-first retains suspended ancestor iterators; breadth-first retains the
+ * next-level frontier, which can grow for an infinitely wide level.
  *
  * This is particularly useful for traversing graph or tree-like data, such as
  * file directories or hierarchical API endpoints, where each item might lead
@@ -39,48 +44,77 @@ export const expand = <T = any>(
   options: ExpandOptions = {}
 ): Operator<T, T> =>
   createOperator<T, T>('expand', function (this: Operator, source) {
-    type QueueItem = {
-      result: IteratorResult<T>;
+    type Frame = {
+      iterator: AsyncIterator<T>;
       depth: number;
+      lifetime?: StreamixLifetimeSpan;
+      next?: Frame;
     };
-    const queue: QueueItem[] = [];
-    let sourceDone = false;
-    const inner = new SerialInnerExecution<T>();
-    let lifetime: StreamixLifetimeSpan | undefined;
-    const operator = this;
+    let head: Frame | undefined;
+    let tail: Frame | undefined;
+    let stopped = false;
+    let closing: Promise<void> | undefined;
+    let preparing: StreamixLifetimeSpan | undefined;
+    const sourceFrame: Frame = { iterator: source, depth: 0 };
 
-    const enqueueChildren = async (
-      value: T,
-      depth: number
-    ) => {
+    const closeIterator = async (iterator: AsyncIterator<T>) => {
+      try { await iterator.return?.(); } catch { /* Best-effort cleanup. */ }
+    };
+
+    const close = (outcome: 'cancel' | 'error'): Promise<void> => {
+      if (closing) return closing;
+      stopped = true;
+      preparing?.finish(outcome);
+      preparing = undefined;
+      const pending: Promise<void>[] = [];
+      for (let frame = head; frame; frame = frame.next) {
+        frame.lifetime?.finish(outcome);
+        pending.push(closeIterator(frame.iterator));
+      }
+      head = tail = undefined;
+      // Close suspended ancestors and the source independently of a possibly
+      // pending pull on the active child.
+      pending.push(closeIterator(source));
+      closing = Promise.all(pending).then(() => {});
+      return closing;
+    };
+
+    const enqueueChildren = async (value: T, depth: number) => {
       if (options.maxDepth !== undefined && depth >= options.maxDepth) return;
 
       // Each span covers one direct child enumeration, not the whole subtree.
-      lifetime = __streamixBeginLifetime(operator);
+      const lifetime = __streamixBeginLifetime(this);
       lifetime?.start();
-      const projected = project(value);
-      const normalized = isPromiseLike(projected) ? await projected : projected;
-
-      if (inner.stopped) return;
-      const stream = from(normalized);
-      inner.attach(stream[Symbol.asyncIterator]() as AsyncIterator<T>);
-
-      const children: QueueItem[] = [];
-      while (true) {
-        const child = await inner.next();
-        if (inner.stopped) return;
-        if (child.done) { lifetime?.finish('complete'); break; }
-        lifetime?.output();
-        children.push({ result: child, depth: depth + 1 });
-      }
-
-      if (options.traversal === 'breadth') {
-        queue.push(...children);
-      } else {
-        // Depth-first: children are explored before pending siblings. Inserting
-        // the whole batch at the front keeps left-to-right order within it,
-        // which single-item unshifting would reverse.
-        queue.unshift(...children);
+      preparing = lifetime;
+      try {
+        const projected = project(value);
+        const normalized = isPromiseLike(projected) ? await projected : projected;
+        // Preserve native iterator cancellation, and don't eagerly materialize
+        // synchronous iterables (which may themselves be infinite). Strings
+        // retain from()'s scalar-value contract.
+        const stream = isAsyncIterable(normalized) || (typeof normalized !== 'string' && isIterable(normalized))
+          ? toAsyncIterable<T>(normalized)
+          : from<T>(normalized);
+        const iterator = stream[Symbol.asyncIterator]();
+        if (stopped) {
+          await closeIterator(iterator);
+          return;
+        }
+        const frame: Frame = { iterator, depth: depth + 1, lifetime };
+        if (options.traversal === 'breadth') {
+          if (tail) tail.next = frame;
+          else head = frame;
+          tail = frame;
+        } else {
+          frame.next = head;
+          head = frame;
+          tail ??= frame;
+        }
+      } catch (error) {
+        if (!stopped) lifetime?.finish('error');
+        throw error;
+      } finally {
+        preparing = undefined;
       }
     };
 
@@ -88,59 +122,41 @@ export const expand = <T = any>(
       next: async () => {
         try {
           while (true) {
-            if (inner.stopped) return DONE;
-            while (queue.length === 0 && !sourceDone) {
-              const result = await source.next();
-              if (inner.stopped) return DONE;
-              if (result.done) {
-                sourceDone = true;
-                break;
+            if (stopped) return DONE;
+            const frame = head ?? sourceFrame;
+            const result = await frame.iterator.next();
+            if (stopped) return DONE;
+            if (result.done) {
+              frame.lifetime?.finish('complete');
+              if (frame === sourceFrame) {
+                stopped = true;
+                return DONE;
               }
-
-              queue.push({ result, depth: 0 });
+              head = frame.next;
+              if (!head) tail = undefined;
+              frame.next = undefined;
+              continue;
             }
-
-            if (queue.length > 0) {
-              const item = queue.shift()!;
-              await enqueueChildren(item.result.value, item.depth);
-              if (inner.stopped) return DONE;
-              return NEXT(item.result.value);
-            }
-
-            if (sourceDone && queue.length === 0) {
-              return DONE;
-            }
-
-            // Yield to microtask queue to avoid starving the event loop
-            await new Promise<void>((resolve) => queueMicrotask(resolve));
+            frame.lifetime?.output();
+            await enqueueChildren(result.value, frame.depth);
+            if (stopped) return DONE;
+            return NEXT(result.value);
           }
         } catch (error) {
-          lifetime?.finish('error');
-          queue.length = 0;
-          void inner.close();
+          if (stopped) return DONE;
+          await close('error');
           throw error;
         }
       },
 
-      async return(value?: any) {
-        lifetime?.finish('cancel');
-        queue.length = 0;
-        await inner.close();
-        try {
-          await source.return?.(value);
-        } catch {}
+      async return() {
+        await close('cancel');
         return DONE;
       },
 
       async throw(err: any) {
-        lifetime?.finish('error');
-        await inner.close();
-        const error = normalizeError(err);
-        queue.length = 0;
-        try {
-          await source.return?.();
-        } catch {}
-        throw error;
+        await close('error');
+        throw normalizeError(err);
       }
     };
 
