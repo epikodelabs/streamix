@@ -33,7 +33,7 @@ import { createAsyncCoordinator } from "../utils";
  *
  * @template T Source/output value type.
  * @template N Notifier value type (ignored by this operator).
- * @param notifier A `AtomBase<N>` or `Promise<N>` that gates the source.
+ * @param notifier A `Readable<N>` or `Promise<N>` that gates the source.
  * @returns An `Operator<T, T>` that can be used in a stream pipeline.
  */
 export function delayUntil<T = any, N = any>(

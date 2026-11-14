@@ -22,7 +22,7 @@ import { createAsyncCoordinator } from "../utils";
  *
  * @template T Source/output value type.
  * @template N Notifier value type (ignored by this operator).
- * @param notifier A `AtomBase<N>` or `Promise<N>` that opens the gate when it emits.
+ * @param notifier A `PipeInput<N>` that opens the gate when it emits.
  * @returns An `Operator<T, T>` that drops source values until the notifier emits.
  */
 export function skipUntil<T = any, N = any>(

@@ -19,7 +19,7 @@ import { createAsyncCoordinator } from "../utils";
  *
  * @template T Source/output value type.
  * @template N Notifier value type (ignored by this operator).
- * @param notifier A `AtomBase<N>` or `Promise<N>` that signals when to stop taking.
+ * @param notifier A `PipeInput<N>` that signals when to stop taking.
  * @returns An `Operator<T, T>` that can be used in a stream pipeline.
  */
 export function takeUntil<T = any, N = any>(

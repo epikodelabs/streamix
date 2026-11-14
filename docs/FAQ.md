@@ -317,7 +317,7 @@ the atom carries**, and termination is a policy:
 const status = atom("idle", {
   onError: handler,           // producer / formula failures
   terminateOnError: false,    // true disposes the atom after a producer/formula failure
-  propagateErrors: false,     // true rethrows after handlers run
+  propagateErrors: false,     // true invalidates dependents after handlers run
 });
 ```
 

@@ -48,9 +48,10 @@ export interface AtomOptions {
    */
   terminateOnError?: boolean;
   /**
-   * Controls whether subscriber/source errors are rethrown after error handlers
-   * run. Applies to writable atoms and flow-backed sources; `derived()` always
-   * records errors and reports them through `onError` handlers.
+   * Controls whether a failed writable atom invalidates dependents after error
+   * handlers run, so downstream reads rethrow the error. Applies to writable
+   * atoms only; flows record errors and report them through `onError`
+   * handlers, and `derived()` always records errors.
    */
   propagateErrors?: boolean;
 }

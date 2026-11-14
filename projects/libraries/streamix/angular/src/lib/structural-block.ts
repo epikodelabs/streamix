@@ -569,11 +569,11 @@ export function ɵcreateSxConditionalBlock(
 /**
  * Resolves the anchor for a lowered structural block.
  *
- * During server rendering the marker element is kept and the block renders
- * inside it, so the server HTML still contains the block content and client
- * hydration finds the template's element in place. In the browser the marker is
- * replaced by a comment anchor, which keeps CSS selectors such as
- * `ul > li`/`:first-child` intact.
+ * During server rendering the marker element is kept but stays empty: the
+ * client template declares an empty marker, so rendering block content inside
+ * it would cause a hydration mismatch. Angular-owned fallbacks still render
+ * direct bindings. In the browser the marker is replaced by a comment anchor,
+ * which keeps CSS selectors such as `ul > li`/`:first-child` intact.
  *
  * @internal
  */

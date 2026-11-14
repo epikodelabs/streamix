@@ -53,7 +53,7 @@ Errors surface through `onError` handlers rather than one-off `try/catch` around
 const status = atom("idle", {
   onError: handler,          // receives producer / formula failures
   terminateOnError: false,   // true disposes the atom after an error instead of staying recoverable
-  propagateErrors: false,    // true rethrows after handlers run
+  propagateErrors: false,    // true invalidates dependents after handlers run
   maxSubscribers: 1000,      // hard limit: subscribe() throws once this many are active
 });
 ```

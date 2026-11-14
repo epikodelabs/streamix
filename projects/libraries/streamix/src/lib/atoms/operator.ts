@@ -252,8 +252,8 @@ export function createPushOperator<T, R = T>(
  * Recursive conditional type that computes the output type of a chain of operators.
  *
  * Walks the operator array left-to-right, threading each operator's output type
- * into the next operator's input type. Returns `AtomBase<T>` for an empty chain,
- * and falls back to `AtomBase<any>` if type inference is exhausted.
+ * into the next operator's input type. Returns `Readable<T>` for an empty
+ * chain, and falls back to `Readable<any>` if type inference is exhausted.
  *
  * @template T The initial stream value type.
  * @template Ops The tuple of operators to apply.

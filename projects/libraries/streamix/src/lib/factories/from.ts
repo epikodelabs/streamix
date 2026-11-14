@@ -5,7 +5,8 @@ import { isAtomLike, isAsyncIterable, isIterable } from "../utils/helpers";
 
 
 /**
- * Normalizes any value type into an AtomBase using your system's native atom/flow primitives.
+ * Normalizes any supported input into a `Readable` using the runtime's atom and
+ * flow primitives.
  */
 export function from<R = any>(
   value: PipeInput<R> | ((signal?: AbortSignal) => MaybePromise<R>)

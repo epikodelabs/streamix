@@ -38,8 +38,9 @@ async function renderFixture(): Promise<string> {
 
 /**
  * Server-rendering contract for the compiled view: the marker element stays in
- * place with the block content inside it, no listener is attached, and the
- * two-way value is rendered so hydration finds it.
+ * place but empty, direct bindings render through Angular's SSR fallback, no
+ * listener is attached, and the two-way value is rendered so hydration finds
+ * it.
  */
 describe('compiled view under server rendering', () => {
   it('keeps the committed server HTML fixture in sync', async () => {

@@ -2,7 +2,8 @@ import { iterate, type Readable } from "../atoms";
 import { isAtomLike } from "../utils/helpers";
 
 /**
- * Returns a promise that resolves with the last emitted value from an `AtomBase` or atom.
+ * Returns a promise that resolves with the last emitted value from a `Readable`
+ * or async iterable.
  *
  * - **Successful resolution:** The promise resolves with the last value
  *   emitted by the source, after the source has completed.
