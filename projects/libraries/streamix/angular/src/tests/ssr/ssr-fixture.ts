@@ -30,17 +30,6 @@ import {
  * with `@if (ready)` and `@for (row of rows; track row.id)` compiled blocks.
  * Written by hand so the server and browser bundles share one fixture.
  */
-@Component({
-  selector: 'sx-ssr-fixture',
-  standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <div class="slot"><span data-sx-block="0" data-slot="if"></span></div>
-    <ul class="rows"><span data-sx-block="1" data-slot="for"></span></ul>
-    <input>
-    <button type="button">click</button>
-  `,
-})
 export class SsrFixtureComponent implements AfterViewInit {
   readonly ready = atom(true);
   readonly message = atom('hello');
@@ -182,3 +171,22 @@ export class SsrFixtureComponent implements AfterViewInit {
     this.ɵsx.ɵafterViewInit();
   }
 }
+
+/**
+ * Applied as a plain call instead of decorator syntax. The node test bundle
+ * lowers decorators through oxc, whose emitted form imports the
+ * `@oxc-project/runtime` package — not a project dependency. Angular's class
+ * decorators mutate the class in place and return it, so calling the decorator
+ * directly is the identical JIT result without the import.
+ */
+Component({
+  selector: 'sx-ssr-fixture',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <div class="slot"><span data-sx-block="0" data-slot="if"></span></div>
+    <ul class="rows"><span data-sx-block="1" data-slot="for"></span></ul>
+    <input>
+    <button type="button">click</button>
+  `,
+})(SsrFixtureComponent);

@@ -29,11 +29,6 @@ export type { StreamixDevtoolsEvent };
  * scheduler involvement. It renders nothing in production builds or on the
  * server.
  */
-@Component({
-  selector: 'streamix-devtools',
-  standalone: true,
-  template: '',
-})
 export class StreamixDevtools {
   private readonly unsubscribe = subscribeStreamixDevtools(() => this.scheduleRender());
   private panel: HTMLElement | undefined;
@@ -101,3 +96,16 @@ export class StreamixDevtools {
     );
   }
 }
+
+/**
+ * Applied as a plain call instead of decorator syntax. The node test bundle
+ * lowers decorators through oxc, whose emitted form imports the
+ * `@oxc-project/runtime` package — not a project dependency. Angular's class
+ * decorators mutate the class in place and return it, so calling the decorator
+ * directly is the identical JIT result without the import.
+ */
+Component({
+  selector: 'streamix-devtools',
+  standalone: true,
+  template: '',
+})(StreamixDevtools);
