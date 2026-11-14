@@ -60,7 +60,7 @@ describe('interval', () => {
     expect(emittedValues.length).toBe(previousLength);
   });
 
-  it('should emit immediately if interval is 0', async () => {
+  it('should emit asynchronously if interval is 0', async () => {
     const atom = interval(0);
 
     const emittedValues: number[] = [];

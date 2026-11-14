@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** `timer(due)` is now one-shot. It emits `0` once after `due` milliseconds and completes, matching RxJS; it no longer repeats every `due` milliseconds, so explicit `take(1)` is unnecessary. `timer(due, period)` keeps its contract (first emission after `due`, then every `period`). `interval(period)` now waits one full period before its first tick, matching RxJS and `setInterval`; it is now `timer(period, period)`.
+
 ## 3.0.11 - 2026-11-09
 
 - **Lenses and pull-shaped unfolds.** `lens(source, path)` creates a focused atom over a property or nested path: reads stay dependency-tracked, unrelated source updates do not emit, and writes copy only the containers along the path so untouched branches keep their identity and frozen snapshots are never mutated. A writable source produces a writable lens; a read-only source produces a read-only one, and disposing a lens never disposes its source. `unfold(initialState, step)` produces a genuinely pull-driven async iterable: each `iterator.next()` evaluates at most one step, the transition is deferred until the following pull, and `return()`/`throw()` abort the signal supplied to the step. Wrap it in `flow()` when an atom is needed.

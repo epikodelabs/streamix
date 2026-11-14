@@ -48,7 +48,7 @@ describe('timer', () => {
     expect(emitted).toEqual([0, 1]);
   });
 
-  it('should use the delay value when no interval is provided', async () => {
+  it('should emit once and complete when no interval is provided', async () => {
     const atom = timer(20);
     const emittedValues: number[] = [];
     const unsubscribe = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
@@ -56,8 +56,7 @@ describe('timer', () => {
     await delay(80);
     unsubscribe();
 
-    expect(emittedValues[0]).toBe(0);
-    expect(emittedValues[1]).toBe(1);
+    expect(emittedValues).toEqual([0]);
   });
 
   it('should cancel a pending first timeout before the first emission', async () => {

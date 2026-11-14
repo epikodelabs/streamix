@@ -444,6 +444,19 @@ are atoms or shared sources.
 
 ### Scheduling and time
 
+- Timers start on the first subscription, not when the factory is called.
+  Streamix follows the RxJS `timer` / `interval` contract:
+
+  | Source | First value (`0`) | Later values (`1`, `2`, ...) |
+  | --- | --- | --- |
+  | `timer(due)` | After `due` milliseconds | None; the source completes after emitting once |
+  | `timer(due, period)` | After `due` milliseconds | Repeats every `period` milliseconds |
+  | `interval(period)` | After `period` milliseconds | Repeats every `period` milliseconds |
+
+  A zero first delay delivers asynchronously without advancing the clock.
+  Unsubscribing the last consumer cancels a pending first delay or repeat
+  wait. While consumers remain, they share the timer; a new subscriber first
+  receives its current value when one exists.
 - Time operators use the real clock: `timer(delay, interval?)` and
   `interval(ms)` are shared sources over recursive `setTimeout`;
   `debounce`, `throttle`, `delay`, and `sample` use real timers too.

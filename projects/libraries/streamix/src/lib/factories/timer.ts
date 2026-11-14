@@ -4,6 +4,10 @@ import { fromPush } from './fromPush';
 /**
  * Creates a hot timer atom that emits numbers starting from 0.
  *
+ * With only a delay, the timer is one-shot: it emits `0` once and then
+ * completes. With a repeat period, it emits `0` after `delayMs` and then
+ * `1`, `2`, ... every `intervalMs`. This matches RxJS `timer`.
+ *
  * The underlying timer is shared between all subscribers. It starts on the
  * first subscription and stops when the last subscriber unsubscribes. As with
  * every Readable, a new subscriber receives the timer atom's current value first
@@ -13,11 +17,12 @@ import { fromPush } from './fromPush';
  * intermittent ticks); in discrete mode each subscriber queues all values.
  *
  * @param delayMs - The time in milliseconds to wait before emitting the first value (0).
- * If 0, the first value is emitted immediately (in the next microtask).
+ * If 0, the first value is emitted asynchronously (in the next microtask).
  * @param intervalMs - The time in milliseconds between subsequent emissions.
- * If not provided, it defaults to `delayMs`, which means `timer(100)` keeps
- * emitting every 100 ms indefinitely. (RxJS `timer(due)` emits once and
- * completes; use `take(1)` for that behavior here.)
+ * If omitted, the timer emits once and completes.
+ * @example
+ * timer(100); // 0 after 100 ms, then completes.
+ * timer(100, 20); // 0 after 100 ms, then 1 every 20 ms.
  * @returns {Readable<number>} An atom that emits incrementing numbers (0, 1, 2, ...).
  */
 export function timer(delayMs: number = 0, intervalMs?: number): Readable<number> {
@@ -38,8 +43,6 @@ export function timer(delayMs: number = 0, intervalMs?: number): Readable<number
       });
 
     const run = async () => {
-      const resolvedInterval = intervalMs ?? delayMs;
-
       if (delayMs > 0) {
         if (!(await sleep(delayMs))) return;
       } else {
@@ -47,10 +50,17 @@ export function timer(delayMs: number = 0, intervalMs?: number): Readable<number
         if (signal.aborted) return;
       }
 
+      await sink.next(count++);
+      if (signal.aborted) return;
+
+      if (intervalMs === undefined) {
+        sink.complete();
+        return;
+      }
+
       while (!signal.aborted) {
+        if (!(await sleep(intervalMs))) return;
         await sink.next(count++);
-        if (signal.aborted) return;
-        if (!(await sleep(resolvedInterval))) return;
       }
     };
 
