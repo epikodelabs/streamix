@@ -3,6 +3,51 @@ import { cyclicBuffer } from '@epikodelabs/streamix';
 const flushMicrotasks = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe('cyclicBuffer', () => {
+  it('settles all blocked producers on close without draining', async () => {
+    const buffer = cyclicBuffer<number>(1);
+    await buffer.push(1);
+    const blocked = [buffer.push(2), buffer.push(3), buffer.push(4)];
+
+    buffer.close();
+    buffer.close();
+    await Promise.all(blocked);
+    await buffer.push(5);
+    expect(buffer.length).toBe(1);
+    const iterator = buffer[Symbol.asyncIterator]();
+    expect(await iterator.next()).toEqual({ value: 1, done: false });
+    expect((await iterator.next()).done).toBeTrue();
+  });
+
+  it('admits blocked producers in order as capacity becomes available', async () => {
+    const buffer = cyclicBuffer<number>(1);
+    await buffer.push(1);
+    const blocked = [buffer.push(2), buffer.push(3)];
+    const iterator = buffer[Symbol.asyncIterator]();
+    for (const value of [1, 2, 3]) {
+      expect(await iterator.next()).toEqual({ value, done: false });
+      expect(buffer.length).toBeLessThanOrEqual(1);
+    }
+    await Promise.all(blocked);
+  });
+
+  it('cancels all pending pulls without stealing values from active readers', async () => {
+    const buffer = cyclicBuffer<number>(1);
+    const cancelled = buffer[Symbol.asyncIterator]();
+    const active = buffer[Symbol.asyncIterator]();
+    const pending = [cancelled.next(), cancelled.next()];
+    const activePull = active.next();
+
+    expect((await cancelled.return!()).done).toBeTrue();
+    for (const result of await Promise.all(pending)) expect(result.done).toBeTrue();
+    await buffer.push(42);
+    expect(await activePull).toEqual({ value: 42, done: false });
+    await buffer.push(43);
+    expect((await cancelled.next()).done).toBeTrue();
+    expect(await active.next()).toEqual({ value: 43, done: false });
+    await cancelled.return!();
+    buffer.close();
+  });
+
   it('pushes and iterates values in order', async () => {
     const buffer = cyclicBuffer<number>(4);
     buffer.push(1);

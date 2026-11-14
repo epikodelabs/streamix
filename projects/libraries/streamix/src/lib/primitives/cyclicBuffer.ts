@@ -1,21 +1,22 @@
-import { createSemaphore, type Semaphore } from "./semaphore";
-
 export type CyclicBufferMode = "discrete" | "analog";
 
 export interface CyclicBuffer<T> extends AsyncIterable<T> {
+  /** Resolves when admitted, or without admission if the buffer closes. */
   push(value: T): Promise<void>;
   tryPush(value: T): boolean;
+  /** Discards blocked pushes, rejects pending readers, and leaves buffered values available to drain. */
   close(): void;
   get length(): number;
 }
 
 export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "discrete"): CyclicBuffer<T> {
-  const semaphore: Semaphore = createSemaphore(capacity);
   const buffer: (T | undefined)[] = new Array(capacity);
   let readIdx = 0;
   let writeIdx = 0;
   let size = 0;
-  const waiters: Array<{ resolve: (v: T) => void; reject: (e: Error) => void }> = [];
+  type Reader = { resolve: (v: IteratorResult<T>) => void; reject: (e: Error) => void };
+  const waiters: Reader[] = [];
+  const producers: Array<{ value: T; resolve: () => void }> = [];
   let closed = false;
 
   function write(value: T): void {
@@ -29,21 +30,24 @@ export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "disc
     buffer[readIdx] = undefined;
     readIdx = (readIdx + 1) % capacity;
     size--;
-    semaphore.release();
+    const producer = producers.shift();
+    if (producer) {
+      write(producer.value);
+      producer.resolve();
+    }
     return value;
   }
 
   function notify(): void {
     while (waiters.length > 0 && size > 0) {
-      waiters.shift()!.resolve(dequeue());
+      waiters.shift()!.resolve({ value: dequeue(), done: false });
     }
   }
 
   function tryPush(value: T): boolean {
     if (closed) return false;
 
-    const release = semaphore.tryAcquire();
-    if (release) {
+    if (size < capacity) {
       write(value);
       notify();
       return true;
@@ -63,8 +67,7 @@ export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "disc
     async push(value: T): Promise<void> {
       if (closed) return;
 
-      let release = semaphore.tryAcquire();
-      if (release) {
+      if (size < capacity) {
         write(value);
         notify();
         return;
@@ -75,20 +78,16 @@ export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "disc
         return;
       }
 
-      release = await semaphore.acquire();
-      if (closed) {
-        release();
-        return;
-      }
-
-      write(value);
-      notify();
+      // A blocked push resolves on admission, or when close discards it.
+      await new Promise<void>((resolve) => producers.push({ value, resolve }));
     },
 
     tryPush,
 
     close(): void {
       closed = true;
+      for (const producer of producers) producer.resolve();
+      producers.length = 0;
       for (const w of waiters) w.reject(new Error("Buffer closed"));
       waiters.length = 0;
     },
@@ -98,8 +97,11 @@ export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "disc
     },
 
     [Symbol.asyncIterator](): AsyncIterator<T> {
+      let returned = false;
+      const pending = new Set<Reader>();
       return {
         next: async (): Promise<IteratorResult<T>> => {
+          if (returned) return { value: undefined as any, done: true };
           if (size > 0) {
             return { value: dequeue(), done: false };
           }
@@ -107,11 +109,24 @@ export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "disc
             return { value: undefined as any, done: true };
           }
 
-          return new Promise<T>((resolve, reject) => {
-            waiters.push({ resolve, reject });
-          }).then((value) => ({ value, done: false }));
+          return new Promise<IteratorResult<T>>((resolve, reject) => {
+            const reader: Reader = {
+              resolve: (result) => { pending.delete(reader); resolve(result); },
+              reject: (error) => { pending.delete(reader); reject(error); },
+            };
+            pending.add(reader);
+            waiters.push(reader);
+          });
         },
-        return: async () => ({ value: undefined as any, done: true }),
+        return: async () => {
+          returned = true;
+          for (const reader of pending) {
+            const index = waiters.indexOf(reader);
+            if (index >= 0) waiters.splice(index, 1);
+            reader.resolve({ value: undefined as any, done: true });
+          }
+          return { value: undefined as any, done: true };
+        },
       };
     },
   };
