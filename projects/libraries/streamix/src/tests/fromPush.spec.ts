@@ -3,6 +3,55 @@ import { DONE, fromPush, type PushSink } from '@epikodelabs/streamix';
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 describe('fromPush()', () => {
+  it('drains blocked producers before completing a backpressured session', async () => {
+    let sink!: PushSink<number>;
+    const source = fromPush<number>(s => { sink = s; }, { capacity: 1 });
+    const iterator = source[Symbol.asyncIterator]();
+    await sink.next(1);
+    await sink.next(2);
+    const blocked = [sink.next(3), sink.next(4)];
+    sink.complete();
+    // Producers already blocked on a full buffer are admitted and delivered;
+    // a push after complete() resolves but is not delivered.
+    await sink.next(99);
+    const values: number[] = [];
+    for (let item = await iterator.next(); !item.done; item = await iterator.next()) values.push(item.value);
+    await Promise.all(blocked);
+    expect(values).toEqual([1, 2, 3, 4]);
+    expect(source.value).toBe(4);
+    source.dispose();
+  });
+
+  it('coalesces the newest session value while retaining its pending prefix in analog mode', async () => {
+    let sink!: PushSink<number>;
+    const source = fromPush<number>(s => { sink = s; }, { capacity: 3, mode: 'analog' });
+    const iterator = source[Symbol.asyncIterator]();
+    await Promise.all([1, 2, 3, 4, 5].map(value => sink.next(value)));
+    sink.complete();
+    // capacity 3 retains the pending prefix (1, 2) and coalesces the burst
+    // tail into the newest pending value (5).
+    expect(await iterator.next()).toEqual({ value: 1, done: false });
+    expect(await iterator.next()).toEqual({ value: 2, done: false });
+    expect(await iterator.next()).toEqual({ value: 5, done: false });
+    expect(await iterator.next()).toEqual(DONE);
+    source.dispose();
+  });
+
+  it('coalesces the newest iterator value across separate analog deliveries', async () => {
+    let sink!: PushSink<number>;
+    const source = fromPush<number>(s => { sink = s; }, { capacity: 3, mode: 'analog' });
+    const iterator = source[Symbol.asyncIterator]();
+    for (const value of [1, 2, 3, 4, 5]) await sink.next(value);
+    sink.complete();
+    // Same retain-prefix/coalesce-newest trace when each push settles before
+    // the next one, not just for a synchronous burst.
+    expect(await iterator.next()).toEqual({ value: 1, done: false });
+    expect(await iterator.next()).toEqual({ value: 2, done: false });
+    expect(await iterator.next()).toEqual({ value: 5, done: false });
+    expect(await iterator.next()).toEqual(DONE);
+    source.dispose();
+  });
+
   it('lazily shares one producer and disconnects on the last consumer', async () => {
     const cleanups: number[] = [];
     let starts = 0;

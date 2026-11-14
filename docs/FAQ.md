@@ -221,7 +221,7 @@ only blocking backpressure.
 | Source kind                                                                   | Producer paced by consumers?                      | Slow consumer behavior                                                                                                             |
 | ----------------------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Flow-backed (`flow`, `pipe`, `from`, …)                                        | No                                                 | Per-subscriber FIFO queue (unbounded); `mode: "analog"` keeps only the latest pending value                                         |
-| Shared source (`fromPush`, `timer`, `interval`, `addListener`, DOM)            | Yes, when `connect` awaits `sink.next()` in discrete mode | `next()` waits for buffer space and for subscriber callbacks to finish; async iterators queue values instead of applying backpressure |
+| Shared source (`fromPush`, `timer`, `interval`, `addListener`, DOM)            | Yes, when `connect` awaits `sink.next()` in discrete mode | `next()` waits only for buffer admission, not delivery or subscriber callbacks; `analog` never blocks and coalesces the newest pending value; async iterators queue drained values instead of applying backpressure |
 
 The atom’s `.value` always reflects the newest emission.
 
@@ -235,16 +235,17 @@ const clicks    = flow(clickEvents(),      { mode: "discrete" }); // every event
 ```
 
 - `mode: "discrete"` (default) preserves every emission.
-- `mode: "analog"` keeps only the latest pending value (ideal for pointer,
-  scroll, or other high-frequency signals where intermediate values do not
-  matter).
+- `mode: "analog"` coalesces pending values (ideal for pointer, scroll, or
+  other high-frequency signals where intermediate values do not matter).
+  Flows keep only the latest pending value per subscriber; shared sources
+  retain the pending prefix and replace only the newest pending value.
 
 Shared sources also own a single cyclic buffer with an optional `capacity`:
 
-| Mode       | Default capacity | Full-buffer behavior                          |
-| ---------- | ---------------- | --------------------------------------------- |
-| `discrete` | 16               | `push` waits for a free slot (producer waits) |
-| `analog`   | 1                | Overwrites the pending slot (latest wins)     |
+| Mode       | Default capacity | Full-buffer behavior                                                          |
+| ---------- | ---------------- | ----------------------------------------------------------------------------- |
+| `discrete` | 16               | `push` waits for a free slot (producer waits)                                 |
+| `analog`   | 1                | Replaces the newest pending value; `capacity > 1` retains the pending prefix  |
 
 Flows have no source-side buffer — `mode: "analog"` conflates each
 subscriber’s pending queue instead. Keeping the queue per-subscriber preserves
@@ -259,13 +260,15 @@ handled by the delivery mode and the runtime’s internal buffers.
 
 A push-based producer can be paced, but only cooperatively:
 
-- In **discrete** mode, `push(value)` settles after the ring buffer accepts
-  the value and subscriber callbacks finish processing it. Promise-returning
-  callbacks are awaited, so a slow async subscriber delays `push` — and, for
-  `timer` / `interval`, the next tick. Because distribution is shared, that
-  subscriber also delays every other consumer.
-- In **analog** mode, `push` overwrites the latest pending value and returns
-  immediately; consumers never slow the producer.
+- In **discrete** mode, `push(value)` settles when the ring buffer admits the
+  value or the overflow policy drops it. It does not wait for delivery or
+  subscriber callbacks; a slow async subscriber delays delivery, not
+  admission. Because distribution is shared, that subscriber also delays every
+  other consumer, and a producer that awaits admission still pauses once the
+  buffer is full.
+- In **analog** mode, `push` replaces the newest pending value (retaining the
+  pending prefix when `capacity > 1`) and returns immediately; consumers never
+  slow the producer.
 
 DOM event sources cannot be paced by the browser: `addEventListener` ignores
 the listener’s returned promise. Awaiting `push` in discrete mode preserves
@@ -289,16 +292,17 @@ subscription owns a private pending queue:
 `iterate()` and `for await` own a separate per-iterator buffer: discrete values
 queue without a bound, analog atoms conflate into it. Consuming slowly never
 pressures a flow producer, and it does not pressure a shared-source producer
-either — a shared source’s ring buffer drains into this queue, so only async
-subscriber callbacks suspend its producer.
+either — a shared source’s ring buffer drains into this queue, so its producer
+is paced only by admission into the ring buffer.
 
 ### Choosing a mode
 
 - **Every event matters and the producer can wait:** keep the default
   `discrete` mode. Built-in timer sources await `push`; a custom `connect`
   should do the same so a full buffer suspends the producer.
-- **Only the latest value matters, or the producer cannot wait (DOM):** use
-  `analog`; intermediate values are conflated and the producer never blocks.
+- **Only the newest value matters, or the producer cannot wait (DOM):** use
+  `analog`; intermediate values are coalesced into the newest pending value
+  and the producer never blocks.
 - **A flow producer must not outrun its consumer:** do not rely on the runtime
   to pause it. Use `mode: "analog"`, operator-level shaping (`buffer`,
   `bufferCount`, `debounce`, `throttle`, `sample`), or make the producer pace
@@ -412,7 +416,7 @@ Streamix multicasts in three related ways:
 
    Delivery mode (`analog` / `discrete`) and an optional ring-buffer capacity
    are configured once on the shared source; concurrently attached consumers
-   see the same sequence (or the same coalesced latest value). A late consumer
+   see the same sequence (or the same coalesced pending values). A late consumer
    sees only the current value, and a shared source allows **one active async
    iterator at a time** — a second `for await` over the source finishes
    immediately. Use multiple `subscribe()` callbacks, or `iterate()` (which
@@ -471,5 +475,5 @@ are atoms or shared sources.
   scheduling. `transaction(fn)` batches several writes so downstream
   formulas publish once.
 - `mode: "analog"` versus `"discrete"` is the scheduling-like choice that
-  matters most for event sources: analog conflates to the latest pending
-  value, discrete preserves every event.
+  matters most for event sources: analog coalesces pending values into the
+  newest one, discrete preserves every event.

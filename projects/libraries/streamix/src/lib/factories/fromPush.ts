@@ -19,13 +19,19 @@ export interface PushSink<T> {
    *
    * Resolves when the value is accepted into the bounded buffer, or when the
    * overflow policy drops it — it does not wait for delivery, the atom's
-   * current value update, or subscriber callbacks. Awaiting applies
-   * backpressure only while the buffer is full.
+   * current value update, or subscriber callbacks. In discrete mode, awaiting
+   * applies backpressure only while the buffer is full. In analog mode the
+   * value is admitted immediately, replacing the newest pending value when
+   * the buffer is full, so `next()` never blocks.
    */
   next(value: T): Promise<void>;
   /** Terminates the source with an error; queued values are discarded. */
   error(reason: unknown): void;
-  /** Stops accepting values, then delivers already accepted values before completing. */
+  /**
+   * Stops accepting new values. Producers already blocked inside `next()`
+   * are admitted and delivered before the source completes; pushes made after
+   * this call resolve but are ignored.
+   */
   complete(): void;
 }
 
@@ -34,9 +40,16 @@ export type PushOverflow = 'block' | 'drop-oldest' | 'drop-newest' | 'error';
 export interface FromPushOptions {
   /** Optional diagnostic name. */
   name?: string;
-  /** Discrete preserves each accepted event; analog retains only the latest pending event. */
+  /**
+   * Discrete preserves each accepted event. Analog retains the pending prefix
+   * and replaces only the newest pending value when the buffer is full; with
+   * the default capacity of 1, every push replaces the pending value.
+   */
   mode?: 'discrete' | 'analog';
-  /** Maximum accepted events awaiting delivery (and per-iterator backlog). */
+  /**
+   * Maximum accepted events awaiting delivery (and per-iterator backlog). In
+   * analog mode it bounds the retained prefix plus the coalesced newest value.
+   */
   capacity?: number;
   /** Discrete overflow handling; defaults to `block`. Ignoring returned promises defeats backpressure. */
   overflow?: PushOverflow;
@@ -87,6 +100,17 @@ type Session<T> = {
  * while the buffer is full. External APIs that ignore `next()` promises
  * cannot be flow-controlled; select a dropping/error overflow policy for
  * those APIs if memory must remain bounded.
+ *
+ * In `analog` mode the source-side buffer keeps its pending prefix and
+ * replaces the newest pending value when full, so a consumer that falls
+ * behind sees the oldest queued values followed by the newest one. `capacity`
+ * bounds how many prefix values are retained and defaults to 1, where every
+ * push replaces the pending value and `next()` never blocks.
+ *
+ * `complete()` stops accepting new values but still admits producers that are
+ * already blocked inside `next()`; the source completes after those values and
+ * the buffered prefix have been delivered. Pushes made after `complete()`
+ * resolve without being delivered.
  *
  * This implementation intentionally supports one active async iterator, matching
  * the existing Streamix shared-source contract. Callback subscribers multicast.
