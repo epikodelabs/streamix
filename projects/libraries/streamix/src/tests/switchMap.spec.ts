@@ -136,13 +136,15 @@ describe('switchMap', () => {
     let done = false;
 
     const sourceIterator: any = {
+      // Advertise push support before switchMap selects its consumption mode.
+      __onPush: () => {},
       __tryNext() {
         if (buffer.length > 0) return NEXT(buffer.shift()!);
         if (done) return DONE;
         return null;
       },
       next: async () => {
-        throw new Error('next() should not be used when __tryNext is present');
+        throw new Error('next() should not be used for a push-driven source');
       },
     };
 

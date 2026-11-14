@@ -129,7 +129,10 @@ export function switchMap<T = any, R = any>(
     };
 
     const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
-    if (typeof tryNext === 'function') {
+    // A synchronous try-pull is only a fast path unless the iterator also
+    // advertises push notifications. Until operators expose __tryNext but
+    // still need next() to wait for asynchronous coordinator events.
+    if (typeof tryNext === 'function' && '__onPush' in source) {
       const drain = () => {
         while (!stopped) {
           let item: IteratorResult<T> | null;
@@ -150,7 +153,10 @@ export function switchMap<T = any, R = any>(
       void (async () => {
         try {
           while (!stopped) {
-            const item = await source.next();
+            // Drain ready values without yielding, preserving latest-only
+            // switching for synchronous bursts, then fall back to a real pull.
+            const ready = tryNext?.call(source);
+            const item = ready ?? await source.next();
             if (stopped || item.done) break;
             processOuterValue(item.value);
           }

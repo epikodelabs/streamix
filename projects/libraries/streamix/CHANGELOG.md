@@ -2,6 +2,7 @@
 
 ## 3.0.12 - 2026-11-14
 
+- **Fix:** `switchMap()` falls back to asynchronous pulls for iterators that expose `__tryNext` without push notifications. Pipelines after `takeUntil`, `skipUntil`, `delayUntil` and `bufferUntil` now deliver values, completion and errors instead of hanging.
 - **Fix:** `expand()` streams children incrementally, so a non-terminating child no longer blocks the parent or buffers all child values. Depth/breadth traversal and `maxDepth` are preserved; cancellation and errors close suspended child iterators and the source.
 - **Breaking:** `timer(due)` is now one-shot. It emits `0` once after `due` milliseconds and completes, matching RxJS; it no longer repeats every `due` milliseconds, so explicit `take(1)` is unnecessary. `timer(due, period)` keeps its contract (first emission after `due`, then every `period`). `interval(period)` now waits one full period before its first tick, matching RxJS and `setInterval`; it is now `timer(period, period)`.
 
