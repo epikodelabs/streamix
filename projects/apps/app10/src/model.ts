@@ -1,4 +1,4 @@
-// Shared demo model for the app8 task board. Plain data and storage helpers —
+// Shared demo model for the app10 task board. Plain data and storage helpers —
 // every Streamix node lives in App.vue.
 
 export type Tag = "work" | "home" | "idea";
@@ -29,7 +29,7 @@ export const PRIORITIES: Priority[] = ["high", "medium", "low"];
 /** Lower ranks sort first. */
 export const PRIORITY_RANK: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
 
-const STORAGE_KEY = "streamix.app8.tasks.v1";
+const STORAGE_KEY = "streamix.app10.tasks.v1";
 const MINUTE = 60_000;
 const now = Date.now();
 

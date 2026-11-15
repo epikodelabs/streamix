@@ -1,4 +1,4 @@
-# App 8 — Vue Task Board
+# App 10 — Vue Task Board
 
 A task board written as compiled Vue single-file components on top of Streamix.
 Every stateful value in the app is a Streamix node — nothing is copied into
@@ -36,5 +36,5 @@ The demo covers the compiler-first Vue surface, one pipeline per feature:
 Run it with:
 
 ```bash
-npx ng serve app8
+npx ng serve app10
 ```
