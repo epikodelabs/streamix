@@ -42,12 +42,6 @@
     "preserveModulesRoot": "."
   },
   "viteConfig": {
-    "resolve": {
-      "dedupe": [
-        "react",
-        "react-dom"
-      ]
-    },
     "define": {
       "import.meta.env.DEV": "true"
     }
