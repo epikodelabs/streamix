@@ -19,10 +19,15 @@ import { COMPLETED_REPLAY } from '../atoms/replay';
  * - Providing a "state history" to late subscribers.
  *
  * @template T The type of the values in the stream.
- * @param bufferSize The number of last values to replay to new subscribers. Defaults to `Infinity`.
+ * @param bufferSize A non-negative safe integer, or `Infinity` (the default).
+ * Zero disables replay while still sharing live emissions.
+ * @throws {RangeError} If bufferSize is fractional, negative, NaN, or an unsafe integer.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export function shareReplay<T = any>(bufferSize: number = Infinity) {
+  if (bufferSize !== Infinity && (!Number.isSafeInteger(bufferSize) || bufferSize < 0)) {
+    throw new RangeError('shareReplay bufferSize must be a non-negative safe integer or Infinity');
+  }
   let isConnected = false;
   let resolvedSize: number | undefined;
   let sourceIterator: AsyncIterator<T> | null = null;

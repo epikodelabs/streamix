@@ -6,6 +6,7 @@
 - **Introspection:** fixed builds for projects without Streamix sources.
 - **Push sources:** added `fromPush()`'s `prefetch: false` option and a FIFO demo.
 - **Sharing:** fixed `share()` reconnection and `shareReplay()` cache retention after completion (#92, #93).
+- **Replay:** `shareReplay()` rejects invalid buffer sizes to prevent corrupted history (#68).
 - **Tooling:** updated browser targets and fixed duplicate test modules on Windows.
 
 ## 3.0.12 - 2026-11-14

@@ -17,6 +17,24 @@ const emptySource = <T>(): AsyncIterator<T> => ({
 });
 
 describe('shareReplay', () => {
+  it('rejects invalid replay sizes at creation', () => {
+    for (const size of [2.5, -1, NaN, -Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => shareReplay(size)).toThrowError(RangeError,
+        'shareReplay bufferSize must be a non-negative safe integer or Infinity');
+    }
+  });
+
+  it('retains the latest suffix across multiple buffer rotations', async () => {
+    for (const size of [0, 1, 2, 3, Infinity]) {
+      const op = shareReplay<number>(size);
+      const values = Array.from({ length: 10 }, (_, i) => i + 1);
+      async function* source() { yield* values; }
+      expect(await collect(op.apply(source()))).toEqual(values);
+      expect(await collect(op.apply(emptySource<number>())))
+        .toEqual(size === 0 ? [] : values.slice(-size));
+    }
+  });
+
   it('preserves the completed bounded cache through public pipe iteration', async () => {
     const shared = pipe([1, 2, 3], shareReplay<number>(2));
     expect(await collect(iterate(shared))).toEqual([1, 2, 3]);
