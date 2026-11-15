@@ -59,6 +59,12 @@
     "preserveModulesRoot": "."
   },
   "viteConfig": {
+    "resolve": {
+      "dedupe": [
+        "react",
+        "react-dom"
+      ]
+    },
     "server": {
       "open": false
     },
