@@ -22,17 +22,22 @@ export interface AtomSnapshotPayload {
 type Disposable = { dispose(): void };
 type Listener = () => void;
 
-// Shared compiler runtime. Keeping these helpers in the adapter means every
-// transformed module observes the same subscription and ownership registries,
-// rather than injecting a private copy into each compiled file.
-const compilerSubscriptions = new WeakMap<object, {
+type CompilerSubscriptionEntry = {
   listeners: Set<Listener>;
   stop: (() => void) | null;
   generation: number;
   version: number;
   value: unknown;
   snapshot: { readonly version: number; readonly value: unknown };
-}>();
+};
+
+// Shared compiler runtime. Keeping these helpers in the adapter means every
+// transformed module observes the same subscription and ownership registries,
+// rather than injecting a private copy into each compiled file. Entries are
+// split by dedupe mode: compiler reads and explicit read hatches have
+// different equal-emission contracts and must not inherit whichever one
+// subscribed first.
+const compilerSubscriptions = new WeakMap<object, Map<boolean, CompilerSubscriptionEntry>>();
 const compilerLocalDisposals = new WeakMap<object, object>();
 
 /**
@@ -183,12 +188,17 @@ export function useStreamixLocal<T>(factory: () => T): T {
  * no trace event. The explicit read hatches pass `dedupe: false` to keep
  * their in-place-mutation re-render contract. */
 export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "dynamic atom", dedupe = true): T {
-  const entryFor = (): NonNullable<ReturnType<typeof compilerSubscriptions.get>> => {
+  const entryFor = (): CompilerSubscriptionEntry => {
     const sourceKey = source as unknown as object;
-    let entry = compilerSubscriptions.get(sourceKey);
+    let modes = compilerSubscriptions.get(sourceKey);
+    if (!modes) {
+      modes = new Map();
+      compilerSubscriptions.set(sourceKey, modes);
+    }
+    let entry = modes.get(dedupe);
     if (!entry) {
       entry = { listeners: new Set(), stop: null, generation: 0, version: 0, value: source.value, snapshot: { version: 0, value: source.value } };
-      compilerSubscriptions.set(sourceKey, entry);
+      modes.set(dedupe, entry);
     }
     return entry;
   };
@@ -228,10 +238,14 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
           if (entry!.generation !== generation || entry!.listeners.size > 0) return;
           __streamixTrace("unsubscribe", sourceName);
           entry!.stop?.();
-          compilerSubscriptions.delete(sourceKey);
+          const modes = compilerSubscriptions.get(sourceKey);
+          if (modes?.get(dedupe) === entry) {
+            modes.delete(dedupe);
+            if (modes.size === 0) compilerSubscriptions.delete(sourceKey);
+          }
         });
       };
-    }, [source, sourceName]);
+    }, [dedupe, source, sourceName]);
   const getSnapshot = useCallback(() => {
     const entry = entryFor();
     // Accommodate stores changed before their first subscriber attaches.
@@ -241,7 +255,7 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
       entry.snapshot = { version: entry.version, value: entry.value };
     }
     return entry.snapshot;
-  }, [source]);
+  }, [dedupe, source]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).value as T;
 }
 

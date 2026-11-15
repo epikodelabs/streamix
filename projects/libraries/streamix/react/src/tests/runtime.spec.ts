@@ -160,6 +160,42 @@ idescribe("React runtime escape hatches", () => {
     expect(renders).toBeGreaterThan(before);
   });
 
+  it("keeps dedupe contracts per read mode regardless of subscription order", () => {
+    for (const compilerFirst of [true, false]) {
+      const item = { count: 0 };
+      const model = atom(item);
+      const host = document.createElement("div");
+      const scopedRoot = createRoot(host);
+      try {
+        function CompilerView() {
+          const value = useStreamixSource(model, "model");
+          return createElement("output", { id: "compiler" }, String(value.count));
+        }
+        function ExplicitView() {
+          const value = useAtomValue(model);
+          return createElement("output", { id: "explicit" }, String(value.count));
+        }
+        const compiler = createElement(CompilerView, { key: "compiler" });
+        const explicit = createElement(ExplicitView, { key: "explicit" });
+        act(() => scopedRoot.render(createElement("div", null,
+          compilerFirst ? compiler : explicit,
+          compilerFirst ? explicit : compiler,
+        )));
+
+        item.count = 7;
+        act(() => { model.next(item); });
+
+        // The explicit read keeps its in-place mutation contract; the compiler
+        // read keeps the equal-emission gate, in either subscription order.
+        expect(host.querySelector("#explicit")?.textContent).toBe("7");
+        expect(host.querySelector("#compiler")?.textContent).toBe("0");
+      } finally {
+        act(() => scopedRoot.unmount());
+        host.remove();
+      }
+    }
+  });
+
   it("handles a loader throwing synchronously as a resource error", async () => {
     const resource = createResource<string>(() => { throw new Error("loader failed"); });
     expect(() => resource.preload()).not.toThrow();
