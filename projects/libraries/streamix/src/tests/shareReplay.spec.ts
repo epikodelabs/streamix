@@ -1,4 +1,4 @@
-import { DONE, NEXT, shareReplay } from '@epikodelabs/streamix';
+import { DONE, NEXT, iterate, map, pipe, shareReplay } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -17,6 +17,41 @@ const emptySource = <T>(): AsyncIterator<T> => ({
 });
 
 describe('shareReplay', () => {
+  it('preserves the completed bounded cache through public pipe iteration', async () => {
+    const shared = pipe([1, 2, 3], shareReplay<number>(2));
+    expect(await collect(iterate(shared))).toEqual([1, 2, 3]);
+    expect(await collect(iterate(shared))).toEqual([2, 3]);
+    expect(await collect(shared[Symbol.asyncIterator]())).toEqual([2, 3]);
+  });
+
+  it('applies downstream transformations to completed replay readers', async () => {
+    const shared = pipe([1, 2, 3], shareReplay<number>(2), map(value => value * 10));
+    expect(await collect(iterate(shared))).toEqual([10, 20, 30]);
+    expect(await collect(iterate(shared))).toEqual([20, 30]);
+  });
+
+  it('reconnects after cancellation without accepting stale in-flight values', async () => {
+    const op = shareReplay<number>(2);
+    let resolveOld!: (value: IteratorResult<number>) => void;
+    let pulls = 0;
+    let returns = 0;
+    const first = op.apply({
+      next: async () => ++pulls === 1 ? NEXT(1)
+        : new Promise<IteratorResult<number>>(resolve => resolveOld = resolve),
+      return: async () => { returns++; return DONE; },
+    });
+    expect(await first.next()).toEqual(NEXT(1));
+    await first.return?.();
+    await first.return?.();
+    expect(returns).toBe(1);
+    let next = 1;
+    const second = op.apply({ next: async () => ++next <= 3 ? NEXT(next) : DONE });
+    resolveOld(NEXT(99));
+    expect(await collect(second)).toEqual([1, 2, 3]);
+    expect(pulls).toBe(2);
+    expect(await collect(op.apply(emptySource()))).toEqual([2, 3]);
+  });
+
   it('replays emitted values to later consumers without rerunning the first source', async () => {
     const op = shareReplay<number>();
     let pulls = 0;

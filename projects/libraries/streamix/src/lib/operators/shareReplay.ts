@@ -1,5 +1,6 @@
 import { createOperator, DONE, type Operator } from "../atoms";
 import { normalizeError } from "../atoms";
+import { COMPLETED_REPLAY } from '../atoms/replay';
 
 /**
  * Creates a stream operator that shares a single subscription to the source stream
@@ -9,6 +10,9 @@ import { normalizeError } from "../atoms";
  * consumers can receive values from a single source connection. It uses an internal
  * atom and a bounded replay buffer so that late subscribers receive the most recent
  * values before continuing with live emissions.
+ * The cache survives natural completion, including subsequent iteration of a
+ * completed `pipe()`. If all consumers cancel before completion, the upstream
+ * disconnects; a later `apply(source)` replays the cache and reconnects.
  *
  * This is useful for:
  * - Preventing redundant execution of a source stream (e.g. a network request).
@@ -126,11 +130,13 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
       try {
         while (true) {
           const result = await source.next();
+          if (activeConnection !== connection) return;
           if (result.done) break;
           pushReplay(result.value);
           broadcastValue(result.value);
         }
       } catch (err) {
+        if (activeConnection !== connection) return;
         errorValue = normalizeError(err);
         broadcastError(errorValue);
         return;
@@ -148,7 +154,7 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
     })();
   };
 
-  return createOperator<T, T>('shareReplay', function (this: Operator, source) {
+  const operator = createOperator<T, T>('shareReplay', function (this: Operator, source) {
     let initialized = false;
     const subscriber: Subscriber = {
       done: false,
@@ -228,5 +234,10 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
     };
 
     return iterator;
+  });
+  return Object.assign(operator, {
+    [COMPLETED_REPLAY]: () => completed
+      ? operator.apply({ next: async () => DONE })
+      : undefined,
   });
 }

@@ -3,6 +3,60 @@ import { atom, flow, iterate, pipe, share } from '@epikodelabs/streamix';
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 describe('share', () => {
+  it('starts a fresh session after finite completion', async () => {
+    const op = share<number>();
+    const collect = async (value: number) => {
+      let pulled = false;
+      const reader = op.apply({ next: async () => pulled
+        ? { value: undefined, done: true }
+        : (pulled = true, { value, done: false }) });
+      const values: number[] = [];
+      while (true) {
+        const item = await reader.next();
+        if (item.done) break;
+        values.push(item.value);
+      }
+      return values;
+    };
+    expect(await collect(1)).toEqual([1]);
+    expect(await collect(2)).toEqual([2]);
+  });
+
+  it('isolates reconnects from cancelled pumps and repeated returns', async () => {
+    const op = share<number>();
+    const sources = [0, 1, 2].map(() => {
+      let resolve!: (value: IteratorResult<number>) => void;
+      let pulls = 0;
+      let returns = 0;
+      return {
+        next: () => { pulls++; return new Promise<IteratorResult<number>>(r => resolve = r); },
+        return: async () => { returns++; return { value: undefined, done: true as const }; },
+        emit: (value: number) => resolve({ value, done: false }),
+        get pulls() { return pulls; },
+        get returns() { return returns; },
+      };
+    });
+    const old = op.apply(sources[0]);
+    await old.return?.();
+    const current = op.apply(sources[1]);
+    const other = op.apply(sources[2]);
+    await old.return?.();
+    sources[0].emit(99);
+    const pending = current.next();
+    sources[1].emit(7);
+    expect(await pending).toEqual({ value: 7, done: false });
+    expect(sources[0].pulls).toBe(1);
+    expect(sources[0].returns).toBe(1);
+    await current.return?.();
+    await current.return?.();
+    expect(sources[1].returns).toBe(0);
+    await other.return?.();
+    expect(sources[1].returns).toBe(1);
+    sources[1].emit(8);
+    await wait(0);
+    expect(sources[1].pulls).toBe(2);
+  });
+
   it('shares one source execution across overlapping consumers', async () => {
     let executions = 0;
     const source = flow<number>(async function* () {

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **React:** fixed Activity recovery, subscription deduplication and snapshot hydration.
+- **Introspection:** fixed builds for projects without Streamix sources.
+- **Push sources:** added `fromPush()`'s `prefetch: false` option and a FIFO demo.
+- **Sharing:** fixed `share()` reconnection and `shareReplay()` cache retention after completion (#92, #93).
+- **Tooling:** updated browser targets and fixed duplicate test modules on Windows.
+
 ## 3.0.12 - 2026-11-14
 
 - **Fix:** `switchMap()` falls back to asynchronous pulls for iterators that expose `__tryNext` without push notifications. Pipelines after `takeUntil`, `skipUntil`, `delayUntil` and `bufferUntil` now deliver values, completion and errors instead of hanging.

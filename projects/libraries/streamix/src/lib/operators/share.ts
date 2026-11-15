@@ -10,6 +10,9 @@ import { normalizeError } from "../atoms";
  * subject's current value when one exists, then continues with live emissions.
  * This is a one-value current snapshot, not a replay history; use `shareReplay()`
  * when multiple past values must be retained.
+ * After upstream completion or the last consumer's cancellation, a subsequent
+ * `apply(source)` starts a fresh session with a new subject. A completed pipe
+ * remains terminal; construct a new pipe to supply a new upstream iterator.
  *
  * **Timing caveat:** values produced before the internal subject has acquired a
  * current value are not recoverable, and only the latest current value is visible
@@ -23,38 +26,53 @@ export function share<T = any>() {
   let isConnected = false;
   let sourceIterator: AsyncIterator<T> | null = null;
   let subscriberCount = 0;
+  let activeConnection: symbol | null = null;
 
   const disconnect = () => {
     if (sourceIterator) {
       const it = sourceIterator;
       sourceIterator = null;
       isConnected = false;
+      activeConnection = null;
+      shared?.dispose();
       void it.return?.().catch(() => {});
     }
   };
 
   const connect = (source: AsyncIterator<T>) => {
+    const subject = shared!;
+    const connection = Symbol('shareConnection');
+    activeConnection = connection;
     sourceIterator = source;
     isConnected = true;
     void (async () => {
       try {
-        while (true) {
+        while (activeConnection === connection) {
           const result = await source.next();
+          if (activeConnection !== connection) return;
           if (result.done) break;
 
-          shared!.next(result.value);
+          subject.next(result.value);
         }
       } catch (err) {
-        shared!.fail(normalizeError(err));
+        if (activeConnection === connection) subject.fail(normalizeError(err));
         return;
       } finally {
-        if (shared && !shared.disposed) shared.dispose();
+        if (activeConnection === connection) {
+          sourceIterator = null;
+          isConnected = false;
+          activeConnection = null;
+          subject.dispose();
+        }
       }
     })();
   };
 
   return createOperator<T, T>('share', function (this: Operator, source) {
-    if (!shared) shared = atom<T>();
+    if (!shared || shared.disposed) {
+      shared = atom<T>();
+      subscriberCount = 0;
+    }
     if (!isConnected) {
       connect(source);
     } else if (typeof source.return === "function") {
@@ -65,15 +83,32 @@ export function share<T = any>() {
     }
 
     subscriberCount++;
+    const subject = shared;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      if (shared !== subject) return;
+      subscriberCount--;
+      if (subscriberCount === 0 && isConnected) disconnect();
+    };
     const outputIterator = iterate(shared)[Symbol.asyncIterator]();
+    const baseNext = outputIterator.next.bind(outputIterator);
+    outputIterator.next = async () => {
+      try {
+        const result = await baseNext();
+        if (result.done) release();
+        return result;
+      } catch (err) {
+        release();
+        throw err;
+      }
+    };
     const baseReturn = outputIterator.return?.bind(outputIterator);
     const baseThrow = outputIterator.throw?.bind(outputIterator);
 
     (outputIterator as any).return = async (value?: any) => {
-      subscriberCount--;
-      if (subscriberCount === 0 && isConnected) {
-        disconnect();
-      }
+      release();
       return baseReturn ? baseReturn(value) : DONE;
     };
 

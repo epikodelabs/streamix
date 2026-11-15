@@ -1,6 +1,7 @@
 import type { Readable } from "./atom";
 import { ANALOG_DELIVERY } from "./delivery";
 import type { MaybePromise } from "./operator";
+import { REPLAY_ITERATOR } from './replay';
 
 /**
  * Creates an async iterable from an atom.
@@ -41,6 +42,8 @@ export function iterate<T>(
   }
 
   const atom = source as Readable<T>;
+  const replay = (atom as any)[REPLAY_ITERATOR]?.();
+  if (replay) return replay;
   const conflate = (atom as any)[ANALOG_DELIVERY] === true;
 
   let initialized = false;
