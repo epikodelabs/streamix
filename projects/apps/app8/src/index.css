@@ -1,0 +1,15 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', Consolas, monospace;
+}
+
+:root { font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif; }
+code, pre, .font-mono { font-family: 'JetBrains Mono', Consolas, monospace; }
+
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: #191b20; }
+::-webkit-scrollbar-thumb { background: #555866; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #696e7d; }

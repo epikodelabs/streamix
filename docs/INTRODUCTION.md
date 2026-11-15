@@ -29,13 +29,13 @@ This repository is an Angular CLI monorepo that hosts **Angular, React, and Vue*
 | Projects | Framework |
 | --- | --- |
 | `app1` – `app4` | Angular |
-| `app5` – `app7` | React |
-| `app8` – `app9` | Vue |
+| `app5` – `app8` | React |
+| `app9` – `app10` | Vue |
 
 Run any of them with the Angular CLI:
 
 ```sh
-npx ng serve app1   # ... through app9
+npx ng serve app1   # ... through app10
 ```
 
 ## Builder not found after cloning

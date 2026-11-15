@@ -550,51 +550,73 @@
         }
       }
     },
-    "app10": {
+    "app8": {
       "projectType": "application",
-      "root": "projects/apps/app10",
-      "sourceRoot": "projects/apps/app10/src",
+      "root": "projects/apps/app8",
+      "sourceRoot": "projects/apps/app8/src",
       "architect": {
         "application": {
-          "builder": "@epikodelabs/streamix/vue/builder:vite",
+          "builder": "@angular/build:application",
           "options": {
-            "root": ".angular/.streamix/app10/src",
-            "outputPath": "dist/apps/app10/browser"
+            "outputPath": "dist/apps/app8",
+            "index": "projects/apps/app8/src/index.html",
+            "browser": ".angular/.streamix/app8/src/main.tsx",
+            "polyfills": [],
+            "tsConfig": ".angular/.streamix/app8/tsconfig.app.json",
+            "assets": [],
+            "styles": [
+              "projects/apps/app8/src/index.css",
+              "projects/apps/app8/src/workbench.css"
+            ],
+            "scripts": [],
+            "define": {
+              "import.meta.env.DEV": "false"
+            }
           },
           "configurations": {
-            "production": {},
+            "production": {
+              "outputHashing": "all"
+            },
             "development": {
-              "sourceMap": true
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "define": {
+                "import.meta.env.DEV": "true"
+              }
             }
           },
           "defaultConfiguration": "production"
         },
         "build": {
-          "builder": "@epikodelabs/streamix/vue/builder:application",
+          "builder": "@epikodelabs/streamix/react/builder:application",
           "options": {
-            "delegateTarget": "app10:application",
-            "sourceRoot": "projects/apps/app10/src"
+            "delegateTarget": "app8:application",
+            "sourceRoot": "projects/apps/app8/src"
           },
           "configurations": {
             "production": {
-              "introspection": false
+              "outputHashing": "all",
+              "introspection": true
             },
             "development": {
-              "introspection": true,
-              "sourceMap": true
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "introspection": true
             }
           },
           "defaultConfiguration": "production"
         },
         "serve": {
-          "builder": "@epikodelabs/streamix/vue/builder:application",
+          "builder": "@epikodelabs/streamix/react/builder:application",
           "options": {
-            "delegateTarget": "app10:dev-server",
-            "sourceRoot": "projects/apps/app10/src"
+            "delegateTarget": "app8:dev-server",
+            "sourceRoot": "projects/apps/app8/src"
           },
           "configurations": {
             "production": {
-              "introspection": false
+              "introspection": true
             },
             "development": {
               "introspection": true
@@ -603,15 +625,14 @@
           "defaultConfiguration": "development"
         },
         "dev-server": {
-          "builder": "@epikodelabs/streamix/vue/builder:vite",
-          "options": {
-            "root": ".angular/.streamix/app10/src",
-            "serve": true,
-            "port": 4200
-          },
+          "builder": "@angular/build:dev-server",
           "configurations": {
-            "production": {},
-            "development": {}
+            "production": {
+              "buildTarget": "app8:application:production"
+            },
+            "development": {
+              "buildTarget": "app8:application:development"
+            }
           },
           "defaultConfiguration": "development"
         }
@@ -673,6 +694,73 @@
           "builder": "@epikodelabs/streamix/vue/builder:vite",
           "options": {
             "root": ".angular/.streamix/app9/src",
+            "serve": true,
+            "port": 4200
+          },
+          "configurations": {
+            "production": {},
+            "development": {}
+          },
+          "defaultConfiguration": "development"
+        }
+      }
+    },
+    "app10": {
+      "projectType": "application",
+      "root": "projects/apps/app10",
+      "sourceRoot": "projects/apps/app10/src",
+      "architect": {
+        "application": {
+          "builder": "@epikodelabs/streamix/vue/builder:vite",
+          "options": {
+            "root": ".angular/.streamix/app10/src",
+            "outputPath": "dist/apps/app10/browser"
+          },
+          "configurations": {
+            "production": {},
+            "development": {
+              "sourceMap": true
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "build": {
+          "builder": "@epikodelabs/streamix/vue/builder:application",
+          "options": {
+            "delegateTarget": "app10:application",
+            "sourceRoot": "projects/apps/app10/src"
+          },
+          "configurations": {
+            "production": {
+              "introspection": false
+            },
+            "development": {
+              "introspection": true,
+              "sourceMap": true
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@epikodelabs/streamix/vue/builder:application",
+          "options": {
+            "delegateTarget": "app10:dev-server",
+            "sourceRoot": "projects/apps/app10/src"
+          },
+          "configurations": {
+            "production": {
+              "introspection": false
+            },
+            "development": {
+              "introspection": true
+            }
+          },
+          "defaultConfiguration": "development"
+        },
+        "dev-server": {
+          "builder": "@epikodelabs/streamix/vue/builder:vite",
+          "options": {
+            "root": ".angular/.streamix/app10/src",
             "serve": true,
             "port": 4200
           },

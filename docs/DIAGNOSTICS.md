@@ -194,9 +194,10 @@ A rule in this guide is only real if a test breaks when it is violated.
   accounting invariants and the no-cost-when-unused toggles.
 - `introspection.spec.ts` — pruning, lazy evaluation, scope relations,
   previews, trace behavior.
-- Demo e2e (`scripts/verify-demo-introspection.mjs`) — discovery in all eight
-  built development apps, app5 request output, app6 interaction and scaling,
-  app8 Vue board interactions, and production parity (`--production`, using
+- Demo e2e (`scripts/verify-demo-introspection.mjs`) — discovery in the built
+  development apps (app1–app8 and app10), app5 request output, app6 interaction
+  and scaling, app8 activation without Streamix sources, app10 Vue board
+  interactions, and production parity (`--production`, using
   `dist/apps-production`).
 - Tests that toggle flags restore them in `finally`. Fixture flows that must
   stay observable mid-flight stay pending on a release function; a completed

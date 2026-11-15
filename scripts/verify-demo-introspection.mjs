@@ -27,7 +27,10 @@ let browser;
 try {
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  for (const app of process.argv.includes('--app6') ? [6] : production ? [5, 6] : [1, 2, 3, 4, 5, 6, 7, 8]) {
+  for (const app of process.argv.includes('--app6') ? [6]
+    : process.argv.includes('--app8') ? [8]
+    : production ? [5, 6]
+    : [1, 2, 3, 4, 5, 6, 7, 8, 10]) {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -38,6 +41,11 @@ try {
     if (production) {
       await page.waitForSelector('main');
       assert.equal(await page.evaluate(() => typeof window.__streamix), 'undefined');
+    } else if (app === 8) {
+      // The FIFO visualizer does not declare Streamix sources; introspection
+      // must still activate without requiring any inspectable entries.
+      await page.waitForSelector('.focus-workbench');
+      await page.waitForFunction(() => typeof window.__streamix !== 'undefined');
     } else {
       await page.waitForFunction(() => window.__streamix?.inspect().length > 0);
     }
@@ -49,9 +57,9 @@ try {
       assert(await page.evaluate(() => window.__streamix.inspect().some(entry => entry.value.includes('Inspector test post'))),
         'The inspector must expose the response output');
     }
-    if (app === 8 && !production) {
+    if (app === 10 && !production) {
       assert(await page.evaluate(() => window.__streamix.inspect().some(entry => entry.kind === 'scope')),
-        'The Vue demo must expose its board scope');
+        'The Vue demo (app10) must expose its board scope');
       await page.getByPlaceholder('What needs doing?').fill('Inspector task');
       await page.getByRole('button', { name: 'Add task' }).click();
       await page.waitForFunction(() => document.querySelector('.tasks')?.textContent.includes('Inspector task'));
