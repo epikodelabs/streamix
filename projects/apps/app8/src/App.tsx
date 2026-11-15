@@ -234,7 +234,11 @@ export default function App() {
     sourceRef.current = source;
     const unsubscribeError = source.onError(error => {
       if (session !== sessionEpochRef.current) return;
-      abortRef.current(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      const buffered = queueRef.current.length + reservedRef.current.length;
+      abortRef.current(message === 'fromPush buffer capacity exceeded'
+        ? `Push #${seqRef.current - 1} exceeded the full buffer (${buffered}/${capacity}). The source stopped and discarded ${buffered} queued values. Reset to try again.`
+        : message);
     });
     const iterator = source[Symbol.asyncIterator]();
     iteratorRef.current = iterator;
@@ -472,7 +476,7 @@ export default function App() {
       case 'analog-coalescing': setMode('analog'); setOverflow('drop-oldest'); setCapacity(1); setProducerRate(.8); setConsumerRate(2.4); setIsAutoPlay(true); break;
       case 'drop-oldest': setMode('discrete'); setOverflow('drop-oldest'); setCapacity(4); setProducerRate(1); setConsumerRate(2.8); setIsAutoPlay(true); break;
       case 'drop-newest': setMode('discrete'); setOverflow('drop-newest'); setCapacity(4); setProducerRate(1); setConsumerRate(2.8); setIsAutoPlay(true); break;
-      case 'overflow-error': setMode('discrete'); setOverflow('error'); setCapacity(4); setProducerRate(1); setConsumerRate(4); setIsAutoPlay(true); break;
+      case 'overflow-error': setMode('discrete'); setOverflow('error'); setCapacity(4); setProducerRate(1); setConsumerRate(3.5); setIsAutoPlay(true); break;
       case 'balanced': setMode('discrete'); setOverflow('block'); setCapacity(6); setProducerRate(1.8); setConsumerRate(1.8); setIsAutoPlay(true); break;
       case 'burst': setMode('discrete'); setOverflow('block'); setCapacity(6); setProducerRate(.6); setConsumerRate(2.2); setIsAutoPlay(true); break;
       case 'manual': setIsAutoPlay(false); break;

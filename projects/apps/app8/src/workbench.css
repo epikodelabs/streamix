@@ -342,6 +342,7 @@
 }
 
 .focus-error-notice { margin: 0; padding: 9px 18px; color: #efa2a2; border-top: 1px solid #4b3336; font-size: 11px; }
+.focus-policy-description { margin: 0; padding: 10px 18px; color: #a0a4b0; font-size: 12px; line-height: 1.5; }
 
 /* Connected vector arrows: no separate icon, gaps or thick horizontal bars. */
 .focus-workbench .focus-conveyor {

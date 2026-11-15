@@ -93,6 +93,15 @@ export const FifoBufferVisualizer: React.FC<FifoBufferVisualizerProps> = ({
 }) => {
   const isDone = sessionState.isCompleted || sessionState.hasError;
   const waiting = blockedItems.slice(0, 3).reverse();
+  const policyDescription = mode === 'analog'
+    ? 'When full, each push replaces the newest queued value with the latest value.'
+    : overflow === 'error'
+      ? 'When full, the next push fails the source and clears the queue. This scenario intentionally ends in an error.'
+      : overflow === 'drop-newest'
+        ? 'When full, incoming values are discarded. Queued values stay in order; the Dropped count increases.'
+        : overflow === 'drop-oldest'
+          ? 'When full, each push removes the oldest queued value to make room.'
+          : 'When full, the producer waits until a pull frees a slot.';
 
   return (
     <div className="focus-stage" aria-label="Live first-in first-out queue visualizer">
@@ -107,6 +116,8 @@ export const FifoBufferVisualizer: React.FC<FifoBufferVisualizerProps> = ({
           <span>{items.length}/{capacity} slots</span>
         </div>
       </div>
+
+      <p className="focus-policy-description">{policyDescription}</p>
 
       <div className="focus-pipeline-scroll">
         <div className="focus-pipeline">

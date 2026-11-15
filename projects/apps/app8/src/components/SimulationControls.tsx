@@ -58,10 +58,10 @@ export const SimulationControls: React.FC<SimulationControlsProps> = ({
     </label>
     <label className="focus-setting">
       <span>Overflow</span>
-      <select value={overflow} onChange={event => onChangeOverflow(event.target.value as PushOverflow)}>
+      <select value={overflow} disabled={mode === 'analog'} onChange={event => onChangeOverflow(event.target.value as PushOverflow)}>
         <option value="block" disabled={mode === 'analog'}>Block</option>
-        <option value="drop-oldest">Drop oldest</option>
-        <option value="drop-newest">Drop newest</option>
+        <option value="drop-oldest">{mode === 'analog' ? 'Coalesce latest' : 'Drop oldest'}</option>
+        <option value="drop-newest" disabled={mode === 'analog'}>Drop newest</option>
         <option value="error" disabled={mode === 'analog'}>Error</option>
       </select>
     </label>
