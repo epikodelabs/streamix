@@ -10,7 +10,7 @@ import {
   useStreamixLocal,
   type PreloadedResource,
 } from "../lib/runtime";
-import { atom, type Writable } from "@epikodelabs/streamix";
+import { atom, scope, type Writable } from "@epikodelabs/streamix";
 import { idescribe } from "./env.spec";
 
 idescribe("Streamix explicit lifetime across React Activity", () => {
@@ -120,6 +120,42 @@ idescribe("Streamix explicit lifetime across React Activity", () => {
       expect(current.disposed).toBe(false);
       await act(async () => { current.next("revived"); });
       expect(host.textContent).toBe("revived");
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("recreates a no-provider useStreamixLocal scope after Activity hide/show", async () => {
+    const Activity = (React as unknown as { Activity?: React.ComponentType<{ mode: "visible" | "hidden"; children?: React.ReactNode }> }).Activity;
+    if (!Activity) { pending("Requires React with Activity support"); return; }
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    const makeScope = () => scope({ count: 1 });
+    let current!: ReturnType<typeof makeScope>;
+    function View() {
+      const state = useStreamixLocal(makeScope);
+      current = state;
+      return createElement("output", null, String(state.count));
+    }
+    const render = (mode: "visible" | "hidden") => {
+      root.render(createElement(StrictMode, null, createElement(Activity, { mode }, createElement(View))));
+    };
+    try {
+      await act(async () => render("visible"));
+      expect(host.textContent).toBe("1");
+      const before = current;
+      expect(before._disposed).toBe(false);
+
+      await act(async () => render("hidden"));
+      await act(async () => { await Promise.resolve(); });
+      expect(before._disposed).toBe(true);
+
+      await act(async () => render("visible"));
+      await act(async () => { await Promise.resolve(); });
+      expect(current === before).toBe(false);
+      expect(current._disposed).toBe(false);
+      expect(host.textContent).toBe("1");
     } finally {
       await act(async () => root.unmount());
       host.remove();

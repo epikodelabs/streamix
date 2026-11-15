@@ -97,7 +97,9 @@ function isObjectLike(value: unknown): value is object {
 
 /** True when a retained render-owned instance was terminated by its owner. */
 function isDisposed(value: unknown): boolean {
-  return isObjectLike(value) && (value as { disposed?: unknown }).disposed === true;
+  if (!isObjectLike(value)) return false;
+  const record = value as { disposed?: unknown; _disposed?: unknown };
+  return record.disposed === true || record._disposed === true;
 }
 
 /** Compiler-path writes since the last traced render. Renders are traced
