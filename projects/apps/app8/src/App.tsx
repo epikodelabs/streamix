@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { atom, derived, fromPush, type PushSink, type Readable } from '@epikodelabs/streamix';
+import { useAtom, useAtomValue } from '@epikodelabs/streamix/react';
 import { Activity, ListOrdered, Settings2 } from 'lucide-react';
 import type { QueueItem, ScenarioPreset, ProducerStatus, ConsumerStatus, PushMode, PushOverflow, SimulationStats } from './types';
 import { TopBar } from './components/TopBar';
@@ -21,23 +23,22 @@ function makeToken(seq: number): QueueItem {
     color: TOKEN_COLORS[(seq - 1) % TOKEN_COLORS.length], status: 'queued' };
 }
 
-/**
- * A push waiting for buffer capacity. Its resolver fires at admission, which
- * is what the source awaits for backpressure (`fromPush` resolves on
- * acceptance, not on delivery).
- */
+/** A push whose `sink.next()` admission promise is still pending. */
 interface PendingPush {
   item: QueueItem;
-  resolve: () => void;
 }
 
 /**
- * This application is a visual simulation of push-to-pull flow control, not a
- * binding to the Streamix npm runtime. The buffer, blocked queue and inlet
- * reservations have distinct ownership; visual entry is committed only on
- * arrival. A push is admitted — and its promise resolved — when it claims
- * buffer capacity; the inlet transfer is presentation. The automatic source
- * awaits every push, while manual and burst controls deliberately do not.
+ * A real `fromPush` source owns admission, the blocked-producer queue,
+ * overflow policy, completion, and delivery. The visualizer keeps a
+ * presentation mirror of accepted values so it can animate the bounded queue
+ * slot by slot; pull delivery (`prefetch: false`) keeps that mirror aligned
+ * with the source's single admission buffer instead of a second prefetch
+ * backlog.
+ *
+ * The automatic producer awaits `sink.next()`, so it genuinely stalls while
+ * the source is full. Manual and burst pushes deliberately ignore the
+ * returned promise, which is how the blocked backlog grows.
  */
 export default function App() {
   const [mode, setMode] = useState<PushMode>('discrete');
@@ -50,10 +51,20 @@ export default function App() {
   const [activeScenario, setActiveScenario] = useState<ScenarioPreset>('backpressure-block');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [sessionKey, setSessionKey] = useState(0);
 
-  const [items, setItems] = useState<QueueItem[]>([]);
-  const [blockedItems, setBlockedItems] = useState<QueueItem[]>([]);
-  const [reservedCount, setReservedCount] = useState(0);
+  // Streamix-owned domain state: the inspector sees these atoms/derived.
+  const itemsAtom = useAtom(() => atom<QueueItem[]>([]));
+  const blockedAtom = useAtom(() => atom<QueueItem[]>([]));
+  const reservedAtom = useAtom(() => atom(0));
+  const statsAtom = useAtom(() => atom<SimulationStats>(initialStats()));
+  const occupancyAtom = useAtom(() => derived(() => itemsAtom.value.length + reservedAtom.value));
+
+  const items = useAtomValue(itemsAtom);
+  const blockedItems = useAtomValue(blockedAtom);
+  const stats = useAtomValue(statsAtom);
+  const occupancy = useAtomValue(occupancyAtom);
+
   const [stagedProducerToken, setStagedProducerToken] = useState(() => makeToken(1));
   const [inTransitInToken, setInTransitInToken] = useState<QueueItem | null>(null);
   const [inTransitOutToken, setInTransitOutToken] = useState<QueueItem | null>(null);
@@ -68,11 +79,10 @@ export default function App() {
   const [isCompleted, setIsCompleted] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
-  const [stats, setStats] = useState<SimulationStats>(initialStats);
   const [consumptionHistory, setConsumptionHistory] = useState<QueueItem[]>([]);
 
-  // Refs are authoritative inside independent timer callbacks; React state is
-  // published synchronously, never mutated from a state-updater callback.
+  // Refs are authoritative inside independent timer callbacks; atoms publish
+  // the same values to React without ever being mutated from a state updater.
   const seqRef = useRef(1);
   const queueRef = useRef<QueueItem[]>([]);
   const blockedRef = useRef<PendingPush[]>([]);
@@ -83,31 +93,36 @@ export default function App() {
   const completedRef = useRef(false);
   const errorRef = useRef(false);
   const epochRef = useRef(0);
+  const sessionEpochRef = useRef(0);
+  const pendingAdmissionsRef = useRef(0);
+  const inTransitIdRef = useRef<number | null>(null);
+  const sourceRef = useRef<Readable<QueueItem> | null>(null);
+  const sinkRef = useRef<PushSink<QueueItem> | null>(null);
+  const iteratorRef = useRef<AsyncIterator<QueueItem> | null>(null);
   const incomingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outgoingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const launchInletRef = useRef<() => void>(() => {});
-  const fillVacanciesRef = useRef<() => void>(() => {});
   const checkCompletionRef = useRef<() => void>(() => {});
+  const abortRef = useRef<(reason: string) => void>(() => {});
+
+  const updateStats = useCallback((updater: (previous: SimulationStats) => SimulationStats) => {
+    statsAtom.next(updater(statsAtom.value));
+  }, [statsAtom]);
 
   const commitItems = useCallback((next: QueueItem[]) => {
     queueRef.current = next;
-    setItems(next);
-    setStats(prev => ({ ...prev, peakOccupancy: Math.max(prev.peakOccupancy, next.length) }));
-  }, []);
+    itemsAtom.next(next);
+  }, [itemsAtom]);
   const commitBlocked = useCallback((next: PendingPush[]) => {
     blockedRef.current = next;
-    setBlockedItems(next.map(record => record.item));
-  }, []);
-  /** Releases every push still waiting for capacity (session stop/reset). */
-  const settlePendingPushes = useCallback(() => {
-    for (const record of blockedRef.current) record.resolve();
-  }, []);
-  const publishReservations = useCallback(() => setReservedCount(reservedRef.current.length), []);
+    blockedAtom.next(next.map(record => record.item));
+  }, [blockedAtom]);
 
   useEffect(() => { sound.enabled = soundEnabled; }, [soundEnabled]);
 
   const checkCompletion = useCallback(() => {
     if (!finishingRef.current || completedRef.current || errorRef.current) return;
+    if (pendingAdmissionsRef.current !== 0) return;
     if (queueRef.current.length !== 0 || blockedRef.current.length !== 0 ||
         reservedRef.current.length !== 0 || incomingRef.current || outgoingRef.current) return;
     completedRef.current = true;
@@ -117,6 +132,15 @@ export default function App() {
   }, []);
   checkCompletionRef.current = checkCompletion;
 
+  const stopInlet = useCallback(() => {
+    if (incomingTimerRef.current) clearTimeout(incomingTimerRef.current);
+    incomingTimerRef.current = null;
+    incomingRef.current = false;
+    inTransitIdRef.current = null;
+    setIsEmitting(false);
+    setInTransitInToken(null);
+  }, []);
+
   // At most one token is visually in transit, even when many buffer slots have
   // already been reserved. A reservation is not a visible buffered item.
   const launchInlet = useCallback(() => {
@@ -124,6 +148,7 @@ export default function App() {
     const token = reservedRef.current[0];
     if (!token) { checkCompletionRef.current(); return; }
     incomingRef.current = true;
+    inTransitIdRef.current = token.id;
     setIsEmitting(true);
     setInTransitInToken(token);
     setProducerStatus('producing');
@@ -132,54 +157,115 @@ export default function App() {
       incomingTimerRef.current = null;
       if (epoch !== epochRef.current || errorRef.current) return;
       incomingRef.current = false;
+      inTransitIdRef.current = null;
       setIsEmitting(false);
       setInTransitInToken(null);
-      // The visual slot becomes populated only after the transfer animation.
-      reservedRef.current.shift();
-      publishReservations();
+      const index = reservedRef.current.findIndex(entry => entry.id === token.id);
+      if (index < 0) {
+        // The source dropped this reservation while it was in transit.
+        launchInletRef.current();
+        checkCompletionRef.current();
+        return;
+      }
+      reservedRef.current.splice(index, 1);
+      reservedAtom.next(reservedRef.current.length);
       if (queueRef.current.length >= capacity) {
-        // Defensive: never silently drop a reserved item. Its push promise
-        // was already settled at admission, so there is nothing left to await.
-        commitBlocked([{ item: { ...token, status: 'blocked' }, resolve: () => {} }, ...blockedRef.current]);
+        // The source admitted beyond the visible capacity; keep the mirror
+        // bounded rather than rendering more tiles than slots.
+        updateStats(previous => ({ ...previous, totalDropped: previous.totalDropped + 1 }));
       } else {
         commitItems([...queueRef.current, { ...token, enteredBufferAt: Date.now(), status: 'queued' }]);
         sound.playEnqueue();
       }
-      fillVacanciesRef.current();
       launchInletRef.current();
       setProducerStatus(blockedRef.current.length ? 'blocked' : finishingRef.current ? 'completed' : 'idle');
       checkCompletionRef.current();
     }, TRANSIT_MS);
-  }, [capacity, commitBlocked, commitItems, publishReservations]);
+  }, [capacity, commitItems, reservedAtom, updateStats]);
   launchInletRef.current = launchInlet;
 
-  const fillVacancies = useCallback(() => {
-    if (errorRef.current || completedRef.current || mode !== 'discrete' || overflow !== 'block') return;
-    const free = capacity - queueRef.current.length - reservedRef.current.length;
-    if (free <= 0 || blockedRef.current.length === 0) return;
-    const admitted = blockedRef.current.slice(0, free);
-    reservedRef.current.push(...admitted.map(record => record.item));
-    publishReservations();
-    commitBlocked(blockedRef.current.slice(admitted.length));
-    // Admission into buffer capacity ends producer backpressure. The inlet
-    // animation is presentation and does not delay the source.
-    for (const record of admitted) record.resolve();
-    if (blockedRef.current.length) setProducerStatus('blocked');
+  /**
+   * Removes the token the real source dropped. The head/tail position follows
+   * fromPush's queue order: items are older admissions, reservations newer.
+   */
+  const dropQueuedToken = useCallback((position: 'head' | 'tail') => {
+    if (queueRef.current.length > 0) {
+      const next = position === 'head' ? queueRef.current.slice(1) : queueRef.current.slice(0, -1);
+      commitItems(next);
+      return;
+    }
+    if (reservedRef.current.length > 0) {
+      const index = position === 'head' ? 0 : reservedRef.current.length - 1;
+      const [removed] = reservedRef.current.splice(index, 1);
+      reservedAtom.next(reservedRef.current.length);
+      if (removed.id === inTransitIdRef.current) stopInlet();
+    }
+  }, [commitItems, reservedAtom, stopInlet]);
+
+  const admitVisual = useCallback((item: QueueItem) => {
+    reservedRef.current.push(item);
+    reservedAtom.next(reservedRef.current.length);
+    updateStats(previous => ({
+      ...previous,
+      peakOccupancy: Math.max(previous.peakOccupancy, queueRef.current.length + reservedRef.current.length),
+    }));
     launchInletRef.current();
-  }, [capacity, mode, overflow, commitBlocked, publishReservations]);
-  fillVacanciesRef.current = fillVacancies;
+  }, [reservedAtom, updateStats]);
+
+  // A source session per configuration. fromPush starts its lazy producer when
+  // the iterator below is created; resetting bumps sessionKey and swaps it.
+  useEffect(() => {
+    const session = ++sessionEpochRef.current;
+    let connectedSink: PushSink<QueueItem> | null = null;
+    const source = fromPush<QueueItem>((sink) => {
+      connectedSink = sink;
+      sinkRef.current = sink;
+      return () => {
+        if (sinkRef.current === sink) sinkRef.current = null;
+      };
+    }, {
+      name: 'app8-fifo',
+      mode,
+      capacity,
+      // fromPush rejects blocking/error policies for analog sources.
+      overflow: mode === 'analog' && (overflow === 'block' || overflow === 'error') ? 'drop-oldest' : overflow,
+      prefetch: false,
+    });
+    sourceRef.current = source;
+    const unsubscribeError = source.onError(error => {
+      if (session !== sessionEpochRef.current) return;
+      abortRef.current(error instanceof Error ? error.message : String(error));
+    });
+    const iterator = source[Symbol.asyncIterator]();
+    iteratorRef.current = iterator;
+    return () => {
+      void unsubscribeError();
+      source.dispose();
+      if (sourceRef.current === source) sourceRef.current = null;
+      if (iteratorRef.current === iterator) iteratorRef.current = null;
+      if (connectedSink && sinkRef.current === connectedSink) sinkRef.current = null;
+    };
+  }, [mode, overflow, capacity, sessionKey]);
 
   const abortSimulation = useCallback((reason: string) => {
+    if (errorRef.current) return;
     epochRef.current++;
+    sessionEpochRef.current++;
+    pendingAdmissionsRef.current = 0;
     if (incomingTimerRef.current) clearTimeout(incomingTimerRef.current);
     if (outgoingTimerRef.current) clearTimeout(outgoingTimerRef.current);
     incomingTimerRef.current = null;
     outgoingTimerRef.current = null;
     incomingRef.current = false;
     outgoingRef.current = false;
-    settlePendingPushes();
+    inTransitIdRef.current = null;
+    const source = sourceRef.current;
+    sourceRef.current = null;
+    sinkRef.current = null;
+    iteratorRef.current = null;
+    source?.dispose();
     reservedRef.current = [];
-    publishReservations();
+    reservedAtom.next(0);
     commitItems([]);
     commitBlocked([]);
     setInTransitInToken(null);
@@ -197,90 +283,117 @@ export default function App() {
     setProducerStatus('error');
     setConsumerStatus('completed');
     sound.playBlocked();
-  }, [commitItems, commitBlocked, publishReservations, settlePendingPushes]);
+  }, [commitBlocked, commitItems, reservedAtom]);
+  abortRef.current = abortSimulation;
 
   const handleProduce = useCallback((): Promise<boolean> => {
     if (finishingRef.current || completedRef.current || errorRef.current) return Promise.resolve(false);
+    const sink = sinkRef.current;
+    if (!sink) return Promise.resolve(false);
+    const epoch = epochRef.current;
+    const session = sessionEpochRef.current;
     const token = makeToken(seqRef.current++);
     setStagedProducerToken(makeToken(seqRef.current));
-    const queued = queueRef.current.length;
-    const reserved = reservedRef.current.length;
-    const free = capacity - queued - reserved;
+    updateStats(previous => ({ ...previous, totalProduced: previous.totalProduced + 1 }));
 
-    // Discrete/block: reserve buffer space FIRST. Only excess goes to blocked.
-    if (mode === 'discrete' && overflow === 'block') {
-      if (free > 0 && blockedRef.current.length === 0) {
-        reservedRef.current.push(token);
-        publishReservations();
-        launchInletRef.current();
+    const full = queueRef.current.length + reservedRef.current.length >= capacity;
+    const stillCurrent = () => epoch === epochRef.current && session === sessionEpochRef.current;
+    const failFrom = (error: unknown) => {
+      if (stillCurrent()) abortRef.current(error instanceof Error ? error.message : String(error));
+    };
+    const trackAdmission = (attempt: Promise<void>) => {
+      pendingAdmissionsRef.current++;
+      void attempt.then(() => {
+        if (!stillCurrent()) return;
+        pendingAdmissionsRef.current = Math.max(0, pendingAdmissionsRef.current - 1);
+        admitVisual(token);
+      }).catch(failFrom);
+    };
+
+    if (mode === 'analog') {
+      if (full) {
+        // Analog replaces the newest pending value; the prefix is retained.
+        dropQueuedToken('tail');
+        updateStats(previous => ({ ...previous, totalDropped: previous.totalDropped + 1 }));
+      }
+      const admission = sink.next(token);
+      trackAdmission(admission);
+      sound.playProduce();
+      return admission.then(() => true);
+    }
+
+    if (overflow === 'block') {
+      if (!full && blockedRef.current.length === 0) {
+        const admission = sink.next(token);
+        trackAdmission(admission);
         sound.playProduce();
-        setStats(prev => ({ ...prev, totalProduced: prev.totalProduced + 1 }));
-        // Admission claims buffer capacity and ends backpressure immediately.
-        return Promise.resolve(true);
+        return admission.then(() => true);
       }
-      // The push stays pending until fillVacancies admits it. An awaiting
-      // source stalls here instead of accumulating ignored pushes.
-      return new Promise<boolean>(resolve => {
-        commitBlocked([...blockedRef.current, {
-          item: { ...token, status: 'blocked' },
-          resolve: () => resolve(true),
-        }]);
-        setStats(prev => ({ ...prev,
-          totalProduced: prev.totalProduced + 1,
-          totalBlockedEvents: prev.totalBlockedEvents + 1 }));
-        setProducerStatus('blocked');
-        sound.playBlocked();
-      });
+      // The source's own blocked queue now owns admission. Its promise stays
+      // pending while the buffer is full and resolves when a pull frees a slot.
+      const admission = sink.next(token);
+      commitBlocked([...blockedRef.current, { item: { ...token, status: 'blocked' } }]);
+      updateStats(previous => ({ ...previous, totalBlockedEvents: previous.totalBlockedEvents + 1 }));
+      setProducerStatus('blocked');
+      sound.playBlocked();
+      void admission.then(() => {
+        if (!stillCurrent()) return;
+        commitBlocked(blockedRef.current.filter(record => record.item.id !== token.id));
+        admitVisual(token);
+        setProducerStatus(blockedRef.current.length ? 'blocked' : finishingRef.current ? 'completed' : 'idle');
+      }).catch(failFrom);
+      return admission.then(() => true);
     }
 
-    if (free <= 0) {
-      if (overflow === 'error') {
-        abortSimulation(`Buffer capacity exceeded (${capacity})`);
-        return Promise.resolve(false);
-      }
-      if (overflow === 'drop-newest') {
-        setStats(prev => ({ ...prev, totalProduced: prev.totalProduced + 1, totalDropped: prev.totalDropped + 1 }));
-        sound.playBlocked();
-        return Promise.resolve(true);
-      }
-      // Drop the oldest visible value or, if nothing is visible, replace the
-      // newest reservation that has not started its animation.
-      if (queueRef.current.length > 0) {
-        commitItems(queueRef.current.slice(1));
-        setStats(prev => ({ ...prev, totalDropped: prev.totalDropped + 1 }));
-      } else if (reservedRef.current.length > 1) {
-        reservedRef.current.pop();
-        publishReservations();
-        setStats(prev => ({ ...prev, totalDropped: prev.totalDropped + 1 }));
-      }
-      // Otherwise the only reserved item is already in transit; hold the new
-      // value as a single deferred latest reservation without dropping anything.
+    if (full && overflow === 'error') {
+      // The source fails itself; onError below reports the same condition.
+      void sink.next(token);
+      abortRef.current(`Buffer capacity exceeded (${capacity})`);
+      return Promise.resolve(false);
     }
-    // If the buffer was freed by dropping an item, the new value still travels
-    // along the inlet before it becomes visible in the buffer.
-    reservedRef.current.push(token);
-    publishReservations();
-    launchInletRef.current();
-    setStats(prev => ({ ...prev, totalProduced: prev.totalProduced + 1 }));
+
+    if (full && overflow === 'drop-newest') {
+      void sink.next(token);
+      updateStats(previous => ({ ...previous, totalDropped: previous.totalDropped + 1 }));
+      sound.playBlocked();
+      return Promise.resolve(true);
+    }
+
+    if (full) {
+      // drop-oldest: the source discards the head and admits the new value.
+      dropQueuedToken('head');
+      updateStats(previous => ({ ...previous, totalDropped: previous.totalDropped + 1 }));
+    }
+    const admission = sink.next(token);
+    trackAdmission(admission);
     sound.playProduce();
-    return Promise.resolve(true);
-  }, [abortSimulation, capacity, commitBlocked, commitItems, mode, overflow, publishReservations]);
+    return admission.then(() => true);
+  }, [capacity, mode, overflow, admitVisual, commitBlocked, dropQueuedToken, updateStats]);
 
   const handleConsume = useCallback((): boolean => {
     if (errorRef.current || outgoingRef.current || queueRef.current.length === 0) {
       if (!errorRef.current && queueRef.current.length === 0 && !finishingRef.current) setConsumerStatus('starved');
       return false;
     }
+    const iterator = iteratorRef.current;
+    if (!iterator) return false;
+    const epoch = epochRef.current;
+    const session = sessionEpochRef.current;
     const token = queueRef.current[0];
     outgoingRef.current = true;
     const departed: QueueItem = { ...token, status: 'delivered', consumedAt: Date.now(),
       dwellTimeMs: token.enteredBufferAt ? Date.now() - token.enteredBufferAt : 0 };
     commitItems(queueRef.current.slice(1));
-    fillVacanciesRef.current();
     setInTransitOutToken(departed);
     setConsumerStatus('consuming');
     sound.playConsume();
-    const epoch = epochRef.current;
+    // Pull from the real iterator. This is the operation that frees source
+    // capacity and lets fromPush admit a blocked producer.
+    void iterator.next().catch(error => {
+      if (epoch === epochRef.current && session === sessionEpochRef.current) {
+        abortRef.current(error instanceof Error ? error.message : String(error));
+      }
+    });
     outgoingTimerRef.current = setTimeout(() => {
       outgoingTimerRef.current = null;
       if (epoch !== epochRef.current || errorRef.current) return;
@@ -288,17 +401,17 @@ export default function App() {
       setInTransitOutToken(null);
       setRecentlyConsumedItem(departed);
       setSubscriberValue(departed);
-      setConsumptionHistory(prev => [departed, ...prev]);
-      setStats(prev => {
-        const count = prev.totalDelivered + 1;
-        return { ...prev, totalDelivered: count,
-          averageDwellTimeMs: Math.round((prev.averageDwellTimeMs * prev.totalDelivered + (departed.dwellTimeMs || 0)) / count) };
+      setConsumptionHistory(previous => [departed, ...previous]);
+      updateStats(previous => {
+        const count = previous.totalDelivered + 1;
+        return { ...previous, totalDelivered: count,
+          averageDwellTimeMs: Math.round((previous.averageDwellTimeMs * previous.totalDelivered + (departed.dwellTimeMs || 0)) / count) };
       });
       setConsumerStatus('idle');
       checkCompletionRef.current();
     }, TRANSIT_MS);
     return true;
-  }, [commitItems]);
+  }, [commitItems, updateStats]);
 
   const handleComplete = useCallback(() => {
     if (finishingRef.current || completedRef.current || errorRef.current) return;
@@ -306,23 +419,29 @@ export default function App() {
     setIsFinishing(true);
     setProducerStatus('completed');
     setBurstRemaining(0);
+    // The source admits already-blocked producers as pulls drain the buffer,
+    // then completes once the accepted values are delivered.
+    sinkRef.current?.complete();
     checkCompletionRef.current();
   }, []);
 
   const handleReset = useCallback(() => {
     epochRef.current++;
+    // Invalidate source callbacks before the effect swaps in the next session.
+    sessionEpochRef.current++;
+    pendingAdmissionsRef.current = 0;
     if (incomingTimerRef.current) clearTimeout(incomingTimerRef.current);
     if (outgoingTimerRef.current) clearTimeout(outgoingTimerRef.current);
     incomingTimerRef.current = null;
     outgoingTimerRef.current = null;
     incomingRef.current = false;
     outgoingRef.current = false;
+    inTransitIdRef.current = null;
     finishingRef.current = false;
     completedRef.current = false;
     errorRef.current = false;
-    settlePendingPushes();
     reservedRef.current = [];
-    publishReservations();
+    reservedAtom.next(0);
     seqRef.current = 1;
     commitItems([]);
     commitBlocked([]);
@@ -340,9 +459,10 @@ export default function App() {
     setErrorMessage(undefined);
     setProducerStatus('idle');
     setConsumerStatus('idle');
-    setStats(initialStats());
+    statsAtom.next(initialStats());
     setConsumptionHistory([]);
-  }, [commitBlocked, commitItems, publishReservations, settlePendingPushes]);
+    setSessionKey(previous => previous + 1);
+  }, [commitBlocked, commitItems, reservedAtom, statsAtom]);
 
   const handleScenario = useCallback((preset: ScenarioPreset) => {
     handleReset();
@@ -366,7 +486,7 @@ export default function App() {
     const intervalMs = Math.max(300, producerRate * 1000 / speedMultiplier);
 
     // A sequential source: it does not start a new emission until the previous
-    // push is accepted. While the buffer is full the promise stays pending, so
+    // push is accepted. While the source is full the promise stays pending, so
     // the generator is genuinely stalled. A fire-and-forget timer source would
     // keep firing here and simply grow the blocked backlog instead.
     const tick = async () => {
@@ -395,9 +515,9 @@ export default function App() {
     setIsBursting(true);
     const timer = setTimeout(() => {
       // Burst is the deliberate fire-and-forget case: the promise is ignored,
-      // so pushes may pile up while the buffer is full.
+      // so pushes may pile up while the source is full.
       void handleProduce();
-      setBurstRemaining(prev => Math.max(0, prev - 1));
+      setBurstRemaining(previous => Math.max(0, previous - 1));
     }, 160);
     return () => clearTimeout(timer);
   }, [burstRemaining, isFinishing, isCompleted, hasError, handleProduce]);
@@ -406,15 +526,14 @@ export default function App() {
     if (queueRef.current.length > 0) handleConsume();
     else void handleProduce();
   };
-  // Only blocked pushes are unresolved: admission settles the promise.
   const pendingValues = blockedItems.length;
-  const isFull = items.length + reservedCount >= capacity;
+  const isFull = occupancy >= capacity;
   const simulationStats = { ...stats, pendingPromises: pendingValues };
 
   return (
     <div className="focus-workbench">
       <TopBar onReset={handleReset} onOpenGuide={() => setIsGuideOpen(true)}
-        soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled(prev => !prev)}
+        soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled(previous => !previous)}
         activeSection="visualizer" onSelectSection={() => document.getElementById('visualizer')?.scrollIntoView({ behavior: 'smooth' })} />
       <main className="focus-main">
         <section className="focus-intro" aria-label="Session status">
@@ -432,17 +551,17 @@ export default function App() {
             isEmpty={items.length === 0} pendingPromisesCount={pendingValues}
             sessionState={{ isStopped: isCompleted || hasError, isFinishing, isCompleted, hasError, errorMessage }}
             subscriberValue={subscriberValue} subscriberCount={1}
-            onManualProduce={handleProduce} onManualBurst={() => setBurstRemaining(prev => prev + 3)}
+            onManualProduce={handleProduce} onManualBurst={() => setBurstRemaining(previous => previous + 3)}
             onManualConsume={handleConsume} onSinkComplete={handleComplete}
-            onSinkError={() => abortSimulation('Simulated source error')}
+            onSinkError={() => sinkRef.current?.error('Simulated source error')}
             onRestartSession={handleReset} isAutoPlay={isAutoPlay}
-            onToggleAutoPlay={() => setIsAutoPlay(prev => !prev)} onStep={handleStep} onReset={handleReset} />
+            onToggleAutoPlay={() => setIsAutoPlay(previous => !previous)} onStep={handleStep} onReset={handleReset} />
         </section>
         <section className="focus-secondary" aria-label="Additional tools">
           <details className="focus-panel" id="controls" open>
             <summary><Settings2 size={16} /><span>Configuration</span></summary>
             <div className="focus-panel-body">
-              <SimulationControls isAutoPlay={isAutoPlay} onToggleAutoPlay={() => setIsAutoPlay(prev => !prev)}
+              <SimulationControls isAutoPlay={isAutoPlay} onToggleAutoPlay={() => setIsAutoPlay(previous => !previous)}
                 onStep={handleStep} onReset={handleReset} mode={mode}
                 onChangeMode={newMode => { handleReset(); setMode(newMode); setOverflow(newMode === 'analog' ? 'drop-oldest' : 'block'); setCapacity(newMode === 'analog' ? 1 : 6); }}
                 overflow={overflow} onChangeOverflow={newValue => { handleReset(); setOverflow(newValue); }}
@@ -456,14 +575,14 @@ export default function App() {
           <details className="focus-panel" id="history" open>
             <summary><ListOrdered size={16} /><span>Activity &amp; metrics</span></summary>
             <div className="focus-panel-body">
-              <MetricsPanel stats={simulationStats} currentOccupancy={items.length} capacity={capacity}
+              <MetricsPanel stats={simulationStats} currentOccupancy={occupancy} capacity={capacity}
                 isFull={isFull} mode={mode} overflow={overflow} />
               <ConsumptionHistory history={consumptionHistory} onClearHistory={() => setConsumptionHistory([])} />
             </div>
           </details>
         </section>
         <div className="focus-statusline" role="status">
-          <Activity size={13} /><span>Buffer {items.length}/{capacity}</span>
+          <Activity size={13} /><span>Buffer {occupancy}/{capacity}</span>
           <span>Blocked {blockedItems.length}</span><span>Delivered {stats.totalDelivered}</span>
           <span className="focus-statusline-end">{isFinishing && !isCompleted ? 'Draining remaining values…' : 'Values delivered in FIFO order'}</span>
         </div>

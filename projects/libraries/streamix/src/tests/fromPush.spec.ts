@@ -257,4 +257,84 @@ describe('fromPush()', () => {
     await errSub();
     source.dispose();
   });
+
+  it('pulls directly from the bounded buffer when prefetch is disabled', async () => {
+    let sink!: PushSink<number>;
+    const source = fromPush<number>(s => { sink = s; }, { capacity: 2, prefetch: false });
+    const iterator = source[Symbol.asyncIterator]();
+    await sink.next(1);
+    await sink.next(2);
+
+    // No per-iterator prefetch queue: the third admission is backpressured
+    // until a pull frees a buffer slot.
+    let thirdResolved = false;
+    const third = sink.next(3).then(() => { thirdResolved = true; });
+    await tick();
+    expect(thirdResolved).toBeFalse();
+
+    expect(await iterator.next()).toEqual({ done: false, value: 1 });
+    await third;
+    // The atom advances on pull, not on admission, in pull mode.
+    expect(source.value).toBe(1);
+    expect(await iterator.next()).toEqual({ done: false, value: 2 });
+    expect(await iterator.next()).toEqual({ done: false, value: 3 });
+    await iterator.return?.();
+    source.dispose();
+  });
+
+  it('admits blocked producers as a pull-mode consumer drains', async () => {
+    let sink!: PushSink<number>;
+    const source = fromPush<number>(s => { sink = s; }, { capacity: 1, prefetch: false });
+    const iterator = source[Symbol.asyncIterator]();
+    await sink.next(1);
+    let secondResolved = false;
+    const second = sink.next(2).then(() => { secondResolved = true; });
+    let thirdResolved = false;
+    const third = sink.next(3).then(() => { thirdResolved = true; });
+    await tick();
+    expect(secondResolved).toBeFalse();
+
+    sink.complete();
+    expect(await iterator.next()).toEqual({ done: false, value: 1 });
+    await second;
+    expect(thirdResolved).toBeFalse();
+    expect(await iterator.next()).toEqual({ done: false, value: 2 });
+    await third;
+    expect(await iterator.next()).toEqual({ done: false, value: 3 });
+    expect(await iterator.next()).toEqual(DONE);
+    source.dispose();
+  });
+
+  it('coalesces analog values in the admission buffer without prefetching', async () => {
+    let sink!: PushSink<number>;
+    const source = fromPush<number>(s => { sink = s; }, { mode: 'analog', capacity: 1, prefetch: false });
+    const iterator = source[Symbol.asyncIterator]();
+    await Promise.all([sink.next(1), sink.next(2), sink.next(3)]);
+    expect(await iterator.next()).toEqual({ done: false, value: 3 });
+    expect(source.value).toBe(3);
+    await iterator.return?.();
+    source.dispose();
+  });
+
+  it('notifies subscribers when a pull-mode iterator takes a value', async () => {
+    let sink!: PushSink<number>;
+    const source = fromPush<number>(s => { sink = s; }, { capacity: 2, prefetch: false });
+    const seen: number[] = [];
+    const subscription = source.subscribe(value => { seen.push(value); });
+    const iterator = source[Symbol.asyncIterator]();
+    await sink.next(1);
+    await tick();
+    // No iterator pull yet, so the accepted value stays in the buffer and the
+    // subscriber has not seen it.
+    expect(seen).toEqual([]);
+    expect(await iterator.next()).toEqual({ done: false, value: 1 });
+    expect(seen).toEqual([1]);
+    await subscription();
+    await iterator.return?.();
+    source.dispose();
+  });
+
+  it('validates the prefetch option', () => {
+    expect(() => fromPush(() => {}, { prefetch: 'yes' as never })).toThrowError(TypeError);
+  });
 });

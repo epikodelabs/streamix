@@ -42,10 +42,21 @@ try {
       await page.waitForSelector('main');
       assert.equal(await page.evaluate(() => typeof window.__streamix), 'undefined');
     } else if (app === 8) {
-      // The FIFO visualizer does not declare Streamix sources; introspection
-      // must still activate without requiring any inspectable entries.
+      // The FIFO visualizer is backed by a real fromPush source and Streamix
+      // atoms/derived state, so the inspector must discover both.
       await page.waitForSelector('.focus-workbench');
-      await page.waitForFunction(() => typeof window.__streamix !== 'undefined');
+      await page.waitForFunction(() => window.__streamix?.inspect().length >= 5);
+      const entries = await page.evaluate(() => window.__streamix.inspect().map(entry => entry.name));
+      assert(entries.includes('App.occupancyAtom'), 'The FIFO visualizer must expose its occupancy source');
+      assert(entries.includes('app8-fifo'), 'The FIFO visualizer must expose its fromPush source');
+      // Drive the real source manually: push, then pull, and observe both the
+      // buffer slot and the delivery counter.
+      await page.locator('.focus-settings select').first().selectOption('manual');
+      await page.getByRole('button', { name: 'Push one' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.focus-slot.is-occupied').length === 1);
+      await page.getByRole('button', { name: 'Pull one' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.focus-slot.is-occupied').length === 0);
+      await page.waitForFunction(() => document.querySelector('.focus-statusline')?.textContent.includes('Delivered 1'));
     } else {
       await page.waitForFunction(() => window.__streamix?.inspect().length > 0);
     }

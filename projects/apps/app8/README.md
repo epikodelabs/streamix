@@ -1,12 +1,16 @@
 # App 8 — FIFO Workbench
 
 An interactive React visualizer for FIFO buffering and cooperative backpressure.
-It simulates a push producer feeding a bounded buffer, showing admissions,
-blocked producers, overflow policies, consumer flow, and live metrics.
+It drives a push producer into a bounded buffer, showing admissions, blocked
+producers, overflow policies, consumer flow, and live metrics.
 
-The visualizer simulates its FIFO engine locally; it is a standalone
-educational app rather than a binding to a particular runtime. Introspection
-activation is still supported when the app is built in development mode.
+The engine is the real Streamix `fromPush` source: admission, the blocked
+producer queue, overflow handling, completion, and delivery all come from the
+runtime, with `prefetch: false` so the asynchronous iterator pulls directly
+from the single bounded buffer. The visualizer keeps a presentation mirror of
+accepted values to animate the queue slot by slot, and its metrics/session
+state live in Streamix `atom`/`derived` sources. Development builds therefore
+expose the FIFO state and the live source in the inspector.
 
 ## What it demonstrates
 

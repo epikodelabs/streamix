@@ -221,7 +221,7 @@ only blocking backpressure.
 | Source kind                                                                   | Producer paced by consumers?                      | Slow consumer behavior                                                                                                             |
 | ----------------------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Flow-backed (`flow`, `pipe`, `from`, …)                                        | No                                                 | Per-subscriber FIFO queue (unbounded); `mode: "analog"` keeps only the latest pending value                                         |
-| Shared source (`fromPush`, `timer`, `interval`, `addListener`, DOM)            | Yes, when `connect` awaits `sink.next()` in discrete mode | `next()` waits only for buffer admission, not delivery or subscriber callbacks; `analog` never blocks and coalesces the newest pending value; async iterators queue drained values instead of applying backpressure |
+| Shared source (`fromPush`, `timer`, `interval`, `addListener`, DOM)            | Yes, when `connect` awaits `sink.next()` in discrete mode | `next()` waits only for buffer admission, not delivery or subscriber callbacks; `analog` never blocks and coalesces the newest pending value; async iterators prefetch drained values by default, while `prefetch: false` pulls directly from the bounded buffer so producer backpressure reflects the pull rate |
 
 The atom’s `.value` always reflects the newest emission.
 
@@ -294,6 +294,12 @@ queue without a bound, analog atoms conflate into it. Consuming slowly never
 pressures a flow producer, and it does not pressure a shared-source producer
 either — a shared source’s ring buffer drains into this queue, so its producer
 is paced only by admission into the ring buffer.
+
+`fromPush(..., { prefetch: false })` opts a single async-iterator consumer out
+of that prefetch queue. Accepted values stay in the bounded admission buffer
+until the iterator pulls one, so producer backpressure reflects the consumer’s
+pull rate. This is the mode the app8 FIFO visualizer uses to keep one visible
+buffer and one source of truth.
 
 ### Choosing a mode
 

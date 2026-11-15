@@ -47,12 +47,29 @@ export interface FromPushOptions {
    */
   mode?: 'discrete' | 'analog';
   /**
-   * Maximum accepted events awaiting delivery (and per-iterator backlog). In
-   * analog mode it bounds the retained prefix plus the coalesced newest value.
+   * Maximum accepted events awaiting delivery. With prefetching (the default)
+   * the per-iterator delivery queue is bounded by the same capacity, so both
+   * stages can hold up to this many values. With `prefetch: false` only the
+   * admission buffer exists. In analog mode it bounds the retained prefix
+   * plus the coalesced newest value.
    */
   capacity?: number;
   /** Discrete overflow handling; defaults to `block`. Ignoring returned promises defeats backpressure. */
   overflow?: PushOverflow;
+  /**
+   * Iterator delivery strategy; defaults to `true`.
+   *
+   * With prefetching, the pump moves accepted values into a per-iterator
+   * queue (also bounded by `capacity`) so pulls return immediately. A lagging
+   * iterator can therefore hold up to `capacity` accepted values in addition
+   * to the admission buffer, and producer backpressure reflects admission
+   * only. Set this to `false` to have the iterator pull directly from the
+   * bounded admission queue: no delivery backlog is populated, a pull waits
+   * for admission, and `next()` backpressure reflects the consumer's pull
+   * rate. Callback subscribers are notified as values are pulled in this
+   * mode; without an active iterator they still receive values from the pump.
+   */
+  prefetch?: boolean;
 }
 
 type Cleanup = () => MaybePromise<void>;
@@ -112,6 +129,11 @@ type Session<T> = {
  * the buffered prefix have been delivered. Pushes made after `complete()`
  * resolve without being delivered.
  *
+ * By default the pump prefetches accepted values into a per-iterator queue.
+ * Pass `prefetch: false` when the iterator itself should pull from the bounded
+ * admission buffer, so producer backpressure reflects the pull rate and no
+ * second backlog exists.
+ *
  * This implementation intentionally supports one active async iterator, matching
  * the existing Streamix shared-source contract. Callback subscribers multicast.
  */
@@ -126,6 +148,10 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
   if (analog && (overflow === 'block' || overflow === 'error')) {
     throw new TypeError('fromPush analog mode requires a dropping overflow policy');
   }
+  if (options.prefetch !== undefined && typeof options.prefetch !== 'boolean') {
+    throw new TypeError('fromPush prefetch must be a boolean');
+  }
+  const prefetch = options.prefetch ?? true;
 
   const state = atom<T>(NO_INITIAL_VALUE) as Writable<T>;
   const baseDispose = state.dispose.bind(state);
@@ -225,15 +251,44 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
     }
   };
 
+  /** Publishes a dequeued value to the atom and callback subscribers. */
+  const deliver = (item: Delivery<T>): Promise<unknown>[] => {
+    state.next(item.value);
+    hasCurrent = true;
+    const pending: Promise<unknown>[] = [];
+    for (const listener of listeners) {
+      if (!listener.callback) continue;
+      // Replays and event delivery are serialized per listener.
+      const invoke = () => listener.callback!(item.value, item.value);
+      if (listener.replay) {
+        const chained = listener.replay.then(invoke).catch(() => {});
+        listener.replay = Promise.resolve(chained).then(() => {});
+        pending.push(chained);
+      } else {
+        try {
+          const result = invoke();
+          if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+            pending.push(Promise.resolve(result).catch(() => {}));
+          }
+        } catch { /* Subscriber errors stay isolated. */ }
+      }
+    }
+    return pending;
+  };
+
   const pump = async (session: Session<T>) => {
     if (session.pumping || session.stopped) return;
     session.pumping = true;
     try {
       while (!session.stopped && session.queued.length) {
+        const it = consumer;
+        // Pull delivery disables the per-iterator queue: values stay in the
+        // bounded admission buffer until an iterator pull asks for one.
+        const pulling = !prefetch && !!it && !it.closed;
+        if (pulling && !it!.waiters.length) break;
         // The iterator is optional, but if it exists discrete delivery cannot
         // overrun its bounded queue while the consumer is not pulling.
-        const it = consumer;
-        if (it && !it.closed && !analog) {
+        if (it && !it.closed && !analog && !pulling) {
           while (!session.stopped && !it.closed && it.queue.length >= capacity) {
             await new Promise<void>(resolve => it.roomWaiters.push(() => resolve()));
           }
@@ -253,34 +308,21 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
           }
         }
 
-        state.next(item.value);
-        hasCurrent = true;
-        const pending: Promise<unknown>[] = [];
-        for (const listener of listeners) {
-          if (!listener.callback) continue;
-          // Replays and event delivery are serialized per listener.
-          const invoke = () => listener.callback!(item.value, item.value);
-          if (listener.replay) {
-            const chained = listener.replay.then(invoke).catch(() => {});
-            listener.replay = Promise.resolve(chained).then(() => {});
-            pending.push(chained);
-          } else {
-            try {
-              const result = invoke();
-              if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
-                pending.push(Promise.resolve(result).catch(() => {}));
-              }
-            } catch { /* Subscriber errors stay isolated. */ }
-          }
-        }
+        const pending = deliver(item);
         if (pending.length) await Promise.all(pending);
       }
     } catch (error) {
       fail(session, error);
     } finally {
       session.pumping = false;
-      if (!session.stopped && session.queued.length) void pump(session);
-      else if (session.finishing) finishComplete(session);
+      if (!session.stopped && session.queued.length) {
+        const it = consumer;
+        // Pull-mode values wait for the next iterator pull; rescheduling here
+        // would spin while the consumer is idle.
+        if (!(!prefetch && it && !it.closed && !it.waiters.length)) void pump(session);
+      } else if (session.finishing) {
+        finishComplete(session);
+      }
     }
   };
 
@@ -445,6 +487,9 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
         if (it.ended) return failed ? Promise.reject(failed) : DONE;
         return new Promise<IteratorResult<T>>((resolve, reject) => {
           it.waiters.push({ resolve, reject });
+          // In pull mode the pump leaves accepted values in the admission
+          // buffer until a waiter asks for one.
+          if (!prefetch && currentSession) schedulePump(currentSession);
         });
       },
       return: async () => {

@@ -71,7 +71,7 @@ export const EducationalGuideModal: React.FC<EducationalGuideModalProps> = ({ is
 
           <section className="fifo-doc-section" aria-labelledby="fifo-doc-backpressure">
             <h3 id="fifo-doc-backpressure"><span className="fifo-doc-section-num">02</span> Backpressure</h3>
-            <p>In <code>block</code> mode, <code>next(value)</code> returns a promise. When the buffer has room, the value is admitted immediately and the promise resolves. When the buffer is full, the push waits in <code>session.blocked</code>; as soon as a consumer frees a slot, the oldest waiting value is admitted and its promise resolves. Admission — not delivery — ends backpressure.</p>
+            <p>In <code>block</code> mode, <code>next(value)</code> returns a promise. When the buffer has room, the value is admitted immediately and the promise resolves. When the buffer is full, the push waits in the source's blocked queue; as soon as a consumer frees a slot, the oldest waiting value is admitted and its promise resolves. Admission — not delivery — ends backpressure.</p>
             <div className="fifo-doc-note"><strong>Two producer behaviors</strong><p>The automatic source awaits every push, so it pauses while the buffer is full and holds at most one blocked value. “Push one” and “Burst” ignore the returned promises on purpose; a timer or event source cannot be paused this way, so its blocked backlog keeps growing.</p></div>
             <p>The visualizer displays the first three waiting values. A <code>+N</code> label counts the rest; none are removed just because they are hidden.</p>
           </section>
