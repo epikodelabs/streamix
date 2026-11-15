@@ -5,8 +5,8 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
 } from "react";
 import type { Readable, DependencySource, Writable } from "@epikodelabs/streamix";
@@ -86,6 +86,15 @@ function isDisposable(value: unknown): value is Disposable {
     typeof (value as Partial<Disposable>).dispose === "function";
 }
 
+function isObjectLike(value: unknown): value is object {
+  return (typeof value === "object" && value !== null) || typeof value === "function";
+}
+
+/** True when a retained render-owned instance was terminated by its owner. */
+function isDisposed(value: unknown): boolean {
+  return isObjectLike(value) && (value as { disposed?: unknown }).disposed === true;
+}
+
 /** Compiler-path writes since the last traced render. Renders are traced
  * only after such a write, mirroring the Angular layer's per-flush render
  * event. Explicit escape-hatch writes never count: they have no render
@@ -125,7 +134,16 @@ export function useStreamixAfterCommit(effect: () => void): void {
 export function useStreamixLocal<T>(factory: () => T): T {
   const lifetime = useContext(StreamixLifetimeContext);
   const ref = useRef<T | null>(null);
-  if (ref.current === null) ref.current = factory();
+  const [, forceRender] = useState(0);
+  if (ref.current === null || isDisposed(ref.current)) {
+    // A hidden Activity tears effects down but keeps this hook slot. Without
+    // a lifetime provider the deferred cleanup below has already disposed the
+    // retained instance, so the re-shown tree must create a fresh one instead
+    // of reading through a terminal atom.
+    const abandoned = ref.current;
+    if (abandoned !== null && isObjectLike(abandoned)) compilerLocalDisposals.delete(abandoned);
+    ref.current = factory();
+  }
 
   useEffect(() => {
     if (lifetime) {
@@ -134,14 +152,20 @@ export function useStreamixLocal<T>(factory: () => T): T {
       // Dispose only at the explicit lifetime boundary, not on hide.
       return;
     }
-    const instance = ref.current!;
-    const token = {};
-    if ((typeof instance === "object" || typeof instance === "function") && instance !== null) {
-      compilerLocalDisposals.set(instance, token);
+    let instance: T = ref.current!;
+    if (isDisposed(instance)) {
+      // Activity can reveal a hidden tree without re-rendering it. Recreate in
+      // the effect too, then force a render so subscriptions leave the
+      // terminal instance for the replacement.
+      if (isObjectLike(instance)) compilerLocalDisposals.delete(instance);
+      instance = ref.current = factory();
+      forceRender(version => version + 1);
     }
+    const token = {};
+    if (isObjectLike(instance)) compilerLocalDisposals.set(instance, token);
     return () => {
       queueMicrotask(() => {
-        if ((typeof instance === "object" || typeof instance === "function") && instance !== null) {
+        if (isObjectLike(instance)) {
           if (compilerLocalDisposals.get(instance) !== token) return;
           compilerLocalDisposals.delete(instance);
         }
@@ -290,6 +314,8 @@ export interface Resource<T> {
 }
 
 export interface PreloadedResource<T> extends Resource<T> {
+  /** True after dispose() has released the resource. */
+  readonly disposed: boolean;
   /** Explicitly starts loading outside render (route loader, event, or SSR). */
   preload(): void;
   /** Cancels an in-flight request and releases listeners. */
@@ -327,6 +353,7 @@ export function createResource<T>(loader: (signal: AbortSignal) => Promise<T>): 
     get status() { return status; },
     get data() { return data; },
     get error() { return error; },
+    get disposed() { return disposed; },
     read() {
       if (!promise) throw new Error("Resource has not been preloaded. Start it outside render with resource.preload().");
       if (status === "pending") throw promise;
@@ -391,12 +418,27 @@ export function useResource<T>(
 ): Resource<T> {
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
-  const resource = useMemo(
-    () => createResource<T>(signal => loaderRef.current(signal)),
-    dependencies,
-  );
+  const resourceSlot = useRef<{
+    dependencies: readonly unknown[];
+    resource: PreloadedResource<T>;
+  } | null>(null);
+  const previous = resourceSlot.current;
+  const dependenciesChanged = previous === null ||
+    previous.dependencies.length !== dependencies.length ||
+    dependencies.some((dependency, index) => !Object.is(dependency, previous.dependencies[index]));
+  if (previous === null || dependenciesChanged || previous.resource.disposed) {
+    // A no-provider Activity hide disposes the effect-owned resource while
+    // React keeps this hook slot. Recreate it for the re-shown tree instead
+    // of returning a permanently pending resource.
+    resourceSlot.current = {
+      dependencies: dependencies.slice(),
+      resource: createResource<T>(signal => loaderRef.current(signal)),
+    };
+  }
+  const resource = resourceSlot.current!.resource;
   const lifetime = useContext(StreamixLifetimeContext);
   const previousResource = useRef<PreloadedResource<T> | null>(null);
+  const [, forceRender] = useState(0);
   useEffect(() => {
     if (lifetime) {
       if (previousResource.current && previousResource.current !== resource) previousResource.current.dispose();
@@ -406,6 +448,17 @@ export function useResource<T>(
       // Activity hide is not a cancellation request. The lifetime is managed
       // outside the hidden subtree; dependency changes still dispose the old
       // resource in the next effect above.
+      return;
+    }
+    if (resource.disposed) {
+      // Activity can re-show the retained tree without a render. Replace the
+      // effect-owned resource here as well and let the forced render switch
+      // usePreloadedResource to the replacement.
+      resourceSlot.current = {
+        dependencies: dependencies.slice(),
+        resource: createResource<T>(signal => loaderRef.current(signal)),
+      };
+      forceRender(version => version + 1);
       return;
     }
     resource.preload();

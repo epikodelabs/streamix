@@ -1,7 +1,15 @@
 import * as React from "react";
 import { act, createElement, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { createStreamixLifetime, StreamixLifetimeProvider, useAtom } from "../lib/runtime";
+import {
+  createStreamixLifetime,
+  StreamixLifetimeProvider,
+  useAtom,
+  useAtomValue,
+  useResource,
+  useStreamixLocal,
+  type PreloadedResource,
+} from "../lib/runtime";
 import { atom, type Writable } from "@epikodelabs/streamix";
 import { idescribe } from "./env.spec";
 
@@ -40,6 +48,122 @@ idescribe("Streamix explicit lifetime across React Activity", () => {
       expect(last.disposed).toBe(true);
     } finally {
       lifetime.dispose();
+      host.remove();
+    }
+  });
+
+  it("recreates a no-provider useAtom instance after Activity hide/show", async () => {
+    const Activity = (React as unknown as { Activity?: React.ComponentType<{ mode: "visible" | "hidden"; children?: React.ReactNode }> }).Activity;
+    if (!Activity) { pending("Requires React with Activity support"); return; }
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    let current!: Writable<number>;
+    function Counter() {
+      const instance = useAtom(() => atom(1));
+      current = instance;
+      const value = useAtomValue(instance);
+      return createElement("output", null, String(value));
+    }
+    const render = (mode: "visible" | "hidden") => {
+      root.render(createElement(StrictMode, null, createElement(Activity, { mode }, createElement(Counter))));
+    };
+    try {
+      await act(async () => render("visible"));
+      expect(host.textContent).toBe("1");
+      const before = current;
+      expect(before.disposed).toBe(false);
+
+      await act(async () => render("hidden"));
+      await act(async () => { await Promise.resolve(); });
+      expect(before.disposed).toBe(true);
+
+      await act(async () => render("visible"));
+      await act(async () => { await Promise.resolve(); });
+      expect(current === before).toBe(false);
+      expect(current.disposed).toBe(false);
+      expect(host.textContent).toBe("1");
+      await act(async () => { current.next(2); });
+      expect(host.textContent).toBe("2");
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("recreates a no-provider useStreamixLocal instance after Activity hide/show", async () => {
+    const Activity = (React as unknown as { Activity?: React.ComponentType<{ mode: "visible" | "hidden"; children?: React.ReactNode }> }).Activity;
+    if (!Activity) { pending("Requires React with Activity support"); return; }
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    let current!: Writable<string>;
+    function View() {
+      const instance = useStreamixLocal(() => atom("local"));
+      current = instance;
+      const value = useAtomValue(instance);
+      return createElement("output", null, value);
+    }
+    const render = (mode: "visible" | "hidden") => {
+      root.render(createElement(StrictMode, null, createElement(Activity, { mode }, createElement(View))));
+    };
+    try {
+      await act(async () => render("visible"));
+      expect(host.textContent).toBe("local");
+      const before = current;
+
+      await act(async () => render("hidden"));
+      await act(async () => { await Promise.resolve(); });
+      expect(before.disposed).toBe(true);
+
+      await act(async () => render("visible"));
+      await act(async () => { await Promise.resolve(); });
+      expect(current === before).toBe(false);
+      expect(current.disposed).toBe(false);
+      await act(async () => { current.next("revived"); });
+      expect(host.textContent).toBe("revived");
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("recreates a no-provider useResource after Activity hide/show", async () => {
+    const Activity = (React as unknown as { Activity?: React.ComponentType<{ mode: "visible" | "hidden"; children?: React.ReactNode }> }).Activity;
+    if (!Activity) { pending("Requires React with Activity support"); return; }
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    let loads = 0;
+    let current!: PreloadedResource<string>;
+    function View() {
+      const resource = useResource(() => {
+        loads++;
+        return Promise.resolve("loaded");
+      }, []);
+      current = resource as PreloadedResource<string>;
+      return createElement("output", null, resource.status === "ready" ? String(resource.data) : resource.status);
+    }
+    const render = (mode: "visible" | "hidden") => {
+      root.render(createElement(StrictMode, null, createElement(Activity, { mode }, createElement(View))));
+    };
+    try {
+      await act(async () => render("visible"));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(host.textContent).toBe("loaded");
+      const before = current;
+      expect(before.disposed).toBe(false);
+      const loadsBeforeHide = loads;
+
+      await act(async () => render("hidden"));
+      await act(async () => { await Promise.resolve(); });
+      expect(before.disposed).toBe(true);
+
+      await act(async () => render("visible"));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(current === before).toBe(false);
+      expect(current.disposed).toBe(false);
+      expect(host.textContent).toBe("loaded");
+      expect(loads).toBeGreaterThan(loadsBeforeHide);
+    } finally {
+      await act(async () => root.unmount());
       host.remove();
     }
   });
