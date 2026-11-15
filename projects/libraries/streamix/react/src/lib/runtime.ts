@@ -504,10 +504,13 @@ export function hydrateAtomSnapshot(
   targets: Record<string, Writable<unknown>>,
   snapshot: AtomSnapshot,
 ): void {
-  for (const [name, value] of Object.entries(snapshot)) {
+  const entries = Object.entries(snapshot);
+  // Validate the whole payload before writing anything, so a bad trailing key
+  // cannot leave earlier atoms partially hydrated.
+  for (const [name] of entries) {
     if (!Object.prototype.hasOwnProperty.call(targets, name)) throw new Error(`Unknown atom snapshot key: ${name}`);
-    targets[name].next(value);
   }
+  for (const [name, value] of entries) targets[name].next(value);
 }
 
 /** Creates a JSON-safe, versioned SSR payload from named atom snapshots. */

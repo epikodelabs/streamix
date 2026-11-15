@@ -121,6 +121,15 @@ idescribe("React runtime escape hatches", () => {
     expect(count.value).toBe(1);
   });
 
+  it("rejects unknown snapshot keys without partially hydrating targets", () => {
+    const first = atom("first");
+    const second = atom("second");
+    expect(() => hydrateAtomSnapshot({ first, second }, { first: "changed", extra: true }))
+      .toThrowError(/Unknown atom snapshot key: extra/);
+    expect(first.value).toBe("first");
+    expect(second.value).toBe("second");
+  });
+
   it("uses the same concurrent-safe snapshot bridge without the compiler", () => {
     const count = atom(0);
     function Counter() {
