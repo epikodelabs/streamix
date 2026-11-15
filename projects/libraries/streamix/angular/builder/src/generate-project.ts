@@ -49,7 +49,16 @@ export async function generateProject({
         getNewLine: () => '\n',
       }));
   }
-  const program = ts.createProgram(parsedConfig.fileNames, parsedConfig.options);
+  // Introspection instruments every authored file, including files a narrowed
+  // tsconfig does not list as program roots. Include them so the checker knows
+  // every node it is asked about; otherwise projects that never import
+  // Streamix can crash inside TypeScript while probing unrelated `this` or
+  // member expressions.
+  const programRoots = [...new Set([
+    ...parsedConfig.fileNames,
+    ...(introspection ? await listFiles(sourceDirectory, false) : []),
+  ])];
+  const program = ts.createProgram(programRoots, parsedConfig.options);
   const checker = program.getTypeChecker();
 
   /** Only component-owned reactive fields affect template ownership checks.

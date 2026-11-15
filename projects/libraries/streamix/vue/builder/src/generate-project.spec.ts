@@ -100,6 +100,35 @@ describe('Vue builder introspection injection', () => {
     }
   });
 
+  it('instruments an SFC without Streamix sources when the app tsconfig has no roots', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-builder-plain-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const source = join(workspace, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(workspace, 'projects/apps/demo/tsconfig.json'), JSON.stringify({
+        files: [],
+        references: [{ path: './tsconfig.app.json' }],
+      }));
+      await writeFile(join(workspace, 'tsconfig.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler' },
+        include: ['projects/apps/demo/src/**/*.ts', 'projects/apps/demo/src/**/*.vue'],
+      }));
+      await writeFile(join(source, 'main.ts'), `import { createApp } from 'vue';\ncreateApp({}).mount('#app');\n`);
+      await writeFile(join(source, 'Plain.vue'), `
+        <script setup lang="ts">
+        const local = 1;
+        </script>
+        <template><span>{{ local }}</span></template>
+      `);
+      const output = await generateVueProject(workspace, sourceRoot, true);
+      expect(await readFile(join(output, 'main.ts'), 'utf8')).toContain('__sxEnable();');
+      expect(await readFile(join(output, 'Plain.vue'), 'utf8')).not.toContain('__sxDebug');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('finds the bootstrap entry under src/ in the standard vite layout', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-builder-entry-'));
     const sourceRoot = 'projects/apps/demo';

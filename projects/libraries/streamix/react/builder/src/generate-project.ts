@@ -34,6 +34,7 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
   const registrationProgram = introspection && results.size > 0
     ? createSourceProgram(workspaceRoot, sourceRoot, new Map([...results].map(([path, result]) => [path, result.code])))
     : undefined;
+  const outputs: Array<{ file: string; code: string; mapName: string; map: string }> = [];
   for (const file of files) {
     const original = join(source, relative(output, file));
     const result = results.get(original)!;
@@ -43,9 +44,15 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
       code = instrumentStreamixSource({ file: sourceFile, checker: registrationProgram.getTypeChecker(),
         sourcePath: relative(workspaceRoot, original), enabled: true });
     }
-    const mapName = `${basename(file)}.map`;
-    await writeFile(file, `${code}\n//# sourceMappingURL=${mapName}\n`);
-    await writeFile(join(dirname(file), mapName), `${result.map}\n`);
+    outputs.push({ file, code, mapName: `${basename(file)}.map`, map: result.map });
+  }
+  // Write only after the registration pass has finished. The program can
+  // lazily read the virtual paths it also owns; letting it observe a
+  // half-written, instrumented tree corrupts symbol resolution and can crash
+  // TypeScript on a later file in projects that never import Streamix.
+  for (const outputFile of outputs) {
+    await writeFile(outputFile.file, `${outputFile.code}\n//# sourceMappingURL=${outputFile.mapName}\n`);
+    await writeFile(join(dirname(outputFile.file), outputFile.mapName), `${outputFile.map}\n`);
   }
   const available = new Set((await readdir(output)).map(name => name.toLowerCase()));
   const entry = ENTRY_NAMES.find(name => available.has(name));
@@ -144,15 +151,25 @@ function createSourceProgram(
   overlays = new Map<string, string>(),
 ): ts.Program {
   const source = join(workspaceRoot, sourceRoot);
-  const configPath = ts.findConfigFile(source, ts.sys.fileExists, "tsconfig.json") ??
-    ts.findConfigFile(workspaceRoot, ts.sys.fileExists, "tsconfig.json");
-  const rawConfig = configPath ? (ts.readConfigFile(configPath, ts.sys.readFile).config ?? {}) : {};
-  const parsed = configPath
-    ? ts.parseJsonConfigFileContent(
-        { ...rawConfig, compilerOptions: { ...(rawConfig.compilerOptions ?? {}), allowJs: true } },
-        ts.sys, dirname(configPath), { jsx: ts.JsxEmit.Preserve }, configPath,
-      )
-    : { fileNames: [], options: { jsx: ts.JsxEmit.Preserve, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler } as ts.CompilerOptions };
+  const sourceConfigPath = ts.findConfigFile(source, ts.sys.fileExists, "tsconfig.json");
+  const workspaceConfigPath = ts.findConfigFile(workspaceRoot, ts.sys.fileExists, "tsconfig.json");
+  const parseConfig = (configPath: string | undefined) => {
+    const rawConfig = configPath ? (ts.readConfigFile(configPath, ts.sys.readFile).config ?? {}) : {};
+    return configPath
+      ? ts.parseJsonConfigFileContent(
+          { ...rawConfig, compilerOptions: { ...(rawConfig.compilerOptions ?? {}), allowJs: true } },
+          ts.sys, dirname(configPath), { jsx: ts.JsxEmit.Preserve }, configPath,
+        )
+      : { fileNames: [] as string[], options: { jsx: ts.JsxEmit.Preserve, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler } as ts.CompilerOptions };
+  };
+  // Solution-style app tsconfigs (`files: []` + project references) give the
+  // checker no roots. Introspection then asks it about `this`/imports in files
+  // it never loaded and crashes inside TypeScript. Fall back to the workspace
+  // program, which owns the real source graph.
+  let parsed = parseConfig(sourceConfigPath);
+  if (parsed.fileNames.length === 0 && workspaceConfigPath && workspaceConfigPath !== sourceConfigPath) {
+    parsed = parseConfig(workspaceConfigPath);
+  }
   if (overlays.size === 0) {
     return ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, allowJs: true } });
   }
@@ -172,10 +189,21 @@ function createSourceProgram(
   const getSourceFile = host.getSourceFile.bind(host);
   const readFile = host.readFile?.bind(host);
   const fileExists = host.fileExists.bind(host);
+  // TypeScript may ask for the same file more than once. Returning a fresh
+  // SourceFile each time splits the nodes and symbols across instances and
+  // corrupts the checker (observed as internal `escapedName`/`members` crashes
+  // while instrumenting projects that do not import Streamix at all).
+  const overlaySources = new Map<string, ts.SourceFile>();
   host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
     const text = overlayFor(fileName);
     if (text === undefined) return getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
-    return ts.createSourceFile(fileName, text, languageVersion, true, scriptKindFor(fileName));
+    const key = fileName.replace(/\\/g, '/').toLowerCase();
+    let source = overlaySources.get(key);
+    if (!source) {
+      source = ts.createSourceFile(fileName, text, languageVersion, true, scriptKindFor(fileName));
+      overlaySources.set(key, source);
+    }
+    return source;
   };
   host.readFile = fileName => overlayFor(fileName) ?? readFile?.(fileName);
   host.fileExists = fileName => overlayFor(fileName) !== undefined || fileExists(fileName);

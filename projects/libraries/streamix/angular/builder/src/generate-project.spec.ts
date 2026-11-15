@@ -166,6 +166,29 @@ describe('Angular debug project generation', () => {
       expect(await readFile(join(src, 'main.ts'), 'utf8')).toBe(original);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+  it('instruments files that are not roots of the app tsconfig', async () => {
+    const { mkdtemp, mkdir, writeFile, readFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-plain-generation-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const src = join(root, sourceRoot);
+      await mkdir(src, { recursive: true });
+      await writeFile(join(src, '..', 'tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', moduleResolution: 'Node' },
+        files: ['src/main.ts'],
+      }));
+      await writeFile(join(src, 'main.ts'), `export const start = () => 'ok';\n`);
+      const helper = `export class Counter {\n  private value = 0;\n  increment() { return ++this.value; }\n}\n`;
+      await writeFile(join(src, 'helper.ts'), helper);
+      await generateProject({ workspaceRoot: root, sourceRoot, introspection: true });
+      expect(await readFile(join(root, '.angular/.streamix/demo/src/main.ts'), 'utf8')).toContain('__sxEnable();');
+      expect(await readFile(join(root, '.angular/.streamix/demo/src/helper.ts'), 'utf8')).toBe(helper);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('normalizes derived shorthand through debug wrappers', () => {
     const result = rewriteDerivedAtomReads('const count = __sxDebug(atom(1), {}); const total = __sxDebug(derived(() => count * 2), {});');
     expect(result).toContain('count.value * 2');

@@ -28,42 +28,60 @@ const ENTRY_NAMES = ["main.tsx", "main.jsx", "main.ts", "main.js", "index.tsx", 
 export function sx(options: StreamixReactViteOptions = {}): Plugin {
   const programs = new Map<string, ts.Program>();
   const programFor = (fileName: string, source: string): ts.Program => {
-    const configPath = ts.findConfigFile(dirname(fileName), ts.sys.fileExists, "tsconfig.json");
+    const parseConfig = (configPath: string | undefined) => {
+      const configuration = configPath
+        ? ts.readConfigFile(configPath, ts.sys.readFile)
+        : { config: {} };
+      return ts.parseJsonConfigFileContent(
+        {
+          ...(configuration.config ?? {}),
+          compilerOptions: { ...(configuration.config?.compilerOptions ?? {}), allowJs: true },
+        },
+        ts.sys,
+        configPath ? dirname(configPath) : dirname(fileName),
+        configPath ? {} : {
+          jsx: ts.JsxEmit.Preserve,
+          module: ts.ModuleKind.ESNext,
+          moduleResolution: ts.ModuleResolutionKind.Bundler,
+          allowJs: true,
+          skipLibCheck: true,
+        },
+        configPath,
+      );
+    };
+    let configPath = ts.findConfigFile(dirname(fileName), ts.sys.fileExists, "tsconfig.json");
+    let parsed = parseConfig(configPath);
+    // A solution-style app tsconfig (`files: []` + references) leaves the
+    // checker with no roots. Fall back to the Vite workspace config so
+    // instrumentation never queries unloaded nodes.
+    if (parsed.fileNames.length === 0) {
+      const fallback = ts.findConfigFile(process.cwd(), ts.sys.fileExists, "tsconfig.json");
+      if (fallback && fallback !== configPath) {
+        const fallbackParsed = parseConfig(fallback);
+        if (fallbackParsed.fileNames.length > 0) {
+          configPath = fallback;
+          parsed = fallbackParsed;
+        }
+      }
+    }
     const key = configPath ?? `standalone:${fileName}`;
     const cached = programs.get(key);
     // A Vite transform may receive an in-memory HMR edit not written to disk.
     // Never silently discard semantic analysis because its TS SourceFile is stale.
     if (cached?.getSourceFile(fileName)?.text === source) return cached;
-
-    const configuration = configPath
-      ? ts.readConfigFile(configPath, ts.sys.readFile)
-      : { config: {} };
-    const parsed = ts.parseJsonConfigFileContent(
-      {
-        ...(configuration.config ?? {}),
-        compilerOptions: { ...(configuration.config?.compilerOptions ?? {}), allowJs: true },
-      },
-      ts.sys,
-      configPath ? dirname(configPath) : dirname(fileName),
-      configPath ? {} : {
-        jsx: ts.JsxEmit.Preserve,
-        module: ts.ModuleKind.ESNext,
-        moduleResolution: ts.ModuleResolutionKind.Bundler,
-        allowJs: true,
-        skipLibCheck: true,
-      },
-      configPath,
-    );
     const rootNames = parsed.fileNames.includes(fileName)
       ? parsed.fileNames
       : [...parsed.fileNames, fileName];
     const host = ts.createCompilerHost(parsed.options);
     const getSourceFile = host.getSourceFile.bind(host);
     const readFile = host.readFile?.bind(host);
-    host.getSourceFile = (name, languageVersion, onError, shouldCreateNewSourceFile) =>
-      name === fileName
-        ? ts.createSourceFile(name, source, languageVersion, true, scriptKindFor(name))
-        : getSourceFile(name, languageVersion, onError, shouldCreateNewSourceFile);
+    // Keep one SourceFile instance per file: recreating it would split nodes
+    // and symbols across instances and corrupt the checker.
+    let overlaySource: ts.SourceFile | undefined;
+    host.getSourceFile = (name, languageVersion, onError, shouldCreateNewSourceFile) => {
+      if (name !== fileName) return getSourceFile(name, languageVersion, onError, shouldCreateNewSourceFile);
+      return overlaySource ??= ts.createSourceFile(name, source, languageVersion, true, scriptKindFor(name));
+    };
     host.readFile = name => name === fileName ? source : readFile?.(name);
     host.fileExists = ((existing) => name => name === fileName || existing(name))(host.fileExists.bind(host));
     const program = ts.createProgram({ rootNames, options: { ...parsed.options, allowJs: true }, host, oldProgram: cached });

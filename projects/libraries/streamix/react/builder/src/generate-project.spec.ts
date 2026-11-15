@@ -92,4 +92,36 @@ describe("React Angular-hosted source generation", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  it("instruments a project with no Streamix sources and a solution-style app tsconfig", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-builder-plain-"));
+    const sourceRoot = "projects/apps/demo/src";
+    try {
+      const source = join(root, sourceRoot);
+      await mkdir(source, { recursive: true });
+      // The app-level config has no roots; the builder must fall back to the
+      // workspace program instead of handing instrumentation an empty checker.
+      await writeFile(join(root, "projects/apps/demo/tsconfig.json"), JSON.stringify({
+        files: [],
+        references: [{ path: "./tsconfig.app.json" }],
+      }));
+      await writeFile(join(root, "projects/apps/demo/tsconfig.app.json"), JSON.stringify({
+        files: ["src/main.tsx"],
+        compilerOptions: { jsx: "react-jsx" },
+      }));
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
+        include: ["projects/apps/demo/src/**/*.ts", "projects/apps/demo/src/**/*.tsx"],
+      }));
+      const main = `export const App = () => <main>plain</main>;\n`;
+      const helper = `export class Counter {\n  private value = 0;\n  increment() { return ++this.value; }\n}\n`;
+      await writeFile(join(source, "main.tsx"), main);
+      await writeFile(join(source, "helper.ts"), helper);
+      const virtualRoot = await generateReactProject(root, sourceRoot, true);
+      expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).toContain("__sxEnable();");
+      expect(await readFile(join(virtualRoot, "helper.ts"), "utf8")).not.toContain("__sxDebug");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });

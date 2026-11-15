@@ -32,17 +32,32 @@ function instrumentProgram(
   source: string,
   virtualScripts: ReadonlyMap<string, string>,
 ): ts.Program {
-  const configPath = ts.findConfigFile(dirname(fileName), ts.sys.fileExists, 'tsconfig.json');
-  const rawConfig = configPath ? (ts.readConfigFile(configPath, ts.sys.readFile).config ?? {}) : {};
-  const parsed = configPath
-    ? ts.parseJsonConfigFileContent(
-        { ...rawConfig, compilerOptions: { ...(rawConfig.compilerOptions ?? {}), allowJs: true } },
-        ts.sys, dirname(configPath), { jsx: ts.JsxEmit.Preserve }, configPath,
-      )
-    : { fileNames: [] as string[], options: {
-        jsx: ts.JsxEmit.Preserve, module: ts.ModuleKind.ESNext,
-        moduleResolution: ts.ModuleResolutionKind.Bundler,
-      } as ts.CompilerOptions };
+  const parseConfig = (configPath: string | undefined) => {
+    const rawConfig = configPath ? (ts.readConfigFile(configPath, ts.sys.readFile).config ?? {}) : {};
+    return configPath
+      ? ts.parseJsonConfigFileContent(
+          { ...rawConfig, compilerOptions: { ...(rawConfig.compilerOptions ?? {}), allowJs: true } },
+          ts.sys, dirname(configPath), { jsx: ts.JsxEmit.Preserve }, configPath,
+        )
+      : { fileNames: [] as string[], options: {
+          jsx: ts.JsxEmit.Preserve, module: ts.ModuleKind.ESNext,
+          moduleResolution: ts.ModuleResolutionKind.Bundler,
+        } as ts.CompilerOptions };
+  };
+  let configPath = ts.findConfigFile(dirname(fileName), ts.sys.fileExists, 'tsconfig.json');
+  let parsed = parseConfig(configPath);
+  // Solution-style configs (`files: []` + references) give the checker no
+  // roots; fall back to the Vite workspace config before instrumenting.
+  if (parsed.fileNames.length === 0) {
+    const fallback = ts.findConfigFile(process.cwd(), ts.sys.fileExists, 'tsconfig.json');
+    if (fallback && fallback !== configPath) {
+      const fallbackParsed = parseConfig(fallback);
+      if (fallbackParsed.fileNames.length > 0) {
+        configPath = fallback;
+        parsed = fallbackParsed;
+      }
+    }
+  }
   const overlays = new Map(virtualScripts);
   overlays.set(fileName, source);
   const rootNames = [...new Set([...parsed.fileNames, ...overlays.keys()])];
@@ -67,10 +82,17 @@ function instrumentProgram(
     if (/\.js$/i.test(name)) return ts.ScriptKind.JS;
     return ts.ScriptKind.TS;
   };
+  const overlaySources = new Map<string, ts.SourceFile>();
   host.getSourceFile = (name, languageVersion, onError, shouldCreateNewSourceFile) => {
     const text = overlayFor(name);
     if (text === undefined) return getSourceFile(name, languageVersion, onError, shouldCreateNewSourceFile);
-    return ts.createSourceFile(name, text, languageVersion, true, scriptKindFor(name));
+    const key = name.replace(/\\/g, '/').toLowerCase();
+    let source = overlaySources.get(key);
+    if (!source) {
+      source = ts.createSourceFile(name, text, languageVersion, true, scriptKindFor(name));
+      overlaySources.set(key, source);
+    }
+    return source;
   };
   host.readFile = name => overlayFor(name) ?? readFile?.(name);
   host.fileExists = name => overlayFor(name) !== undefined || fileExists(name);
