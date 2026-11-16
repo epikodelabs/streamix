@@ -333,6 +333,7 @@ export function transformReactJsx(
       call: ts.CallExpression,
       reactiveNames: ReadonlySet<string>,
       boundary: ts.Node,
+      reactiveMaps: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map(),
       hidden: (site: ts.Identifier) => boolean = () => false,
     ): ts.CallExpression => {
       if (!call.arguments.length || !(ts.isArrowFunction(call.arguments[0]) || ts.isFunctionExpression(call.arguments[0]))) return call;
@@ -341,6 +342,20 @@ export function transformReactJsx(
       for (const parameter of callback.parameters) boundNames(parameter.name, callbackParameters);
       const canRead = (id: ts.Identifier): boolean => reactiveNames.has(id.text) &&
         !callbackParameters.has(id.text) && !hidden(id) && !isShadowedName(id.text, id, boundary);
+      // A proven atom-map member read resolves to its atom reference, with
+      // canRead's guards applied to the base and to the resolved name: a
+      // callback parameter or shadowing local must still win, and a member
+      // of an arbitrary object is never guessed to be reactive.
+      const resolveReactiveMapRead = (access: ts.Expression): string | undefined => {
+        if (!ts.isPropertyAccessExpression(access) && !ts.isElementAccessExpression(access)) return undefined;
+        if (!ts.isIdentifier(access.expression)) return undefined;
+        const base = access.expression;
+        const atomName = atomFromMapAccess(access, reactiveMaps);
+        if (!atomName || !reactiveNames.has(atomName) || callbackParameters.has(base.text)) return undefined;
+        if (hidden(base) || isShadowedName(base.text, base, boundary)) return undefined;
+        if (isShadowedName(atomName, base, boundary)) return undefined;
+        return atomName;
+      };
       const lower: ts.Visitor = child => {
         // DerivedScope readers consume source references, regardless of their
         // parameter name; lowering their arguments would pass plain values.
@@ -352,9 +367,14 @@ export function transformReactJsx(
               !isShadowedName(reader.text, reader, callback.body)) return child;
         }
         if (ts.isPropertyAccessExpression(child) && child.name.text === "value" &&
-            ts.isIdentifier(child.expression) && canRead(child.expression)) return child;
+            (ts.isIdentifier(child.expression) && canRead(child.expression) ||
+             resolveReactiveMapRead(child.expression) !== undefined)) return child;
         if (ts.isShorthandPropertyAssignment(child) && canRead(child.name)) {
           return factory.createPropertyAssignment(child.name, factory.createPropertyAccessExpression(child.name, "value"));
+        }
+        if (ts.isPropertyAccessExpression(child) || ts.isElementAccessExpression(child)) {
+          const atomName = resolveReactiveMapRead(child);
+          if (atomName) return factory.createPropertyAccessExpression(factory.createIdentifier(atomName), "value");
         }
         if (ts.isIdentifier(child) && !isNamePosition(child) && canRead(child))
           return factory.createPropertyAccessExpression(child, "value");
@@ -368,7 +388,7 @@ export function transformReactJsx(
     };
     const lowerModuleFormulas: ts.Visitor = node => {
       if (ts.isCallExpression(node) && factoryKind(node, imports, checker) === "derived")
-        return lowerDerivedCallback(node, moduleAtoms, sourceFile);
+        return lowerDerivedCallback(node, moduleAtoms, sourceFile, moduleAtomMaps);
       return ts.visitEachChild(node, lowerModuleFormulas, context);
     };
 
@@ -1056,7 +1076,7 @@ export function transformReactJsx(
           }
         }
         if (ts.isCallExpression(child) && factoryKind(child, imports, checker) === "derived") {
-          return lowerDerivedCallback(child, atoms, node, isHidden);
+          return lowerDerivedCallback(child, atoms, node, atomMaps, isHidden);
         }
         if (isComponent && ts.isVariableDeclaration(child) && localReactiveDeclarations.has(child) && child.initializer) {
           needsRuntimeImport = true;
