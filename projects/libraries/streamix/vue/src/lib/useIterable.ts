@@ -8,6 +8,7 @@ import type {
   DependencySource,
   Subscription,
 } from '@epikodelabs/streamix';
+import { NO_INITIAL_VALUE } from '@epikodelabs/streamix';
 import { recordStreamixDevtoolsEvent } from './devtools';
 
 type Disposable = { dispose(): void };
@@ -130,7 +131,8 @@ function dependencyRef<T>(
     }
     try {
       const value = source.value;
-      return value === undefined && initialValue !== undefined ? initialValue : value;
+      return value === NO_INITIAL_VALUE ? initialValue as T
+        : value === undefined && initialValue !== undefined ? initialValue : value;
     } catch {
       return (lastKnown ? lastValue : initialValue) as T;
     }
@@ -140,7 +142,9 @@ function dependencyRef<T>(
   recordStreamixDevtoolsEvent({ type: 'subscription', source: sourceName });
   const subscription = source.subscribe(() => {
     try {
-      lastValue = source.value;
+      const value = source.value;
+      if (value === NO_INITIAL_VALUE) return;
+      lastValue = value;
       lastKnown = true;
     } catch {
       // The source disposed between the emission and this read; the mirror
@@ -204,6 +208,7 @@ function asyncIterableRef<T>(
           break;
         }
 
+        if (next.value === NO_INITIAL_VALUE) continue;
         value = next.value;
         failed = false;
         error = undefined;
@@ -240,6 +245,9 @@ function asyncIterableRef<T>(
 
 /**
  * Reads a Streamix reactive source or any async iterable from Vue.
+ *
+ * Until the first emission, exposes `initialValue` or `undefined` instead of
+ * the internal pending sentinel.
  *
  * If `source.value` is genuinely `undefined`, a supplied `initialValue` is
  * displayed instead; omit it when `undefined` itself is meaningful.

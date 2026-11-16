@@ -21,6 +21,7 @@ import {
   type RendererScheduler,
   type ScheduledBinding,
 } from './render-scheduler';
+import { viewValue } from './view-value';
 
 /**
  * Handle returned by a direct renderer binding.
@@ -60,7 +61,7 @@ function bindDirect<T>(
   const scheduler = options.scheduler ?? rendererScheduler;
   const equal = writer.equal ?? Object.is;
 
-  let pending = writer.read(source);
+  let pending = viewValue(writer.read(source));
   let rendered = pending;
   let subscription: Subscription | undefined;
   let scheduled: ScheduledBinding | undefined;
@@ -80,7 +81,7 @@ function bindDirect<T>(
   let subscribing = true;
   subscription = source.subscribe((value) => {
     if (subscribing) return;
-    pending = value;
+    pending = viewValue(value);
     scheduled?.markDirty();
   });
   subscribing = false;

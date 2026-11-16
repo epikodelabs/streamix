@@ -11,6 +11,7 @@ import {
 } from '@angular/compiler';
 
 import { jsStringLiteral } from './codegen';
+import { SX_NO_INITIAL_VALUE_FIELD } from './generated-names';
 import {
   createBindingPlan,
   type SxBindingKind,
@@ -381,7 +382,8 @@ function visitElement(
   for (const handled of twoWay.values()) {
     state.bindingEdits.push({
       ...handled.span,
-      replacement: `[${handled.property}]="${handled.readExpression}"`,
+      replacement: angularFallbackForExpression(handled.property, handled.readExpression,
+        handled.bindings.filter(binding => binding.kind === 'property').map(binding => binding.source)),
     });
 
     for (const binding of handled.bindings) {
@@ -416,7 +418,7 @@ function visitElement(
       state.bindings.push({ kind: 'attribute-expression', node: nodeId, name: attributeName,
         source: analysis.expression, dependencies: analysis.dependencies, span });
       state.bindingSpans.push(span);
-      state.bindingEdits.push({ ...span, replacement: angularFallbackForExpression('attr.' + attributeName, analysis.expression) });
+      state.bindingEdits.push({ ...span, replacement: angularFallbackForExpression('attr.' + attributeName, analysis.expression, analysis.dependencies) });
       continue;
     }
 
@@ -491,6 +493,7 @@ function visitElement(
         replacement: angularFallbackForExpression(
           publicName,
           analysis.expression,
+          analysis.dependencies,
         ),
       });
 
@@ -507,21 +510,17 @@ function visitElement(
 
     const binding = classifyNativeAngularBinding(publicName, nodeId, source);
 
-    if (transparentSource) {
-      if (binding) {
-        if (!isScopeBackingSource(transparentSource)) {
-          // The direct binding owns the DOM; Angular's fallback read only has
-          // to render the correct server/hydration value.
-          state.bindingEdits.push({
-            ...span,
-            replacement: angularFallbackForNativeBinding(publicName, source),
-          });
-        }
-      } else {
-        // Angular evaluates this input itself: a directive/component input
-        // (`ngSwitch`, `[item]`, …) or a sanitizer-sensitive sink.
-        throw new Error(angularOwnedReadError(transparentPath!));
-      }
+    if (binding) {
+      // Guard both explicit and transparent reads before Angular evaluates
+      // the initial server/hydration template.
+      state.bindingEdits.push({
+        ...span,
+        replacement: angularFallbackForNativeBinding(publicName, source),
+      });
+    } else if (transparentSource) {
+      // Angular evaluates this input itself: a directive/component input
+      // (`ngSwitch`, `[item]`, …) or a sanitizer-sensitive sink.
+      throw new Error(angularOwnedReadError(transparentPath!));
     }
 
     if (!binding) {
@@ -756,7 +755,7 @@ function angularFallbackForNativeBinding(
   publicName: string,
   source: string,
 ): string {
-  return `[${publicName}]=\"${source}.value\"`;
+  return angularFallbackForExpression(publicName, `${source}.value`, [source]);
 }
 
 /**
@@ -767,8 +766,15 @@ function angularFallbackForNativeBinding(
 function angularFallbackForExpression(
   publicName: string,
   expression: string,
+  dependencies: readonly string[] = [],
 ): string {
-  return `[${publicName}]=\"${expression}\"`;
+  return `[${publicName}]=\"${pendingSafeExpression(expression, dependencies)}\"`;
+}
+
+function pendingSafeExpression(expression: string, dependencies: readonly string[]): string {
+  if (dependencies.length === 0) return expression;
+  const ready = [...new Set(dependencies)].map(source => `$any(${source}.value) !== ${SX_NO_INITIAL_VALUE_FIELD}`).join(' && ');
+  return `(${ready}) ? (${expression}) : undefined`;
 }
 
 
@@ -1087,8 +1093,8 @@ function bindTextInterpolation(child: TmplAstBoundText, state: WalkState, nodeId
     throw new Error(angularOwnedReadError(analysis.dependencies[0], MIXED_STATE_REASON));
   }
   const span = { start: child.sourceSpan.start.offset, end: child.sourceSpan.end.offset };
-  if (analysis.sourceTransparent) {
-    state.bindingEdits.push({ ...span, replacement: '{{ ' + analysis.expression + ' }}' });
+  if (analysis.dependencies.length > 0) {
+    state.bindingEdits.push({ ...span, replacement: '{{ ' + pendingSafeExpression(analysis.expression, analysis.dependencies) + ' }}' });
   }
   state.bindings.push({
     kind: analysis.mode === 'direct' ? 'text-node' : 'text-expression-node',

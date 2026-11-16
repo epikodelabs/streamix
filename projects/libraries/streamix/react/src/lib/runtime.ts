@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { Readable, DependencySource, Writable } from "@epikodelabs/streamix";
+import { NO_INITIAL_VALUE } from "@epikodelabs/streamix";
 import { recordStreamixDevtoolsEvent } from "./devtools";
 
 export type AtomSnapshot = Record<string, unknown>;
@@ -39,6 +40,11 @@ type CompilerSubscriptionEntry = {
 // subscribed first.
 const compilerSubscriptions = new WeakMap<object, Map<boolean, CompilerSubscriptionEntry>>();
 const compilerLocalDisposals = new WeakMap<object, object>();
+
+// Framework reads expose pending state as undefined, never as the core sentinel.
+function viewValue<T>(value: T): T {
+  return value === NO_INITIAL_VALUE ? undefined as T : value;
+}
 
 /**
  * Explicit lifetime for compiler-owned atom and scope instances beneath
@@ -185,6 +191,7 @@ export function useStreamixLocal<T>(factory: () => T): T {
 }
 
 /** @internal Concurrent-safe shared subscription used by compiler JSX reads.
+ * Before the first emission, exposes undefined instead of the pending sentinel.
  * Dedupes equal emissions by default: Angular's binding equals gate skips
  * unchanged values, so an equal emission is not a write — no re-render and
  * no trace event. The explicit read hatches pass `dedupe: false` to keep
@@ -199,7 +206,8 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
     }
     let entry = modes.get(dedupe);
     if (!entry) {
-      entry = { listeners: new Set(), stop: null, generation: 0, version: 0, value: source.value, snapshot: { version: 0, value: source.value } };
+      const value = viewValue(source.value);
+      entry = { listeners: new Set(), stop: null, generation: 0, version: 0, value, snapshot: { version: 0, value } };
       modes.set(dedupe, entry);
     }
     return entry;
@@ -216,7 +224,7 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
       if (!entry.stop) {
         let replaying = true;
         entry.stop = source.subscribe(() => {
-          const next = source.value;
+          const next = viewValue(source.value);
           // Angular parity: the binding equals gate skips unchanged values.
           // An equal emission is not a write — it schedules no render and
           // emits no trace event.
@@ -251,9 +259,10 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
   const getSnapshot = useCallback(() => {
     const entry = entryFor();
     // Accommodate stores changed before their first subscriber attaches.
-    if (!Object.is(entry.value, source.value)) {
+    const value = viewValue(source.value);
+    if (!Object.is(entry.value, value)) {
       entry.version++;
-      entry.value = source.value;
+      entry.value = value;
       entry.snapshot = { version: entry.version, value: entry.value };
     }
     return entry.snapshot;
@@ -268,7 +277,7 @@ export const __streamixUse = useStreamixSource;
 
 /** Reads an atom explicitly, without compiler involvement. */
 export function read<T>(source: DependencySource<T>): T {
-  return source.value;
+  return viewValue(source.value);
 }
 
 /** Writes an atom explicitly, without compiler involvement. */

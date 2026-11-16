@@ -180,7 +180,7 @@ describe('the $any() cast', () => {
       { resolveReactiveSource },
     );
 
-    expect(result.template).toBe('<span>{{ count.value * 2 }}</span>');
+    expect(result.template).toBe('<span>{{ ($any(count.value) !== __sxNoInitialValue) ? (count.value * 2) : undefined }}</span>');
     expect(result.setup).toContain('ctx.count.value * 2');
     expect(result.setup).not.toContain('$any');
   });
@@ -192,7 +192,7 @@ describe('the $any() cast', () => {
       { resolveReactiveSource },
     );
 
-    expect(result.template).toBe('<span>{{ count.value + 1 }}</span>');
+    expect(result.template).toBe('<span>{{ ($any(count.value) !== __sxNoInitialValue) ? (count.value + 1) : undefined }}</span>');
     expect(result.setup).toContain('ctx.count.value + 1');
     expect(result.setup).not.toContain('$any');
   });
@@ -204,7 +204,7 @@ describe('the $any() cast', () => {
       { resolveReactiveSource },
     );
 
-    expect(result.template).toBe('<span>{{ count.value }}</span>');
+    expect(result.template).toBe('<span>{{ ($any(count.value) !== __sxNoInitialValue) ? (count.value) : undefined }}</span>');
     expect(result.setup).toContain('ctx.count');
     expect(result.setup).not.toContain('$any');
   });

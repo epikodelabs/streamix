@@ -22,8 +22,8 @@ describe('standard Angular atom templates', () => {
       { resolveReactiveSource },
     );
 
-    expect(result.template).toContain('[disabled]="count.value"');
-    expect(result.template).toContain('{{ count.value }}');
+    expect(result.template).toContain('[disabled]="($any(count.value) !== __sxNoInitialValue) ? (count.value) : undefined"');
+    expect(result.template).toContain('{{ ($any(count.value) !== __sxNoInitialValue) ? (count.value) : undefined }}');
     expect(result.setup).toContain('ɵsxProperty');
     expect(result.setup).toContain('ɵsxTextNode');
   });
@@ -252,7 +252,7 @@ describe('standard Angular atom templates', () => {
       { resolveReactiveSource },
     );
 
-    expect(result.template).toContain('[class.active]="count.value > 3"');
+    expect(result.template).toContain('[class.active]="($any(count.value) !== __sxNoInitialValue) ? (count.value > 3) : undefined"');
     expect(result.setup).toContain(
       'ɵsxClassExpression(table, 0, node0, "active", [ctx.count], () => ctx.count.value > 3)',
     );
@@ -266,7 +266,7 @@ describe('standard Angular atom templates', () => {
     );
 
     expect(result.template).toContain(
-      '[attr.aria-label]="count.value + total.value"',
+      '[attr.aria-label]="($any(count.value) !== __sxNoInitialValue && $any(total.value) !== __sxNoInitialValue) ? (count.value + total.value) : undefined"',
     );
     expect(result.setup).toContain('ɵsxAttributeExpression');
   });

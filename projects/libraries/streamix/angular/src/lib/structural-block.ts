@@ -7,6 +7,7 @@ import {
   rendererScheduler,
   type ScheduledBinding,
 } from './render-scheduler';
+import { readViewExpression, viewValue } from './view-value';
 
 export interface SxBlockInstance {
   readonly first: Node;
@@ -113,6 +114,7 @@ export class SxValueBlock<T> {
   }
 
   private render(value: T | undefined): void {
+    value = viewValue(value);
     if (this.destroyed || Object.is(this.current, value)) {
       return;
     }
@@ -176,7 +178,7 @@ function isSxExpression<T>(
 }
 
 function readSxValue<T>(value: SxValueOrExpression<T>): T {
-  return isSxExpression(value) ? value.read() : value.value;
+  return isSxExpression(value) ? readViewExpression(value.sources, value.read) : viewValue(value.value);
 }
 
 function sourcesOf<T>(

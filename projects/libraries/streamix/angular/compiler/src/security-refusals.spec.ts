@@ -71,7 +71,7 @@ describe('security-sensitive binding refusals', () => {
       { resolveReactiveSource },
     );
 
-    expect(result.template).toContain('[attr.aria-label]="label.value"');
+    expect(result.template).toContain('[attr.aria-label]="($any(label.value) !== __sxNoInitialValue) ? (label.value) : undefined"');
     expect(result.setup).toContain('ɵsxAttribute');
     expect(result.setup).toContain('ɵsxProperty');
     expect(result.setup).toContain('ɵsxStyle');

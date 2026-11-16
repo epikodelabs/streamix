@@ -4,6 +4,11 @@
 
 Vue still renders the interface. Streamix holds state, derived values, and asynchronous work. The adapter makes those sources feel natural in the Composition API and in templates.
 
+Before an atom or flow emits, adapter reads expose `undefined`, so pending
+values render empty and are falsy in conditionals during SSR and hydration.
+`useIterable(source, initialValue)` can supply a pending fallback. The internal
+`NO_INITIAL_VALUE` sentinel is never forwarded to a view.
+
 ## Install
 
 ```bash

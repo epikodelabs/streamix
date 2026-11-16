@@ -4,11 +4,13 @@ import type {
   Writable,
 } from '@epikodelabs/streamix';
 import { recordStreamixDevtoolsEvent } from './devtools';
+import { NO_INITIAL_VALUE } from '@epikodelabs/streamix';
 
 /** Reads an atom explicitly, without composable involvement. */
 export function read<T>(source: DependencySource<T>): T {
   recordStreamixDevtoolsEvent({ type: 'read', source: 'explicit atom read' });
-  return source.value;
+  const value = source.value;
+  return value === NO_INITIAL_VALUE ? undefined as T : value;
 }
 
 /** Writes an atom explicitly, without composable involvement. */

@@ -4,6 +4,11 @@
 Write Streamix atoms and scopes directly in TSX or JSX; the compiler lowers JSX reads
 to React's concurrent-safe external-store contract.
 
+Before an atom or flow emits, adapter reads expose `undefined`. Pending values
+render empty and are falsy in conditionals, on both the server and the client;
+the internal `NO_INITIAL_VALUE` sentinel stays in the core. Supply an initial
+value or use a fallback such as `value ?? 'Loading'` when needed.
+
 ```tsx
 import { atom, scope } from "@epikodelabs/streamix";
 

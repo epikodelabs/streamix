@@ -22,6 +22,7 @@ import {
   type RendererScheduler,
   type ScheduledBinding,
 } from './render-scheduler';
+import { readViewExpression, viewValue } from './view-value';
 
 export type BindingSlot = number;
 
@@ -86,7 +87,7 @@ export class SxBindingTable {
     this.assertLiveSlot(slot);
     this.unbind(slot);
 
-    const initial = source.value;
+    const initial = viewValue(source.value);
 
     this.writers[slot] = write as BindingWriter;
     this.equals[slot] = equal as BindingEquals;
@@ -101,7 +102,7 @@ export class SxBindingTable {
         return;
       }
 
-      this.pending[slot] = value;
+      this.pending[slot] = viewValue(value);
       this.markSlotDirty(slot);
     });
     subscribing = false;
@@ -128,9 +129,10 @@ export class SxBindingTable {
     this.assertLiveSlot(slot);
     this.unbind(slot);
 
-    const initial = read();
+    const readView = () => readViewExpression(sources, read);
+    const initial = readView();
 
-    this.readers[slot] = read as BindingReader;
+    this.readers[slot] = readView as BindingReader;
     this.writers[slot] = write as BindingWriter;
     this.equals[slot] = equal as BindingEquals;
     this.rendered[slot] = initial;

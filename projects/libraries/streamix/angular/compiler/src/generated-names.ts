@@ -6,3 +6,4 @@
  * runtime-only generated symbols.
  */
 export const SX_SOURCE_REFERENCES_FIELD = '__sxRefs';
+export const SX_NO_INITIAL_VALUE_FIELD = '__sxNoInitialValue';

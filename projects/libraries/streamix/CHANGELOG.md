@@ -4,6 +4,7 @@
 
 - **React:** fixed Activity recovery, subscription deduplication and snapshot hydration.
 - **React compiler:** preserved local objects that shadow atom-map names (#199).
+- **Views:** pending atoms and flows render empty across React, Vue and Angular instead of exposing the internal sentinel (#84).
 - **Introspection:** fixed builds for projects without Streamix sources.
 - **Push sources:** added `fromPush()`'s `prefetch: false` option and a FIFO demo.
 - **Sharing:** fixed `share()` reconnection and `shareReplay()` cache retention after completion (#92, #93).

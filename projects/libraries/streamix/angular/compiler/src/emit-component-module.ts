@@ -1,4 +1,4 @@
-import { SX_SOURCE_REFERENCES_FIELD } from './generated-names';
+import { SX_NO_INITIAL_VALUE_FIELD, SX_SOURCE_REFERENCES_FIELD } from './generated-names';
 
 /**
  * Runtime primitives referenced by emitted setup functions. Generated setup is
@@ -63,13 +63,13 @@ export function emitSourceReferenceInitializer(
     `  this,`,
     `  ${JSON.stringify(sourceReferences)},`,
     `);`,
+    `public readonly ${SX_NO_INITIAL_VALUE_FIELD} = ɵsxNoInitialValue;`,
   ].join('\n');
 }
 
 /**
- * Generated fields that do not depend on the compiled setup. Only the source
- * reference bridge exists today; it is emitted on its own when a component
- * needs no binding table.
+ * Generated source-reference and pending-value fields, also used when a
+ * component needs no binding table.
  */
 export function emitComponentFieldInitializers(options: {
   readonly sourceReferences?: readonly string[];

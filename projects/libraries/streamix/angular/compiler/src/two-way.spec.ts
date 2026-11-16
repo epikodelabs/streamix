@@ -32,7 +32,7 @@ describe('two-way bindings', () => {
     );
 
     // Angular renders the server/hydration value; the compiled pair owns the DOM.
-    expect(result.template).toContain('[value]="count.value"');
+    expect(result.template).toContain('[value]="($any(count.value) !== __sxNoInitialValue) ? (count.value) : undefined"');
     expect(result.template).not.toContain('valueChange');
     expect(result.setup).toContain(
       'ɵsxProperty(table, 0, node0, "value", ctx.count);',
@@ -49,7 +49,7 @@ describe('two-way bindings', () => {
       options,
     );
 
-    expect(result.template).toContain("[checked]=\"model.get('done').value\"");
+    expect(result.template).toContain("[checked]=\"($any(model.get('done').value) !== __sxNoInitialValue) ? (model.get('done').value) : undefined\"");
     expect(result.setup).toContain(
       "ɵsxListener(table, 1, node0, \"change\", (event) => { ctx.model.set('done', event.target.checked); }, undefined, server);",
     );

@@ -4,6 +4,11 @@
 
 The idea is simple: write ordinary Angular templates, keep state in Streamix, and let the integration keep the view up to date.
 
+Before an atom or flow emits, bindings treat it as `undefined`: text stays
+empty, conditional branches are inactive, and collections are empty. Expressions
+wait until their dependencies are available. This also applies during SSR and
+hydration; the internal `NO_INITIAL_VALUE` sentinel never becomes view data.
+
 ```ts
 model = scope({
   count: 0,

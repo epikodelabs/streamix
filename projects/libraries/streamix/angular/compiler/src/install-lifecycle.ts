@@ -5,7 +5,7 @@ import {
   emitComponentFieldInitializers,
   emitLifecycleInitializer,
 } from './emit-component-module';
-import { SX_SOURCE_REFERENCES_FIELD } from './generated-names';
+import { SX_NO_INITIAL_VALUE_FIELD, SX_SOURCE_REFERENCES_FIELD } from './generated-names';
 
 export interface SxComponentSourceTransformOptions {
   /**
@@ -78,6 +78,13 @@ export function installSxLifecycleIntoComponentSource(
 
   if (
     sourceReferences.length > 0 &&
+    declaredMembers.has(SX_NO_INITIAL_VALUE_FIELD)
+  ) {
+    throw new Error(`Unable to install sx lifecycle: component member ${SX_NO_INITIAL_VALUE_FIELD} is reserved for generated Streamix pending-value guards.`);
+  }
+
+  if (
+    sourceReferences.length > 0 &&
     declaredMembers.has(SX_SOURCE_REFERENCES_FIELD)
   ) {
     throw new Error(
@@ -87,7 +94,7 @@ export function installSxLifecycleIntoComponentSource(
 
   const runtimeSymbols = [
     ...(hasSetup ? ['ɵinstallSxCompiledView'] : []),
-    ...(sourceReferences.length > 0 ? ['ɵinstallSxSourceReferences'] : []),
+    ...(sourceReferences.length > 0 ? ['ɵinstallSxSourceReferences', 'ɵsxNoInitialValue'] : []),
     ...(hasSetup ? runtimeSymbolsForSetup(options.inlineSetup!) : []),
   ];
 
