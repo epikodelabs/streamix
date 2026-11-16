@@ -5,6 +5,7 @@
 - **React:** fixed Activity recovery, subscription deduplication and snapshot hydration.
 - **React compiler:** preserved local objects that shadow atom-map names (#199).
 - **React compiler:** preserved assignment results and single RHS evaluation, including concise callbacks (#164).
+- **React compiler:** report bare atom reads in `useMemo`, `useEffect` and `useCallback` with guidance for explicit reads (#204).
 - **Views:** pending atoms and flows render empty across React, Vue and Angular instead of exposing the internal sentinel (#84).
 - **Angular compiler:** native `.value` bindings require reactive proof; ordinary objects and form controls stay Angular-owned (#171).
 - **Introspection:** fixed builds for projects without Streamix sources.

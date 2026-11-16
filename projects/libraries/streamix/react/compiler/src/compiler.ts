@@ -174,6 +174,40 @@ function reactWrappers(file: ts.SourceFile): (expression: ts.Expression) => bool
     namespaces.has(expression.expression.text) && ["memo", "forwardRef"].includes(expression.name.text);
 }
 
+/** React hooks whose callbacks run outside the compiler's JSX lowering. */
+const NON_JSX_HOOKS = new Set(["useMemo", "useEffect", "useCallback"]);
+
+/**
+ * Recognize the React hooks whose inline callbacks are an explicit Streamix
+ * boundary. Bare atom identifiers inside those callbacks would otherwise
+ * observe the atom object instead of its value.
+ */
+function reactNonJsxHooks(file: ts.SourceFile): (expression: ts.Expression) => string | undefined {
+  const named = new Map<string, string>();
+  const namespaces = new Set<string>();
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+        statement.moduleSpecifier.text !== "react" || !statement.importClause) continue;
+    if (statement.importClause.name) namespaces.add(statement.importClause.name.text);
+    const bindings = statement.importClause.namedBindings;
+    if (bindings && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text);
+    if (bindings && ts.isNamedImports(bindings)) for (const specifier of bindings.elements) {
+      const imported = (specifier.propertyName ?? specifier.name).text;
+      if (NON_JSX_HOOKS.has(imported)) named.set(specifier.name.text, imported);
+    }
+  }
+  return expression => {
+    const base = ts.isIdentifier(expression) ? expression :
+      ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression) ? expression.expression : undefined;
+    if (base && isShadowedName(base.text, base, file)) return undefined;
+    if (ts.isIdentifier(expression)) return named.get(expression.text);
+    if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression) &&
+        namespaces.has(expression.expression.text) && NON_JSX_HOOKS.has(expression.name.text))
+      return expression.name.text;
+    return undefined;
+  };
+}
+
 type FactoryImports = { aliases: Map<string, string>; namespaces: Set<string>; excluded: Set<string> };
 function streamixFactoryImports(file: ts.SourceFile): FactoryImports {
   const aliases = new Map<string, string>();
@@ -270,6 +304,7 @@ export function transformReactJsx(
   const isJavaScript = /\.[cm]?jsx?$/i.test(fileName);
   const imports = streamixFactoryImports(sourceFile);
   const isReactWrapper = reactWrappers(sourceFile);
+  const reactNonJsxHook = reactNonJsxHooks(sourceFile);
   let bindingCount = 0;
   let needsRuntimeImport = false;
   const diagnostics: ReactJsxDiagnostic[] = [];
@@ -879,7 +914,123 @@ export function transformReactJsx(
         return ts.visitNode(expression, jsxValueVisitor) as ts.Expression;
       };
 
+      /**
+       * Non-JSX React callbacks are an explicit Streamix boundary: writes are
+       * lowered, but standalone reads would still observe the atom object.
+       * Report every bare atom read that survives the lowering pass. JSX
+       * subtrees, derived formulas, explicit atom APIs, and atom writes are
+       * handled elsewhere and are skipped deliberately.
+       */
+      const inspectedHookCallbacks = new Set<ts.Node>();
+      /**
+       * Resolve an inline callback or a directly referenced local/module
+       * function so the boundary check covers `useEffect(handler)` as well as
+       * `useEffect(() => ...)`.
+       */
+      const hookCallbackFor = (argument: ts.Expression | undefined): ts.FunctionLikeDeclarationBase | undefined => {
+        if (!argument) return undefined;
+        if (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) return argument;
+        if (!ts.isIdentifier(argument) || isShadowedName(argument.text, argument, node)) return undefined;
+        const statements = [...functionBody.statements, ...sourceFile.statements];
+        for (const statement of statements) {
+          if (ts.isFunctionDeclaration(statement) && statement.name?.text === argument.text && statement.body)
+            return statement;
+          if (!ts.isVariableStatement(statement)) continue;
+          for (const declaration of statement.declarationList.declarations) {
+            if (!ts.isIdentifier(declaration.name) || declaration.name.text !== argument.text || !declaration.initializer) continue;
+            if (ts.isArrowFunction(declaration.initializer) || ts.isFunctionExpression(declaration.initializer))
+              return declaration.initializer;
+          }
+        }
+        return undefined;
+      };
+      const reportHookCallbackReads = (
+        callback: ts.FunctionLikeDeclarationBase,
+        hook: string,
+      ): void => {
+        if (inspectedHookCallbacks.has(callback)) return;
+        inspectedHookCallbacks.add(callback);
+        const explicitAtomApis = new Set(["read", "write", "atomRef", "useAtomValue", "useWritable"]);
+        const calledName = (callee: ts.Expression): string | undefined =>
+          ts.isIdentifier(callee) ? callee.text :
+            ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined;
+        const unwrap = (expression: ts.Expression): ts.Expression => {
+          let current = expression;
+          while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+                 ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) ||
+                 ts.isSatisfiesExpression(current)) current = current.expression;
+          return current;
+        };
+        const report = (site: ts.Node, atomName: string): void => {
+          diagnostics.push(diagnostic(site, "error",
+            `Atom "${atomName}" is used as a value inside a ${hook} callback. Non-JSX callbacks are an explicit boundary: read ${atomName}.value, use read(${atomName}), capture useAtomValue(${atomName}) at component scope, or pass the source with atomRef(${atomName}).`));
+        };
+        const inspect = (child: ts.Node): void => {
+          // JSX expressions receive subscription bindings; type positions are
+          // not runtime reads.
+          if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) ||
+              ts.isJsxFragment(child) || ts.isJsxExpression(child) || ts.isTypeNode(child)) return;
+          if (ts.isCallExpression(child)) {
+            // Nested hook callbacks are reported by their own call site.
+            if (reactNonJsxHook(child.expression)) return;
+            if (factoryKind(child, imports, checker) === "derived") return;
+            const api = calledName(child.expression);
+            if (api && explicitAtomApis.has(api)) {
+              // The first argument is the atom source itself; later arguments
+              // are still value positions.
+              child.arguments.forEach((argument, index) => { if (index > 0) inspect(argument); });
+              return;
+            }
+          }
+          // A write target and its right side are lowered as a unit.
+          if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind) &&
+              !isHiddenTarget(child.left) && atomReferenceName(child.left, atoms, atomMaps)) return;
+          // Destructured atom writes lower the targets, not the right side.
+          if (ts.isBinaryExpression(child) && child.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+              (ts.isObjectLiteralExpression(child.left) || ts.isArrayLiteralExpression(child.left)) &&
+              destructuredAtomTargets(child.left, atoms, atomMaps).length > 0) {
+            inspect(child.right);
+            return;
+          }
+          // ++/-- on an atom is a write, not a value read.
+          if ((ts.isPrefixUnaryExpression(child) || ts.isPostfixUnaryExpression(child)) &&
+              (child.operator === ts.SyntaxKind.PlusPlusToken || child.operator === ts.SyntaxKind.MinusMinusToken) &&
+              !isHiddenTarget(child.operand) && atomReferenceName(child.operand, atoms, atomMaps)) return;
+          // Any explicit atom member access (.value, .next, .subscribe, ...)
+          // deliberately uses the source object.
+          if ((ts.isPropertyAccessExpression(child) || ts.isElementAccessExpression(child)) &&
+              !isHiddenTarget(child.expression) &&
+              atomReferenceName(unwrap(child.expression), atoms, atomMaps)) return;
+          if (ts.isShorthandPropertyAssignment(child) && atoms.has(child.name.text) && !isHidden(child.name)) {
+            report(child.name, child.name.text);
+            return;
+          }
+          if (ts.isIdentifier(child) && atoms.has(child.text) && !isNamePosition(child) && !isHidden(child)) {
+            report(child, child.text);
+            return;
+          }
+          if ((ts.isPropertyAccessExpression(child) || ts.isElementAccessExpression(child)) &&
+              ts.isIdentifier(child.expression) && !isHidden(child.expression)) {
+            const atomName = atomFromMapAccess(child, atomMaps);
+            if (atomName) { report(child, atomName); return; }
+            if (ts.isElementAccessExpression(child) && atomMaps.has(child.expression.text)) {
+              report(child, child.expression.text);
+              return;
+            }
+          }
+          ts.forEachChild(child, inspect);
+        };
+        ts.forEachChild(callback, inspect);
+      };
+
       const visit: ts.Visitor = (child) => {
+        if (ts.isCallExpression(child)) {
+          const hook = reactNonJsxHook(child.expression);
+          if (hook) {
+            const callback = hookCallbackFor(child.arguments[0]);
+            if (callback) reportHookCallbackReads(callback, hook);
+          }
+        }
         if (ts.isCallExpression(child) && factoryKind(child, imports, checker) === "derived") {
           return lowerDerivedCallback(child, atoms, node, isHidden);
         }

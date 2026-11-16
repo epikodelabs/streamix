@@ -176,6 +176,13 @@ Use `read` and `write` in timers, service callbacks, dynamic paths, and other
 non-React code. A wrapper callback that might execute outside React is also an
 explicit boundary.
 
+The compiler enforces that boundary inside `useMemo`, `useEffect`, and
+`useCallback` callbacks: a bare atom identifier that would observe the atom
+object is a compile-time error. Read `count.value`, use `read(count)`, or
+capture `useAtomValue(count)` at component scope. Pass the source explicitly
+with `atomRef(count)` when its identity is needed.
+Writes such as `count = count + 1` are fully lowered and remain valid.
+
 ### Supported and explicit cases
 
 | Use case | Use |
