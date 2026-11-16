@@ -21,6 +21,7 @@ export async function generateVueProject(workspaceRoot: string, sourceRoot: stri
   let installed = false;
   try {
     await cp(source, staging, { recursive: true });
+    await stripLegacySidecars(staging);
     if (introspection) {
       // Metadata registration before the SFC transform (Angular reference
       // order): adoption then rewrites the instrumented script content.
@@ -93,7 +94,7 @@ async function sweepAbandonedTransactions(output: string): Promise<void> {
 export function validatedSourceDirectory(workspaceRoot: string, sourceRoot: string): string {
   const parts = sourceRoot.replace(/\\/g, '/').split('/');
   if (!sourceRoot || isAbsolute(sourceRoot) || win32.isAbsolute(sourceRoot) ||
-      parts.some(part => part === '..' || part === '.' || part === '.angular') ||
+      parts.some(part => part === '..' || part === '.' || part === '.angular' || part === 'node_modules') ||
       !parts.some(Boolean)) {
     throw new Error('Streamix Vue sourceRoot must be a nonempty workspace-relative source directory.');
   }
@@ -111,6 +112,16 @@ export function virtualRootOf(sourceRoot: string): string {
   return sourceRoot
     .replace(/^projects[\\/]apps[\\/]/, '')
     .replace(/[\\/]src$/, '/src');
+}
+
+/** Legacy generated `.sx.ts` sidecars copied from the authored tree must not
+ * reach the virtual compilation inputs; the staged copy strips them. */
+async function stripLegacySidecars(root: string): Promise<void> {
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) await stripLegacySidecars(path);
+    else if (entry.name.endsWith('.sx.ts')) await rm(path, { force: true });
+  }
 }
 
 /** Semantic program over the authored tree; overlays replace real files and add virtual script modules. */
@@ -278,10 +289,12 @@ export async function regenerateVueFile(
     if (code === 'EISDIR') return;
     if (code !== 'ENOENT') throw error;
     await rm(destination, { force: true, recursive: true });
+    await rm(`${destination}.map`, { force: true });
     return;
   }
 
   let output = content;
+  let map: string | undefined;
   if (normalized.endsWith('.vue')) {
     let input = content.toString('utf8');
     if (introspection) input = await instrumentVueFileText(workspaceRoot, originalRoot, origin, input);
@@ -291,6 +304,7 @@ export async function regenerateVueFile(
       throw new Error(formatVueSfcDiagnostics(input, relative(workspaceRoot, origin), errors));
     }
     output = Buffer.from(transformed.code);
+    map = transformed.sourceMap ? `${JSON.stringify(transformed.sourceMap)}\n` : undefined;
   } else if (introspection && /\.[jt]sx?$/i.test(normalized) && !/\.(?:d|spec|test)\.[jt]sx?$/i.test(normalized)) {
     const text = content.toString('utf8');
     const program = createSourceProgram(workspaceRoot, originalRoot, new Map([[origin, text]]));
@@ -316,6 +330,19 @@ export async function regenerateVueFile(
   } finally {
     await rm(temporary, { force: true });
   }
+  if (map !== undefined) {
+    const mapTemporary = `${destination}.map.sx-tmp-${randomUUID()}`;
+    try {
+      await writeFile(mapTemporary, map);
+      await rename(mapTemporary, `${destination}.map`);
+    } finally {
+      await rm(mapTemporary, { force: true });
+    }
+  } else if (normalized.endsWith('.vue')) {
+    // The transform produced no map (an unchanged passthrough), so a map from
+    // an earlier generation would describe stale positions.
+    await rm(`${destination}.map`, { force: true });
+  }
 }
 
 async function collectVueFiles(directory: string): Promise<string[]> {
@@ -330,7 +357,7 @@ async function collectVueFiles(directory: string): Promise<string[]> {
 }
 
 /** Entry bootstrap module names across common Vite layouts. */
-const ENTRY_NAMES = ['main.ts', 'main.js', 'index.ts', 'index.js'];
+const ENTRY_NAMES = ['main.tsx', 'main.jsx', 'main.ts', 'main.js', 'index.tsx', 'index.jsx', 'index.ts', 'index.js'];
 
 /** The bootstrap module the delegate bundles, at the root or under src/. */
 async function findEntry(root: string): Promise<string | undefined> {
@@ -354,4 +381,10 @@ async function transformFile(file: string, fileName: string): Promise<void> {
     throw new Error(formatVueSfcDiagnostics(input, fileName, errors));
   }
   await writeFile(file, transformed.code);
+  if (transformed.sourceMap) {
+    // The compiler maps every surviving authored SFC text position onto its
+    // original line and column; inserted bridges and imports stay unmapped.
+    // The vite delegate chains this map so devtools point at authored files.
+    await writeFile(`${file}.map`, `${JSON.stringify(transformed.sourceMap)}\n`);
+  }
 }

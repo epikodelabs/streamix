@@ -20,6 +20,7 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
   let installed = false;
   try {
     await cp(source, staging, { recursive: true });
+    await stripLegacySidecars(staging);
 
     const files = await collectAdoptableFiles(staging);
     const program = createSourceProgram(workspaceRoot, sourceRoot);
@@ -33,7 +34,14 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
         // Diagnostics point at the authored file, not the staging copy.
         throw new Error(formatReactJsxDiagnostics(input, relative(workspaceRoot, original), errors));
       }
-      results.set(original, { code: transformed.code, map: JSON.stringify(transformed.sourceMap) });
+      // Map sources carry the workspace-relative authored path so the chained
+      // devtools point at a portable location instead of the machine's temp
+      // workspace (mirrors the vite plugin's source rewrite).
+      const mapSource = relative(workspaceRoot, original).replace(/\\/g, "/");
+      results.set(original, {
+        code: transformed.code,
+        map: JSON.stringify(transformed.sourceMap && { ...transformed.sourceMap, sources: [mapSource] }),
+      });
     }
     // Registration runs AFTER adoption, not before: the adoption transform
     // typechecks the text it rewrites, and a __sxDebug wrapper around factory
@@ -64,13 +72,14 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
       await writeFile(outputFile.file, `${outputFile.code}\n//# sourceMappingURL=${outputFile.mapName}\n`);
       await writeFile(join(dirname(outputFile.file), outputFile.mapName), `${outputFile.map}\n`);
     }
-    const available = new Set((await readdir(staging)).map(name => name.toLowerCase()));
-    const entry = ENTRY_NAMES.find(name => available.has(name));
+    const entry = await findEntry(staging);
+    // The tree root maps to `<app>/src` on the virtual tsconfig's level.
+    const entryPath = entry ? relative(staging, entry).replace(/\\/g, "/") : undefined;
     if (introspection && entry !== undefined) {
       // Devtools activation is injected into the generated entry only, mirroring
       // the Angular builder: authored source stays clean and the gate stays
       // `import.meta.env.DEV`, so production builds carry inert definitions.
-      await writeFile(join(staging, entry), injectIntrospectionActivation(await readFile(join(staging, entry), "utf8")));
+      await writeFile(entry, injectIntrospectionActivation(await readFile(entry, "utf8")));
     }
     // Atomically replace the live tree only after every transform succeeded:
     // rename tolerates a first-run missing output, and a failure before the
@@ -88,7 +97,7 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
       `${JSON.stringify({
         extends: toConfigPath(relative(dirname(output), join(workspaceRoot, "tsconfig.json"))),
         compilerOptions: { outDir: "../../out-tsc/app", types: [], jsx: "react-jsx", allowJs: true },
-        files: entry ? [`src/${entry}`] : [],
+        files: entryPath ? [`src/${entryPath}`] : [],
         include: ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx"],
         exclude: ["src/**/*.spec.*", "src/**/*.test.*", "src/**/*.d.ts"],
       }, null, 2)}\n`,
@@ -139,7 +148,7 @@ async function sweepAbandonedTransactions(output: string): Promise<void> {
 function validatedSourceDirectory(workspaceRoot: string, sourceRoot: string): string {
   const parts = sourceRoot.replace(/\\/g, "/").split("/");
   if (!sourceRoot || isAbsolute(sourceRoot) || win32.isAbsolute(sourceRoot) ||
-      parts.some(part => part === ".." || part === "." || part === ".angular") ||
+      parts.some(part => part === ".." || part === "." || part === ".angular" || part === "node_modules") ||
       !parts.some(Boolean)) {
     throw new Error("Streamix React sourceRoot must be a nonempty workspace-relative source directory.");
   }
@@ -172,6 +181,30 @@ export function virtualRootOf(sourceRoot: string): string {
 
 const ENTRY_NAMES = ["main.tsx", "main.jsx", "main.ts", "main.js", "index.tsx", "index.jsx", "index.ts", "index.js"];
 
+/** Legacy generated `.sx.ts` sidecars copied from the authored tree must not
+ * reach the virtual compilation inputs; the staged copy strips them. */
+async function stripLegacySidecars(root: string): Promise<void> {
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) await stripLegacySidecars(path);
+    else if (entry.name.endsWith(".sx.ts")) await rm(path, { force: true });
+  }
+}
+
+/** The bootstrap module the delegate bundles, at the root or under src/. */
+async function findEntry(root: string): Promise<string | undefined> {
+  for (const directory of [join(root, "src"), root]) {
+    for (const name of ENTRY_NAMES) {
+      const path = join(directory, name);
+      try {
+        await readFile(path);
+        return path;
+      } catch { /* not this one */ }
+    }
+  }
+  return undefined;
+}
+
 function toConfigPath(path: string): string {
   const normalized = path.replace(/\\/g, "/");
   return normalized.startsWith(".") ? normalized : `./${normalized}`;
@@ -189,7 +222,7 @@ async function collectAdoptableFiles(directory: string): Promise<string[]> {
 }
 
 /** Synchronize an original source change into the delegated virtual project. */
-export async function regenerateStreamixFile(workspaceRoot: string, sourceRoot: string, changedPath: string, introspection = false): Promise<void> {
+export async function regenerateReactFile(workspaceRoot: string, sourceRoot: string, changedPath: string, introspection = false): Promise<void> {
   const originalRoot = validatedSourceDirectory(workspaceRoot, sourceRoot);
   const destRoot = join(workspaceRoot, ".angular", ".streamix", virtualRootOf(sourceRoot));
   const normalized = changedPath.replace(/\\/g, "/");

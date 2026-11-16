@@ -21,11 +21,11 @@ export function resolveSourceRoot(options?: Record<string, unknown>): string {
   if (typeof sourceRoot !== 'string' || !sourceRoot.trim()) {
     throw new Error('Streamix Angular builder requires a non-empty sourceRoot (for example projects/apps/demo/src).');
   }
-  const segments = sourceRoot.split(/[\\/]/);
+  const segments = sourceRoot.replace(/\\/g, '/').split('/');
   if (sourceRoot.startsWith('/') || sourceRoot.startsWith('\\') ||
       /^[A-Za-z]:[\\/]/.test(sourceRoot) ||
-      segments.includes('..') || segments.every(segment => !segment || segment === '.') ||
-      segments.some(segment => segment === '.angular' || segment === 'node_modules')) {
+      segments.some(segment => segment === '..' || segment === '.' || segment === '.angular' || segment === 'node_modules') ||
+      !segments.some(Boolean)) {
     throw new Error('Streamix Angular builder sourceRoot must be a workspace-relative directory without parent traversal.');
   }
   return sourceRoot.replace(/\\/g, '/').replace(/\/$/, '');

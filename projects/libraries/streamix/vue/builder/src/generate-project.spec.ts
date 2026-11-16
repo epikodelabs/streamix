@@ -40,6 +40,12 @@ describe('Vue builder project generation', () => {
       expect(output).toBe(join(workspace, '.angular', '.streamix', 'demo/src'));
       expect(counter).toContain('const count = atom(0);');
       expect(counter).toContain("useWritable(count, 'count')");
+      // The compiler's authored-position map is written beside the SFC; the
+      // vite delegate chains it so devtools point at authored files.
+      const map = JSON.parse(await readFile(join(output, 'Counter.vue.map'), 'utf8'));
+      expect(map.version).toBe(3);
+      expect(map.sources).toEqual(['projects/apps/demo/src/Counter.vue']);
+      expect(map.sourcesContent[0]).toContain('const count = atom(0);');
       expect(await readFile(join(output, 'plain.txt'), 'utf8')).toBe('copied unchanged');
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -56,7 +62,7 @@ describe('Vue builder production safety', () => {
   it('rejects absolute and traversing source roots before modifying generated files', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-root-'));
     try {
-      for (const invalid of ['', '.', '..', '../outside', '/tmp/source', 'C:\\source', '.angular/source']) {
+      for (const invalid of ['', '.', '..', '../outside', '/tmp/source', 'C:\\source', '.angular/source', 'node_modules/x']) {
         await expectAsync(generateVueProject(workspace, invalid)).toBeRejectedWithError(/sourceRoot/);
       }
     } finally {

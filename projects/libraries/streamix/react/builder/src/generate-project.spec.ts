@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { generateReactProject, regenerateStreamixFile } from "./generate-project";
+import { generateReactProject, regenerateReactFile } from "./generate-project";
 
 /** Content snapshot of every file under a tree, keyed by slash-relative path. */
 async function snapshotTree(root: string): Promise<Record<string, string>> {
@@ -65,7 +65,13 @@ describe("React Angular-hosted source generation", () => {
       expect(testSource).not.toContain("useStreamixSource");
       const config = JSON.parse(await readFile(join(root, ".angular/.streamix/demo/tsconfig.app.json"), "utf8"));
       expect(config.files).toEqual(["src/main.tsx"]);
-      await expectAsync(regenerateStreamixFile(root, sourceRoot, "assets")).toBeResolved();
+      // The builder map chains through esbuild so devtools point at authored files.
+      const map = JSON.parse(await readFile(join(virtualRoot, "main.tsx.map"), "utf8"));
+      expect(map.version).toBe(3);
+      expect(map.sources).toEqual(["projects/apps/demo/src/main.tsx"]);
+      expect(map.sourcesContent[0]).toContain("export function App");
+      expect(compiled.trimEnd().endsWith("//# sourceMappingURL=main.tsx.map")).toBe(true);
+      await expectAsync(regenerateReactFile(root, sourceRoot, "assets")).toBeResolved();
     } finally {
       await rm(root, { force: true, recursive: true });
     }
@@ -95,12 +101,12 @@ describe("React Angular-hosted source generation", () => {
       expect(await readFile(join(source, "main.tsx"), "utf8")).toBe(authored);
 
       // A watch edit of the entry must keep the activation.
-      await regenerateStreamixFile(root, sourceRoot, "main.tsx", true);
+      await regenerateReactFile(root, sourceRoot, "main.tsx", true);
       expect(await readFile(generatedPath, "utf8")).toContain("__sxEnable();");
       // Dropping the flag regenerates without it.
       await generateReactProject(root, sourceRoot, false);
       expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).not.toContain("__sxEnable");
-      await regenerateStreamixFile(root, sourceRoot, "main.tsx", false);
+      await regenerateReactFile(root, sourceRoot, "main.tsx", false);
       expect(await readFile(generatedPath, "utf8")).not.toContain("__sxEnable");
     } finally {
       await rm(root, { force: true, recursive: true });
@@ -142,7 +148,7 @@ describe("React Angular-hosted source generation", () => {
   it("rejects absolute and traversing source roots before modifying generated files", async () => {
     const root = await mkdtemp(join(tmpdir(), "streamix-react-root-"));
     try {
-      for (const invalid of ["", ".", "..", "../outside", "/tmp/source", "C:\\source", ".angular/source"]) {
+      for (const invalid of ["", ".", "..", "../outside", "/tmp/source", "C:\\source", ".angular/source", "node_modules/x"]) {
         await expectAsync(generateReactProject(root, invalid)).toBeRejectedWithError(/sourceRoot/);
       }
       // Nothing was created for any rejected root.

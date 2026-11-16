@@ -137,6 +137,12 @@ describe('external Angular component templates', () => {
       const generated = await readFile(join(root, '.angular/.streamix/demo/src/counter.ts'), 'utf8');
       expect(generated).toContain('template: `');
       expect(generated).not.toContain('templateUrl');
+      // The authored-position map chains through esbuild like the React builder's.
+      const map = JSON.parse(await readFile(join(root, '.angular/.streamix/demo/src/counter.ts.map'), 'utf8'));
+      expect(map.version).toBe(3);
+      expect(map.sources).toEqual(['projects/apps/demo/src/counter.ts']);
+      expect(map.sourcesContent[0]).toContain('export class Counter');
+      expect(generated.trimEnd().endsWith('//# sourceMappingURL=counter.ts.map')).toBe(true);
       expect(await readFile(join(src, 'counter.html'), 'utf8')).toBe(template);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -202,6 +208,96 @@ describe('Angular staged regeneration', () => {
     }
   });
 
+  it('regenerates a single authored component in place on a watch edit', async () => {
+    const { mkdtemp, mkdir, writeFile, readFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject, regenerateAngularFile } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-per-file-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const src = join(root, sourceRoot);
+      await mkdir(src, { recursive: true });
+      await writeFile(join(src, '..', 'tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true, moduleResolution: 'Node' },
+        include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'counter.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ templateUrl: './counter.html' })
+        export class Counter { count = atom(1); }
+      `);
+      await writeFile(join(src, 'counter.html'), '<output>{{ count.value }}</output>');
+      await writeFile(join(src, 'globals.d.ts'), [
+        'declare module "@epikodelabs/streamix" {',
+        '  export function atom<T>(value: T): { type: string; value: T; subscribe(cb: () => void): () => void };',
+        '}',
+      ].join('\n'));
+      await generateProject({ workspaceRoot: root, sourceRoot });
+      const virtualPath = join(root, '.angular/.streamix/demo/src/counter.ts');
+      const before = await readFile(virtualPath, 'utf8');
+      await writeFile(join(src, 'counter.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ templateUrl: './counter.html' })
+        export class Counter { count = atom(42); }
+      `);
+      await regenerateAngularFile(root, sourceRoot, 'counter.ts');
+      const updated = await readFile(virtualPath, 'utf8');
+      expect(updated).not.toBe(before);
+      expect(updated).toContain('atom(42)');
+      expect(updated).toContain('template: `');
+      expect(JSON.parse(await readFile(`${virtualPath}.map`, 'utf8')).version).toBe(3);
+      // Authored source stays clean; the virtual tree carries the rewrite.
+      expect(await readFile(join(src, 'counter.ts'), 'utf8')).toContain('atom(42)');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('mirrors deletions and routes template edits through a full staged pass', async () => {
+    const { mkdtemp, mkdir, writeFile, readFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject, regenerateAngularFile } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-per-file-delete-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const src = join(root, sourceRoot);
+      await mkdir(src, { recursive: true });
+      await writeFile(join(src, '..', 'tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true, moduleResolution: 'Node' },
+        include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'counter.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ templateUrl: './counter.html' })
+        export class Counter { count = atom(1); }
+      `);
+      await writeFile(join(src, 'counter.html'), '<output>{{ count.value }}</output>');
+      await writeFile(join(src, 'globals.d.ts'), [
+        'declare module "@epikodelabs/streamix" {',
+        '  export function atom<T>(value: T): { type: string; value: T; subscribe(cb: () => void): () => void };',
+        '}',
+      ].join('\n'));
+      await generateProject({ workspaceRoot: root, sourceRoot });
+      const virtualPath = join(root, '.angular/.streamix/demo/src/counter.ts');
+      // Deleting the authored component removes its virtual twin and map.
+      await rm(join(src, 'counter.ts'));
+      await regenerateAngularFile(root, sourceRoot, 'counter.ts');
+      await expectAsync(readFile(virtualPath, 'utf8')).toBeRejected();
+      await expectAsync(readFile(`${virtualPath}.map`, 'utf8')).toBeRejected();
+      // A template edit can affect any component referencing it: full pass.
+      await regenerateAngularFile(root, sourceRoot, 'counter.html');
+      expect(await readFile(join(src, 'counter.html'), 'utf8')).toBe('<output>{{ count.value }}</output>');
+      await expectAsync(readFile(virtualPath, 'utf8')).toBeRejected();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects absolute and traversing source roots before modifying generated files', async () => {
     const { mkdtemp, readdir, rm } = await import('node:fs/promises');
     const { join } = await import('node:path');
@@ -209,7 +305,7 @@ describe('Angular staged regeneration', () => {
     const { generateProject } = await import('./generate-project');
     const root = await mkdtemp(join(tmpdir(), 'sx-root-validation-'));
     try {
-      for (const invalid of ['', '.', '..', '../outside', '/tmp/source', 'C:\\source', '.angular/source', 'node_modules/x']) {
+      for (const invalid of ['', '.', '..', '../outside', '/tmp/source', 'C:\\source', '.angular/source', 'node_modules/x', 'projects/./src']) {
         await expectAsync(generateProject({ workspaceRoot: root, sourceRoot: invalid })).toBeRejectedWithError(/sourceRoot/);
       }
       // Nothing was created for any rejected root.

@@ -20,7 +20,7 @@ export interface StreamixVueViteOptions {
   readonly introspection?: boolean;
 }
 
-const ENTRY_NAMES = ['main.ts', 'main.js', 'index.ts', 'index.js'];
+const ENTRY_NAMES = ['main.tsx', 'main.jsx', 'main.ts', 'main.js', 'index.tsx', 'index.jsx', 'index.ts', 'index.js'];
 
 /**
  * Semantic program over the authored tree, with one virtual `<name>.vue.ts`

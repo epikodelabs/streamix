@@ -12,6 +12,7 @@
 - **Replay:** `shareReplay()` rejects invalid buffer sizes to prevent corrupted history (#68).
 - **Tooling:** updated browser targets and fixed duplicate test modules on Windows.
 - **Builders:** React and Angular regeneration is transactional like Vue's — every pass compiles into a staging sibling and swaps atomically, so a failed generation (compiler error or fs failure) leaves the previous virtual tree serving untouched (#78). React's watch-path writes are atomic like Vue's, all builders sweep staging/backup siblings abandoned by crashed generations and restore the last good tree from the backup, and every generator validates `sourceRoot` before touching disk.
+- **Builders:** full framework parity across the three builders. Vue now writes the compiler's authored-position source map beside each SFC and its Vite delegate chains it (Angular writes esbuild-chained token maps like React's); Angular regenerates a single authored file on watch edits instead of re-running the whole pass; all three share one watcher shape (per-directory fallback, 50 ms coalescing debounce, batched relative paths), one `sourceRoot` validation rule set, one entry-name convention (`main`/`index`, `.ts/.tsx/.js/.jsx`, root or `src/`), the same log severities, and the same `.sx.ts` sidecar stripping. React's generator functions are now exported (`generateReactProject`, `regenerateReactFile`, `virtualRootOf`) matching Vue's surface.
 
 ## 3.0.12 - 2026-11-14
 

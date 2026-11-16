@@ -5,7 +5,7 @@
  * export; the named exports are the pieces a workspace can reuse directly.
  */
 export { applicationBuilder, default } from './application';
-export { generateProject, type SxGenerateProjectOptions } from './generate-project';
+export { generateProject, regenerateAngularFile, type SxGenerateProjectOptions } from './generate-project';
 export {
   DEFAULT_SOURCE_ROOT,
   buildDelegateOptions,

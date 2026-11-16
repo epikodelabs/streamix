@@ -1,20 +1,19 @@
-import { watchLibraries } from './watch-libraries';
+import { refreshApplication, watchLibraries } from './watch-libraries';
 import { createBuilder, type Target } from '@angular-devkit/architect';
 import { watch, type FSWatcher } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
-import { generateProject } from './generate-project';
+import { generateProject, regenerateAngularFile } from './generate-project';
 import {
   buildDelegateOptions,
   resolveSourceRoot,
-  shouldRegenerateOn,
   shouldWatchSources,
   virtualRootOf,
   virtualTsconfigOf,
 } from './options';
 
-const REGENERATE_DEBOUNCE_MS = 50;
+const SOURCE_WATCH_DEBOUNCE_MS = 50;
 
 interface ObservableLike<T> {
   subscribe(observer: {
@@ -76,86 +75,52 @@ async function* delegateOutputs<T>(
 
 interface RegeneratorContext {
   readonly workspaceRoot: string;
-  readonly logger: { warn(message: string): void };
+  readonly logger: { warn(message: string): void; error(message: string): void };
 }
 
 /**
- * Re-runs the generator on demand, coalescing requests that arrive while a
- * pass is already running. The generator is called in process: the compiled
- * builder needs no separate generator script or loader registration.
- */
-function createRegenerator(
-  context: RegeneratorContext,
-  sourceRoot: string,
-  introspection: boolean,
-): { trigger(): void; stop(): void } {
-  let running = false;
-  let queued = false;
-  let stopped = false;
-
-  const run = async (): Promise<void> => {
-    running = true;
-
-    try {
-      await generateProject({
-        sourceRoot,
-        introspection,
-        workspaceRoot: context.workspaceRoot,
-      });
-    } catch (error) {
-      // A mid-edit save can fail compilation; keep the previously generated
-      // component serving and retry on the next change.
-      context.logger.warn(
-        `Streamix regeneration failed; keeping the previous generated component. ${String(error)}`,
-      );
-    } finally {
-      running = false;
-
-      if (queued && !stopped) {
-        queued = false;
-        void run();
-      }
-    }
-  };
-
-  return {
-    trigger() {
-      if (stopped) {
-        return;
-      }
-
-      if (running) {
-        queued = true;
-        return;
-      }
-
-      void run();
-    },
-    stop() {
-      stopped = true;
-      queued = false;
-    },
-  };
-}
-
-/**
- * Watches the application source root and reports changes. Recursive watching
- * is preferred so components anywhere below the root trigger regeneration;
+ * Watches the application source root and reports batched source-root-relative
+ * paths (or null when the platform reports no names). Recursive watching is
+ * preferred so components anywhere below the root trigger regeneration;
  * editors that save via rename would otherwise invalidate a direct file
- * watcher on Windows.
+ * watcher on Windows, so a thrown recursive watch falls back to one watch per
+ * existing directory. Directories created after startup are not picked up
+ * until the builder restarts. Events inside the debounce window coalesce, so
+ * a burst of saves regenerates each changed file exactly once.
  */
 function startSourceWatcher(
   context: RegeneratorContext,
   sourceRoot: string,
-  onChange: () => void,
+  onEvent: (paths: string[] | null) => void,
 ): () => void {
   const watchers: FSWatcher[] = [];
+  const rootDirectory = join(context.workspaceRoot, sourceRoot);
+  const pending = new Set<string>();
+  let unknown = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
 
   const schedule = (): void => {
     clearTimeout(timer);
-    timer = setTimeout(onChange, REGENERATE_DEBOUNCE_MS);
+    timer = setTimeout(() => {
+      const paths = unknown ? null : [...pending];
+      pending.clear();
+      unknown = false;
+      if (!stopped) onEvent(paths !== null && paths.length > 0 ? paths : null);
+    }, SOURCE_WATCH_DEBOUNCE_MS);
+  };
+
+  const handleEvent = (watchDirectory: string, filename: string | Buffer | null): void => {
+    if (stopped) return;
+    if (filename === null) {
+      unknown = true;
+      schedule();
+      return;
+    }
+    const path = relative(rootDirectory, resolve(watchDirectory, String(filename))).replace(/\\/g, '/');
+    if (path.startsWith('..') || path === '') return;
+    pending.add(path);
+    schedule();
   };
 
   const track = (watcher: FSWatcher): void => {
@@ -168,18 +133,12 @@ function startSourceWatcher(
     // renamed or deleted, permission loss); left unhandled it would crash the
     // dev-server process.
     watcher.on('error', (error: Error) => {
-      context.logger.warn(
+      context.logger.error(
         `Streamix rebuild hook stopped watching ${sourceRoot}: ${error.message}`,
       );
     });
 
     watchers.push(watcher);
-  };
-
-  const handleEvent = (_event: string, filename: string | Buffer | null): void => {
-    if (shouldRegenerateOn(filename, '')) {
-      schedule();
-    }
   };
 
   const watchEachDirectory = async (rootDirectory: string): Promise<void> => {
@@ -202,19 +161,17 @@ function startSourceWatcher(
       }
 
       try {
-        track(watch(directory, handleEvent));
+        track(watch(directory, (_event, filename) => handleEvent(directory, filename)));
       } catch (error) {
-        context.logger.warn(
+        context.logger.error(
           `Streamix rebuild hook could not watch ${directory}: ${String(error)}`,
         );
       }
     }
   };
 
-  const rootDirectory = join(context.workspaceRoot, sourceRoot);
-
   try {
-    track(watch(rootDirectory, { recursive: true }, handleEvent));
+    track(watch(rootDirectory, { recursive: true }, (_event, filename) => handleEvent(rootDirectory, filename)));
   } catch {
     // Some platforms cannot watch recursively; fall back to one watch per
     // existing directory. Directories created after startup are not picked up
@@ -248,10 +205,11 @@ const applicationBuilder = createBuilder(async function* (options, context) {
   }
 
   const sourceRoot = resolveSourceRoot(options);
+  const introspection = options['introspection'] === true;
 
   await generateProject({
     sourceRoot,
-    introspection: options['introspection'] === true,
+    introspection,
     workspaceRoot: context.workspaceRoot,
   });
 
@@ -281,22 +239,39 @@ const applicationBuilder = createBuilder(async function* (options, context) {
 
   // Rebuild hook: re-run the generator when its source inputs change. The
   // delegate (dev-server or watch build) rebuilds on its own once the
-  // regenerated virtual component is rewritten.
+  // regenerated virtual component is rewritten. A mid-edit save can fail
+  // compilation; the queue keeps the previous virtual tree serving and
+  // retries on the next change.
   const shouldWatch = shouldWatchSources(target, context.target?.target, delegateOptions['watch']);
-  const regenerator = shouldWatch ? createRegenerator(context, sourceRoot, options['introspection'] === true) : undefined;
-  const stopWatcher = regenerator
-    ? startSourceWatcher(context, sourceRoot, regenerator.trigger)
-    : () => undefined;
-  const stopLibraries = regenerator
-    ? watchLibraries(context.workspaceRoot, sourceRoot, regenerator.trigger, message => context.logger.warn(message))
-    : () => undefined;
+  let stopped = false;
+  let rebuildQueue = Promise.resolve();
+  let stopWatcher: () => void = () => undefined;
+  let stopLibraries: () => void = () => undefined;
+  if (shouldWatch) {
+    stopLibraries = watchLibraries(context.workspaceRoot, sourceRoot, () => {
+      rebuildQueue = rebuildQueue.then(async () => {
+        if (!stopped) await refreshApplication(context.workspaceRoot, sourceRoot,
+          (workspace, root, file) => regenerateAngularFile(workspace, root, file, introspection));
+      }).catch(error => context.logger.warn(`Streamix library update failed: ${String(error)}`));
+    }, message => context.logger.warn(message));
+    stopWatcher = startSourceWatcher(context, sourceRoot, paths => {
+      rebuildQueue = rebuildQueue.then(async () => {
+        if (stopped) return;
+        if (paths && !paths.some(path => path.endsWith('.html'))) {
+          for (const path of paths) await regenerateAngularFile(context.workspaceRoot, sourceRoot, path, introspection);
+        } else {
+          await generateProject({ sourceRoot, introspection, workspaceRoot: context.workspaceRoot });
+        }
+      }).catch(error => context.logger.warn(`Streamix Angular source update failed: ${String(error)}`));
+    });
+  }
 
   try {
     yield* delegateOutputs(run);
   } finally {
+    stopped = true;
     stopLibraries();
     stopWatcher();
-    regenerator?.stop();
   }
 });
 

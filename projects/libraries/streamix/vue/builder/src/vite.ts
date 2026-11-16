@@ -1,8 +1,37 @@
 import { createBuilder, type BuilderOutput } from '@angular-devkit/architect';
 import { Observable } from 'rxjs';
+import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, win32 } from 'node:path';
-import { build, createServer, loadConfigFromFile, type InlineConfig, type ViteDevServer } from 'vite';
+import { build, createServer, loadConfigFromFile, type InlineConfig, type Plugin, type ViteDevServer } from 'vite';
 import vue from '@vitejs/plugin-vue';
+
+/**
+ * Chains the authored source maps the Streamix builder wrote beside each
+ * virtual SFC into Vite's map pipeline: the returned map composes with
+ * plugin-vue's downstream transform, so devtools point at authored files
+ * instead of the mirrored virtual tree. Only the base SFC request chains —
+ * the `?vue&type=script` sub-requests describe different text.
+ */
+function authoredSourceMaps(): Plugin {
+  return {
+    name: 'streamix-authored-sourcemaps',
+    enforce: 'pre',
+    async transform(code, id) {
+      if (!id.endsWith('.vue') || id.includes('?')) return null;
+      let raw: string;
+      try {
+        raw = await readFile(`${id}.map`, 'utf8');
+      } catch {
+        return null;
+      }
+      try {
+        return { code, map: JSON.parse(raw) };
+      } catch {
+        return null;
+      }
+    },
+  };
+}
 
 /**
  * Vite build and dev-server target for the generated Vue project. The Streamix
@@ -101,7 +130,8 @@ export const viteBuilder = createBuilder((options, context) => new Observable<Bu
         const candidate: { name?: unknown } = Array.isArray(plugin) ? plugin[0] as { name?: unknown } : plugin as { name?: unknown };
         return candidate?.name === 'vite:vue';
       });
-      if (!hasVuePlugin) config.plugins = [...plugins, vue()];
+      config.plugins = [authoredSourceMaps(), ...plugins];
+      if (!hasVuePlugin) config.plugins = [...config.plugins, vue()];
 
       if (serve) {
         server = await createServer(config);

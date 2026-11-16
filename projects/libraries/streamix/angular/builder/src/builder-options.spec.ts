@@ -21,6 +21,8 @@ describe('streamix builder options', () => {
     expect(() => resolveSourceRoot({ sourceRoot: '/tmp/demo' })).toThrowError(/workspace-relative/);
     expect(() => resolveSourceRoot({ sourceRoot: '.' })).toThrowError(/workspace-relative/);
     expect(() => resolveSourceRoot({ sourceRoot: '.angular' })).toThrowError(/workspace-relative/);
+    expect(() => resolveSourceRoot({ sourceRoot: 'projects/./demo/src' })).toThrowError(/workspace-relative/);
+    expect(() => resolveSourceRoot({ sourceRoot: 'node_modules/demo/src' })).toThrowError(/workspace-relative/);
   });
 
   it('forwards only real delegate options', () => {
