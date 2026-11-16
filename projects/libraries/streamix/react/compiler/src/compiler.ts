@@ -645,7 +645,7 @@ export function transformReactJsx(
           if (loweredRight === node.right) return undefined;
           return factory.updateBinaryExpression(node, node.left, node.operatorToken, loweredRight);
         }
-        const right = rewriteAtomReads(loweredRight, atoms, atomMaps, context, node.right);
+        const right = rewriteAtomReads(loweredRight, atoms, atomMaps, context, node.right, isHidden);
         if (!writableBindings.has(atomName)) {
           diagnostics.push(diagnostic(node, "error", `Cannot assign to read-only atom binding "${atomName}". Declare it with let or call ${atomName}.next(value).`));
           return undefined;
@@ -946,7 +946,7 @@ export function transformReactJsx(
         if (ts.isJsxExpression(child) && child.expression) {
           if (ts.isArrowFunction(child.expression) || ts.isFunctionExpression(child.expression)) {
             const lowered = ts.visitNode(child.expression, visit) as ts.Expression;
-            return factory.updateJsxExpression(child, rewriteAtomReads(lowered, atoms, atomMaps, context, child.expression));
+            return factory.updateJsxExpression(child, rewriteAtomReads(lowered, atoms, atomMaps, context, child.expression, isHidden));
           }
           if (isSharedAtomComponentProp(child, atoms, atomMaps)) {
             return child;
@@ -1773,10 +1773,15 @@ function rewriteAtomReads(
   atomMaps: ReadonlyMap<string, ReadonlyMap<string, string>>,
   context: ts.TransformationContext,
   lexicalOrigin: ts.Node = expression,
+  isHidden?: (id: ts.Identifier) => boolean,
 ): ts.Expression {
   let boundary: ts.Node | undefined = lexicalOrigin.parent;
   while (boundary && !ts.isFunctionLike(boundary) && !ts.isSourceFile(boundary)) boundary = boundary.parent;
-  const shadowed = (id: ts.Identifier) => isShadowedName(id.text, id, boundary ?? expression);
+  // Component-aware resolution must include the handler's own locals and
+  // parameters; the nearest function boundary alone can miss those shadows.
+  const shadowed = (id: ts.Identifier) => isHidden
+    ? isHidden(id)
+    : isShadowedName(id.text, id, boundary ?? expression);
   const visitor: ts.Visitor = (node) => {
     // Keep invalid read-only lvalues intact; the original assignment has a
     // compiler diagnostic and must not be changed into a property write.
@@ -1813,7 +1818,8 @@ function rewriteAtomReads(
         !shadowed(node)) {
       return context.factory.createPropertyAccessExpression(node, "value");
     }
-    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+    if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+        ts.isIdentifier(node.expression) && !shadowed(node.expression)) {
       const atomName = atomFromMapAccess(node, atomMaps);
       if (atomName) return context.factory.createPropertyAccessExpression(context.factory.createIdentifier(atomName), "value");
       if (
