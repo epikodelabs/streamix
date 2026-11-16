@@ -21,7 +21,8 @@ import {
   type RendererScheduler,
   type ScheduledBinding,
 } from './render-scheduler';
-import { viewValue } from './view-value';
+import { combineSubscriptions, readSourceState, subscribeSourceError, viewValue } from './view-value';
+import { getSxRenderErrorSink } from './error-delivery';
 
 /**
  * Handle returned by a direct renderer binding.
@@ -61,8 +62,14 @@ function bindDirect<T>(
   const scheduler = options.scheduler ?? rendererScheduler;
   const equal = writer.equal ?? Object.is;
 
-  let pending = viewValue(writer.read(source));
+  // Delivery contract (React/Vue parity): a failed source delivers at setup;
+  // pending and completed sources bind undefined.
+  const state = readSourceState(source);
+  if (state.status === "failed") throw state.error;
+  let pending = (state.status === "value" ? viewValue(state.value) : undefined) as T;
   let rendered = pending;
+  /** Stored failure delivered by the next flush; cleared by a good emission. */
+  let failure: { error: unknown } | undefined;
   let subscription: Subscription | undefined;
   let scheduled: ScheduledBinding | undefined;
   let destroyed = false;
@@ -70,7 +77,16 @@ function bindDirect<T>(
   writer.write(rendered);
 
   scheduled = scheduler.register(() => {
-    if (destroyed || equal(rendered, pending)) {
+    if (destroyed) {
+      return;
+    }
+
+    if (failure) {
+      getSxRenderErrorSink()(failure.error);
+      return;
+    }
+
+    if (equal(rendered, pending)) {
       return;
     }
 
@@ -81,10 +97,21 @@ function bindDirect<T>(
   let subscribing = true;
   subscription = source.subscribe((value) => {
     if (subscribing) return;
+    // A successful emission clears a stored failure: the binding recovers in
+    // place on the next flush.
+    failure = undefined;
     pending = viewValue(value);
     scheduled?.markDirty();
   });
   subscribing = false;
+  // fail() never notifies value subscribers; failures reach the binding only
+  // through onError.
+  const errorSubscription = subscribeSourceError(source, error => {
+    if (destroyed) return;
+    failure = { error };
+    scheduled?.markDirty();
+  });
+  subscription = combineSubscriptions(subscription, errorSubscription);
 
   return {
     destroy(): void {

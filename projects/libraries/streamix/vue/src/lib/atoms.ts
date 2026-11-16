@@ -9,8 +9,21 @@ import { NO_INITIAL_VALUE } from '@epikodelabs/streamix';
 /** Reads an atom explicitly, without composable involvement. */
 export function read<T>(source: DependencySource<T>): T {
   recordStreamixDevtoolsEvent({ type: 'read', source: 'explicit atom read' });
-  const value = source.value;
-  return value === NO_INITIAL_VALUE ? undefined as T : value;
+  // Delivery contract (React parity): failed reads throw to the caller,
+  // pending reads are undefined, and completed sources keep the core's own
+  // disposed-read semantics.
+  if ((source as { disposed?: unknown }).disposed === true) {
+    const storedError = (source as { error?: unknown }).error;
+    if (storedError !== undefined) throw storedError;
+    const disposedValue = source.value;
+    return disposedValue === NO_INITIAL_VALUE ? undefined as T : disposedValue;
+  }
+  try {
+    const value = source.value;
+    return value === NO_INITIAL_VALUE ? undefined as T : value;
+  } catch (error) {
+    throw (source as { error?: unknown }).error ?? error;
+  }
 }
 
 /** Writes an atom explicitly, without composable involvement. */

@@ -125,18 +125,44 @@ function dependencyRef<T>(
   // through the ref instead of throwing inside a render effect.
   let lastValue: T | undefined;
   let lastKnown = false;
+  // Delivery contract (React/Angular parity): a failed source read throws
+  // into the render effect, where Vue's app.config.errorHandler and
+  // onErrorCaptured handle it; pending reads fall back to the initial value;
+  // a completed source keeps its last emission. A later successful emission
+  // clears the failure in place.
+  let failed = false;
+  let failure: unknown;
   const bridge = readonlyBridgeRef(() => {
+    if (failed) {
+      throw failure;
+    }
+
     if (isDisposed(source)) {
       return (lastKnown ? lastValue : initialValue) as T;
     }
+
     try {
       const value = source.value;
       return value === NO_INITIAL_VALUE ? initialValue as T
         : value === undefined && initialValue !== undefined ? initialValue : value;
-    } catch {
-      return (lastKnown ? lastValue : initialValue) as T;
+    } catch (error) {
+      // A failed read delivers instead of serving the stale prior value.
+      failure = (source as { error?: unknown }).error ?? error;
+      failed = true;
+      throw failure;
     }
   });
+
+  const readTraceValue = (): unknown => {
+    if (failed) return failure;
+    if (isDisposed(source)) return lastValue;
+    try {
+      const value = source.value;
+      return value === NO_INITIAL_VALUE ? lastValue : value;
+    } catch {
+      return lastValue;
+    }
+  };
 
   let subscribing = true;
   recordStreamixDevtoolsEvent({ type: 'subscription', source: sourceName });
@@ -146,6 +172,10 @@ function dependencyRef<T>(
       if (value === NO_INITIAL_VALUE) return;
       lastValue = value;
       lastKnown = true;
+      // A successful emission clears a stored failure: the view recovers in
+      // place on the next render.
+      failed = false;
+      failure = undefined;
     } catch {
       // The source disposed between the emission and this read; the mirror
       // keeps the previous emission readable.
@@ -155,13 +185,19 @@ function dependencyRef<T>(
       recordStreamixDevtoolsEvent({
         type: 'write',
         source: sourceName,
-        value: traceValue(isDisposed(source) ? lastValue : source.value),
+        value: traceValue(readTraceValue()),
       });
     }
   });
   subscribing = false;
   const errorSubscription = isErrorSource(source)
-    ? source.onError(() => bridge.invalidate())
+    ? source.onError((error) => {
+      // fail() never notifies value subscribers; failures reach the bridge
+      // only through onError.
+      failed = true;
+      failure = error;
+      bridge.invalidate();
+    })
     : undefined;
 
   let disposed = false;

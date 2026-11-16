@@ -2,6 +2,7 @@ import type {
   DependencySource,
   Writable,
 } from '@epikodelabs/streamix';
+import { NO_INITIAL_VALUE } from '@epikodelabs/streamix';
 
 /**
  * Serializes named atom values for a server-rendered document and applies a
@@ -18,13 +19,35 @@ export interface AtomSnapshotPayload {
   readonly atoms: AtomSnapshot;
 }
 
+/**
+ * Reads one source for snapshot capture. Pending, failed, and completed
+ * sources report the sentinel so the key is omitted: the sentinel would
+ * vanish through JSON.stringify and break hydration key-matching, and a
+ * failed read would abort the whole payload. Parity with the React adapter.
+ */
+function captureSourceValue(source: DependencySource<unknown>): unknown {
+  const disposed = (source as { disposed?: unknown }).disposed === true;
+  const storedError = (source as { error?: unknown }).error;
+  if (disposed && storedError !== undefined) return NO_INITIAL_VALUE;
+  if (disposed) return NO_INITIAL_VALUE;
+  try {
+    return source.value;
+  } catch {
+    return NO_INITIAL_VALUE;
+  }
+}
+
 /** Captures named atom values for an SSR payload. */
 export function createAtomSnapshot(
   sources: Record<string, DependencySource<unknown>>,
 ): AtomSnapshot {
-  return Object.fromEntries(
-    Object.entries(sources).map(([name, source]) => [name, source.value]),
-  );
+  const snapshot: AtomSnapshot = {};
+  for (const [name, source] of Object.entries(sources)) {
+    const value = captureSourceValue(source);
+    if (value === NO_INITIAL_VALUE) continue;
+    snapshot[name] = value;
+  }
+  return snapshot;
 }
 
 /** Applies a validated SSR payload to named writable atoms before hydration. */
@@ -98,15 +121,16 @@ export function hydrateAtomPayload(
   targets: Record<string, Writable<unknown>>,
   payload: AtomSnapshotPayload,
 ): void {
-  const expected = Object.keys(targets).sort();
-  const received = Object.keys(payload.atoms).sort();
+  // The server omits keys for pending, failed, and completed sources: those
+  // targets simply stay pending on the client. Unknown payload keys remain a
+  // hard error because they indicate a server/client target mismatch.
+  const unknown = Object.keys(payload.atoms)
+    .filter(name => !Object.hasOwn(targets, name))
+    .sort();
 
-  if (
-    expected.length !== received.length ||
-    expected.some((name, index) => name !== received[index])
-  ) {
+  if (unknown.length > 0) {
     throw new Error(
-      `Atom snapshot keys do not match hydration targets (expected: ${expected.join(', ')}; received: ${received.join(', ')})`,
+      `Atom snapshot keys do not match hydration targets (expected: ${Object.keys(targets).sort().join(', ')}; received: ${Object.keys(payload.atoms).sort().join(', ')})`,
     );
   }
 

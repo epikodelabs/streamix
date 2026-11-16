@@ -29,6 +29,8 @@ type CompilerSubscriptionEntry = {
   generation: number;
   version: number;
   value: unknown;
+  /** Last failure observed for the source, delivered through the render. */
+  error: unknown;
   snapshot: { readonly version: number; readonly value: unknown };
 };
 
@@ -44,6 +46,37 @@ const compilerLocalDisposals = new WeakMap<object, object>();
 // Framework reads expose pending state as undefined, never as the core sentinel.
 function viewValue<T>(value: T): T {
   return value === NO_INITIAL_VALUE ? undefined as T : value;
+}
+
+/**
+ * Framework delivery contract, shared with the Vue and Angular adapters:
+ * a failed source read delivers its error through React's error boundary,
+ * pending reads stay undefined, and a completed source (`disposed` without
+ * an error) keeps its last emission — completion is never failure.
+ */
+type SourceState =
+  | { status: "value"; value: unknown }
+  | { status: "pending" }
+  | { status: "completed" }
+  | { status: "failed"; error: unknown };
+
+function isDisposedSource(source: DependencySource<unknown>): boolean {
+  return (source as { disposed?: unknown }).disposed === true;
+}
+
+function readSourceState(source: DependencySource<unknown>): SourceState {
+  // `disposed && error !== undefined` is the only failure discriminator for a
+  // terminated atom; a disposed atom without an error completed normally.
+  const disposed = isDisposedSource(source);
+  const storedError = (source as { error?: unknown }).error;
+  if (disposed && storedError !== undefined) return { status: "failed", error: storedError };
+  if (disposed) return { status: "completed" };
+  try {
+    const value = source.value;
+    return value === NO_INITIAL_VALUE ? { status: "pending" } : { status: "value", value };
+  } catch (error) {
+    return { status: "failed", error: storedError !== undefined ? storedError : error };
+  }
 }
 
 /**
@@ -206,8 +239,19 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
     }
     let entry = modes.get(dedupe);
     if (!entry) {
-      const value = viewValue(source.value);
-      entry = { listeners: new Set(), stop: null, generation: 0, version: 0, value, snapshot: { version: 0, value } };
+      // A failed source must not throw while the entry is being built: the
+      // error is stored and getSnapshot delivers it during render.
+      const state = readSourceState(source);
+      const value = state.status === "value" ? viewValue(state.value) : undefined;
+      entry = {
+        listeners: new Set(),
+        stop: null,
+        generation: 0,
+        version: 0,
+        value,
+        error: state.status === "failed" ? state.error : undefined,
+        snapshot: { version: 0, value },
+      };
       modes.set(dedupe, entry);
     }
     return entry;
@@ -224,20 +268,41 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
       if (!entry.stop) {
         let replaying = true;
         entry.stop = source.subscribe(() => {
-          const next = viewValue(source.value);
-          // Angular parity: the binding equals gate skips unchanged values.
-          // An equal emission is not a write — it schedules no render and
-          // emits no trace event.
-          if (dedupe && Object.is(entry!.value, next)) return;
-          entry!.version++;
-          entry!.value = next;
-          entry!.snapshot = { version: entry!.version, value: next };
+          const state = readSourceState(source);
+          if (state.status === "failed") {
+            entry!.error = state.error;
+          } else if (state.status === "value") {
+            const next = viewValue(state.value);
+            entry!.error = undefined;
+            // Angular parity: the binding equals gate skips unchanged values.
+            // An equal emission is not a write — it schedules no render and
+            // emits no trace event.
+            if (dedupe && Object.is(entry!.value, next)) return;
+            entry!.version++;
+            entry!.value = next;
+            entry!.snapshot = { version: entry!.version, value: next };
+          }
+          // Pending and completed reads keep the entry's previous state.
           // The first replay initializes the subscription; it isn't a write.
           if (replaying) return;
-          __streamixTrace("write", sourceName, dedupe, next);
+          __streamixTrace("write", sourceName, dedupe, entry!.error ?? entry!.value);
           for (const listener of entry!.listeners) listener();
         });
         replaying = false;
+        // fail() never notifies value subscribers, so failures reach React
+        // only through onError: store the error and force the store-change
+        // re-render whose getSnapshot throws into the error boundary.
+        const stopError = typeof (source as { onError?: unknown }).onError === "function"
+          ? (source as Readable<unknown>).onError((error: unknown) => {
+            entry!.error = error;
+            for (const listener of entry!.listeners) listener();
+          })
+          : null;
+        const valueStop = entry.stop;
+        entry.stop = () => {
+          valueStop();
+          void stopError?.();
+        };
       }
       entry.listeners.add(notify);
       return () => {
@@ -259,12 +324,23 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
   const getSnapshot = useCallback(() => {
     const entry = entryFor();
     // Accommodate stores changed before their first subscriber attaches.
-    const value = viewValue(source.value);
-    if (!Object.is(entry.value, value)) {
-      entry.version++;
-      entry.value = value;
-      entry.snapshot = { version: entry.version, value: entry.value };
+    const state = readSourceState(source);
+    if (state.status === "failed") {
+      entry.error = state.error;
+      // Delivery through the framework: the render that reads this snapshot
+      // throws, and the nearest error boundary handles it.
+      throw state.error;
     }
+    if (state.status === "value") {
+      const value = viewValue(state.value);
+      entry.error = undefined;
+      if (!Object.is(entry.value, value)) {
+        entry.version++;
+        entry.value = value;
+        entry.snapshot = { version: entry.version, value: entry.value };
+      }
+    }
+    // Pending and completed reads keep the entry's previous snapshot.
     return entry.snapshot;
   }, [dedupe, source]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot).value as T;
@@ -277,7 +353,14 @@ export const __streamixUse = useStreamixSource;
 
 /** Reads an atom explicitly, without compiler involvement. */
 export function read<T>(source: DependencySource<T>): T {
-  return viewValue(source.value);
+  const state = readSourceState(source);
+  // Delivery contract: failed reads throw to the caller, pending reads are
+  // undefined, and completed sources keep the core's own disposed-read
+  // semantics (the raw read reports the disposed atom).
+  if (state.status === "failed") throw state.error;
+  if (state.status === "pending") return undefined as T;
+  if (state.status === "completed") return viewValue(source.value);
+  return viewValue(state.value) as T;
 }
 
 /** Writes an atom explicitly, without compiler involvement. */
@@ -307,8 +390,14 @@ export type WritableUpdate<T> = T | ((previous: T) => T);
 
 export function useWritable<T>(source: Writable<T>): [T, (value: WritableUpdate<T>) => void] {
   const value = useAtomValue(source);
-  const setValue = useCallback((next: WritableUpdate<T>) =>
-    source.next(typeof next === "function" ? (next as (previous: T) => T)(source.value) : next), [source]);
+  const setValue = useCallback((next: WritableUpdate<T>) => {
+    // Functional updaters receive the last safe value, never the pending
+    // sentinel and never a thrown read: writing to a failed atom is the
+    // recovery path, and next() clears the error state.
+    let previous: T = undefined as T;
+    try { previous = viewValue(source.safeValue); } catch { /* keep undefined */ }
+    source.next(typeof next === "function" ? (next as (previous: T) => T)(previous) : next);
+  }, [source]);
   return [value, setValue];
 }
 
@@ -507,7 +596,18 @@ export function useResource<T>(
 
 /** Captures named atom values for an SSR payload. */
 export function createAtomSnapshot(sources: Record<string, DependencySource<unknown>>): AtomSnapshot {
-  return Object.fromEntries(Object.entries(sources).map(([name, source]) => [name, source.value]));
+  const snapshot: AtomSnapshot = {};
+  for (const [name, source] of Object.entries(sources)) {
+    const state = readSourceState(source);
+    // Pending and failed sources have no hydratable value (the sentinel
+    // would vanish through JSON.stringify and break hydration key-matching,
+    // and a failed read would abort the whole payload); completed sources
+    // no longer expose their value. The key is omitted and hydration keeps
+    // the matching target pending.
+    if (state.status !== "value") continue;
+    snapshot[name] = viewValue(state.value);
+  }
+  return snapshot;
 }
 
 /** Applies a validated SSR payload to named writable atoms before hydration. */
@@ -563,10 +663,15 @@ export function hydrateAtomPayload(
   targets: Record<string, Writable<unknown>>,
   payload: AtomSnapshotPayload,
 ): void {
-  const expected = Object.keys(targets).sort();
-  const received = Object.keys(payload.atoms).sort();
-  if (expected.length !== received.length || expected.some((name, index) => name !== received[index])) {
-    throw new Error(`Readable snapshot keys do not match hydration targets (expected: ${expected.join(", ")}; received: ${received.join(", ")})`);
+  // The server omits keys for pending, failed, and completed sources: those
+  // targets simply stay pending on the client. Unknown payload keys remain a
+  // hard error because they indicate a server/client target mismatch.
+  const unknown = Object.keys(payload.atoms)
+    .filter(name => !Object.prototype.hasOwnProperty.call(targets, name))
+    .sort();
+  if (unknown.length > 0) {
+    const expected = Object.keys(targets).sort();
+    throw new Error(`Readable snapshot keys do not match hydration targets (expected: ${expected.join(", ")}; received: ${Object.keys(payload.atoms).sort().join(", ")})`);
   }
   hydrateAtomSnapshot(targets, payload.atoms);
 }

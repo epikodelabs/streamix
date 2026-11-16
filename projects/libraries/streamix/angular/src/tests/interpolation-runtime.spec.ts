@@ -2,6 +2,7 @@ import ts from 'typescript';
 import { atom, scope } from '@epikodelabs/streamix';
 import { transformAngularComponentTemplate } from '../../compiler/src/build-transform';
 import * as instructions from '../lib/binding-table';
+import { ɵsxInstallErrorDelivery } from '../lib/error-delivery';
 import { rendererScheduler } from '../lib/render-scheduler';
 import { idescribe } from '../../../src/tests/env.spec';
 
@@ -13,8 +14,9 @@ function install(template: string, host: Element, context: object) {
   const javascript = ts.transpileModule(result.setup, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
   }).outputText;
-  const setup = new Function(...Object.keys(instructions), javascript + '\nreturn ɵsetupSxBindings;')(
+  const setup = new Function(...Object.keys(instructions), 'ɵsxInstallErrorDelivery', javascript + '\nreturn ɵsetupSxBindings;')(
     ...Object.values(instructions),
+    ɵsxInstallErrorDelivery,
   );
   return setup(host, context) as { destroy(): void };
 }

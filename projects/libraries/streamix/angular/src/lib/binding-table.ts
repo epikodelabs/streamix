@@ -22,13 +22,27 @@ import {
   type RendererScheduler,
   type ScheduledBinding,
 } from './render-scheduler';
-import { readViewExpression, viewValue } from './view-value';
+import { readSourceState, readViewExpression, subscribeSourceError, viewValue } from './view-value';
+import { getSxRenderErrorSink } from './error-delivery';
 
 export type BindingSlot = number;
 
 type BindingWriter = ((value: unknown) => void) & { destroy?: () => void };
 type BindingEquals = (previous: unknown, next: unknown) => boolean;
 type BindingReader = () => unknown;
+/** Wrapper avoids the `error === undefined` ambiguity for stored failures. */
+type SlotError = { error: unknown };
+
+function subscriptionFromAll(subscriptions: Subscription[]): Subscription {
+  const combined = (): void => {
+    for (const subscription of subscriptions) subscription();
+  };
+  return Object.assign(combined, {
+    get unsubscribed(): boolean {
+      return subscriptions.every(subscription => subscription.unsubscribed);
+    },
+  });
+}
 
 /**
  * Preallocated binding table used by compiler-generated Streamix Angular views.
@@ -45,6 +59,8 @@ export class SxBindingTable {
   private readonly labels: Array<string | undefined>;
   private readonly rendered: unknown[];
   private readonly pending: unknown[];
+  /** Last source failure per slot, delivered through the error sink on flush. */
+  private readonly slotErrors: Array<SlotError | undefined>;
   private readonly subscriptions: Array<Subscription[] | undefined>;
   /** Listener removers, cleared on unbind so teardown needs no extra plumbing. */
   private readonly teardowns: Array<(() => void) | undefined>;
@@ -68,6 +84,7 @@ export class SxBindingTable {
     this.labels = new Array(size);
     this.rendered = new Array(size);
     this.pending = new Array(size);
+    this.slotErrors = new Array(size);
     this.subscriptions = new Array(size);
     this.teardowns = new Array(size);
     this.dirtyFlags = new Uint8Array(size);
@@ -87,7 +104,11 @@ export class SxBindingTable {
     this.assertLiveSlot(slot);
     this.unbind(slot);
 
-    const initial = viewValue(source.value);
+    // Delivery contract: a failed source delivers at setup; pending and
+    // completed sources bind undefined like any other pending view read.
+    const state = readSourceState(source);
+    if (state.status === "failed") throw state.error;
+    const initial = (state.status === "value" ? viewValue(state.value) : undefined) as T;
 
     this.writers[slot] = write as BindingWriter;
     this.equals[slot] = equal as BindingEquals;
@@ -102,12 +123,25 @@ export class SxBindingTable {
         return;
       }
 
+      // A successful emission clears a stored failure: the view recovers in
+      // place on the next flush.
+      this.slotErrors[slot] = undefined;
       this.pending[slot] = viewValue(value);
       this.markSlotDirty(slot);
     });
     subscribing = false;
 
-    this.subscriptions[slot] = [subscription];
+    const subscriptions: Subscription[] = [subscription];
+    // fail() never notifies value subscribers, so failures reach the table
+    // only through onError: the failure is stored and the slot flush delivers
+    // it through the error sink.
+    const errorSubscription = subscribeSourceError(source, error => {
+      if (this.destroyed) return;
+      this.slotErrors[slot] = { error };
+      this.markSlotDirty(slot);
+    });
+    if (errorSubscription) subscriptions.push(errorSubscription);
+    this.subscriptions[slot] = subscriptions;
     this.labels[slot] = name;
     recordStreamixDevtoolsEvent({ type: "subscription", source: this.slotLabel(slot) });
   }
@@ -254,7 +288,16 @@ export class SxBindingTable {
         }
       });
       subscribing = false;
-      return subscription;
+      const subscriptions = [subscription];
+      // Expression slots learn about failures the same way direct slots do:
+      // the stored failure is delivered by the next flush of this slot.
+      const errorSubscription = subscribeSourceError(source, error => {
+        if (this.destroyed) return;
+        this.slotErrors[slot] = { error };
+        this.markSlotDirty(slot);
+      });
+      if (errorSubscription) subscriptions.push(errorSubscription);
+      return subscriptions.length === 1 ? subscription : subscriptionFromAll(subscriptions);
     });
   }
 
@@ -278,6 +321,7 @@ export class SxBindingTable {
     this.labels[slot] = undefined;
     this.rendered[slot] = undefined;
     this.pending[slot] = undefined;
+    this.slotErrors[slot] = undefined;
     this.dirtyFlags[slot] = 0;
   }
 
@@ -316,6 +360,15 @@ export class SxBindingTable {
     const write = this.writers[slot];
     if (!write) return false;
     const equal = this.equals[slot] ?? Object.is;
+    // Delivery contract (React/Vue parity): a stored source failure is
+    // delivered through the error sink instead of keeping the previous
+    // successful value rendered. The slot stays failed until a successful
+    // emission clears it.
+    const slotError = this.slotErrors[slot];
+    if (slotError) {
+      getSxRenderErrorSink()(slotError.error);
+      return false;
+    }
     try {
       const next = this.readers[slot] ? this.readers[slot]!() : this.pending[slot];
       if (!equal(this.rendered[slot], next)) {
@@ -325,8 +378,9 @@ export class SxBindingTable {
       }
       return false;
     } catch (error) {
-      // Preserve the previous successful value and isolate sibling slots.
-      console.error(`sx binding slot ${slot} update failed.`, error);
+      // Preserve the previous successful value and isolate sibling slots for
+      // unexpected reader or writer failures.
+      getSxRenderErrorSink()(error);
       return false;
     }
   }

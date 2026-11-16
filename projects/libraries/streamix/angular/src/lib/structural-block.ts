@@ -7,7 +7,13 @@ import {
   rendererScheduler,
   type ScheduledBinding,
 } from './render-scheduler';
-import { readViewExpression, viewValue } from './view-value';
+import { getSxRenderErrorSink } from './error-delivery';
+import { combineSubscriptions, readSourceState, readViewExpression, subscribeSourceError, viewValue } from './view-value';
+
+/** Wrapper avoids the `error === undefined` ambiguity for stored failures. */
+interface BlockFailure {
+  error: unknown;
+}
 
 export interface SxBlockInstance {
   readonly first: Node;
@@ -52,6 +58,7 @@ export class SxValueBlock<T> {
   private unsubscribe?: Subscription;
   private scheduled?: ScheduledBinding;
   private pending: T | undefined | typeof UNSET = UNSET;
+  private failure?: BlockFailure;
   private instance?: SxBlockInstance;
   private current: T | undefined | typeof UNSET = UNSET;
   private generation = 0;
@@ -69,18 +76,33 @@ export class SxValueBlock<T> {
 
     this.unbind();
     this.current = UNSET;
-    this.render(source.value);
+    // Delivery contract (React/Vue parity): a failed source delivers at
+    // setup; pending and completed sources render like any pending read.
+    const state = readSourceState(source);
+    if (state.status === "failed") throw state.error;
+    this.render((state.status === "value" ? state.value : undefined) as T | undefined);
 
     const generation = ++this.generation;
 
     let subscribing = true;
-    this.unsubscribe = source.subscribe(value => {
+    const valueSubscription = source.subscribe(value => {
       if (generation !== this.generation || subscribing) return;
 
+      // A successful emission clears a stored failure: the block recovers in
+      // place on the next frame.
+      this.failure = undefined;
       this.pending = value;
       this.ensureScheduled(generation);
     });
     subscribing = false;
+    // fail() never notifies value subscribers; failures reach the block only
+    // through onError.
+    const errorSubscription = subscribeSourceError(source, error => {
+      if (generation !== this.generation || this.destroyed) return;
+      this.failure = { error };
+      this.ensureScheduled(generation);
+    });
+    this.unsubscribe = combineSubscriptions(valueSubscription, errorSubscription);
   }
 
   destroy(): void {
@@ -98,9 +120,19 @@ export class SxValueBlock<T> {
       this.scheduled = rendererScheduler.register(() => {
         if (
           this.destroyed ||
-          generation !== this.generation ||
-          this.pending === UNSET
+          generation !== this.generation
         ) {
+          return;
+        }
+
+        // Delivery contract: a stored source failure is delivered through the
+        // error sink instead of rendering, until a successful emission clears it.
+        if (this.failure) {
+          getSxRenderErrorSink()(this.failure.error);
+          return;
+        }
+
+        if (this.pending === UNSET) {
           return;
         }
 
@@ -153,6 +185,7 @@ export class SxValueBlock<T> {
     this.scheduled = undefined;
 
     this.pending = UNSET;
+    this.failure = undefined;
   }
 }
 
@@ -178,7 +211,15 @@ function isSxExpression<T>(
 }
 
 function readSxValue<T>(value: SxValueOrExpression<T>): T {
-  return isSxExpression(value) ? readViewExpression(value.sources, value.read) : viewValue(value.value);
+  if (isSxExpression(value)) return readViewExpression(value.sources, value.read);
+  // Delivery contract: a failed direct source delivers its stored error;
+  // pending sources read as undefined; completed sources keep the core's
+  // disposed-read semantics.
+  const state = readSourceState(value);
+  if (state.status === "failed") throw state.error;
+  if (state.status === "pending") return undefined as T;
+  if (state.status === "completed") return viewValue(value.value);
+  return viewValue(state.value) as T;
 }
 
 function sourcesOf<T>(
@@ -217,6 +258,7 @@ export class SxConditionalBlock {
   private current = -1;
   private generation = 0;
   private destroyed = false;
+  private failure?: BlockFailure;
 
   constructor(
     private readonly anchor: Node,
@@ -242,8 +284,19 @@ export class SxConditionalBlock {
         this.unsubscribes.push(source.subscribe(() => {
           if (generation !== this.generation || subscribing) return;
 
+          // A successful emission clears a stored failure: the selection
+          // re-evaluates in place on the next frame.
+          this.failure = undefined;
           this.ensureScheduled(generation);
         }));
+        // fail() never notifies value subscribers; failures reach the block
+        // only through onError.
+        const errorSubscription = subscribeSourceError(source, error => {
+          if (generation !== this.generation || this.destroyed) return;
+          this.failure = { error };
+          this.ensureScheduled(generation);
+        });
+        if (errorSubscription) this.unsubscribes.push(errorSubscription);
       }
     }
 
@@ -278,6 +331,14 @@ export class SxConditionalBlock {
     if (!this.scheduled) {
       this.scheduled = rendererScheduler.register(() => {
         if (this.destroyed || generation !== this.generation) {
+          return;
+        }
+
+        // Delivery contract: a stored source failure is delivered through the
+        // error sink instead of re-selecting a branch, until a successful
+        // emission clears it.
+        if (this.failure) {
+          getSxRenderErrorSink()(this.failure.error);
           return;
         }
 
@@ -349,6 +410,8 @@ export class SxConditionalBlock {
 
     this.scheduled?.destroy();
     this.scheduled = undefined;
+
+    this.failure = undefined;
   }
 }
 
@@ -366,6 +429,7 @@ export class SxKeyedBlock<T> {
   private emptyInstance?: SxBlockInstance;
   private generation = 0;
   private destroyed = false;
+  private failure?: BlockFailure;
 
   constructor(
     private readonly anchor: Node,
@@ -381,6 +445,7 @@ export class SxKeyedBlock<T> {
 
     this.unbind();
     this.bound = source;
+    // readSxValue delivers a failed dependency's stored error at setup.
     this.render(toArray(readSxValue(source)));
 
     const generation = ++this.generation;
@@ -390,9 +455,20 @@ export class SxKeyedBlock<T> {
       this.unsubscribes.push(dependency.subscribe(() => {
         if (generation !== this.generation || subscribing) return;
 
+        // A successful emission clears a stored failure: the collection
+        // re-renders in place on the next frame.
+        this.failure = undefined;
         this.pending = source;
         this.ensureScheduled(generation);
       }));
+      // fail() never notifies value subscribers; failures reach the block
+      // only through onError.
+      const errorSubscription = subscribeSourceError(dependency, error => {
+        if (generation !== this.generation || this.destroyed) return;
+        this.failure = { error };
+        this.ensureScheduled(generation);
+      });
+      if (errorSubscription) this.unsubscribes.push(errorSubscription);
     }
     subscribing = false;
   }
@@ -446,6 +522,14 @@ export class SxKeyedBlock<T> {
           this.destroyed ||
           generation !== this.generation
         ) {
+          return;
+        }
+
+        // Delivery contract: a stored source failure is delivered through the
+        // error sink instead of re-rendering the collection, until a
+        // successful emission clears it.
+        if (this.failure) {
+          getSxRenderErrorSink()(this.failure.error);
           return;
         }
 
@@ -546,6 +630,7 @@ export class SxKeyedBlock<T> {
 
     this.pending = undefined;
     this.bound = undefined;
+    this.failure = undefined;
   }
 }
 
