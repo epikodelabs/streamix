@@ -442,12 +442,16 @@ function visitElement(
     // source extraction has to look through the cast.
     const unwrappedExpression = stripAnyCasts(expression);
     const explicitSource = extractDirectValueSource(unwrappedExpression);
+    // A .value member alone is not reactive proof (DTOs and form controls
+    // expose it too). Only the resolver can transfer ownership from Angular.
+    const reactiveExplicitSource = explicitSource && state.resolveReactiveSource?.(explicitSource);
+    if (explicitSource && !reactiveExplicitSource) continue;
     const transparentPath = !explicitSource
       ? extractComponentSourcePath(unwrappedExpression)
       : undefined;
     const transparentSource = transparentPath &&
       state.resolveReactiveSource?.(transparentPath);
-    const source = explicitSource ?? transparentSource;
+    const source = reactiveExplicitSource || transparentSource;
 
     if (!source) {
       // An expression the compiler cannot prove: silent when it reads no
@@ -685,11 +689,14 @@ function containsCompiledBinding(
 
       const expression = tryExtractBindingExpression(raw);
       if (expression) {
-        const explicitSource = extractDirectValueSource(expression);
+        const unwrappedExpression = stripAnyCasts(expression);
+        const explicitSource = extractDirectValueSource(unwrappedExpression);
+        const reactiveExplicitSource = explicitSource && resolveReactiveSource?.(explicitSource);
+        if (explicitSource && !reactiveExplicitSource) continue;
         const transparentPath = !explicitSource
-          ? extractComponentSourcePath(expression)
+          ? extractComponentSourcePath(unwrappedExpression)
           : undefined;
-        const source = explicitSource ?? (
+        const source = reactiveExplicitSource || (
           transparentPath
             ? resolveReactiveSource?.(transparentPath)
             : undefined

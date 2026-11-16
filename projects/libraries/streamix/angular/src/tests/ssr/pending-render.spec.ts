@@ -11,6 +11,7 @@ describe('Angular pending SSR markup', () => {
     const compiled = transformAngularComponentTemplate(
       '<output>{{ count.value + "!" }}</output><button [disabled]="count.value">Run</button>',
       'pending.html',
+      { resolveReactiveSource: path => path === 'count' ? 'count' : undefined },
     );
     class PendingFixture {
       readonly count = atom<string>();
