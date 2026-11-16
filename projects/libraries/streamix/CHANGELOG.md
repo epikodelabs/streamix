@@ -11,6 +11,7 @@
 - **Sharing:** fixed `share()` reconnection and `shareReplay()` cache retention after completion (#92, #93).
 - **Replay:** `shareReplay()` rejects invalid buffer sizes to prevent corrupted history (#68).
 - **Tooling:** updated browser targets and fixed duplicate test modules on Windows.
+- **Builders:** React and Angular regeneration is transactional like Vue's — every pass compiles into a staging sibling and swaps atomically, so a failed generation (compiler error or fs failure) leaves the previous virtual tree serving untouched (#78). React's watch-path writes are atomic like Vue's, all builders sweep staging/backup siblings abandoned by crashed generations and restore the last good tree from the backup, and every generator validates `sourceRoot` before touching disk.
 
 ## 3.0.12 - 2026-11-14
 

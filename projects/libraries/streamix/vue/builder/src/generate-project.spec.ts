@@ -1,7 +1,21 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { generateVueProject, regenerateVueFile, virtualRootOf } from './generate-project';
+
+/** Content snapshot of every file under a tree, keyed by slash-relative path. */
+async function snapshotTree(root: string): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+  const walk = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else files[relative(root, path).replace(/\\/g, '/')] = await readFile(path, 'utf8');
+    }
+  };
+  await walk(root);
+  return files;
+}
 
 describe('Vue builder project generation', () => {
   it('copies and transforms Vue SFCs into the delegated virtual project', async () => {
@@ -57,11 +71,39 @@ describe('Vue builder production safety', () => {
       const source = join(workspace, sourceRoot);
       await mkdir(source, { recursive: true });
       await writeFile(join(source, 'Counter.vue'), `<script setup>import { atom } from '@epikodelabs/streamix'; const count = atom(1);</script><template>{{ count }}</template>`);
-      const output = await generateVueProject(workspace, sourceRoot);
-      const before = await readFile(join(output, 'Counter.vue'), 'utf8');
+      await generateVueProject(workspace, sourceRoot);
+      const before = await snapshotTree(join(workspace, '.angular'));
       await writeFile(join(source, 'Broken.vue'), `<script setup>import { scope } from '@epikodelabs/streamix'; const state = scope({ name: '' });</script><template><x-control v-model="state.name"/></template>`);
       await expectAsync(generateVueProject(workspace, sourceRoot)).toBeRejectedWithError(/v-model on <x-control>/);
-      expect(await readFile(join(output, 'Counter.vue'), 'utf8')).toBe(before);
+      // The failed pass must not touch one byte of the served virtual tree.
+      expect(await snapshotTree(join(workspace, '.angular'))).toEqual(before);
+      const siblings = await readdir(join(workspace, '.angular/.streamix/demo'));
+      expect(siblings.filter(name => name.includes('sx-stage') || name.includes('sx-backup'))).toEqual([]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers a tree abandoned by a crashed generation', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-crash-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const source = join(workspace, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'Counter.vue'), `<script setup>import { atom } from '@epikodelabs/streamix'; const count = atom(1);</script><template>{{ count }}</template>`);
+      await generateVueProject(workspace, sourceRoot);
+      const before = await snapshotTree(join(workspace, '.angular'));
+      // Simulate a crash between the backup and install renames: the live
+      // tree is missing, the last good generation sits in an orphaned backup,
+      // and a failed stage lingers beside it.
+      const appDir = join(workspace, '.angular/.streamix/demo');
+      await rename(join(appDir, 'src'), join(appDir, '.src-sx-backup-11111111-2222-3333-4444-555555555555'));
+      await mkdir(join(appDir, '.src-sx-stage-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'), { recursive: true });
+      await writeFile(join(source, 'Broken.vue'), `<script setup>import { scope } from '@epikodelabs/streamix'; const state = scope({ name: '' });</script><template><x-control v-model="state.name"/></template>`);
+      await expectAsync(generateVueProject(workspace, sourceRoot)).toBeRejectedWithError(/v-model on <x-control>/);
+      // The sweep restored the backup into the live tree and cleaned the
+      // abandoned stage before the failing pass ran.
+      expect(await snapshotTree(join(workspace, '.angular'))).toEqual(before);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

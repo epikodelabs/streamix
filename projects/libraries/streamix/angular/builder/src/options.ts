@@ -22,7 +22,8 @@ export function resolveSourceRoot(options?: Record<string, unknown>): string {
     throw new Error('Streamix Angular builder requires a non-empty sourceRoot (for example projects/apps/demo/src).');
   }
   const segments = sourceRoot.split(/[\\/]/);
-  if (sourceRoot.startsWith('/') || /^[A-Za-z]:[\\/]/.test(sourceRoot) ||
+  if (sourceRoot.startsWith('/') || sourceRoot.startsWith('\\') ||
+      /^[A-Za-z]:[\\/]/.test(sourceRoot) ||
       segments.includes('..') || segments.every(segment => !segment || segment === '.') ||
       segments.some(segment => segment === '.angular' || segment === 'node_modules')) {
     throw new Error('Streamix Angular builder sourceRoot must be a workspace-relative directory without parent traversal.');

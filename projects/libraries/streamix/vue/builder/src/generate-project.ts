@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import ts from 'typescript';
@@ -14,6 +14,7 @@ export async function generateVueProject(workspaceRoot: string, sourceRoot: stri
   const source = validatedSourceDirectory(workspaceRoot, sourceRoot);
   const output = join(workspaceRoot, '.angular', '.streamix', virtualRootOf(sourceRoot));
   await mkdir(dirname(output), { recursive: true });
+  await sweepAbandonedTransactions(output);
   const staging = join(dirname(output), `.${basename(output)}-sx-stage-${randomUUID()}`);
   const backup = join(dirname(output), `.${basename(output)}-sx-backup-${randomUUID()}`);
   let backedUp = false;
@@ -53,6 +54,38 @@ export async function generateVueProject(workspaceRoot: string, sourceRoot: stri
   } finally {
     await rm(staging, { force: true, recursive: true });
     if (installed && backedUp) await rm(backup, { force: true, recursive: true });
+  }
+}
+
+/** Deletes staging and backup siblings abandoned by a crashed generation, and
+ * restores the last good tree when a crash landed between the swap renames.
+ * Only UUID-shaped matches of this builder's own naming are touched. */
+async function sweepAbandonedTransactions(output: string): Promise<void> {
+  const abandoned = new RegExp(
+    `^\\.${basename(output)}-sx-(?:stage|backup)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
+    'i',
+  );
+  const leftovers = (await readdir(dirname(output), { withFileTypes: true })
+    .catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return [];
+    }))
+    .filter(entry => abandoned.test(entry.name))
+    .map(entry => join(dirname(output), entry.name));
+  if (leftovers.length === 0) return;
+  const backups = leftovers.filter(path => basename(path).includes('-sx-backup-')).sort();
+  let restored = false;
+  if (backups.length > 0) {
+    try {
+      await access(output);
+    } catch {
+      await rename(backups[0], output);
+      restored = true;
+    }
+  }
+  for (const leftover of leftovers) {
+    if (restored && leftover === backups[0]) continue;
+    await rm(leftover, { force: true, recursive: true });
   }
 }
 

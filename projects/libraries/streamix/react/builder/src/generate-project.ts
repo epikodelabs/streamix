@@ -1,78 +1,167 @@
-import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative } from "node:path";
+import { access, cp, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from "node:path";
+import { randomUUID } from "node:crypto";
 import ts from "typescript";
 import { injectIntrospectionActivation, instrumentStreamixSource } from "@epikodelabs/streamix/compiler";
 import { formatReactJsxDiagnostics, transformReactJsx } from "@epikodelabs/streamix/react/compiler";
 
+/** Creates a clean virtual React project for the delegate target. */
 export async function generateReactProject(workspaceRoot: string, sourceRoot: string, introspection = false): Promise<string> {
-  const source = join(workspaceRoot, sourceRoot);
+  const source = validatedSourceDirectory(workspaceRoot, sourceRoot);
   const output = join(workspaceRoot, ".angular", ".streamix", virtualRootOf(sourceRoot));
-  await rm(output, { recursive: true, force: true });
   await mkdir(dirname(output), { recursive: true });
-  await cp(source, output, { recursive: true });
+  await sweepAbandonedTransactions(output);
+  // Transform into a staging sibling and only then swap: the delegate serves
+  // the live tree, so a mid-pass failure must leave the previous generation
+  // untouched instead of a wiped or half-compiled copy.
+  const staging = join(dirname(output), `.${basename(output)}-sx-stage-${randomUUID()}`);
+  const backup = join(dirname(output), `.${basename(output)}-sx-backup-${randomUUID()}`);
+  let backedUp = false;
+  let installed = false;
+  try {
+    await cp(source, staging, { recursive: true });
 
-  const files = await collectAdoptableFiles(output);
-  const program = createSourceProgram(workspaceRoot, sourceRoot);
-  const results = new Map<string, { code: string; map: string }>();
-  for (const file of files) {
-    const original = join(source, relative(output, file));
-    const input = await readFile(file, "utf8");
-    const transformed = transformReactJsx(input, original, { program });
-    const errors = transformed.diagnostics.filter(diagnostic => diagnostic.category === "error");
-    if (errors.length > 0) {
-      const relativeFile = relative(workspaceRoot, file);
-      throw new Error(formatReactJsxDiagnostics(input, relativeFile, errors));
+    const files = await collectAdoptableFiles(staging);
+    const program = createSourceProgram(workspaceRoot, sourceRoot);
+    const results = new Map<string, { code: string; map: string }>();
+    for (const file of files) {
+      const original = join(source, relative(staging, file));
+      const input = await readFile(file, "utf8");
+      const transformed = transformReactJsx(input, original, { program });
+      const errors = transformed.diagnostics.filter(diagnostic => diagnostic.category === "error");
+      if (errors.length > 0) {
+        // Diagnostics point at the authored file, not the staging copy.
+        throw new Error(formatReactJsxDiagnostics(input, relative(workspaceRoot, original), errors));
+      }
+      results.set(original, { code: transformed.code, map: JSON.stringify(transformed.sourceMap) });
     }
-    results.set(original, { code: transformed.code, map: JSON.stringify(transformed.sourceMap) });
-  }
-  // Registration runs AFTER adoption, not before: the adoption transform
-  // typechecks the text it rewrites, and a __sxDebug wrapper around factory
-  // calls would hide the atom type from it and silently disable adoption.
-  // The registration pass then instruments the transformed texts, so its
-  // metadata positions match the served virtual file. The program over the
-  // transformed tree binds the __sxDebug import the pass inserts.
-  const registrationProgram = introspection && results.size > 0
-    ? createSourceProgram(workspaceRoot, sourceRoot, new Map([...results].map(([path, result]) => [path, result.code])))
-    : undefined;
-  const outputs: Array<{ file: string; code: string; mapName: string; map: string }> = [];
-  for (const file of files) {
-    const original = join(source, relative(output, file));
-    const result = results.get(original)!;
-    let code = result.code;
-    if (registrationProgram) {
-      const sourceFile = registrationProgram.getSourceFile(original) ?? ts.createSourceFile(original, code, ts.ScriptTarget.Latest, true);
-      code = instrumentStreamixSource({ file: sourceFile, checker: registrationProgram.getTypeChecker(),
-        sourcePath: relative(workspaceRoot, original), enabled: true });
+    // Registration runs AFTER adoption, not before: the adoption transform
+    // typechecks the text it rewrites, and a __sxDebug wrapper around factory
+    // calls would hide the atom type from it and silently disable adoption.
+    // The registration pass then instruments the transformed texts, so its
+    // metadata positions match the served virtual file. The program over the
+    // transformed tree binds the __sxDebug import the pass inserts.
+    const registrationProgram = introspection && results.size > 0
+      ? createSourceProgram(workspaceRoot, sourceRoot, new Map([...results].map(([path, result]) => [path, result.code])))
+      : undefined;
+    const outputs: Array<{ file: string; code: string; mapName: string; map: string }> = [];
+    for (const file of files) {
+      const original = join(source, relative(staging, file));
+      const result = results.get(original)!;
+      let code = result.code;
+      if (registrationProgram) {
+        const sourceFile = registrationProgram.getSourceFile(original) ?? ts.createSourceFile(original, code, ts.ScriptTarget.Latest, true);
+        code = instrumentStreamixSource({ file: sourceFile, checker: registrationProgram.getTypeChecker(),
+          sourcePath: relative(workspaceRoot, original), enabled: true });
+      }
+      outputs.push({ file, code, mapName: `${basename(file)}.map`, map: result.map });
     }
-    outputs.push({ file, code, mapName: `${basename(file)}.map`, map: result.map });
+    // Write only after the registration pass has finished. The program can
+    // lazily read the virtual paths it also owns; letting it observe a
+    // half-written, instrumented tree corrupts symbol resolution and can crash
+    // TypeScript on a later file in projects that never import Streamix.
+    for (const outputFile of outputs) {
+      await writeFile(outputFile.file, `${outputFile.code}\n//# sourceMappingURL=${outputFile.mapName}\n`);
+      await writeFile(join(dirname(outputFile.file), outputFile.mapName), `${outputFile.map}\n`);
+    }
+    const available = new Set((await readdir(staging)).map(name => name.toLowerCase()));
+    const entry = ENTRY_NAMES.find(name => available.has(name));
+    if (introspection && entry !== undefined) {
+      // Devtools activation is injected into the generated entry only, mirroring
+      // the Angular builder: authored source stays clean and the gate stays
+      // `import.meta.env.DEV`, so production builds carry inert definitions.
+      await writeFile(join(staging, entry), injectIntrospectionActivation(await readFile(join(staging, entry), "utf8")));
+    }
+    // Atomically replace the live tree only after every transform succeeded:
+    // rename tolerates a first-run missing output, and a failure before the
+    // swap leaves the previous generation serving untouched.
+    try {
+      await rename(output, backup);
+      backedUp = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await rename(staging, output);
+    installed = true;
+    await writeFile(
+      join(dirname(output), "tsconfig.app.json"),
+      `${JSON.stringify({
+        extends: toConfigPath(relative(dirname(output), join(workspaceRoot, "tsconfig.json"))),
+        compilerOptions: { outDir: "../../out-tsc/app", types: [], jsx: "react-jsx", allowJs: true },
+        files: entry ? [`src/${entry}`] : [],
+        include: ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx"],
+        exclude: ["src/**/*.spec.*", "src/**/*.test.*", "src/**/*.d.ts"],
+      }, null, 2)}\n`,
+    );
+    return output;
+  } catch (error) {
+    if (backedUp && !installed) await rename(backup, output);
+    throw error;
+  } finally {
+    await rm(staging, { force: true, recursive: true });
+    if (installed && backedUp) await rm(backup, { force: true, recursive: true });
   }
-  // Write only after the registration pass has finished. The program can
-  // lazily read the virtual paths it also owns; letting it observe a
-  // half-written, instrumented tree corrupts symbol resolution and can crash
-  // TypeScript on a later file in projects that never import Streamix.
-  for (const outputFile of outputs) {
-    await writeFile(outputFile.file, `${outputFile.code}\n//# sourceMappingURL=${outputFile.mapName}\n`);
-    await writeFile(join(dirname(outputFile.file), outputFile.mapName), `${outputFile.map}\n`);
-  }
-  const available = new Set((await readdir(output)).map(name => name.toLowerCase()));
-  const entry = ENTRY_NAMES.find(name => available.has(name));
-  if (introspection && entry !== undefined) {
-    // Devtools activation is injected into the generated entry only, mirroring
-    // the Angular builder: authored source stays clean and the gate stays
-    // `import.meta.env.DEV`, so production builds carry inert definitions.
-    await writeFile(join(output, entry), injectIntrospectionActivation(await readFile(join(output, entry), "utf8")));
-  }
-  await writeFile(
-    join(dirname(output), "tsconfig.app.json"),
-    `${JSON.stringify({
-      extends: toConfigPath(relative(dirname(output), join(workspaceRoot, "tsconfig.json"))),
-      compilerOptions: { outDir: "../../out-tsc/app", types: [], jsx: "react-jsx", allowJs: true },
-      files: entry ? [`src/${entry}`] : [],
-      include: ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx"],
-      exclude: ["src/**/*.spec.*", "src/**/*.test.*", "src/**/*.d.ts"],
-    }, null, 2)}\n`,
+}
+
+/** Deletes staging and backup siblings abandoned by a crashed generation, and
+ * restores the last good tree when a crash landed between the swap renames.
+ * Only UUID-shaped matches of this builder's own naming are touched. */
+async function sweepAbandonedTransactions(output: string): Promise<void> {
+  const abandoned = new RegExp(
+    `^\\.${basename(output)}-sx-(?:stage|backup)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
+    "i",
   );
-  return output;
+  const leftovers = (await readdir(dirname(output), { withFileTypes: true })
+    .catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return [];
+    }))
+    .filter(entry => abandoned.test(entry.name))
+    .map(entry => join(dirname(output), entry.name));
+  if (leftovers.length === 0) return;
+  const backups = leftovers.filter(path => basename(path).includes("-sx-backup-")).sort();
+  let restored = false;
+  if (backups.length > 0) {
+    try {
+      await access(output);
+    } catch {
+      await rename(backups[0], output);
+      restored = true;
+    }
+  }
+  for (const leftover of leftovers) {
+    if (restored && leftover === backups[0]) continue;
+    await rm(leftover, { force: true, recursive: true });
+  }
+}
+
+/** Prevent traversal, workspace-wide recursion, and arbitrary absolute roots. */
+function validatedSourceDirectory(workspaceRoot: string, sourceRoot: string): string {
+  const parts = sourceRoot.replace(/\\/g, "/").split("/");
+  if (!sourceRoot || isAbsolute(sourceRoot) || win32.isAbsolute(sourceRoot) ||
+      parts.some(part => part === ".." || part === "." || part === ".angular") ||
+      !parts.some(Boolean)) {
+    throw new Error("Streamix React sourceRoot must be a nonempty workspace-relative source directory.");
+  }
+  const workspace = resolve(workspaceRoot);
+  const source = resolve(workspaceRoot, sourceRoot);
+  const rel = relative(workspace, source);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error("Streamix React sourceRoot must identify a directory inside the workspace.");
+  }
+  return source;
+}
+
+/** Writes via a same-directory temporary so the delegate never observes a
+ * partially written file while Vite recompiles a change. */
+async function writeFileAtomic(path: string, contents: string | Buffer): Promise<void> {
+  const temporary = `${path}.sx-tmp-${randomUUID()}`;
+  try {
+    await writeFile(temporary, contents);
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 export function virtualRootOf(sourceRoot: string): string {
@@ -101,10 +190,11 @@ async function collectAdoptableFiles(directory: string): Promise<string[]> {
 
 /** Synchronize an original source change into the delegated virtual project. */
 export async function regenerateStreamixFile(workspaceRoot: string, sourceRoot: string, changedPath: string, introspection = false): Promise<void> {
-  const originalRoot = join(workspaceRoot, sourceRoot);
+  const originalRoot = validatedSourceDirectory(workspaceRoot, sourceRoot);
   const destRoot = join(workspaceRoot, ".angular", ".streamix", virtualRootOf(sourceRoot));
   const normalized = changedPath.replace(/\\/g, "/");
-  if (normalized.startsWith("../") || normalized.startsWith("/") || normalized.includes("/../")) return;
+  if (!normalized || isAbsolute(normalized) || win32.isAbsolute(normalized) ||
+      normalized.split("/").some(part => part === ".." || part === ".")) return;
   const origin = join(originalRoot, normalized);
   const destination = join(destRoot, normalized);
   let content: string;
@@ -137,10 +227,10 @@ export async function regenerateStreamixFile(workspaceRoot: string, sourceRoot: 
     // A watch edit of the entry must keep the injected activation, or the
     // first save would silently drop introspection until the next full regen.
     if (introspection && ENTRY_NAMES.includes(basename(normalized).toLowerCase())) code = injectIntrospectionActivation(code);
-    await writeFile(destination, `${code}\n//# sourceMappingURL=${basename(destination)}.map\n`);
-    await writeFile(`${destination}.map`, JSON.stringify(transformed.sourceMap));
+    await writeFileAtomic(destination, `${code}\n//# sourceMappingURL=${basename(destination)}.map\n`);
+    await writeFileAtomic(`${destination}.map`, JSON.stringify(transformed.sourceMap));
   } else {
-    await writeFile(destination, await readFile(origin));
+    await writeFileAtomic(destination, await readFile(origin));
   }
 }
 

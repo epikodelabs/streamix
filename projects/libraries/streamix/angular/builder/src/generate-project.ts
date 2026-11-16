@@ -1,5 +1,6 @@
-import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, relative, resolve } from 'node:path';
+import { access, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import ts from 'typescript';
 
 // The compiler is a sibling entry point of the same package, imported by its
@@ -9,7 +10,7 @@ import { instrumentStreamixSource } from '@epikodelabs/streamix/angular/compiler
 import { injectIntrospectionActivation } from '@epikodelabs/streamix/compiler';
 import { compileSxComponent } from '@epikodelabs/streamix/angular/compiler';
 import { installSxLifecycleIntoComponentSource } from '@epikodelabs/streamix/angular/compiler';
-import { findSxComponentTemplate, installSxComponentTemplate, virtualRootOf } from './options';
+import { findSxComponentTemplate, installSxComponentTemplate, resolveSourceRoot, virtualRootOf } from './options';
 
 /** Input for one generator pass. */
 export interface SxGenerateProjectOptions {
@@ -30,8 +31,11 @@ export async function generateProject({
   workspaceRoot,
   introspection = false,
 }: SxGenerateProjectOptions): Promise<void> {
-  const virtualRoot = virtualRootOf(sourceRoot);
-  const sourceDirectory = resolve(workspaceRoot, sourceRoot);
+  // Validate at the generator boundary too: direct callers (tests, tools)
+  // bypass the builder-option layer where resolveSourceRoot normally runs.
+  const validatedRoot = resolveSourceRoot({ sourceRoot });
+  const virtualRoot = virtualRootOf(validatedRoot);
+  const sourceDirectory = resolve(workspaceRoot, validatedRoot);
   const outputDirectory = resolve(workspaceRoot, virtualRoot);
   const tsconfigPath = resolve(sourceDirectory, '..', 'tsconfig.app.json');
   const tsconfig = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
@@ -60,6 +64,104 @@ export async function generateProject({
   ])];
   const program = ts.createProgram(programRoots, parsedConfig.options);
   const checker = program.getTypeChecker();
+
+  // Compile into a freshly staged sibling and only then swap: the delegate
+  // dev server rebuilds on every change, so a mid-scan failure must leave the
+  // previous generation serving untouched instead of a wiped or mixed tree.
+  await sweepAbandonedTransactions(outputDirectory);
+  const stagingDirectory = join(dirname(outputDirectory), `.${basename(outputDirectory)}-sx-stage-${randomUUID()}`);
+  const backupDirectory = join(dirname(outputDirectory), `.${basename(outputDirectory)}-sx-backup-${randomUUID()}`);
+  let backedUp = false;
+  let installed = false;
+  try {
+    await compileStagedOutput({
+      workspaceRoot, sourceDirectory, outputDirectory: stagingDirectory, program, checker, introspection,
+    });
+    try {
+      await rename(outputDirectory, backupDirectory);
+      backedUp = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await rename(stagingDirectory, outputDirectory);
+    installed = true;
+    // Angular's template compiler requires decorated components to be program
+    // roots, not merely transitively imported by a file replacement. Point the
+    // delegated build at a virtual tsconfig which includes the entire generated
+    // source tree. This keeps consuming projects free from `.angular` paths.
+    await writeFile(
+      resolve(outputDirectory, '..', 'tsconfig.app.json'),
+      `${JSON.stringify({
+        extends: configPath(relative(resolve(outputDirectory, '..'), tsconfigPath)),
+        include: ['src/**/*.ts'],
+        exclude: ['src/**/*.spec.ts'],
+      }, null, 2)}\n`,
+    );
+  } catch (error) {
+    if (backedUp && !installed) await rename(backupDirectory, outputDirectory);
+    throw error;
+  } finally {
+    await rm(stagingDirectory, { force: true, recursive: true });
+    if (installed && backedUp) await rm(backupDirectory, { force: true, recursive: true });
+  }
+}
+
+/** Deletes staging and backup siblings abandoned by a crashed generation, and
+ * restores the last good tree when a crash landed between the swap renames.
+ * Only UUID-shaped matches of this builder's own naming are touched. */
+async function sweepAbandonedTransactions(output: string): Promise<void> {
+  const abandoned = new RegExp(
+    `^\\.${basename(output)}-sx-(?:stage|backup)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
+    'i',
+  );
+  const leftovers = (await readdir(dirname(output), { withFileTypes: true })
+    .catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return [];
+    }))
+    .filter(entry => abandoned.test(entry.name))
+    .map(entry => join(dirname(output), entry.name));
+  if (leftovers.length === 0) return;
+  const backups = leftovers.filter(path => basename(path).includes('-sx-backup-')).sort();
+  let restored = false;
+  if (backups.length > 0) {
+    try {
+      await access(output);
+    } catch {
+      await rename(backups[0], output);
+      restored = true;
+    }
+  }
+  for (const leftover of leftovers) {
+    if (restored && leftover === backups[0]) continue;
+    await rm(leftover, { force: true, recursive: true });
+  }
+}
+
+/** Inputs for one staged compile pass over an authored source tree. */
+interface SxStagedCompileOptions {
+  readonly workspaceRoot: string;
+  readonly sourceDirectory: string;
+  readonly outputDirectory: string;
+  readonly program: ts.Program;
+  readonly checker: ts.TypeChecker;
+  readonly introspection: boolean;
+}
+
+/**
+ * Compiles the authored tree into a freshly staged output directory. Every
+ * intermediate write lands in the stage; the caller swaps it into the live
+ * virtual tree only after this pass has fully succeeded.
+ */
+async function compileStagedOutput({
+  workspaceRoot,
+  sourceDirectory,
+  outputDirectory,
+  program,
+  checker,
+  introspection,
+}: SxStagedCompileOptions): Promise<void> {
+  await cp(sourceDirectory, outputDirectory, { recursive: true });
 
   /** Only component-owned reactive fields affect template ownership checks.
    * A service or store class in the same file must not make an ordinary
@@ -104,29 +206,6 @@ export async function generateProject({
         ts.isIdentifier(member.initializer.expression) &&
         factories.has(member.initializer.expression.text);
     });
-  }
-
-  // Overwrite in place rather than clearing the directory first: the delegate
-  // dev server rebuilds on every change, and a wiped tree would let it compile
-  // a half-regenerated project. Stale entries are pruned after a full pass.
-  await cp(sourceDirectory, outputDirectory, { recursive: true, force: true });
-
-  async function listFiles(
-    directory: string,
-    includeAll: boolean,
-  ): Promise<string[]> {
-    const result: string[] = [];
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const path = resolve(directory, entry.name);
-      if (entry.isDirectory()) result.push(...await listFiles(path, includeAll));
-      else if (
-        includeAll ||
-        (entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts'))
-      ) {
-        result.push(path);
-      }
-    }
-    return result;
   }
 
   function standaloneDependencySources(sourcePath: string): string[] {
@@ -361,9 +440,9 @@ export async function generateProject({
   }
 
   /**
-   * Deletes virtual entries whose source twin is gone: renamed or deleted
-   * sources must not linger as stale compilation inputs. Generated setup is
-   * now inlined into its component, so legacy `.sx.ts` sidecars are removed.
+   * A fresh stage cannot hold stale twins, but legacy generated `.sx.ts`
+   * sidecars copied from the authored tree must still not reach the virtual
+   * compilation inputs.
    */
   async function pruneStaleEntries(): Promise<void> {
     const sourceTwinPaths = new Set(
@@ -392,20 +471,24 @@ export async function generateProject({
   }
 
   await pruneStaleEntries();
+}
 
-  // Angular's template compiler requires decorated components to be program
-  // roots, not merely transitively imported by a file replacement. Point the
-  // delegated build at a virtual tsconfig which includes the entire generated
-  // source tree. This keeps consuming projects free from `.angular` paths.
-  await writeFile(
-    resolve(outputDirectory, '..', 'tsconfig.app.json'),
-    `${JSON.stringify({
-      extends: configPath(relative(resolve(outputDirectory, '..'), tsconfigPath)),
-      include: ['src/**/*.ts'],
-      exclude: ['src/**/*.spec.ts'],
-    }, null, 2)}\n`,
-  );
-
+async function listFiles(
+  directory: string,
+  includeAll: boolean,
+): Promise<string[]> {
+  const result: string[] = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) result.push(...await listFiles(path, includeAll));
+    else if (
+      includeAll ||
+      (entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts'))
+    ) {
+      result.push(path);
+    }
+  }
+  return result;
 }
 
 function configPath(path: string): string {

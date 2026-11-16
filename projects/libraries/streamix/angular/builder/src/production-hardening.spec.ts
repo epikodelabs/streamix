@@ -26,11 +26,11 @@ async function fixture(component: string): Promise<{
 }
 
 describe('Angular production compiler fail-closed boundaries', () => {
-  it('refuses reactive external templates instead of silently copying stale bindings', async () => {
-    const f = await fixture('@Component({templateUrl:"./external.html"}) export class App { count = atom(1); }');
+  it('refuses templateUrl targets outside the source root rather than reading arbitrary files', async () => {
+    const f = await fixture('@Component({templateUrl:"../shared/tpl.html"}) export class App { count = atom(1); }');
     try {
       await expectAsync(generateProject({ workspaceRoot: f.root, sourceRoot: f.sourceRoot }))
-        .toBeRejectedWithError(/component with Streamix sources has no static inline/);
+        .toBeRejectedWithError(/must resolve to an HTML file within sourceRoot/);
     } finally { await f.dispose(); }
   });
 
@@ -40,6 +40,7 @@ describe('Angular production compiler fail-closed boundaries', () => {
       '@Component({templateUrl:"./external.html"}) export class App { count = 1; }',
     ].join('\n'));
     try {
+      await writeFile(join(f.appRoot, 'src', 'external.html'), '<p>plain</p>');
       await generateProject({ workspaceRoot: f.root, sourceRoot: f.sourceRoot });
       const copied = await readFile(join(f.root, '.angular/.streamix/demo/src/component.ts'), 'utf8');
       expect(copied).toContain('templateUrl');

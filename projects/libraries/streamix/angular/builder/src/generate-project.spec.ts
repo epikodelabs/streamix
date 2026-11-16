@@ -126,11 +126,146 @@ describe('external Angular component templates', () => {
       `);
       const template = '<output>{{ count.value }}</output>';
       await writeFile(join(src, 'counter.html'), template);
+      // Native value bindings are only adopted with resolver proof of a
+      // genuine reactive source; the synthetic workspace must type `atom`.
+      await writeFile(join(src, 'globals.d.ts'), [
+        'declare module "@epikodelabs/streamix" {',
+        '  export function atom<T>(value: T): { type: string; value: T; subscribe(cb: () => void): () => void };',
+        '}',
+      ].join('\n'));
       await generateProject({ workspaceRoot: root, sourceRoot: 'projects/apps/demo/src' });
       const generated = await readFile(join(root, '.angular/.streamix/demo/src/counter.ts'), 'utf8');
       expect(generated).toContain('template: `');
       expect(generated).not.toContain('templateUrl');
       expect(await readFile(join(src, 'counter.html'), 'utf8')).toBe(template);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+
+describe('Angular staged regeneration', () => {
+  /** Content snapshot of every file under a tree, keyed by slash-relative path. */
+  async function snapshotTree(root: string): Promise<Record<string, string>> {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join, relative } = await import('node:path');
+    const files: Record<string, string> = {};
+    const walk = async (directory: string): Promise<void> => {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) await walk(path);
+        else files[relative(root, path).replace(/\\/g, '/')] = await readFile(path, 'utf8');
+      }
+    };
+    await walk(root);
+    return files;
+  }
+
+  it('preserves previously generated project when a later component fails compilation', async () => {
+    const { mkdtemp, mkdir, readdir, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-staged-regeneration-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const src = join(root, sourceRoot);
+      await mkdir(src, { recursive: true });
+      await writeFile(join(src, '..', 'tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true, moduleResolution: 'Node' },
+        include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'counter.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ templateUrl: './counter.html' })
+        export class Counter { count = atom(1); }
+      `);
+      await writeFile(join(src, 'counter.html'), '<output>{{ count.value }}</output>');
+      await generateProject({ workspaceRoot: root, sourceRoot });
+      const before = await snapshotTree(join(root, '.angular'));
+      await writeFile(join(src, 'broken.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ template: '<p>one</p>' }) export class One { count = atom(1); }
+        @Component({ template: '<p>two</p>' }) export class Two { count = atom(2); }
+      `);
+      await expectAsync(generateProject({ workspaceRoot: root, sourceRoot }))
+        .toBeRejectedWithError(/multiple @Component classes/);
+      // The failed pass must not touch one byte of the served virtual tree.
+      expect(await snapshotTree(join(root, '.angular'))).toEqual(before);
+      const siblings = await readdir(join(root, '.angular/.streamix/demo'));
+      expect(siblings.filter(name => name.includes('sx-stage') || name.includes('sx-backup'))).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects absolute and traversing source roots before modifying generated files', async () => {
+    const { mkdtemp, readdir, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-root-validation-'));
+    try {
+      for (const invalid of ['', '.', '..', '../outside', '/tmp/source', 'C:\\source', '.angular/source', 'node_modules/x']) {
+        await expectAsync(generateProject({ workspaceRoot: root, sourceRoot: invalid })).toBeRejectedWithError(/sourceRoot/);
+      }
+      // Nothing was created for any rejected root.
+      expect(await readdir(root)).not.toContain('.angular');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers a tree abandoned by a crashed generation', async () => {
+    const { mkdtemp, mkdir, rename, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-crash-recovery-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const src = join(root, sourceRoot);
+      await mkdir(src, { recursive: true });
+      await writeFile(join(src, '..', 'tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true, moduleResolution: 'Node' },
+        include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'counter.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ templateUrl: './counter.html' })
+        export class Counter { count = atom(1); }
+      `);
+      await writeFile(join(src, 'counter.html'), '<output>{{ count.value }}</output>');
+      // Native value bindings are only adopted with resolver proof of a
+      // genuine reactive source; the synthetic workspace must type `atom`.
+      await writeFile(join(src, 'globals.d.ts'), [
+        'declare module "@epikodelabs/streamix" {',
+        '  export function atom<T>(value: T): { type: string; value: T; subscribe(cb: () => void): () => void };',
+        '}',
+      ].join('\n'));
+      await generateProject({ workspaceRoot: root, sourceRoot });
+      const before = await snapshotTree(join(root, '.angular'));
+      // Simulate a crash between the backup and install renames: the live
+      // tree is missing, the last good generation sits in an orphaned backup,
+      // and a failed stage lingers beside it.
+      const appDir = join(root, '.angular/.streamix/demo');
+      await rename(join(appDir, 'src'), join(appDir, '.src-sx-backup-11111111-2222-3333-4444-555555555555'));
+      await mkdir(join(appDir, '.src-sx-stage-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'), { recursive: true });
+      await writeFile(join(src, 'broken.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ template: '<p>one</p>' }) export class One { count = atom(1); }
+        @Component({ template: '<p>two</p>' }) export class Two { count = atom(2); }
+      `);
+      await expectAsync(generateProject({ workspaceRoot: root, sourceRoot }))
+        .toBeRejectedWithError(/multiple @Component classes/);
+      // The sweep restored the backup into the live tree and cleaned the
+      // abandoned stage before the failing pass ran.
+      expect(await snapshotTree(join(root, '.angular'))).toEqual(before);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

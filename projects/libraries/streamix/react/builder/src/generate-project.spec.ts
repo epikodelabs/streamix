@@ -1,7 +1,21 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { generateReactProject, regenerateStreamixFile } from "./generate-project";
+
+/** Content snapshot of every file under a tree, keyed by slash-relative path. */
+async function snapshotTree(root: string): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+  const walk = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else files[relative(root, path).replace(/\\/g, "/")] = await readFile(path, "utf8");
+    }
+  };
+  await walk(root);
+  return files;
+}
 
 describe("React Angular-hosted source generation", () => {
   it("preserves semantic imported atom adoption and leaves spec TSX untouched", async () => {
@@ -88,6 +102,88 @@ describe("React Angular-hosted source generation", () => {
       expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).not.toContain("__sxEnable");
       await regenerateStreamixFile(root, sourceRoot, "main.tsx", false);
       expect(await readFile(generatedPath, "utf8")).not.toContain("__sxEnable");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves previously generated project when a later source fails compilation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-rollback-"));
+    const sourceRoot = "projects/apps/demo/src";
+    try {
+      const source = join(root, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
+        include: ["projects/apps/demo/src/**/*.ts", "projects/apps/demo/src/**/*.tsx"],
+      }));
+      await writeFile(join(source, "main.tsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        let count = atom(0);
+        export function Counter() { return <button onClick={() => count++}>{count}</button>; }
+      `);
+      await generateReactProject(root, sourceRoot);
+      const before = await snapshotTree(join(root, ".angular"));
+      await writeFile(join(source, "Broken.jsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        const count = atom(0);
+        export function Broken() { return <button onClick={() => count = 1}>{count}</button>; }
+      `);
+      await expectAsync(generateReactProject(root, sourceRoot)).toBeRejectedWithError(/read-only atom binding/);
+      // The failed pass must not touch one byte of the served virtual tree.
+      expect(await snapshotTree(join(root, ".angular"))).toEqual(before);
+      const siblings = await readdir(join(root, ".angular/.streamix/demo"));
+      expect(siblings.filter(name => name.includes("sx-stage") || name.includes("sx-backup"))).toEqual([]);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects absolute and traversing source roots before modifying generated files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-root-"));
+    try {
+      for (const invalid of ["", ".", "..", "../outside", "/tmp/source", "C:\\source", ".angular/source"]) {
+        await expectAsync(generateReactProject(root, invalid)).toBeRejectedWithError(/sourceRoot/);
+      }
+      // Nothing was created for any rejected root.
+      expect(await readdir(root)).not.toContain(".angular");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("recovers a tree abandoned by a crashed generation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-crash-"));
+    const sourceRoot = "projects/apps/demo/src";
+    try {
+      const source = join(root, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
+        include: ["projects/apps/demo/src/**/*.ts", "projects/apps/demo/src/**/*.tsx"],
+      }));
+      await writeFile(join(source, "main.tsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        let count = atom(0);
+        export function Counter() { return <button onClick={() => count++}>{count}</button>; }
+      `);
+      await generateReactProject(root, sourceRoot);
+      const before = await snapshotTree(join(root, ".angular"));
+      // Simulate a crash between the backup and install renames: the live
+      // tree is missing, the last good generation sits in an orphaned backup,
+      // and a failed stage lingers beside it.
+      const appDir = join(root, ".angular/.streamix/demo");
+      await rename(join(appDir, "src"), join(appDir, ".src-sx-backup-11111111-2222-3333-4444-555555555555"));
+      await mkdir(join(appDir, ".src-sx-stage-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), { recursive: true });
+      await writeFile(join(source, "Broken.jsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        const count = atom(0);
+        export function Broken() { return <button onClick={() => count = 1}>{count}</button>; }
+      `);
+      await expectAsync(generateReactProject(root, sourceRoot)).toBeRejectedWithError(/read-only atom binding/);
+      // The sweep restored the backup into the live tree and cleaned the
+      // abandoned stage before the failing pass ran.
+      expect(await snapshotTree(join(root, ".angular"))).toEqual(before);
     } finally {
       await rm(root, { force: true, recursive: true });
     }
