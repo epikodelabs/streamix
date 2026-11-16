@@ -81,7 +81,7 @@ idescribe("React JSX compiler client lifecycle", () => {
     const original = module.status;
     await act(async () => { root = createRoot(container); root.render(createElement(module.App)); });
     expect(container.textContent).toBe('initial');
-    act(() => container.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    act(() => container.querySelector('button')!.click());
     expect(container.textContent).toBe('updated');
     expect(module.assignmentResult).toBe('updated');
     expect(module.assignmentCalls).toBe(1);
@@ -249,7 +249,7 @@ idescribe("React JSX compiler client lifecycle", () => {
       root!.render(createElement(module.App));
       await flushMicrotasks();
     });
-    act(() => container.querySelector("button")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => container.querySelector("button")!.click());
 
     expect(container.textContent).toBe("1");
     expect(created.length).toBe(1);
@@ -277,7 +277,7 @@ idescribe("React JSX compiler client lifecycle", () => {
     });
     expect(container.textContent).toBe("0:0");
 
-    act(() => container.querySelector("button")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => container.querySelector("button")!.click());
     expect(container.textContent).toBe("1:2");
   });
 
@@ -300,7 +300,7 @@ idescribe("React JSX compiler client lifecycle", () => {
       root!.render(createElement(module.App));
       await flushMicrotasks();
     });
-    act(() => container.querySelector("button")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => container.querySelector("button")!.click());
 
     expect(container.textContent).toBe("Updated");
     expect(created.length).toBe(1);
