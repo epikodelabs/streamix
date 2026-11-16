@@ -231,6 +231,27 @@ idescribe("React JSX compiler client lifecycle", () => {
     expect(created[0].disposed).toBe(true);
   });
 
+  it("keeps nested assignment targets bound to their atoms", async () => {
+    const module = compileGeneratedModule(`
+      import { atom } from "@epikodelabs/streamix";
+      export function App() {
+        let a = atom(0);
+        let b = atom(0);
+        return <button onClick={() => { a = b = 1; b = b.value + 1; }}>{a}:{b}</button>;
+      }
+    `);
+    root = createRoot(container);
+
+    await act(async () => {
+      root!.render(createElement(module.App));
+      await flushMicrotasks();
+    });
+    expect(container.textContent).toBe("0:0");
+
+    act(() => container.querySelector("button")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(container.textContent).toBe("1:2");
+  });
+
   it("keeps a compiler-owned local scope stable through reactive re-renders and disposes it", async () => {
     const created: Array<ReturnType<typeof scope>> = [];
     const module = compileGeneratedModule(`

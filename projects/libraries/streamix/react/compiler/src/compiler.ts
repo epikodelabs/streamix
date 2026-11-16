@@ -543,6 +543,137 @@ export function transformReactJsx(
         while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) base = base.expression;
         return ts.isIdentifier(base) && isHidden(base);
       };
+      /** Whether an assignment expression's result is consumed by its parent. */
+      const assignmentValueUsed = (expression: ts.Expression): boolean => {
+        let current: ts.Node = expression;
+        let parent = current.parent;
+        while (parent && (
+          ts.isParenthesizedExpression(parent) ||
+          ts.isAsExpression(parent) ||
+          ts.isTypeAssertionExpression(parent) ||
+          ts.isNonNullExpression(parent) ||
+          ts.isSatisfiesExpression(parent)
+        )) {
+          current = parent;
+          parent = parent.parent;
+        }
+        if (!parent) return true;
+        if (ts.isExpressionStatement(parent)) return false;
+        if (ts.isForStatement(parent) && (parent.initializer === current || parent.incrementor === current)) return false;
+        if (ts.isVoidExpression(parent)) return false;
+        // Preserve the established handler contract: a concise arrow body is
+        // control flow, not a value-returning expression.
+        if ((ts.isArrowFunction(parent) || ts.isFunctionExpression(parent) ||
+             ts.isFunctionDeclaration(parent) || ts.isMethodDeclaration(parent)) &&
+            parent.body === current) return false;
+        if (
+          ts.isBinaryExpression(parent) &&
+          parent.operatorToken.kind === ts.SyntaxKind.CommaToken &&
+          parent.right !== current
+        ) return false;
+        if (
+          ts.isBinaryExpression(parent) &&
+          isAssignmentOperator(parent.operatorToken.kind) &&
+          parent.left === current
+        ) return false;
+        return true;
+      };
+
+      /** Atom write that evaluates to the assigned value, like JavaScript. */
+      const writeAtomResult = (atomName: string, initializer: ts.Expression): ts.Expression => {
+        const assigned = factory.createUniqueName("__streamixAssigned");
+        const atom = factory.createIdentifier(atomName);
+        return factory.createCallExpression(
+          factory.createParenthesizedExpression(factory.createArrowFunction(
+            undefined,
+            undefined,
+            [],
+            undefined,
+            factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+            factory.createBlock([
+              factory.createVariableStatement(undefined, factory.createVariableDeclarationList([
+                factory.createVariableDeclaration(assigned, undefined, undefined, initializer),
+              ], ts.NodeFlags.Const)),
+              factory.createExpressionStatement(writeAtom(factory, atom, assigned)),
+              factory.createReturnStatement(assigned),
+            ], true),
+          )),
+          undefined,
+          [],
+        );
+      };
+
+      let lowerAssignmentExpression: (
+        node: ts.BinaryExpression,
+        valueUsed: boolean,
+      ) => ts.Expression | undefined;
+
+      /**
+       * Recursively lowers atom writes nested inside an assignment value. A
+       * nested assignment is a value position: its result is what the outer
+       * assignment stores, so it must use the value-preserving form.
+       */
+      const lowerNestedAssignmentValues = (expression: ts.Expression): ts.Expression => {
+        if (ts.isBinaryExpression(expression) && isAssignmentOperator(expression.operatorToken.kind)) {
+          return lowerAssignmentExpression(expression, true) ?? expression;
+        }
+        // Nested functions/classes own their bindings. The main visitor handles
+        // them separately; descending here could lower a shadowing local.
+        if (ts.isFunctionLike(expression) || ts.isClassExpression(expression)) return expression;
+        let changed = false;
+        const lowered = ts.visitEachChild(
+          expression,
+          child => {
+            if (!ts.isExpression(child)) return child;
+            const next = lowerNestedAssignmentValues(child);
+            if (next !== child) changed = true;
+            return next;
+          },
+          context,
+        );
+        return changed ? lowered as ts.Expression : expression;
+      };
+
+      lowerAssignmentExpression = (node, valueUsed) => {
+        const atomName = !isHiddenTarget(node.left)
+          ? atomReferenceName(node.left, atoms, atomMaps)
+          : undefined;
+        const loweredRight = lowerNestedAssignmentValues(node.right);
+        if (!atomName) {
+          // An ordinary target still participates in chains; only its right
+          // side can contain atom writes. The surrounding pass rewrites reads.
+          if (loweredRight === node.right) return undefined;
+          return factory.updateBinaryExpression(node, node.left, node.operatorToken, loweredRight);
+        }
+        const right = rewriteAtomReads(loweredRight, atoms, atomMaps, context, node.right);
+        if (!writableBindings.has(atomName)) {
+          diagnostics.push(diagnostic(node, "error", `Cannot assign to read-only atom binding "${atomName}". Declare it with let or call ${atomName}.next(value).`));
+          return undefined;
+        }
+        if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+          return valueUsed
+            ? writeAtomResult(atomName, right)
+            : writeAtom(factory, factory.createIdentifier(atomName), right);
+        }
+        const operator = compoundOperator(factory, node.operatorToken.kind);
+        if (operator !== undefined) {
+          const nextValue = factory.createBinaryExpression(
+            factory.createPropertyAccessExpression(factory.createIdentifier(atomName), "value"),
+            operator,
+            right,
+          );
+          return valueUsed
+            ? writeAtomResult(atomName, nextValue)
+            : writeAtom(factory, factory.createIdentifier(atomName), nextValue);
+        }
+        if (isLogicalAssignment(node.operatorToken.kind)) {
+          return writeLogicalAtom(factory, atomName, node.operatorToken.kind, right, isJavaScript);
+        }
+        // The operator table and the write-operator predicate disagree;
+        // leaving the statement unrewritten would write the atom object itself.
+        diagnostics.push(diagnostic(node, "error", `Compound write "${node.operatorToken.getText(sourceFile)}" cannot be lowered for atom "${atomName}". Write ${atomName}.next(...) explicitly.`));
+        return undefined;
+      };
       const componentParameters = new Set<string>();
       for (const parameter of node.parameters) boundNames(parameter.name, componentParameters);
       // Hook bindings are emitted at component scope. A selection that closes
@@ -793,42 +924,10 @@ export function transformReactJsx(
             return child;
           }
         }
-        if (ts.isBinaryExpression(child) && isAtomWriteOperator(child.operatorToken.kind) &&
+        if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind) &&
             !isHiddenTarget(child.left) && atomReferenceName(child.left, atoms, atomMaps)) {
-          const atomName = atomReferenceName(child.left, atoms, atomMaps)!;
-          if (!writableBindings.has(atomName)) {
-            diagnostics.push(diagnostic(child, "error", `Cannot assign to read-only atom binding \"${atomName}\". Declare it with let or call ${atomName}.next(value).`));
-            return child;
-          }
-          if (child.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-            return writeAtom(factory, factory.createIdentifier(atomName), rewriteAtomReads(child.right, atoms, atomMaps, context));
-          }
-          const operator = compoundOperator(factory, child.operatorToken.kind);
-          if (operator !== undefined) {
-            return writeAtom(
-              factory,
-              factory.createIdentifier(atomName),
-              factory.createBinaryExpression(
-                factory.createPropertyAccessExpression(factory.createIdentifier(atomName), "value"),
-                operator,
-                rewriteAtomReads(child.right, atoms, atomMaps, context),
-              ),
-            );
-          }
-          if (isLogicalAssignment(child.operatorToken.kind)) {
-            return writeLogicalAtom(
-              factory,
-              atomName,
-              child.operatorToken.kind,
-              rewriteAtomReads(child.right, atoms, atomMaps, context),
-              isJavaScript,
-            );
-          }
-          // The operator table and the write-operator predicate disagree;
-          // leaving the statement unrewritten would write the atom object
-          // itself instead of emitting a value.
-          diagnostics.push(diagnostic(child, "error", `Compound write "${child.operatorToken.getText(sourceFile)}" cannot be lowered for atom \"${atomName}\". Write ${atomName}.next(...) explicitly.`));
-          return child;
+          const lowered = lowerAssignmentExpression(child, assignmentValueUsed(child));
+          return lowered ?? child;
         }
         if (ts.isPrefixUnaryExpression(child) || ts.isPostfixUnaryExpression(child)) {
           const operand = child.operand;
