@@ -61,7 +61,7 @@ describe("React JSX compiler nested assignments", () => {
       }
     `);
 
-    expect(code).toContain("plain = (() =>");
+    expect(code).toContain("plain = ((__streamixAssigned");
     expect(code).toContain("a.next(__streamixAssigned");
     expect(code).not.toContain("plain = a = 1");
   });
@@ -92,7 +92,7 @@ describe("React JSX compiler nested assignments", () => {
       }
     `);
 
-    expect(code).toContain("const result = (() =>");
+    expect(code).toContain("const result = ((__streamixAssigned");
     expect((code.match(/return __streamixAssigned/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(code).not.toContain("b = 3");
   });
@@ -168,7 +168,7 @@ describe("React JSX compiler nested assignments", () => {
       }
     `);
 
-    expect(code).toContain("a.next((() =>");
+    expect(code).toContain("a.next(__streamixAssigned");
     expect(code).toContain("b.next(__streamixAssigned");
     expect(code).not.toContain("a.next(b =");
   });

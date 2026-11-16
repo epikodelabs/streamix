@@ -561,11 +561,9 @@ export function transformReactJsx(
         if (ts.isExpressionStatement(parent)) return false;
         if (ts.isForStatement(parent) && (parent.initializer === current || parent.incrementor === current)) return false;
         if (ts.isVoidExpression(parent)) return false;
-        // Preserve the established handler contract: a concise arrow body is
-        // control flow, not a value-returning expression.
-        if ((ts.isArrowFunction(parent) || ts.isFunctionExpression(parent) ||
-             ts.isFunctionDeclaration(parent) || ts.isMethodDeclaration(parent)) &&
-            parent.body === current) return false;
+        // A concise arrow body returns its value, including when used as an
+        // event handler. Only genuinely discarded expression positions skip
+        // the value-preserving write.
         if (
           ts.isBinaryExpression(parent) &&
           parent.operatorToken.kind === ts.SyntaxKind.CommaToken &&
@@ -581,25 +579,25 @@ export function transformReactJsx(
 
       /** Atom write that evaluates to the assigned value, like JavaScript. */
       const writeAtomResult = (atomName: string, initializer: ts.Expression): ts.Expression => {
+        // Evaluate the RHS as a call argument, in its authored scope, so
+        // await/yield stay outside the generated synchronous wrapper.
         const assigned = factory.createUniqueName("__streamixAssigned");
         const atom = factory.createIdentifier(atomName);
         return factory.createCallExpression(
           factory.createParenthesizedExpression(factory.createArrowFunction(
             undefined,
             undefined,
-            [],
+            [factory.createParameterDeclaration(undefined, undefined, assigned, undefined, isJavaScript
+              ? undefined : factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword))],
             undefined,
             factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
             factory.createBlock([
-              factory.createVariableStatement(undefined, factory.createVariableDeclarationList([
-                factory.createVariableDeclaration(assigned, undefined, undefined, initializer),
-              ], ts.NodeFlags.Const)),
               factory.createExpressionStatement(writeAtom(factory, atom, assigned)),
               factory.createReturnStatement(assigned),
             ], true),
           )),
           undefined,
-          [],
+          [initializer],
         );
       };
 

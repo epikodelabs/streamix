@@ -11,6 +11,8 @@ import { idescribe } from "../../src/tests/env.spec";
 type CompiledModule = {
   App: () => ReturnType<typeof createElement>;
   status?: Writable<string>;
+  assignmentResult?: unknown;
+  assignmentCalls?: number;
 };
 
 function compileGeneratedModule(
@@ -60,6 +62,33 @@ idescribe("React JSX compiler client lifecycle", () => {
   afterEach(() => {
     act(() => root?.unmount());
     container.remove();
+  });
+
+  it("keeps assignment callback results while updating the rendered atom", async () => {
+    const module = compileGeneratedModule(`
+      import { atom } from '@epikodelabs/streamix';
+      export let status = atom('initial');
+      export let assignmentResult;
+      export let assignmentCalls = 0;
+      function nextValue() { assignmentCalls++; return 'updated'; }
+      export function App() {
+        return <button onClick={() => {
+          const assign = () => status = nextValue();
+          assignmentResult = assign();
+        }}>{status}</button>;
+      }
+    `);
+    const original = module.status;
+    await act(async () => { root = createRoot(container); root.render(createElement(module.App)); });
+    expect(container.textContent).toBe('initial');
+    act(() => container.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(container.textContent).toBe('updated');
+    expect(module.assignmentResult).toBe('updated');
+    expect(module.assignmentCalls).toBe(1);
+    expect(module.status).toBe(original);
+    act(() => root?.unmount());
+    root = undefined;
+    module.status!.dispose();
   });
 
   it("hydrates the server markup, receives updates, and unsubscribes on unmount", async () => {

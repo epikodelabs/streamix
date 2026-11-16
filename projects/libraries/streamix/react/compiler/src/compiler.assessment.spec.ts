@@ -9,7 +9,8 @@ describe("React adoption assessment regressions", () => {
       function inc() { count++; }
     `);
     expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
-    expect(result.code).toContain("count.next(0)");
+    expect(result.code).toContain("count.next(__streamixAssigned");
+    expect(result.code).toContain("})(0)");
     expect(result.code).toContain("count.next(__streamixPrevious");
   });
 

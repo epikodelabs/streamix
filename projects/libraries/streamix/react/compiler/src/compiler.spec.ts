@@ -22,7 +22,8 @@ describe("React JSX compiler", () => {
     expect(result.code).toContain('import { useStreamixAfterCommit, useStreamixLocal, __streamixTrace, useStreamixSource } from "@epikodelabs/streamix/react"');
     expect(result.code).toContain('useStreamixSource(count, "count")');
     expect(result.code).toContain('useStreamixSource(state.get("title"), "state.title")');
-    expect(result.code).toContain('count.next(count.value + 1)');
+    expect(result.code).toContain('count.next(__streamixAssigned');
+    expect(result.code).toContain('})(count.value + 1)');
     expect(result.code).toContain('{__streamixBinding1 + 1}');
   });
 

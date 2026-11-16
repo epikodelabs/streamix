@@ -20,7 +20,8 @@ describe("Streamix React adoption regressions", () => {
       }
     `);
     expect(toggle.diagnostics.filter(d => d.category === "error")).toEqual([]);
-    expect(toggle.code).toContain("on.next(!on.value)");
+    expect(toggle.code).toContain("on.next(__streamixAssigned");
+    expect(toggle.code).toContain("})(!on.value)");
     const counter = transformReactJsx(`
       let count = atom(0);
       function View() { return <button onClick={() => count++}>{count}</button>; }
