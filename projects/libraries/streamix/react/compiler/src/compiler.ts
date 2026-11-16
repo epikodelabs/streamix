@@ -765,7 +765,12 @@ export function transformReactJsx(
       const bindings: ts.Statement[] = [];
       const atomBindings = new Map<string, ts.Identifier>();
       const scopeBindings = new Map<string, ts.Identifier>();
+      // Every generated-binding reference site, recorded so the eager-read
+      // guard can tell which closures would read a binding before it is
+      // declared.
+      const bindingReferenceSites: ts.Node[] = [];
       const bindingForAtom = (atomName: string, _source: ts.Node): ts.Identifier => {
+        bindingReferenceSites.push(_source);
         const existing = atomBindings.get(atomName);
         if (existing) return existing;
         const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
@@ -791,6 +796,7 @@ export function transformReactJsx(
         return name;
       };
       const bindingForSource = (atomSource: ts.Expression, key: string, _source: ts.Node = atomSource): ts.Identifier => {
+        bindingReferenceSites.push(_source);
         const existing = atomBindings.get(key);
         if (existing) return existing;
         const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
@@ -820,6 +826,7 @@ export function transformReactJsx(
         return name;
       };
       const bindingForScope = (scopeName: string, property: string, _source: ts.Node): ts.Identifier => {
+        bindingReferenceSites.push(_source);
         const bindingKey = `${scopeName}.${property}`;
         const existing = scopeBindings.get(bindingKey);
         if (existing) return existing;
@@ -1067,6 +1074,161 @@ export function transformReactJsx(
         ts.forEachChild(callback, inspect);
       };
 
+      /**
+       * Generated bindings initialize at the insertion point, so any
+       * statement before it that reads a binding crashes with a temporal
+       * dead zone error: either eagerly rendered JSX, or a closure invoked
+       * before the declarations whose body — or an eagerly invoked inner
+       * closure — renders reactive JSX. The conditional-return guard covers
+       * returns; this covers eager reads. The shape is diagnosed, not
+       * reordered, mirroring the conditional-return handling.
+       */
+      const reportEagerBindingReads = (): void => {
+        if (insertionIndex === 0 || bindingReferenceSites.length === 0) return;
+        const unwrap = (expression: ts.Expression): ts.Expression => {
+          let current = expression;
+          while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+                 ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) ||
+                 ts.isSatisfiesExpression(current)) current = current.expression;
+          return current;
+        };
+        const statementIndexOf = (target: ts.Node): number => {
+          let current: ts.Node | undefined = target;
+          while (current && current.parent && current.parent !== functionBody) current = current.parent;
+          return current ? functionBody.statements.indexOf(current as ts.Statement) : -1;
+        };
+        /** The nearest enclosing closure: invoking it evaluates the site. */
+        const enclosingClosure = (site: ts.Node): ts.FunctionLikeDeclarationBase | undefined => {
+          let current: ts.Node | undefined = site;
+          while (current && current !== functionBody && current !== node) {
+            if (ts.isFunctionLike(current)) return current as ts.FunctionLikeDeclarationBase;
+            current = current.parent;
+          }
+          return undefined;
+        };
+        const closures: ts.FunctionLikeDeclarationBase[] = [];
+        const collectClosures = (child: ts.Node): void => {
+          if (child !== node && ts.isFunctionLike(child)) closures.push(child as ts.FunctionLikeDeclarationBase);
+          ts.forEachChild(child, collectClosures);
+        };
+        collectClosures(functionBody);
+        const declaredName = (closure: ts.FunctionLikeDeclarationBase): string | undefined => {
+          if (ts.isFunctionDeclaration(closure)) return closure.name?.text;
+          if (ts.isVariableDeclaration(closure.parent) && ts.isIdentifier(closure.parent.name)) return closure.parent.name.text;
+          return undefined;
+        };
+        const closureStatementIndex = new Map<ts.FunctionLikeDeclarationBase, number>(
+          closures.map(closure => [closure, statementIndexOf(closure)]));
+        /** Resolve an invoked name to component-body closures. */
+        const resolveName = (identifier: ts.Identifier, statement: number): ts.FunctionLikeDeclarationBase[] => {
+          if (isShadowedName(identifier.text, identifier, node)) return [];
+          return closures.filter(closure => {
+            if (declaredName(closure) !== identifier.text) return false;
+            // Hoisted function declarations resolve from anywhere; bound
+            // closures must already be declared at the call's statement.
+            if (ts.isFunctionDeclaration(closure)) return true;
+            const index = closureStatementIndex.get(closure) ?? -1;
+            return index >= 0 && index <= statement;
+          });
+        };
+        /** Calls and synchronous array methods that run their closure arguments immediately. */
+        const syncInvokers = new Set(["map", "filter", "forEach", "find", "findIndex", "findLast", "findLastIndex",
+          "some", "every", "reduce", "reduceRight", "flatMap", "sort", "toSorted"]);
+        const invokedClosures = (call: ts.CallExpression, statement: number): ts.FunctionLikeDeclarationBase[] => {
+          const resolved = new Set<ts.FunctionLikeDeclarationBase>();
+          const consider = (expression: ts.Expression): void => {
+            const value = unwrap(expression);
+            if (ts.isFunctionLike(value)) resolved.add(value as ts.FunctionLikeDeclarationBase);
+            else if (ts.isIdentifier(value)) for (const target of resolveName(value, statement)) resolved.add(target);
+          };
+          consider(call.expression);
+          if (ts.isIdentifier(call.expression) && reactNonJsxHook(call.expression) === "useMemo" && call.arguments.length) {
+            // useMemo runs its factory during the call, unlike the deferred
+            // effect-style hooks.
+            consider(call.arguments[0]);
+          }
+          if (ts.isPropertyAccessExpression(call.expression) && syncInvokers.has(call.expression.name.text)) {
+            for (const argument of call.arguments) consider(argument);
+          }
+          return [...resolved];
+        };
+        // Direct references: the nearest enclosing closure reads the binding
+        // when invoked; a site above any closure renders eagerly with its
+        // statement.
+        const siteSets = new Map<ts.FunctionLikeDeclarationBase, Set<ts.Node>>();
+        for (const site of bindingReferenceSites) {
+          const closure = enclosingClosure(site);
+          if (closure) {
+            let sites = siteSets.get(closure);
+            if (!sites) siteSets.set(closure, sites = new Set());
+            sites.add(site);
+          } else {
+            const index = statementIndexOf(site);
+            if (index >= 0 && index < insertionIndex) {
+              const statement = functionBody.statements[index];
+              diagnostics.push(diagnostic(statement, "error",
+                "This statement renders reactive JSX before the generated subscription bindings are declared, reading a binding before initialization. Move the statement below the reactive declarations, or move the reactive JSX read into a closure invoked after them."));
+            }
+          }
+        }
+        // A closure that eagerly invokes — or passes to a synchronous
+        // invoker — another closure inherits its references, so chained
+        // helpers are covered too.
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const closure of closures) {
+            if (!closure.body) continue;
+            const inherit = (expression: ts.Expression): void => {
+              const value = unwrap(expression);
+              let source: ts.FunctionLikeDeclarationBase | undefined;
+              if (ts.isFunctionLike(value)) source = value as ts.FunctionLikeDeclarationBase;
+              else if (ts.isIdentifier(value)) {
+                const targets = resolveName(value, closureStatementIndex.get(closure) ?? -1);
+                if (targets.length === 1) source = targets[0];
+              }
+              if (!source || source === closure) return;
+              const sites = siteSets.get(source);
+              if (!sites?.size) return;
+              let target = siteSets.get(closure);
+              if (!target) siteSets.set(closure, target = new Set());
+              for (const site of sites) if (!target.has(site)) { target.add(site); changed = true; }
+            };
+            const walkEager = (child: ts.Node): void => {
+              if (ts.isFunctionLike(child) && child !== closure) return;
+              if (ts.isCallExpression(child)) {
+                inherit(child.expression);
+                if (ts.isPropertyAccessExpression(child.expression) && syncInvokers.has(child.expression.name.text)) {
+                  for (const argument of child.arguments) inherit(argument);
+                }
+              }
+              ts.forEachChild(child, walkEager);
+            };
+            walkEager(closure.body);
+          }
+        }
+        // A pre-insertion statement that eagerly invokes a closure holding
+        // binding references crashes on every render.
+        for (let index = 0; index < insertionIndex; index++) {
+          const statement = functionBody.statements[index];
+          const walkEager = (child: ts.Node): void => {
+            if (ts.isFunctionLike(child)) return;
+            if (ts.isCallExpression(child)) {
+              for (const target of invokedClosures(child, index)) {
+                const sites = siteSets.get(target);
+                if (!sites?.size) continue;
+                const name = declaredName(target);
+                diagnostics.push(diagnostic(child, "error",
+                  `This eager call runs before the generated subscription bindings are declared, so ${name ? `"${name}"` : "an inline closure"} would read a binding before initialization. Move the call below the reactive declarations, or move the reactive JSX out of the eagerly invoked closure.`));
+                break;
+              }
+            }
+            ts.forEachChild(child, walkEager);
+          };
+          walkEager(statement);
+        }
+      };
+
       const visit: ts.Visitor = (child) => {
         if (ts.isCallExpression(child)) {
           const hook = reactNonJsxHook(child.expression);
@@ -1159,6 +1321,7 @@ export function transformReactJsx(
       };
 
       const body = ts.visitEachChild(functionBody, visit, context) as ts.Block;
+      if (isComponent) reportEagerBindingReads();
       if (!isComponent && bindings.length > 0) {
         diagnostics.push(diagnostic(node, "error", "Reactive JSX in a non-component function cannot use generated React hooks. Rename it as a React component or use an explicit component boundary."));
         return node;
