@@ -636,6 +636,18 @@ export function transformReactJsx(
         );
       };
 
+      /**
+       * An element-access write on a known atom map whose key cannot be
+       * statically resolved to a known entry cannot be lowered: `.value` is
+       * getter-only, and authored JavaScript would silently replace the atom
+       * reference. Report it like the other unwritable atom targets.
+       */
+      const reportUnresolvedMapWrite = (target: ts.Expression): void => {
+        const text = target.getText(sourceFile);
+        diagnostics.push(diagnostic(target, "error",
+          `Cannot assign to atom map entry "${text}" because its key does not statically resolve to a known atom. Resolve the atom first (const target = ${text}) and call target.next(value), or use a statically known key.`));
+      };
+
       let lowerAssignmentExpression: (
         node: ts.BinaryExpression,
         valueUsed: boolean,
@@ -985,6 +997,14 @@ export function transformReactJsx(
           // A write target and its right side are lowered as a unit.
           if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind) &&
               !isHiddenTarget(child.left) && atomReferenceName(child.left, atoms, atomMaps)) return;
+          // An unresolvable atom-map write is reported by the write pass; its
+          // right side is not lowered, so bare reads there still violate the
+          // boundary.
+          if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind) &&
+              !isHiddenTarget(child.left) && unresolvedAtomMapAccessBase(child.left, atomMaps)) {
+            inspect(child.right);
+            return;
+          }
           // Destructured atom writes lower the targets, not the right side.
           if (ts.isBinaryExpression(child) && child.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
               (ts.isObjectLiteralExpression(child.left) || ts.isArrayLiteralExpression(child.left)) &&
@@ -996,6 +1016,10 @@ export function transformReactJsx(
           if ((ts.isPrefixUnaryExpression(child) || ts.isPostfixUnaryExpression(child)) &&
               (child.operator === ts.SyntaxKind.PlusPlusToken || child.operator === ts.SyntaxKind.MinusMinusToken) &&
               !isHiddenTarget(child.operand) && atomReferenceName(child.operand, atoms, atomMaps)) return;
+          // Same for unresolvable atom-map updates, reported by the write pass.
+          if ((ts.isPrefixUnaryExpression(child) || ts.isPostfixUnaryExpression(child)) &&
+              (child.operator === ts.SyntaxKind.PlusPlusToken || child.operator === ts.SyntaxKind.MinusMinusToken) &&
+              !isHiddenTarget(child.operand) && unresolvedAtomMapAccessBase(child.operand, atomMaps)) return;
           // Any explicit atom member access (.value, .next, .subscribe, ...)
           // deliberately uses the source object.
           if ((ts.isPropertyAccessExpression(child) || ts.isElementAccessExpression(child)) &&
@@ -1074,6 +1098,10 @@ export function transformReactJsx(
           }
         }
         if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind) &&
+            !isHiddenTarget(child.left) && unresolvedAtomMapAccessBase(child.left, atomMaps)) {
+          reportUnresolvedMapWrite(child.left);
+        }
+        if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind) &&
             !isHiddenTarget(child.left) && atomReferenceName(child.left, atoms, atomMaps)) {
           const lowered = lowerAssignmentExpression(child, assignmentValueUsed(child));
           return lowered ?? child;
@@ -1089,6 +1117,10 @@ export function transformReactJsx(
               return child;
             }
             return updateAtom(factory, atomName, isIncrement, ts.isPostfixUnaryExpression(child));
+          }
+          if ((isIncrement || isDecrement) && !isHiddenTarget(operand) &&
+              unresolvedAtomMapAccessBase(operand, atomMaps)) {
+            reportUnresolvedMapWrite(operand);
           }
         }
 
@@ -1712,6 +1744,22 @@ function atomReferenceName(
   return undefined;
 }
 
+/**
+ * The base identifier of an element access on a known atom map when the key
+ * cannot be statically resolved to one of its known atom entries. Such a
+ * write can never be lowered onto the atom — `.value` is getter-only, and
+ * plain JavaScript would silently replace the atom reference — so the
+ * component pass reports it and the lvalue keeps its authored form.
+ */
+function unresolvedAtomMapAccessBase(
+  expression: ts.Expression,
+  atomMaps: ReadonlyMap<string, ReadonlyMap<string, string>>,
+): ts.Identifier | undefined {
+  if (!ts.isElementAccessExpression(expression) || !ts.isIdentifier(expression.expression)) return undefined;
+  if (!atomMaps.has(expression.expression.text)) return undefined;
+  return atomFromMapAccess(expression, atomMaps) ? undefined : expression.expression;
+}
+
 interface DestructuredAtomTarget {
   readonly atomName: string;
   readonly key: string | number;
@@ -1936,6 +1984,18 @@ function rewriteAtomReads(
     // compiler diagnostic and must not be changed into a property write.
     if (ts.isBinaryExpression(node) && isAtomWriteOperator(node.operatorToken.kind) &&
         atomReferenceName(node.left, atoms, atomMaps)) return node;
+    // An atom-map write whose key cannot be statically resolved to a known
+    // entry keeps its authored lvalue: appending `.value` would write a
+    // getter-only accessor. The component pass has reported the write; the
+    // right side is still an ordinary read position.
+    if (ts.isBinaryExpression(node) && isAtomWriteOperator(node.operatorToken.kind)) {
+      const base = unresolvedAtomMapAccessBase(node.left, atomMaps);
+      if (base && !shadowed(base)) {
+        const right = ts.visitNode(node.right, visitor) as ts.Expression;
+        return right === node.right ? node :
+          context.factory.updateBinaryExpression(node, node.left, node.operatorToken, right);
+      }
+    }
     // Only increment/decrement stay untouched: they are writes, and lowering
     // their operand would produce an invalid `.value++` on the atom. Pure
     // read operators (`!`, `-`, `+`, `~`, `typeof`) must descend, or a
@@ -1944,6 +2004,13 @@ function rewriteAtomReads(
     if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
         (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) &&
         atomReferenceName(node.operand, atoms, atomMaps)) return node;
+    // Same contract for increment and decrement on an unresolvable atom-map
+    // entry; the update has no value side to preserve.
+    if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+        (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) {
+      const base = unresolvedAtomMapAccessBase(node.operand, atomMaps);
+      if (base && !shadowed(base)) return node;
+    }
     // An explicit `.value` read already observes the atom's current value.
     // Leave the whole expression untouched; descending would produce a
     // nonsensical second `.value` on the resolved value.
