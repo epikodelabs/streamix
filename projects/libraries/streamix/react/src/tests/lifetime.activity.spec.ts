@@ -58,6 +58,7 @@ idescribe("Streamix explicit lifetime across React Activity", () => {
     const host = document.createElement("div");
     const root = createRoot(host);
     let current!: Writable<number>;
+    let unmounted = false;
     function Counter() {
       const instance = useAtom(() => atom(1));
       current = instance;
@@ -84,8 +85,13 @@ idescribe("Streamix explicit lifetime across React Activity", () => {
       expect(host.textContent).toBe("1");
       await act(async () => { current.next(2); });
       expect(host.textContent).toBe("2");
+
+      const revived = current;
+      await act(async () => { root.unmount(); unmounted = true; });
+      await act(async () => { await Promise.resolve(); });
+      expect(revived.disposed).toBe(true);
     } finally {
-      await act(async () => root.unmount());
+      if (!unmounted) await act(async () => root.unmount());
       host.remove();
     }
   });
