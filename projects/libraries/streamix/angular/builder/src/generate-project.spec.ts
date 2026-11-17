@@ -473,3 +473,42 @@ describe('Angular debug project generation', () => {
     expect(result).toContain('count.value * 2');
   });
 });
+
+describe('Angular diagnostic paths', () => {
+  it('reports the same authored path for full and watch compilation errors', async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject, regenerateAngularFile } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-diagnostic-path-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const src = join(root, sourceRoot);
+      await mkdir(src, { recursive: true });
+      await writeFile(join(src, '..', 'tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true, moduleResolution: 'Node' },
+        include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'broken.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ template: '<p>one</p>' }) export class One { count = atom(1); }
+        @Component({ template: '<p>two</p>' }) export class Two { count = atom(2); }
+      `);
+
+      const capture = (promise: Promise<unknown>): Promise<Error> =>
+        promise.then(() => { throw new Error('Expected regeneration to fail'); }, error => error as Error);
+      const fullError = await capture(generateProject({ workspaceRoot: root, sourceRoot }));
+      const watchError = await capture(regenerateAngularFile(root, sourceRoot, 'broken.ts'));
+
+      const authored = '[streamix] broken.ts:';
+      expect(fullError.message.startsWith(authored)).toBeTrue();
+      expect(watchError.message.startsWith(authored)).toBeTrue();
+      expect(watchError.message).toBe(fullError.message);
+      expect(fullError.message).not.toContain('.angular/.streamix');
+      expect(fullError.message).not.toContain(root);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
