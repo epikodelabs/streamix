@@ -194,6 +194,12 @@ Writes such as `count = count + 1` are fully lowered and remain valid.
 | Timer, callback, proxy, or dynamic path | `read`, `write`, or a React hook |
 | Conditional ownership | A separate component or an explicit hook |
 
+Class-component adapters subscribe through a generated wrapper. Their JSX
+reads use render snapshots, so atom writes must be explicit: use
+`count.next(value)` rather than `count = value` or `count++`. The compiler
+reports implicit class writes and leaves their targets intact. Function
+components continue to support assignment lowering.
+
 ## DevTools
 
 `StreamixDevtools` is an opt-in panel for reactive reads, subscriptions,

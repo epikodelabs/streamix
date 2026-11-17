@@ -144,6 +144,33 @@ idescribe("React JSX compiler client lifecycle", () => {
     expect(module.status!.subscriberCount).toBe(0);
   });
 
+  it("notifies the source and re-renders a class handler using an explicit atom write", async () => {
+    const module = compileGeneratedModule(`
+      import { atom } from '@epikodelabs/streamix';
+      export const status = atom('Saved');
+      class Status extends React.Component {
+        render() { return <button onClick={() => status.next(status + '!')}>{status.value}</button>; }
+      }
+      export function App() { return <Status />; }
+    `);
+    const emissions: string[] = [];
+    const stop = module.status!.subscribe(value => emissions.push(value));
+    root = createRoot(container);
+    await act(async () => { root!.render(createElement(module.App)); await flushMicrotasks(); });
+    expect(container.textContent).toBe('Saved');
+    act(() => container.querySelector('button')!.click());
+    expect(module.status!.value).toBe('Saved!');
+    expect(emissions).toEqual(['Saved', 'Saved!']);
+    expect(container.textContent).toBe('Saved!');
+    act(() => container.querySelector('button')!.click());
+    expect(container.textContent).toBe('Saved!!');
+    expect(emissions).toEqual(['Saved', 'Saved!', 'Saved!!']);
+    act(() => root?.unmount());
+    root = undefined;
+    stop();
+    module.status!.dispose();
+  });
+
   it("keeps a higher-order wrapped function component subscribed until unmount", async () => {
     const module = compileGeneratedModule(`
       import { atom } from "@epikodelabs/streamix";

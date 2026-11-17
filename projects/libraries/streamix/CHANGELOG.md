@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **React compiler:** reject implicit class-component atom writes and preserve explicit source methods; verified Vue/Angular handler-write parity (#200).
 - **React compiler:** adopt cast-wrapped reactive initializers and preserve switch-local shadowing (#105).
 - **Vue compiler:** preserve loop/catch/switch shadows, pass bridge names correctly, and adopt let/var and cast-wrapped declarations (#86, #87, #105).
 - **Angular builder:** recognize cast-wrapped factories and scope fields, with shared runtime parity checks for all three frameworks.

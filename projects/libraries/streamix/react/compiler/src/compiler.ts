@@ -1411,6 +1411,43 @@ export function transformReactJsx(
       // declarations private names and keep the default export on the wrapper.
       if ((!node.name && !isDefault) || (node.name && !/^[A-Z]/.test(node.name.text))) return undefined;
       const publicName = node.name?.text ?? 'StreamixDefaultExport';
+      let hasJsx = false;
+      const findJsx = (child: ts.Node): void => {
+        if (child !== node && ts.isClassLike(child)) return;
+        if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child)) hasJsx = true;
+        if (!hasJsx) ts.forEachChild(child, findJsx);
+      };
+      findJsx(node);
+      if (!hasJsx) return undefined;
+
+      const writeSource = (target: ts.Expression): string | undefined => {
+        target = unwrapCast(target);
+        let base = target;
+        while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) base = base.expression;
+        if (ts.isIdentifier(base) && isShadowedName(base.text, base, node)) return undefined;
+        return atomReferenceName(target, moduleAtoms, moduleAtomMaps) ??
+          (ts.isPropertyAccessExpression(target) && target.name.text === 'value'
+            ? atomReferenceName(target.expression, moduleAtoms, moduleAtomMaps) : undefined);
+      };
+      const reportWrite = (target: ts.Expression, site: ts.Node): void => {
+        const names = ts.isObjectLiteralExpression(target) || ts.isArrayLiteralExpression(target)
+          ? destructuredAtomTargets(target, moduleAtoms, moduleAtomMaps)
+              .filter(target => !isShadowedName(target.atomName, site, node)).map(target => target.atomName)
+          : [writeSource(target)].filter((name): name is string => !!name);
+        for (const name of new Set(names)) diagnostics.push(diagnostic(site, 'error',
+          `Implicit atom writes inside class components are not supported. Use ${name}.next(value) to update the source.`));
+      };
+      const inspectWrites = (child: ts.Node): void => {
+        if (child !== node && ts.isClassLike(child)) return;
+        if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind)) reportWrite(child.left, child);
+        if ((ts.isPrefixUnaryExpression(child) || ts.isPostfixUnaryExpression(child)) &&
+            (child.operator === ts.SyntaxKind.PlusPlusToken || child.operator === ts.SyntaxKind.MinusMinusToken))
+          reportWrite(child.operand, child);
+        if ((ts.isForOfStatement(child) || ts.isForInStatement(child)) && !ts.isVariableDeclarationList(child.initializer))
+          reportWrite(child.initializer, child);
+        ts.forEachChild(child, inspectWrites);
+      };
+      inspectWrites(node);
       const atomSources = new Set<string>();
       const scopeSources = new Map<string, Set<string>>();
       // The outer function owns both the subscriptions and their snapshots.
@@ -1430,6 +1467,26 @@ export function transformReactJsx(
       };
       const rewriteExpression = (expression: ts.Expression): ts.Expression => {
         const visit: ts.Visitor = value => {
+          // Snapshots are render inputs, never assignment targets. Keep the
+          // authored lvalue even when a diagnostic rejects an implicit write.
+          if (ts.isBinaryExpression(value) && isAssignmentOperator(value.operatorToken.kind)) {
+            return factory.updateBinaryExpression(value, value.left, value.operatorToken,
+              ts.visitNode(value.right, visit) as ts.Expression);
+          }
+          if ((ts.isPrefixUnaryExpression(value) || ts.isPostfixUnaryExpression(value)) &&
+              (value.operator === ts.SyntaxKind.PlusPlusToken || value.operator === ts.SyntaxKind.MinusMinusToken)) return value;
+          if (ts.isForOfStatement(value)) return factory.updateForOfStatement(value, value.awaitModifier, value.initializer,
+            ts.visitNode(value.expression, visit) as ts.Expression, ts.visitNode(value.statement, visit) as ts.Statement);
+          if (ts.isForInStatement(value)) return factory.updateForInStatement(value, value.initializer,
+            ts.visitNode(value.expression, visit) as ts.Expression, ts.visitNode(value.statement, visit) as ts.Statement);
+          // Explicit source methods (especially .next) must keep their source
+          // receiver. Their call arguments still descend through the visitor.
+          if ((ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) &&
+              !(ts.isPropertyAccessExpression(value) && value.name.text === 'value') &&
+              writeSource(value.expression)) return value;
+          if (ts.isPropertyAccessExpression(value) && ts.isIdentifier(value.expression) &&
+              moduleScopes.has(value.expression.text) && ['get', 'set', 'dispose', 'subscribe'].includes(value.name.text) &&
+              !isShadowedName(value.expression.text, value, node)) return value;
           if (ts.isPropertyAccessExpression(value) && ts.isIdentifier(value.expression) &&
               moduleScopes.has(value.expression.text) && !isShadowedName(value.expression.text, value, node)) {
             recordScope(value.expression.text, value.name.text);

@@ -27,6 +27,10 @@ export function Profile() {
 
 No subscription hook belongs in ordinary application component code.
 
+Class components receive subscribed values through a generated wrapper.
+Use `count.next(value)` for atom writes in class handlers; implicit assignments
+and increments are diagnosed. Function components retain assignment lowering.
+
 ## What the compiler supports
 
 - JSX reads of `atom(...)`, `derived(...)`, `flow(...)`, and scope fields.
