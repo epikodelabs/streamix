@@ -11,6 +11,7 @@ import { idescribe } from "../../src/tests/env.spec";
 type CompiledModule = {
   App: () => ReturnType<typeof createElement>;
   status?: Writable<string>;
+  attrs?: Writable<Record<string, unknown>>;
   assignmentResult?: unknown;
   assignmentCalls?: number;
   orValue?: Writable<number | null>;
@@ -338,6 +339,26 @@ idescribe("React JSX compiler client lifecycle", () => {
 
     act(() => container.querySelector("button")!.click());
     expect(container.textContent).toBe("1:2");
+  });
+
+  it("keeps a reactive attribute spread subscribed to its atom", async () => {
+    const module = compileGeneratedModule(`
+      import { atom } from "@epikodelabs/streamix";
+      export const attrs = atom({ title: "one" });
+      export function App() { return <div {...attrs} />; }
+    `);
+    root = createRoot(container);
+
+    await act(async () => { root!.render(createElement(module.App)); await flushMicrotasks(); });
+    const view = container.querySelector("div")!;
+    expect(view.getAttribute("title")).toBe("one");
+
+    await act(async () => { module.attrs!.next({ title: "two" }); await flushMicrotasks(); });
+    expect(view.getAttribute("title")).toBe("two");
+
+    act(() => root?.unmount());
+    root = undefined;
+    module.attrs!.dispose();
   });
 
   it("keeps a compiler-owned local scope stable through reactive re-renders and disposes it", async () => {

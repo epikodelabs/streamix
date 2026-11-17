@@ -18,7 +18,8 @@ import { recordStreamixDevtoolsEvent, streamixDevtoolsEnabled } from "./devtools
 export type AtomSnapshot = Record<string, unknown>;
 
 export interface AtomSnapshotPayload {
-  readonly version: 1;
+  /** Version 1 payloads are plain JSON; version 2 tags `undefined` values. */
+  readonly version: 1 | 2;
   readonly atoms: AtomSnapshot;
 }
 
@@ -544,6 +545,9 @@ export function createResource<T>(loader: (signal: AbortSignal) => Promise<T>): 
   let error: unknown;
   let promise: Promise<void> | undefined;
   let controller: AbortController | undefined;
+  /** Resolves the promise React is suspending on when cancellation must not
+   * wait for a loader that ignores its abort signal. */
+  let settlePending: (() => void) | undefined;
   let disposed = false;
   const listeners = new Set<Listener>();
   const notify = () => { for (const listener of listeners) listener(); };
@@ -552,10 +556,13 @@ export function createResource<T>(loader: (signal: AbortSignal) => Promise<T>): 
     if (disposed || promise) return;
     const active = new AbortController();
     controller = active;
-    promise = Promise.resolve().then(() => loader(active.signal)).then(
+    const loaded = Promise.resolve().then(() => loader(active.signal)).then(
       value => { if (!disposed && controller === active && !active.signal.aborted) { status = "ready"; data = value; notify(); } },
       reason => { if (!disposed && controller === active && !active.signal.aborted) { status = "error"; error = reason; notify(); } },
     );
+    // Race the load against explicit cancellation so a suspended boundary can
+    // retry even when the loader never settles after abort.
+    promise = Promise.race([loaded, new Promise<void>(resolve => { settlePending = resolve; })]);
     notify();
   };
 
@@ -571,7 +578,10 @@ export function createResource<T>(loader: (signal: AbortSignal) => Promise<T>): 
       return data as T;
     },
     reload() {
+      if (disposed) return;
       controller?.abort();
+      settlePending?.();
+      settlePending = undefined;
       promise = undefined;
       status = "pending";
       data = undefined;
@@ -583,6 +593,16 @@ export function createResource<T>(loader: (signal: AbortSignal) => Promise<T>): 
       if (disposed) return;
       disposed = true;
       controller?.abort();
+      // A Suspense boundary that already received the pending promise retries
+      // the same settled promise forever once resolution is skipped. Deliver a
+      // terminal error and settle the suspended promise so the boundary retries.
+      if (status === "pending") {
+        status = "error";
+        error = new Error("Streamix resource was disposed before it settled.");
+        settlePending?.();
+        settlePending = undefined;
+        notify();
+      }
       listeners.clear();
     },
     subscribe(listener) {
@@ -734,9 +754,49 @@ export function hydrateAtomSnapshot(
   for (const [name, value] of entries) targets[name].next(value);
 }
 
-/** Creates a JSON-safe, versioned SSR payload from named atom snapshots. */
+/** Version-2 wire encoding for one atom: JSON values stay verbatim and
+ * `undefined` is tagged so its key survives serialization. */
+type EncodedSnapshotAtom = { readonly t: "json"; readonly v: unknown } | { readonly t: "undefined" };
+
+/** Rejects values JSON would silently coerce (NaN → null, Date → string, Map
+ * → {}) instead of emitting a payload that hydrates different values. */
+function assertSnapshotValue(value: unknown, path: string, ancestors: Set<object>): void {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error(`Readable snapshot is not serializable: ${path} is ${String(value)}`);
+    return;
+  }
+  if (value === undefined) throw new Error(`Readable snapshot is not serializable: ${path} contains undefined; only a top-level atom value may be undefined`);
+  if (typeof value === "bigint") throw new Error(`Readable snapshot is not serializable: ${path} is a bigint`);
+  if (typeof value === "symbol" || typeof value === "function") throw new Error(`Readable snapshot is not serializable: ${path} is a ${typeof value}`);
+  if (ancestors.has(value)) throw new Error(`Readable snapshot is not serializable: ${path} contains a circular reference`);
+  const prototype = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    throw new Error(`Readable snapshot is not serializable: ${path} is not a plain object or array`);
+  }
+  ancestors.add(value);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) assertSnapshotValue(value[index], `${path}[${index}]`, ancestors);
+  } else {
+    for (const [key, item] of Object.entries(value)) assertSnapshotValue(item, `${path}.${key}`, ancestors);
+  }
+  ancestors.delete(value);
+}
+
+function encodeSnapshotValue(name: string, value: unknown): EncodedSnapshotAtom {
+  if (value === undefined) return { t: "undefined" };
+  assertSnapshotValue(value, name, new Set());
+  return { t: "json", v: value };
+}
+
+/** Creates a JSON-safe, versioned SSR payload from named atom snapshots.
+ * Values that JSON cannot round-trip are rejected before emitting a payload. */
 export function serializeAtomSnapshot(sources: Record<string, DependencySource<unknown>>): string {
-  const payload: AtomSnapshotPayload = { version: 1, atoms: createAtomSnapshot(sources) };
+  const encoded: Record<string, EncodedSnapshotAtom> = {};
+  for (const [name, value] of Object.entries(createAtomSnapshot(sources))) {
+    Object.defineProperty(encoded, name, { value: encodeSnapshotValue(name, value), enumerable: true, configurable: true, writable: true });
+  }
+  const payload = { version: 2 as const, atoms: encoded };
   let json: string | undefined;
   try {
     json = JSON.stringify(payload);
@@ -748,7 +808,9 @@ export function serializeAtomSnapshot(sources: Record<string, DependencySource<u
   return json.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 }
 
-/** Parses and validates a versioned SSR payload before client hydration. */
+/** Parses and validates a versioned SSR payload before client hydration.
+ * Version 1 (plain JSON) payloads remain readable; version 2 restores tagged
+ * `undefined` values. */
 export function parseAtomSnapshot(serialized: string): AtomSnapshotPayload {
   let parsed: unknown;
   try {
@@ -756,16 +818,30 @@ export function parseAtomSnapshot(serialized: string): AtomSnapshotPayload {
   } catch {
     throw new Error("Invalid Streamix atom snapshot JSON");
   }
+  const version = typeof parsed === "object" && parsed !== null ? (parsed as { version?: unknown }).version : undefined;
+  const rawAtoms = typeof parsed === "object" && parsed !== null ? (parsed as { atoms?: unknown }).atoms : undefined;
   if (
-    typeof parsed !== "object" || parsed === null ||
-    (parsed as { version?: unknown }).version !== 1 ||
-    typeof (parsed as { atoms?: unknown }).atoms !== "object" ||
-    (parsed as { atoms?: unknown }).atoms === null ||
-    Array.isArray((parsed as { atoms: unknown }).atoms)
+    (version !== 1 && version !== 2) ||
+    typeof rawAtoms !== "object" || rawAtoms === null || Array.isArray(rawAtoms)
   ) {
     throw new Error("Invalid Streamix atom snapshot payload");
   }
-  return parsed as AtomSnapshotPayload;
+  if (version === 1) return { version: 1, atoms: rawAtoms as AtomSnapshot };
+  const atoms: AtomSnapshot = {};
+  for (const [name, encoded] of Object.entries(rawAtoms)) {
+    if (typeof encoded !== "object" || encoded === null || Array.isArray(encoded)) {
+      throw new Error("Invalid Streamix atom snapshot payload");
+    }
+    const tag = (encoded as { t?: unknown }).t;
+    if (tag === "undefined") {
+      Object.defineProperty(atoms, name, { value: undefined, enumerable: true, configurable: true, writable: true });
+    } else if (tag === "json" && Object.prototype.hasOwnProperty.call(encoded, "v")) {
+      Object.defineProperty(atoms, name, { value: (encoded as { v: unknown }).v, enumerable: true, configurable: true, writable: true });
+    } else {
+      throw new Error("Invalid Streamix atom snapshot payload");
+    }
+  }
+  return { version: 2, atoms };
 }
 
 /** Validates matching server/client atom keys, then applies the payload. */

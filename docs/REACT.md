@@ -137,6 +137,21 @@ component whose boundary cannot be proven by the compiler.
 return <third-party-editor source={atomRef(pageTitle)} />;
 ```
 
+### Attribute spreads and `ref`
+
+A JSX spread places an object's properties on the element, so atom reads inside
+it are value reads. The compiler subscribes to the source and spreads its
+current value on intrinsic elements and components alike:
+
+```tsx
+const attrs = atom({ title: 'Draft', 'aria-label': 'Title' });
+return <input {...attrs} />;
+```
+
+`ref` is different: React reserves it for a ref object or callback. Passing an
+atom value there is a compile error — pass a real ref, or use a different prop
+name to transport the atom to a component.
+
 ## What React receives
 
 The compiler leaves the Streamix source itself in your component and adds the

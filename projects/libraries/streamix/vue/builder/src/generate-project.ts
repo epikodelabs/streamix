@@ -32,9 +32,14 @@ export async function generateVueProject(workspaceRoot: string, sourceRoot: stri
       // order): adoption then rewrites the instrumented script content.
       await instrumentVueTree(workspaceRoot, source, staging);
     }
+    // Collect every file's diagnostics before failing: one failure names all
+    // affected authored SFCs instead of stopping at the first one.
+    const failures: string[] = [];
     for (const file of await collectVueFiles(staging)) {
-      await transformFile(file, relative(workspaceRoot, join(source, relative(staging, file))));
+      const failure = await transformFile(file, relative(workspaceRoot, join(source, relative(staging, file))));
+      if (failure !== undefined) failures.push(failure);
     }
+    if (failures.length > 0) throw new Error(failures.join('\n\n'));
     if (introspection) {
       const entry = await findEntry(staging);
       if (entry !== undefined) {
@@ -350,12 +355,13 @@ async function findEntry(root: string): Promise<string | undefined> {
   return undefined;
 }
 
-async function transformFile(file: string, fileName: string): Promise<void> {
+/** Transforms one staged SFC; returns its formatted failure instead of
+ * throwing so a full pass can report every affected file. */
+async function transformFile(file: string, fileName: string): Promise<string | undefined> {
   const input = await readFile(file, 'utf8');
   const transformed = transformVueSfc(input, fileName);
-  const errors = transformed.diagnostics.filter(diagnostic => diagnostic.category === 'error');
-  if (errors.length > 0) {
-    throw new Error(formatVueSfcDiagnostics(input, fileName, errors));
+  if (transformed.diagnostics.some(diagnostic => diagnostic.category === 'error')) {
+    return formatVueSfcDiagnostics(input, fileName, transformed.diagnostics);
   }
   await writeFile(file, transformed.code);
   if (transformed.sourceMap) {
@@ -364,4 +370,5 @@ async function transformFile(file: string, fileName: string): Promise<void> {
     // The vite delegate chains this map so devtools point at authored files.
     await writeFile(`${file}.map`, `${JSON.stringify(transformed.sourceMap)}\n`);
   }
+  return undefined;
 }

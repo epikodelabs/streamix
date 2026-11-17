@@ -41,7 +41,41 @@ describe('Vue runtime escape hatches', () => {
     expect(clientTitle.value).toBe('<Saved>');
     expect(() => hydrateAtomPayload({ other: clientTitle }, payload))
       .toThrowError(/keys do not match/);
-    expect(() => parseAtomSnapshot('{"version":2,"atoms":{}}'))
+    expect(() => parseAtomSnapshot('{"version":3,"atoms":{}}'))
+      .toThrowError(/Invalid Streamix atom snapshot payload/);
+  });
+
+  it('preserves undefined keys, rejects lossy snapshot values, and reads legacy payloads', () => {
+    const explicitUndefined = atom<unknown>(undefined);
+    const nested = atom({ list: [1, { ok: true }] });
+    const payload = parseAtomSnapshot(serializeAtomSnapshot({ explicitUndefined, nested }));
+
+    expect(payload.version).toBe(2);
+    expect(Object.prototype.hasOwnProperty.call(payload.atoms, 'explicitUndefined')).toBeTrue();
+    expect(payload.atoms['explicitUndefined']).toBeUndefined();
+    expect(payload.atoms['nested']).toEqual({ list: [1, { ok: true }] });
+
+    const targetUndefined = atom<unknown>('initial');
+    const targetNested = atom<unknown>(null);
+    hydrateAtomPayload({ explicitUndefined: targetUndefined, nested: targetNested }, payload);
+    expect(targetUndefined.value).toBeUndefined();
+    expect(targetNested.value).toEqual({ list: [1, { ok: true }] });
+
+    const legacy = parseAtomSnapshot('{"version":1,"atoms":{"title":"Legacy"}}');
+    expect(legacy.version).toBe(1);
+    const legacyTarget = atom('initial');
+    hydrateAtomPayload({ title: legacyTarget }, legacy);
+    expect(legacyTarget.value).toBe('Legacy');
+
+    for (const value of [NaN, Infinity, -Infinity, new Date(0), new Map(), new Set([1]), 10n, Symbol('x'), () => 1]) {
+      expect(() => serializeAtomSnapshot({ bad: atom<unknown>(value) })).toThrowError(/not serializable/);
+    }
+    const cyclic: Record<string, unknown> = {};
+    cyclic['self'] = cyclic;
+    expect(() => serializeAtomSnapshot({ cyclic: atom<unknown>(cyclic) })).toThrowError(/circular reference/);
+    expect(() => serializeAtomSnapshot({ nestedUndefined: atom<unknown>({ skip: undefined }) })).toThrowError(/contains undefined/);
+    expect(() => serializeAtomSnapshot({ nonFinite: atom<unknown>([1, NaN]) })).toThrowError(/not serializable/);
+    expect(() => parseAtomSnapshot('{"version":2,"atoms":{"bad":{"t":"date","v":0}}}'))
       .toThrowError(/Invalid Streamix atom snapshot payload/);
   });
 

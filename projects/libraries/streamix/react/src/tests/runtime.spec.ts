@@ -1,4 +1,4 @@
-import { act, createElement, StrictMode, useState } from "react";
+import { act, Component, createElement, StrictMode, Suspense, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { atom, subscribeStreamixDevtools, type Writable } from "@epikodelabs/streamix";
 import {
@@ -14,6 +14,7 @@ import {
   renderAtomSnapshotScript,
   useAtom,
   useAtomValue,
+  usePreloadedResource,
   useResource,
   useStreamixAfterCommit,
   useStreamixSource,
@@ -241,6 +242,64 @@ idescribe("React runtime escape hatches", () => {
     resource.dispose();
   });
 
+  it("settles a mounted Suspense boundary when a pending resource is disposed", async () => {
+    class Boundary extends Component<{ children?: ReactNode }, { message?: string }> {
+      override state: { message?: string } = {};
+      static getDerivedStateFromError(error: unknown) {
+        return { message: error instanceof Error ? error.message : String(error) };
+      }
+      override render() { return this.state.message ? createElement("output", null, this.state.message) : this.props.children; }
+    }
+    const resource = createResource<string>(() => new Promise<string>(() => {}));
+    resource.preload();
+    function View() {
+      const state = usePreloadedResource(resource);
+      return createElement("output", null, state.read());
+    }
+    await act(async () => {
+      root.render(createElement(Boundary, null,
+        createElement(Suspense, { fallback: createElement("span", null, "loading") }, createElement(View))));
+      await Promise.resolve();
+    });
+    expect(container.textContent).toBe("loading");
+
+    await act(async () => { resource.dispose(); await Promise.resolve(); });
+    expect(resource.status).toBe("error");
+    expect(container.textContent).toContain("disposed before it settled");
+  });
+
+  it("keeps settled data when a ready resource is disposed", async () => {
+    let resolve!: (value: string) => void;
+    const resource = createResource<string>(() => new Promise<string>(complete => { resolve = complete; }));
+    resource.preload();
+    function View() {
+      const state = usePreloadedResource(resource);
+      return createElement("output", null, state.read());
+    }
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const localRoot = createRoot(host);
+    try {
+      await act(async () => {
+        localRoot.render(createElement(Suspense, { fallback: createElement("span", null, "loading") }, createElement(View)));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(host.textContent).toBe("loading");
+      await act(async () => { resolve("Ready"); await Promise.resolve(); await Promise.resolve(); });
+      expect(host.textContent).toBe("Ready");
+
+      act(() => resource.dispose());
+      expect(resource.status).toBe("ready");
+      expect(resource.read()).toBe("Ready");
+      expect(host.textContent).toBe("Ready");
+    } finally {
+      act(() => localRoot.unmount());
+      host.remove();
+      resource.dispose();
+    }
+  });
+
   it("serializes, validates, and hydrates a versioned SSR payload", () => {
     const serverTitle = atom("<Saved>");
     const serialized = serializeAtomSnapshot({ title: serverTitle });
@@ -251,7 +310,40 @@ idescribe("React runtime escape hatches", () => {
     hydrateAtomPayload({ title: clientTitle }, payload);
     expect(clientTitle.value).toBe("<Saved>");
     expect(() => hydrateAtomPayload({ other: clientTitle }, payload)).toThrowError(/keys do not match/);
-    expect(() => parseAtomSnapshot('{"version":2,"atoms":{}}')).toThrowError(/Invalid Streamix atom snapshot payload/);
+    expect(() => parseAtomSnapshot('{"version":3,"atoms":{}}')).toThrowError(/Invalid Streamix atom snapshot payload/);
+  });
+
+  it("preserves undefined keys, rejects lossy snapshot values, and reads legacy payloads", () => {
+    const explicitUndefined = atom<unknown>(undefined);
+    const nested = atom({ list: [1, { ok: true }] });
+    const payload = parseAtomSnapshot(serializeAtomSnapshot({ explicitUndefined, nested }));
+    expect(payload.version).toBe(2);
+    expect(Object.prototype.hasOwnProperty.call(payload.atoms, "explicitUndefined")).toBeTrue();
+    expect(payload.atoms['explicitUndefined']).toBeUndefined();
+    expect(payload.atoms['nested']).toEqual({ list: [1, { ok: true }] });
+
+    const targetUndefined = atom<unknown>("initial");
+    const targetNested = atom<unknown>(null);
+    hydrateAtomPayload({ explicitUndefined: targetUndefined, nested: targetNested }, payload);
+    expect(targetUndefined.value).toBeUndefined();
+    expect(targetNested.value).toEqual({ list: [1, { ok: true }] });
+
+    // Version 1 payloads remain readable for stale server documents.
+    const legacy = parseAtomSnapshot('{"version":1,"atoms":{"title":"Legacy"}}');
+    expect(legacy.version).toBe(1);
+    const legacyTarget = atom("initial");
+    hydrateAtomPayload({ title: legacyTarget }, legacy);
+    expect(legacyTarget.value).toBe("Legacy");
+
+    for (const value of [NaN, Infinity, -Infinity, new Date(0), new Map(), new Set([1]), 10n, Symbol("x"), () => 1]) {
+      expect(() => serializeAtomSnapshot({ bad: atom<unknown>(value) })).toThrowError(/not serializable/);
+    }
+    const cyclic: Record<string, unknown> = {};
+    cyclic['self'] = cyclic;
+    expect(() => serializeAtomSnapshot({ cyclic: atom<unknown>(cyclic) })).toThrowError(/circular reference/);
+    expect(() => serializeAtomSnapshot({ nestedUndefined: atom<unknown>({ skip: undefined }) })).toThrowError(/contains undefined/);
+    expect(() => serializeAtomSnapshot({ nonFinite: atom<unknown>([1, NaN]) })).toThrowError(/not serializable/);
+    expect(() => parseAtomSnapshot('{"version":2,"atoms":{"bad":{"t":"date","v":0}}}')).toThrowError(/Invalid Streamix atom snapshot payload/);
   });
 
   it("transfers a validated SSR payload through a non-executable document element", () => {

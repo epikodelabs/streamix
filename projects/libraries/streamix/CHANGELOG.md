@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **React:** disposing a pending resource now flips it to a terminal error and settles the promise Suspense is waiting on, so a mounted boundary retries instead of hanging; settled resources keep their data (#208).
+
+- **SSR:** React and Vue snapshots encode `undefined` explicitly (payload version 2; version 1 stays readable) and reject values JSON would silently change — non-finite numbers, `Date`, `Map`, `Set`, bigint, symbols, functions, cycles, and nested `undefined` — before emitting a payload (#149).
+
+- **React compiler:** reactive atom spreads are lowered to their values on intrinsic and component elements, atom values in a native `ref` slot are rejected with guidance, and component ref transport plus valid refs/callbacks are preserved (#166).
+
+- **Builders:** React and Vue builders collect every failing file into one diagnostic, keep React warnings alongside contract errors, and no longer report a bogus read-only error for mixed destructuring (#79).
+
 - **Inspector:** coalesced trace rows now replace their repeat count instead of appending every intermediate count, and emission-bearing, valued, lifecycle, or previously valued rows no longer merge (#154).
 
 - **Inspector:** previews keep arrays recognizable, distinguish `Date`/`Map`/`Set`/`NaN`/`Infinity`/`bigint`/`Symbol`/`undefined`, and mark omitted entries, summarized depth and length caps instead of silently dropping them (#155).

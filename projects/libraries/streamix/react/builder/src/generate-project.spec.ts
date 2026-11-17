@@ -145,6 +145,48 @@ describe("React Angular-hosted source generation", () => {
     }
   });
 
+  it("reports every failing file and keeps warnings beside contract errors", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-aggregate-"));
+    const sourceRoot = "projects/apps/demo/src";
+    try {
+      const source = join(root, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
+        include: ["projects/apps/demo/src/**/*.ts", "projects/apps/demo/src/**/*.tsx"],
+      }));
+      const broken = (name: string) => `
+        import { atom } from '@epikodelabs/streamix';
+        const locked = atom(0);
+        export function ${name}() { locked = 1; return <output>{locked}</output>; }
+      `;
+      await writeFile(join(source, "First.tsx"), broken("First"));
+      await writeFile(join(source, "Second.tsx"), broken("Second"));
+      await writeFile(join(source, "Mixed.tsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        let a = atom(0);
+        let plain = 0;
+        const locked = atom(0);
+        export function Mixed() {
+          ({ a, plain } = { a: 1, plain: 2 });
+          locked = 3;
+          return <output>{a}{plain}{locked}</output>;
+        }
+      `);
+
+      const error = await generateReactProject(root, sourceRoot)
+        .then(() => { throw new Error("Expected generation to fail"); }, (reason: unknown) => reason as Error);
+      const authored = (name: string) => `${relative(root, join(source, name))}:`;
+      expect(error.message).toContain(authored("First.tsx"));
+      expect(error.message).toContain(authored("Second.tsx"));
+      expect(error.message).toContain(authored("Mixed.tsx"));
+      expect(error.message).toContain("read-only atom binding");
+      expect(error.message).toContain("Mixed destructured atom assignment");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("restores the committed virtual project when the post-swap tsconfig install fails", async () => {
     const root = await mkdtemp(join(tmpdir(), "streamix-react-tsconfig-rollback-"));
     const sourceRoot = "projects/apps/demo/src";

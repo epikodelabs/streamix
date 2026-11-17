@@ -1381,7 +1381,10 @@ export function transformReactJsx(
         ) {
           const targets = destructuredAtomTargets(child.left, atoms, atomMaps).filter(target => !plainShadowed.has(target.atomName) && !isShadowedName(target.atomName, child, node));
           if (targets.length > 0) {
-            const readOnly = targets.find(target => !writableBindings.has(target.atomName));
+            // Unknown (non-atom) targets carry no atom name; only resolved
+            // atom targets can be read-only. Treating the rest as read-only
+            // made the mixed-destructuring warning unreachable.
+            const readOnly = targets.find(target => target.known && !writableBindings.has(target.atomName));
             if (readOnly) {
               diagnostics.push(diagnostic(child, "error", `Cannot assign to read-only atom binding \"${readOnly.atomName}\" through destructuring.`));
               return child;
@@ -1420,7 +1423,33 @@ export function transformReactJsx(
           }
         }
 
+        if (ts.isJsxSpreadAttribute(child)) {
+          // A spread places an object's properties on the element, so atom
+          // reads inside it are value reads, not transport props. Plain
+          // objects and arbitrary expressions stay untouched.
+          const lowered = rewriteJsxValue(child.expression);
+          return lowered === child.expression ? child : factory.updateJsxSpreadAttribute(child, lowered);
+        }
+
         if (ts.isJsxExpression(child) && child.expression) {
+          // React reserves `ref` for a ref object or callback on intrinsic
+          // elements. Lowering an atom read there would hand React the atom's
+          // value, which is invalid at runtime; reject it with guidance.
+          if (ts.isJsxAttribute(child.parent) && child.parent.name.getText(sourceFile) === "ref" &&
+              isNativeJsxAttribute(child.parent)) {
+            const readsReactiveValue = !isHiddenTarget(child.expression) && (
+              atomReferenceName(child.expression, atoms, atomMaps) !== undefined ||
+              isScopeMemberRead(child.expression, scopes, isHidden) ||
+              (ts.isPropertyAccessExpression(child.expression) && child.expression.name.text === "value" &&
+                !isHiddenTarget(child.expression.expression) &&
+                (atomReferenceName(child.expression.expression, atoms, atomMaps) !== undefined ||
+                 isScopeMemberRead(child.expression.expression, scopes, isHidden))));
+            if (readsReactiveValue) {
+              diagnostics.push(diagnostic(child, "error",
+                "React's ref slot expects a ref object or callback, not an atom value. Pass a ref object, or use a different prop name to transport the atom."));
+              return child;
+            }
+          }
           if (ts.isArrowFunction(child.expression) || ts.isFunctionExpression(child.expression)) {
             const lowered = ts.visitNode(child.expression, visit) as ts.Expression;
             return factory.updateJsxExpression(child, rewriteAtomReads(lowered, atoms, atomMaps, context, child.expression, isHidden));
@@ -1773,6 +1802,25 @@ export function transformReactJsx(
  * subscribe, write, or pass it on. Native DOM attributes still receive a
  * snapshot through the regular JSX rewrite.
  */
+/** True for intrinsic JSX tags (`div`, `my-element`), whose `ref` slot is
+ * reserved by React. Capitalized and member-expression tags are components. */
+function isNativeJsxAttribute(attribute: ts.JsxAttribute): boolean {
+  const attributes = attribute.parent;
+  const opening = attributes?.parent;
+  return (ts.isJsxOpeningElement(opening) || ts.isJsxSelfClosingElement(opening)) &&
+    ts.isIdentifier(opening.tagName) && /^[a-z]/.test(opening.tagName.text);
+}
+
+/** A direct scope-member read on a live scope container. */
+function isScopeMemberRead(
+  expression: ts.Expression,
+  scopes: ReadonlySet<string>,
+  isHidden: (identifier: ts.Identifier) => boolean,
+): boolean {
+  return ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression) &&
+    scopes.has(expression.expression.text) && !isHidden(expression.expression);
+}
+
 function isSharedAtomComponentProp(
   expression: ts.JsxExpression,
   atoms: ReadonlySet<string>,

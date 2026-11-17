@@ -42,6 +42,34 @@ describe("Streamix React Vite plugin", () => {
     expect(readFile).not.toHaveBeenCalled();
   });
 
+  it("reports warnings and contract errors for the same module", () => {
+    const plugin = sx();
+    const warnings: string[] = [];
+    const errors: string[] = [];
+    const context = {
+      warn: (message: string) => { warnings.push(message); },
+      error: (message: string): never => { errors.push(message); throw new Error(message); },
+    } as any;
+    const source = `
+      import { atom } from "@epikodelabs/streamix";
+      let a = atom(0);
+      let plain = 0;
+      const locked = atom(0);
+      export function Mixed() {
+        ({ a, plain } = { a: 1, plain: 2 });
+        locked = 1;
+        return <output>{a}{plain}{locked}</output>;
+      }
+    `;
+
+    expect(() => transformOf(plugin).call(context, source, "/workspace/src/Mixed.tsx"))
+      .toThrowError(/read-only atom binding/);
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("Mixed destructured");
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain("read-only atom binding");
+  });
+
   it("adopts plain TypeScript modules that import Streamix", () => {
     const plugin = sx();
     const context = { error: (message: string): never => { throw new Error(message); } } as any;

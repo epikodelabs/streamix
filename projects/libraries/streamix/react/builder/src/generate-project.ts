@@ -31,14 +31,18 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
     const files = await collectAdoptableFiles(staging);
     const program = createSourceProgram(workspaceRoot, sourceRoot);
     const results = new Map<string, { code: string; map: string }>();
+    // Collect every file's diagnostics before failing: a single failure names
+    // all affected authored files and preserves warnings alongside contract
+    // errors instead of stopping at the first one.
+    const failures: string[] = [];
     for (const file of files) {
       const original = join(source, relative(staging, file));
       const input = await readFile(file, "utf8");
       const transformed = transformReactJsx(input, original, { program });
-      const errors = transformed.diagnostics.filter(diagnostic => diagnostic.category === "error");
-      if (errors.length > 0) {
-        // Diagnostics point at the authored file, not the staging copy.
-        throw new Error(formatReactJsxDiagnostics(input, relative(workspaceRoot, original), errors));
+      // Diagnostics point at the authored file, not the staging copy.
+      if (transformed.diagnostics.some(diagnostic => diagnostic.category === "error")) {
+        failures.push(formatReactJsxDiagnostics(input, relative(workspaceRoot, original), transformed.diagnostics));
+        continue;
       }
       // Map sources carry the workspace-relative authored path so the chained
       // devtools point at a portable location instead of the machine's temp
@@ -49,6 +53,7 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
         map: JSON.stringify(transformed.sourceMap && { ...transformed.sourceMap, sources: [mapSource] }),
       });
     }
+    if (failures.length > 0) throw new Error(failures.join("\n\n"));
     // Registration runs AFTER adoption, not before: the adoption transform
     // typechecks the text it rewrites, and a __sxDebug wrapper around factory
     // calls would hide the atom type from it and silently disable adoption.
@@ -253,12 +258,18 @@ export async function regenerateReactFiles(workspaceRoot: string, sourceRoot: st
   const results = new Map<string, ReturnType<typeof transformReactJsx>>();
   if (overlays.size) {
     const program = createSourceProgram(workspaceRoot, sourceRoot, overlays);
+    // A batched watch save reports every failing file in one diagnostic, as
+    // full regeneration does; nothing is written unless the batch is clean.
+    const failures: string[] = [];
     for (const [origin, content] of overlays) {
       const transformed = transformReactJsx(content, origin, { program });
-      const errors = transformed.diagnostics.filter(item => item.category === 'error');
-      if (errors.length) throw new Error(formatReactJsxDiagnostics(content, relative(workspaceRoot, origin), errors));
+      if (transformed.diagnostics.some(item => item.category === 'error')) {
+        failures.push(formatReactJsxDiagnostics(content, relative(workspaceRoot, origin), transformed.diagnostics));
+        continue;
+      }
       results.set(origin, transformed);
     }
+    if (failures.length) throw new Error(failures.join("\n\n"));
   }
   const registrationProgram = introspection && results.size
     ? createSourceProgram(workspaceRoot, sourceRoot, new Map([...results].map(([path, result]) => [path, result.code])))

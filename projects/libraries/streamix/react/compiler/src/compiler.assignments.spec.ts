@@ -173,6 +173,24 @@ describe("React JSX compiler nested assignments", () => {
     expect(code).not.toContain("a.next(b =");
   });
 
+  it("warns on mixed destructuring instead of inventing a read-only target", () => {
+    const result = transformReactJsx(`
+      import { atom } from "@epikodelabs/streamix";
+      let a = atom(0);
+      let plain = 0;
+      export function C() {
+        ({ a, plain } = { a: 1, plain: 2 });
+        return <output>{a}{plain}</output>;
+      }
+    `);
+
+    expect(result.diagnostics.filter(diagnostic => diagnostic.category === "error")).toEqual([]);
+    const warnings = result.diagnostics.filter(diagnostic => diagnostic.category === "warning");
+    expect(warnings.length).toBe(1);
+    expect(warnings[0].message).toContain("Mixed destructured atom assignment");
+    expect(result.code).toContain("{ a, plain } = { a: 1, plain: 2 }");
+  });
+
   it("still lowers JSX assigned to an ordinary local", () => {
     const code = compile(`
       import { atom } from "@epikodelabs/streamix";

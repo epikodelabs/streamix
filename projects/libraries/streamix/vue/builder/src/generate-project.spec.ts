@@ -94,6 +94,29 @@ describe('Vue builder production safety', () => {
     }
   });
 
+  it('reports every failing SFC in one failure', async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+    const { join, relative } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateVueProject } = await import('./generate-project');
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-aggregate-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    const broken = `<script setup>import { scope } from '@epikodelabs/streamix'; const state = scope({ name: '' });</script><template><x-control v-model="state.name"/></template>`;
+    try {
+      const source = join(workspace, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'One.vue'), broken);
+      await writeFile(join(source, 'Two.vue'), broken);
+      const error = await generateVueProject(workspace, sourceRoot)
+        .then(() => { throw new Error('Expected generation to fail'); }, (reason: unknown) => reason as Error);
+      expect(error.message).toContain(`${relative(workspace, join(source, 'One.vue'))}:`);
+      expect(error.message).toContain(`${relative(workspace, join(source, 'Two.vue'))}:`);
+      expect((error.message.match(/v-model on <x-control>/g) ?? []).length).toBe(2);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('preserves previously generated project when a later SFC fails compilation', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-rollback-'));
     const sourceRoot = 'projects/apps/demo/src';
