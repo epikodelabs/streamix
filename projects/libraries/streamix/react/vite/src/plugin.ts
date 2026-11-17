@@ -103,9 +103,11 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
           fileName.replace(/\\/g, "/").includes("/node_modules/")) return null;
       if (options.include && !options.include(fileName)) return null;
       // Adopt only files the compiler can touch: authored JSX, or a Streamix
-      // import (reactive lowering applies to plain TS modules too). Building a
-      // program for every other authored module would pay for nothing.
-      if (!/<[A-Za-z][^<>]*>|<\/[A-Za-z]|<>/.test(source) && !source.includes("@epikodelabs/streamix")) return null;
+      // import (reactive lowering applies to plain TS modules too). A regex
+      // over comparisons (`a<b&&c>d`) and type assertions (`<Foo>x`) guessed
+      // JSX and paid for a full semantic program; parse the extension-valid
+      // candidates instead and skip everything else before programFor.
+      if (!source.includes("@epikodelabs/streamix") && !containsJsx(source, fileName)) return null;
 
       const result = transformReactJsx(source, fileName, { program: programFor(fileName, source) });
       for (const warning of result.diagnostics.filter(item => item.category === "warning")) {
@@ -145,6 +147,29 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
       programs.clear();
     },
   };
+}
+
+/** True only when the source parses to a real JSX node in a JSX-capable file. */
+function containsJsx(source: string, fileName: string): boolean {
+  if (!/\.[jt]sx$/i.test(fileName)) return false;
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKindFor(fileName),
+  );
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
 }
 
 function scriptKindFor(fileName: string): ts.ScriptKind {

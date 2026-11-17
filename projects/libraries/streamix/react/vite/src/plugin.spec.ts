@@ -1,3 +1,4 @@
+import ts from "typescript";
 import { sx } from "./plugin";
 
 describe("Streamix React Vite plugin", () => {
@@ -19,6 +20,23 @@ describe("Streamix React Vite plugin", () => {
 
     expect(transformOf(plugin).call(context, "export const count = 0;", "/workspace/src/value.ts")).toBeNull();
     expect(transformOf(plugin).call(context, "export const count = 0;", "/workspace/node_modules/lib/index.tsx")).toBeNull();
+  });
+
+  it("does not build a program for comparisons or type assertions without JSX", () => {
+    const plugin = sx();
+    const context = { error: (message: string): never => { throw new Error(message); } } as any;
+    const readFile = spyOn(ts.sys, "readFile").and.callThrough();
+
+    expect(transformOf(plugin).call(context,
+      "export const ok = left < right && low > high;",
+      "/workspace/src/comparison.ts")).toBeNull();
+    expect(transformOf(plugin).call(context,
+      "export type Box = Foo<number>; export const value = <Foo>input;",
+      "/workspace/src/generic.ts")).toBeNull();
+    expect(transformOf(plugin).call(context,
+      "export const ok = left < right && low > high;",
+      "/workspace/src/comparison.tsx")).toBeNull();
+    expect(readFile).not.toHaveBeenCalled();
   });
 
   it("adopts plain TypeScript modules that import Streamix", () => {
