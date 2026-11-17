@@ -145,6 +145,44 @@ describe("React Angular-hosted source generation", () => {
     }
   });
 
+  it("reports the same authored path for full and watch regeneration errors", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-diagnostic-path-"));
+    const sourceRoot = "projects/apps/demo/src";
+    try {
+      const source = join(root, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
+        include: ["projects/apps/demo/src/**/*.ts", "projects/apps/demo/src/**/*.tsx"],
+      }));
+      await writeFile(join(source, "main.tsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        let count = atom(0);
+        export function Counter() { return <button onClick={() => count++}>{count}</button>; }
+      `);
+      await generateReactProject(root, sourceRoot);
+      await writeFile(join(source, "Broken.tsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        const count = atom(0);
+        export function Broken() { return <button onClick={() => count = 1}>{count}</button>; }
+      `);
+
+      const capture = (promise: Promise<unknown>): Promise<Error> =>
+        promise.then(() => { throw new Error("Expected regeneration to fail"); }, error => error as Error);
+      const fullError = await capture(generateReactProject(root, sourceRoot));
+      const watchError = await capture(regenerateReactFile(root, sourceRoot, "Broken.tsx"));
+
+      const authored = `${relative(root, join(source, "Broken.tsx"))}:`;
+      expect(fullError.message.startsWith(authored)).toBeTrue();
+      expect(watchError.message.startsWith(authored)).toBeTrue();
+      expect(watchError.message).toBe(fullError.message);
+      expect(fullError.message).not.toContain(".angular/.streamix");
+      expect(fullError.message).not.toContain(root);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("rejects absolute and traversing source roots before modifying generated files", async () => {
     const root = await mkdtemp(join(tmpdir(), "streamix-react-root-"));
     try {

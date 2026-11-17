@@ -239,7 +239,7 @@ export async function regenerateReactFiles(workspaceRoot: string, sourceRoot: st
     for (const [origin, content] of overlays) {
       const transformed = transformReactJsx(content, origin, { program });
       const errors = transformed.diagnostics.filter(item => item.category === 'error');
-      if (errors.length) throw new Error(formatReactJsxDiagnostics(content, origin, errors));
+      if (errors.length) throw new Error(formatReactJsxDiagnostics(content, relative(workspaceRoot, origin), errors));
       results.set(origin, transformed);
     }
   }

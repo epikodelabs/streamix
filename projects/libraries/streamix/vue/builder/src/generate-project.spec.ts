@@ -70,6 +70,30 @@ describe('Vue builder production safety', () => {
     }
   });
 
+  it('reports the same authored path for full and watch compilation errors', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-diagnostic-path-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const source = join(workspace, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'Broken.vue'), `<script setup>import { scope } from '@epikodelabs/streamix'; const state = scope({ name: '' });</script><template><x-control v-model="state.name"/></template>`);
+
+      const capture = (promise: Promise<unknown>): Promise<Error> =>
+        promise.then(() => { throw new Error('Expected regeneration to fail'); }, error => error as Error);
+      const fullError = await capture(generateVueProject(workspace, sourceRoot));
+      const watchError = await capture(regenerateVueFile(workspace, sourceRoot, 'Broken.vue'));
+
+      const authored = `${relative(workspace, join(source, 'Broken.vue'))}:`;
+      expect(fullError.message.startsWith(authored)).toBeTrue();
+      expect(watchError.message.startsWith(authored)).toBeTrue();
+      expect(watchError.message).toBe(fullError.message);
+      expect(fullError.message).not.toContain('.angular/.streamix');
+      expect(fullError.message).not.toContain(workspace);
+    } finally {
+      await rm(workspace, { force: true, recursive: true });
+    }
+  });
+
   it('preserves previously generated project when a later SFC fails compilation', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-rollback-'));
     const sourceRoot = 'projects/apps/demo/src';
