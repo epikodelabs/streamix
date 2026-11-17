@@ -256,6 +256,48 @@ describe('Angular staged regeneration', () => {
     }
   });
 
+  it('restores the committed virtual project when the post-swap tsconfig install fails', async () => {
+    const { mkdtemp, mkdir, readdir, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-tsconfig-rollback-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const src = join(root, sourceRoot);
+      await mkdir(src, { recursive: true });
+      await writeFile(join(src, '..', 'tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true, moduleResolution: 'Node' },
+        include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'counter.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ templateUrl: './counter.html' })
+        export class Counter { count = atom(1); }
+      `);
+      await writeFile(join(src, 'counter.html'), '<output>{{ count.value }}</output>');
+      await generateProject({ workspaceRoot: root, sourceRoot });
+      const virtualRoot = join(root, '.angular/.streamix/demo/src');
+      const before = await snapshotTree(virtualRoot);
+      // The swap succeeds and only the virtual config install fails. An empty
+      // directory at that path makes the final rename fail on every platform.
+      const configPath = join(root, '.angular/.streamix/demo/tsconfig.app.json');
+      await rm(configPath, { force: true });
+      await mkdir(configPath);
+      await writeFile(join(src, 'counter.html'), '<output>{{ count.value }} changed</output>');
+
+      await expectAsync(generateProject({ workspaceRoot: root, sourceRoot })).toBeRejected();
+
+      // The uncommitted generation is discarded, never served.
+      expect(await snapshotTree(virtualRoot)).toEqual(before);
+      const siblings = await readdir(join(root, '.angular/.streamix/demo'));
+      expect(siblings.filter(name => /sx-(?:stage|backup|tmp)/.test(name))).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('regenerates a single authored component in place on a watch edit', async () => {
     const { mkdtemp, mkdir, writeFile, readFile, rm } = await import('node:fs/promises');
     const { join } = await import('node:path');

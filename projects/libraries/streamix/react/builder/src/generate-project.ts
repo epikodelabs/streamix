@@ -17,7 +17,8 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
   const staging = join(dirname(output), `.${basename(output)}-sx-stage-${randomUUID()}`);
   const backup = join(dirname(output), `.${basename(output)}-sx-backup-${randomUUID()}`);
   let backedUp = false;
-  let installed = false;
+  let swapped = false;
+  let committed = false;
   try {
     await cp(source, staging, { recursive: true });
     await stripLegacySidecars(staging);
@@ -91,8 +92,12 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
     await rename(staging, output);
-    installed = true;
-    await writeFile(
+    swapped = true;
+    // The virtual tsconfig belongs to the generation: install it atomically
+    // after the swap, and treat any failure until here as uncommitted so the
+    // previous tree is restored rather than serving new sources with the old
+    // configuration.
+    await writeFileAtomic(
       join(dirname(output), "tsconfig.app.json"),
       `${JSON.stringify({
         extends: toConfigPath(relative(dirname(output), join(workspaceRoot, "tsconfig.json"))),
@@ -102,13 +107,20 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
         exclude: ["src/**/*.spec.*", "src/**/*.test.*", "src/**/*.d.ts"],
       }, null, 2)}\n`,
     );
+    committed = true;
     return output;
   } catch (error) {
-    if (backedUp && !installed) await rename(backup, output);
+    if (backedUp) {
+      // Discard the uncommitted tree (it may have replaced the live one) and
+      // put the last committed generation back, byte for byte.
+      if (swapped) await rm(output, { force: true, recursive: true });
+      await rename(backup, output);
+      backedUp = false;
+    }
     throw error;
   } finally {
     await rm(staging, { force: true, recursive: true });
-    if (installed && backedUp) await rm(backup, { force: true, recursive: true });
+    if (committed && backedUp) await rm(backup, { force: true, recursive: true });
   }
 }
 

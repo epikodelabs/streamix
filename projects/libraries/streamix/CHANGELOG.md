@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Builders:** React and Angular install the virtual `tsconfig.app.json` atomically as part of the generation transaction; a failure after the output swap now restores the last committed virtual tree byte for byte instead of serving the failed generation (#231). Vue has no post-swap filesystem write, so the equivalent defect does not exist there.
+
 - **React:** release abandoned render-owned instances and keep resource snapshot reads pure; verified Vue/Angular cleanup parity (#211).
 
 - **Builders:** React watch diagnostics report the same authored workspace-relative path as full regeneration; added React and Vue path-parity coverage, with Angular's consistent source-relative behavior verified (#209).

@@ -86,7 +86,8 @@ export async function generateProject({
   const stagingDirectory = join(dirname(outputDirectory), `.${basename(outputDirectory)}-sx-stage-${randomUUID()}`);
   const backupDirectory = join(dirname(outputDirectory), `.${basename(outputDirectory)}-sx-backup-${randomUUID()}`);
   let backedUp = false;
-  let installed = false;
+  let swapped = false;
+  let committed = false;
   try {
     await compileStagedOutput({
       workspaceRoot, sourceDirectory, outputDirectory: stagingDirectory, program, checker, introspection,
@@ -98,12 +99,15 @@ export async function generateProject({
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     await rename(stagingDirectory, outputDirectory);
-    installed = true;
+    swapped = true;
     // Angular's template compiler requires decorated components to be program
     // roots, not merely transitively imported by a file replacement. Point the
     // delegated build at a virtual tsconfig which includes the entire generated
     // source tree. This keeps consuming projects free from `.angular` paths.
-    await writeFile(
+    // The config belongs to the generation: install it atomically after the
+    // swap, and treat any failure until here as uncommitted so the previous
+    // tree is restored instead of serving new sources with the old config.
+    await writeFileAtomic(
       resolve(outputDirectory, '..', 'tsconfig.app.json'),
       `${JSON.stringify({
         extends: configPath(relative(resolve(outputDirectory, '..'), tsconfigPath)),
@@ -111,12 +115,19 @@ export async function generateProject({
         exclude: ['src/**/*.spec.ts'],
       }, null, 2)}\n`,
     );
+    committed = true;
   } catch (error) {
-    if (backedUp && !installed) await rename(backupDirectory, outputDirectory);
+    if (backedUp) {
+      // Discard the uncommitted tree (it may have replaced the live one) and
+      // put the last committed generation back, byte for byte.
+      if (swapped) await rm(outputDirectory, { force: true, recursive: true });
+      await rename(backupDirectory, outputDirectory);
+      backedUp = false;
+    }
     throw error;
   } finally {
     await rm(stagingDirectory, { force: true, recursive: true });
-    if (installed && backedUp) await rm(backupDirectory, { force: true, recursive: true });
+    if (committed && backedUp) await rm(backupDirectory, { force: true, recursive: true });
   }
 }
 
@@ -411,9 +422,13 @@ function scopeValuePathsFor(
  * either the previous or the new file, never a partial write.
  */
 async function writeFileAtomic(path: string, contents: string): Promise<void> {
-  const temporary = `${path}.tmp-${process.pid}`;
-  await writeFile(temporary, contents);
-  await rename(temporary, path);
+  const temporary = `${path}.sx-tmp-${randomUUID()}`;
+  try {
+    await writeFile(temporary, contents);
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 /** Writes the virtual text with an authored-position source map trailer, so

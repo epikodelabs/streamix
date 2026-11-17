@@ -145,6 +145,45 @@ describe("React Angular-hosted source generation", () => {
     }
   });
 
+  it("restores the committed virtual project when the post-swap tsconfig install fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-tsconfig-rollback-"));
+    const sourceRoot = "projects/apps/demo/src";
+    try {
+      const source = join(root, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
+        include: ["projects/apps/demo/src/**/*.ts", "projects/apps/demo/src/**/*.tsx"],
+      }));
+      await writeFile(join(source, "main.tsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        let count = atom(0);
+        export function Counter() { return <button onClick={() => count++}>{count}</button>; }
+      `);
+      const virtualRoot = await generateReactProject(root, sourceRoot);
+      const before = await snapshotTree(virtualRoot);
+      // The swap succeeds and only the virtual config install fails. An empty
+      // directory at that path makes the final rename fail on every platform.
+      const configPath = join(root, ".angular/.streamix/demo/tsconfig.app.json");
+      await rm(configPath, { force: true });
+      await mkdir(configPath);
+      await writeFile(join(source, "main.tsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        let count = atom(41);
+        export function Counter() { return <button onClick={() => count++}>{count}</button>; }
+      `);
+
+      await expectAsync(generateReactProject(root, sourceRoot)).toBeRejected();
+
+      // The uncommitted generation is discarded, never served.
+      expect(await snapshotTree(virtualRoot)).toEqual(before);
+      const siblings = await readdir(join(root, ".angular/.streamix/demo"));
+      expect(siblings.filter(name => /sx-(?:stage|backup|tmp)/.test(name))).toEqual([]);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("reports the same authored path for full and watch regeneration errors", async () => {
     const root = await mkdtemp(join(tmpdir(), "streamix-react-diagnostic-path-"));
     const sourceRoot = "projects/apps/demo/src";
