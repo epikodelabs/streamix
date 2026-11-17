@@ -13,6 +13,7 @@ function compileModule<T>(source: string, fileName: string) {
   const result = transformReactJsx(source, fileName);
   const javascript = ts.transpileModule(result.code, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    fileName,
   }).outputText;
   const module = { exports: {} as Record<string, unknown> };
   const require = (name: string) => {
@@ -65,6 +66,35 @@ function compileComponent(source: string, fileName: string) {
 }
 
 describe("React compiler atom-map reads inside derived", () => {
+  it("adopts angle-bracket casts in TypeScript modules", () => {
+    const compiled = compileModule<{ count: Writable<number>; total: Writable<number> }>(`
+      import { atom, derived, type Writable } from '@epikodelabs/streamix';
+      export const count = <Writable<number>>(atom(2));
+      export const total = derived(() => count * 2);
+    `, 'cast-module.ts');
+    expect(errors(compiled.result)).toEqual([]);
+    expect(compiled.exports.total.value).toBe(4);
+    compiled.exports.count.next(3);
+    expect(compiled.exports.total.value).toBe(6);
+    compiled.exports.total.dispose();
+    compiled.exports.count.dispose();
+  });
+
+  it("keeps cast-wrapped component factories owned and writable", () => {
+    const compiled = compileComponent(`
+      import { atom, derived, type Writable } from '@epikodelabs/streamix';
+      export function App() {
+        let count = (atom(2)) as Writable<number>;
+        const total = derived(() => count * 2) satisfies Writable<number>;
+        return <button onClick={() => { count++; }}>{total}</button>;
+      }
+    `, 'cast-component.tsx');
+    expect(errors(compiled.result)).toEqual([]);
+    expect(compiled.App().props.children).toBe(4);
+    compiled.App().props.onClick();
+    expect(compiled.App().props.children).toBe(6);
+  });
+
   it("lowers a module-level map member read and recomputes from the atom value", () => {
     const compiled = compileModule<MapModule>(`
       import { atom, derived } from "@epikodelabs/streamix";
@@ -166,6 +196,28 @@ describe("React compiler atom-map reads inside derived", () => {
     // The parameter is a DerivedScope reader; its member stays raw.
     expect(compiled.result.code).toContain("derived((model) => model.count + 1)");
     expect(compiled.result.code).not.toContain("count.value + 1");
+  });
+
+  it("does not rewrite catch bindings or loop headers shadowing an atom inside derived", () => {
+    const compiled = compileModule<{ price: Writable<number>; totals: Writable<number> }>(`
+      import { atom, derived } from "@epikodelabs/streamix";
+      export const price = atom(2);
+      export const totals = derived(() => {
+        let sum = 0;
+        try { JSON.parse("{"); } catch (price) { sum += price instanceof SyntaxError ? 1 : 0; }
+        for (const price of [3, 4]) sum += price;
+        return sum + price.value;
+      });
+    `, "derived-maps-shadow.tsx");
+    expect(errors(compiled.result)).toEqual([]);
+    // The shadowed loop variable and catch binding stay raw; the genuine
+    // outer atom read still lowers.
+    expect(compiled.result.code).toContain("sum += price;");
+    expect(compiled.result.code).not.toContain("sum += price.value;");
+    expect(compiled.result.code).toContain("return sum + price.value;");
+    // catch(1) + loop(3 + 4) + outer atom value(2): the computed value proves
+    // the shadowed names are plain numbers, not atom reads.
+    expect(compiled.exports.totals.value).toBe(10);
   });
 
   it("leaves members of unproven plain objects as ordinary JavaScript", () => {

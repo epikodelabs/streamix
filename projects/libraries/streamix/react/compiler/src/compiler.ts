@@ -100,8 +100,9 @@ function boundNames(name: ts.BindingName, out: Set<string>): void {
 function scopeBinds(node: ts.Node, name: string): boolean {
   const names = new Set<string>();
   if (ts.isFunctionLike(node)) for (const param of node.parameters) boundNames(param.name, names);
-  if (ts.isBlock(node) || ts.isSourceFile(node)) {
-    for (const stmt of node.statements) {
+  if (ts.isBlock(node) || ts.isSourceFile(node) || ts.isCaseBlock(node)) {
+    const statements = ts.isCaseBlock(node) ? node.clauses.flatMap(clause => [...clause.statements]) : node.statements;
+    for (const stmt of statements) {
       if (ts.isVariableStatement(stmt)) for (const declaration of stmt.declarationList.declarations) boundNames(declaration.name, names);
       if (ts.isFunctionDeclaration(stmt) && stmt.name) names.add(stmt.name.text);
     }
@@ -229,11 +230,29 @@ function streamixFactoryImports(file: ts.SourceFile): FactoryImports {
   }
   return { aliases, namespaces, excluded };
 }
+/**
+ * Strips value-transparent wrappers (parentheses, `as`/angle-bracket
+ * assertions, `satisfies`) so cast-wrapped factory initializers such as
+ * `atom(0) as Writable<number>` adopt like the bare call they contain.
+ */
+function unwrapCast(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
 function factoryKind(
   node: ts.Expression,
   imports: FactoryImports,
   checker?: ts.TypeChecker,
 ): string | undefined {
+  node = unwrapCast(node);
   if (!ts.isCallExpression(node)) return undefined;
   const callee = node.expression;
   // A host Program can be incomplete while a file is being edited.  Retain
@@ -430,11 +449,12 @@ export function transformReactJsx(
           return;
         }
         for (const declaration of statement.declarationList.declarations) {
-          if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)) {
+          const initializer = declaration.initializer ? unwrapCast(declaration.initializer) : undefined;
+          if (!ts.isIdentifier(declaration.name) || !initializer || !ts.isCallExpression(initializer)) {
             continue;
           }
           {
-            const kind = factoryKind(declaration.initializer, imports, checker);
+            const kind = factoryKind(initializer, imports, checker);
             if (kind === "atom" || kind === "derived" || kind === "flow") {
               if (hasEarlierReturn) {
                 diagnostics.push(diagnostic(
@@ -446,7 +466,7 @@ export function transformReactJsx(
               }
               atoms.add(declaration.name.text);
               localReactiveDeclarations.add(declaration);
-              if (isComponent) reportLocalFactoryImpurity(declaration.initializer, diagnostics);
+              if (isComponent) reportLocalFactoryImpurity(initializer, diagnostics);
               if ((statement.declarationList.flags & ts.NodeFlags.Let) !== 0) writableBindings.add(declaration.name.text);
               declaresReactive = true;
             }
@@ -461,7 +481,7 @@ export function transformReactJsx(
               }
               scopes.add(declaration.name.text);
               localReactiveDeclarations.add(declaration);
-              if (isComponent) reportLocalFactoryImpurity(declaration.initializer, diagnostics);
+              if (isComponent) reportLocalFactoryImpurity(initializer, diagnostics);
               declaresReactive = true;
             }
           }
@@ -476,9 +496,12 @@ export function transformReactJsx(
       // raw atom object.
       if (isComponent) {
         const inspectNestedDeclarations = (node: ts.Node): void => {
+          const initializer = ts.isVariableDeclaration(node) && node.initializer
+            ? unwrapCast(node.initializer)
+            : undefined;
           if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
-              node.initializer && ts.isCallExpression(node.initializer) &&
-              ["atom", "derived", "flow", "scope"].includes(factoryKind(node.initializer, imports, checker) ?? "") &&
+              initializer && ts.isCallExpression(initializer) &&
+              ["atom", "derived", "flow", "scope"].includes(factoryKind(initializer, imports, checker) ?? "") &&
               node.parent.parent.parent !== functionBody) {
             diagnostics.push(diagnostic(node, "error",
               "A component-local reactive declaration inside a nested block cannot be compiled safely. Move it to component scope or use an explicit React hook."));
@@ -1689,8 +1712,9 @@ function collectModuleBindings(
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
-      if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)) continue;
-      if (factoryKind(declaration.initializer, imports, checker) === factoryName) {
+      const initializer = declaration.initializer ? unwrapCast(declaration.initializer) : undefined;
+      if (!ts.isIdentifier(declaration.name) || !initializer || !ts.isCallExpression(initializer)) continue;
+      if (factoryKind(initializer, imports, checker) === factoryName) {
         names.add(declaration.name.text);
       }
     }
@@ -1707,8 +1731,9 @@ function collectModuleWritableBindings(
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement) || (statement.declarationList.flags & ts.NodeFlags.Let) === 0) continue;
     for (const declaration of statement.declarationList.declarations) {
-      if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)) continue;
-      if (["atom", "derived", "flow"].includes(factoryKind(declaration.initializer, imports, checker) ?? "")) {
+      const initializer = declaration.initializer ? unwrapCast(declaration.initializer) : undefined;
+      if (!ts.isIdentifier(declaration.name) || !initializer || !ts.isCallExpression(initializer)) continue;
+      if (["atom", "derived", "flow"].includes(factoryKind(initializer, imports, checker) ?? "")) {
         names.add(declaration.name.text);
       }
     }

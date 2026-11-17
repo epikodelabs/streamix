@@ -344,4 +344,38 @@ describe("React JSX compiler edge cases", () => {
     expect(result.code).toContain('__streamixTrace("render", "Counter")');
     expect(result.code).toContain("useStreamixAfterCommit(() => {");
   });
+
+  it("adopts cast-wrapped and parenthesized reactive initializers", () => {
+    const result = transformReactJsx(`
+      import { atom, type Writable } from '@epikodelabs/streamix';
+      export const count = atom(1) as Writable<number>;
+      export const total = atom(2) satisfies Writable<number>;
+      const rate = (atom(3));
+      function Counter() {
+        let local = (atom(0)) as Writable<number>;
+        return <button onClick={() => { local++; }}>{count}{total}{rate}{local}</button>;
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    // Authored declarations stay raw; the subscriptions bridge them.
+    expect(result.code).toContain('const count = atom(1) as Writable<number>;');
+    expect(result.code).toContain('useStreamixSource(count, "count")');
+    expect(result.code).toContain('useStreamixSource(total, "total")');
+    expect(result.code).toContain('useStreamixSource(rate, "rate")');
+    // Component-local `let` casts stay writable: the increment lowers.
+    expect(result.code).toContain('local.next(');
+    expect(result.code).toContain('useStreamixLocal(() => (atom(0)) as Writable<number>)');
+  });
+
+  it("reports cast-wrapped reactive declarations in nested blocks", () => {
+    const result = transformReactJsx(`
+      import { atom, type Writable } from '@epikodelabs/streamix';
+      export function Counter() {
+        if (true) { const count = atom(0) as Writable<number>; return <span>{count}</span>; }
+        return null;
+      }
+    `);
+    expect(result.diagnostics.some(item => item.message.includes('nested block'))).toBeTrue();
+  });
 });
