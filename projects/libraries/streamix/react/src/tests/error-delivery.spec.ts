@@ -21,10 +21,14 @@ class Boundary extends Component<{ children: ReactNode }, { error: unknown }> {
 idescribe('React error delivery', () => {
   let host: HTMLElement;
   let root: Root | undefined;
+  let caught: unknown[];
+
+  beforeEach(() => { caught = []; });
+  afterEach(() => { teardown(); });
 
   function render(view: ReactNode): void {
     if (!host) host = document.createElement('div');
-    if (!root) root = createRoot(host);
+    if (!root) root = createRoot(host, { onCaughtError: error => { caught.push(error); } });
     act(() => { root!.render(view); });
   }
 
@@ -44,7 +48,9 @@ idescribe('React error delivery', () => {
     render(createElement(Boundary, null, createElement(View)));
     expect(host.textContent).toBe('ok');
 
-    act(() => { source.fail(new Error('boom')); });
+    const failure = new Error('boom');
+    act(() => { source.fail(failure); });
+    expect(caught).toEqual([failure]);
     expect(host.querySelector('#fallback')?.textContent).toBe('failed: boom');
     // The stale successful value is no longer displayed.
     expect(host.querySelector('#view')).toBeNull();
@@ -61,7 +67,9 @@ idescribe('React error delivery', () => {
       return createElement('output', { id: 'view' }, value);
     }
     render(createElement(Boundary, null, createElement(View)));
-    act(() => { source.fail(new Error('boom')); });
+    const failure = new Error('boom');
+    act(() => { source.fail(failure); });
+    expect(caught).toEqual([failure]);
     expect(host.querySelector('#fallback')).not.toBeNull();
 
     // A later successful emission clears the failure state; the boundary's
@@ -69,6 +77,7 @@ idescribe('React error delivery', () => {
     act(() => { source.next('fixed'); });
     render(createElement(Boundary, { key: 'retry', children: createElement(View) }));
     expect(host.querySelector('#view')?.textContent).toBe('fixed');
+    expect(caught).toEqual([failure]);
     expect(renderCount).toBeGreaterThan(0);
     teardown();
     source.dispose();
@@ -86,6 +95,7 @@ idescribe('React error delivery', () => {
     // Flows activate on subscribe: the first emission lands asynchronously.
     await act(async () => {});
     expect(host.querySelector('#view')?.textContent).toBe('only');
+    expect(caught).toEqual([]);
     // Let the flow complete and dispose its backing atom, then force another
     // render: the last emission stays, and no failure is delivered.
     await act(async () => { release(); await finished; });
@@ -119,7 +129,9 @@ idescribe('React error delivery', () => {
     // The failure reaches the boundary (delivery contract); the captured
     // setter outlives the unmounted view.
     render(createElement(Boundary, null, createElement(View)));
-    act(() => { source.fail(new Error('boom')); });
+    const failure = new Error('boom');
+    act(() => { source.fail(failure); });
+    expect(caught).toEqual([failure]);
     expect(host.querySelector('#fallback')).not.toBeNull();
     let received: unknown;
     act(() => { update(previous => { received = previous; return previous + 1; }); });
