@@ -5,12 +5,14 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import type { Readable, DependencySource, Writable } from "@epikodelabs/streamix";
-import { NO_INITIAL_VALUE } from "@epikodelabs/streamix";
+import { NO_INITIAL_VALUE, __streamixRuntime } from "@epikodelabs/streamix";
 import { recordStreamixDevtoolsEvent } from "./devtools";
 
 export type AtomSnapshot = Record<string, unknown>;
@@ -180,6 +182,12 @@ export function useStreamixAfterCommit(effect: () => void): void {
 export function useStreamixLocal<T>(factory: () => T): T {
   const lifetime = useContext(StreamixLifetimeContext);
   const ref = useRef<T | null>(null);
+  const registration = useRef<(() => void) | null>(null);
+  const create = (): T => {
+    const pending = __streamixRuntime.provision(factory);
+    registration.current = pending.commit;
+    return pending.value;
+  };
   const [, forceRender] = useState(0);
   if (ref.current === null || isDisposed(ref.current)) {
     // A hidden Activity tears effects down but keeps this hook slot. Without
@@ -188,8 +196,19 @@ export function useStreamixLocal<T>(factory: () => T): T {
     // of reading through a terminal atom.
     const abandoned = ref.current;
     if (abandoned !== null && isObjectLike(abandoned)) compilerLocalDisposals.delete(abandoned);
-    ref.current = factory();
+    ref.current = create();
   }
+
+  useLayoutEffect(() => {
+    // A yielded render may commit after its provisional instance was swept.
+    // Replace it and synchronously refresh the view before the browser paints.
+    if (isDisposed(ref.current)) {
+      ref.current = create();
+      forceRender(version => version + 1);
+    }
+    registration.current?.();
+    registration.current = null;
+  });
 
   useEffect(() => {
     if (lifetime) {
@@ -204,7 +223,9 @@ export function useStreamixLocal<T>(factory: () => T): T {
       // the effect too, then force a render so subscriptions leave the
       // terminal instance for the replacement.
       if (isObjectLike(instance)) compilerLocalDisposals.delete(instance);
-      instance = ref.current = factory();
+      instance = ref.current = create();
+      registration.current?.();
+      registration.current = null;
       forceRender(version => version + 1);
     }
     const token = {};
@@ -506,17 +527,31 @@ export function createResource<T>(loader: (signal: AbortSignal) => Promise<T>): 
  * This is safe with concurrent rendering and aborted initial mounts.
  */
 export function usePreloadedResource<T>(resource: PreloadedResource<T>): Resource<T> {
-  const subscribe = useCallback((notify: Listener) => resource.subscribe(notify), [resource]);
-  // An object snapshot must be cached. Subscribe to the primitive revision instead.
-  const version = useRef({ resource, version: 0, current: resource.status, data: resource.data, error: resource.error });
-  const getSnapshot = useCallback(() => {
-    const prev = version.current;
-    if (prev.resource !== resource || prev.current !== resource.status || prev.data !== resource.data || prev.error !== resource.error) {
-      version.current = { resource, version: prev.version + 1, current: resource.status, data: resource.data, error: resource.error };
-    }
-    return version.current;
+  const store = useMemo(() => {
+    let revision = 0;
+    let status = resource.status;
+    let data = resource.data;
+    let error = resource.error;
+    const update = (): boolean => {
+      if (status === resource.status && Object.is(data, resource.data) && Object.is(error, resource.error)) return false;
+      status = resource.status;
+      data = resource.data;
+      error = resource.error;
+      revision++;
+      return true;
+    };
+    return {
+      // Snapshot reads are pure, cached primitive reads. Changes are recorded
+      // by notifications, including a change between render and subscribing.
+      getSnapshot: () => revision,
+      subscribe(notify: Listener) {
+        const stop = resource.subscribe(() => { if (update()) notify(); });
+        if (update()) notify();
+        return stop;
+      },
+    };
   }, [resource]);
-  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   return resource;
 }
 

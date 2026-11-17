@@ -1004,7 +1004,7 @@ function fromIteratorInternal<T>(
   // nothing observes it.
   internalRuntime.markFlowNode(instance);
   if (isRuntimeInstrumentationEnabled()) {
-    internalRuntime.diagnostics.registerFlow(instance, () => ({
+    internalRuntime.registerFlow(instance, () => ({
       started, awaitingNext, subscribers: activeSubCount,
       hasValue: current !== NO_INITIAL_VALUE, value: current === NO_INITIAL_VALUE ? undefined : current,
     }));
@@ -1693,7 +1693,7 @@ export function derived<T>(...args: any[]): Readable<T> {
     for (const dep of dependencies) {
       const depNode = (dep as Partial<InternalAtomContainer> as any)[NODE] as AtomNode | undefined;
       if (depNode !== undefined && depNode.depth > maxDepth) maxDepth = depNode.depth;
-      if (internalRuntime.graph.has(dep)) continue;
+      if (internalRuntime.isKnown(dep)) continue;
       if (depSubscriptions.has(dep)) continue;
 
       const handler = () => {

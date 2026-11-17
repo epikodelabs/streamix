@@ -98,7 +98,8 @@ export function installStreamixOperatorTracking(track: StreamixIntrospectionHook
 
 /** Compiler helper: returns the exact input, preserving overloads and lazy semantics. */
 export function __streamixDebug<T>(value: T, metadata: StreamixSourceMetadata): T {
-  return hooks.debug(value, metadata);
+  internalRuntime.afterCommit(() => { hooks.debug(value, metadata); });
+  return value;
 }
 
 /** Preserve subscribe's receiver/signature and return the original subscription handle. */
@@ -110,7 +111,7 @@ export function __streamixSubscribe<T extends { subscribe: (...args: any[]) => a
 
 /** Internal hooks are inactive unless an instrumented browser entry enables them. */
 export function __streamixScopeMember(scope: object, key: PropertyKey, value: unknown): void {
-  hooks.scopeMember(scope, key, value);
+  internalRuntime.afterCommit(() => { hooks.scopeMember(scope, key, value); });
 }
 
 export function __streamixDebugDispose(node: object, kind?: string): void {

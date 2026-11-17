@@ -48,7 +48,10 @@ export function Counter() {
 }
 ```
 
-The source is stable for the committed component lifetime. Keep local reactive
+The source is stable for the committed component lifetime. Factories must be
+restartable and avoid starting external work: React may discard a render.
+Uncommitted instances are provisional and released after that render yields;
+a later commit recreates a released instance before paint. Keep local reactive
 declarations before conditional returns and outside loops or nested callbacks:
 React hook order must remain static, so unsupported nested declarations fail at
 build time instead of becoming a raw atom in JSX. This includes block-local

@@ -200,6 +200,20 @@ export interface ExecutionSpan {
 
 const INACTIVE_EXECUTION: ExecutionSpan = { reports: false, next() {}, finish() {} };
 
+interface ProvisionalRegistration {
+  readonly node: RuntimeNode;
+  readonly origin?: RuntimeOrigin;
+  dependencies?: Set<RuntimeNode>;
+}
+
+interface ProvisionalFrame {
+  nodes: ProvisionalRegistration[];
+  objects: object[];
+  callbacks: Array<() => void>;
+  committed: boolean;
+  released: boolean;
+}
+
 export class StreamixRuntime {
   readonly graph = new RuntimeGraph();
   readonly events = new RuntimeEventBus();
@@ -207,7 +221,10 @@ export class StreamixRuntime {
   diagnostics: RuntimeDiagnosticsPort = new NoopRuntimeDiagnostics();
   readonly root = Object.freeze({ type: "root" as const });
   private readonly flowNodes = new WeakSet<RuntimeNode>();
-  private readonly invalidators = new Map<RuntimeNode, () => void>();
+  private readonly invalidators = new WeakMap<RuntimeNode, () => void>();
+  private readonly provisional = new WeakMap<RuntimeNode, ProvisionalRegistration>();
+  private readonly provisionalObjects = new WeakSet<object>();
+  private provisioning?: ProvisionalFrame;
   private readonly schedulables = new WeakMap<RuntimeNode, SchedulableNode>();
 
   /** Record a flow-backed atom's identity. Unconditional: the graph 'change'
@@ -223,10 +240,108 @@ export class StreamixRuntime {
 
   constructor(readonly scheduling: RuntimeScheduling = new RuntimeScheduling()) {}
 
+  /** @internal Build render-local state without retaining it in runtime registries. */
+  provision<T>(factory: () => T): { value: T; commit(): void } {
+    const previous = this.provisioning;
+    const frame: ProvisionalFrame = {
+      nodes: [],
+      objects: [],
+      callbacks: [],
+      committed: false,
+      released: false,
+    };
+    this.provisioning = frame;
+    let value: T;
+    try {
+      value = factory();
+    } catch (error) {
+      this.provisioning = previous;
+      this.releaseProvisional(frame);
+      throw error;
+    }
+    this.provisioning = previous;
+    // A committed render runs its layout effect before this microtask. If the
+    // render is discarded or yields instead, the provisional instances were
+    // never adopted and are safe to release.
+    queueMicrotask(() => this.releaseProvisional(frame));
+    return { value, commit: () => {
+      if (frame.committed || frame.released) return;
+      frame.committed = true;
+      const live = frame.nodes.filter(entry => this.provisional.get(entry.node) === entry);
+      for (const entry of live) {
+        this.provisional.delete(entry.node);
+        this.register(entry.node, this.schedulables.get(entry.node), entry.origin);
+      }
+      for (const entry of live) if (entry.dependencies) this.dependencies(entry.node, entry.dependencies);
+      for (const callback of frame.callbacks) callback();
+      // A source can change while React has yielded this render. Recheck
+      // provisional formulas after their graph edges become active.
+      for (const entry of live) this.invalidators.get(entry.node)?.();
+      frame.nodes.length = 0;
+      frame.objects.length = 0;
+      frame.callbacks.length = 0;
+    } };
+  }
+
+  /** Release instances from a render that never reached its layout effects. */
+  private releaseProvisional(frame: ProvisionalFrame): void {
+    if (frame.committed || frame.released) return;
+    frame.released = true;
+    for (const entry of frame.nodes) {
+      if (this.provisional.get(entry.node) !== entry) continue;
+      this.provisional.delete(entry.node);
+      const disposable = entry.node as RuntimeNode & { dispose?: () => void };
+      if (typeof disposable.dispose === "function") {
+        try { disposable.dispose(); } catch { /* Keep releasing the rest. */ }
+      } else {
+        this.dispose(entry.node);
+      }
+    }
+    for (const value of frame.objects) {
+      if (!this.provisionalObjects.has(value)) continue;
+      this.provisionalObjects.delete(value);
+      const disposable = value as { dispose?: () => void };
+      if (typeof disposable.dispose === "function") {
+        try { disposable.dispose(); } catch { /* Keep releasing the rest. */ }
+      }
+    }
+    frame.nodes.length = 0;
+    frame.objects.length = 0;
+    frame.callbacks.length = 0;
+  }
+
+  /** @internal Scope/introspection attachment follows the same commit boundary. */
+  afterCommit(callback: () => void): void {
+    if (this.provisioning) this.provisioning.callbacks.push(callback);
+    else callback();
+  }
+
+  /** @internal Mark a scope so its children can attach without rooting the scope. */
+  provisionalObject(value: object): void {
+    if (!this.provisioning) return;
+    this.provisionalObjects.add(value);
+    this.provisioning.objects.push(value);
+  }
+
+  /** @internal Includes provisional sources without exposing them in the graph. */
+  isProvisional(value: object): boolean { return this.provisional.has(value) || this.provisionalObjects.has(value); }
+  isKnown(value: object): boolean { return this.graph.has(value) || this.provisional.has(value); }
+
+  /** @internal Flow diagnostics retain readers strongly and must wait for commit. */
+  registerFlow(node: RuntimeNode, read: () => FlowDiagnosticsState): void {
+    this.afterCommit(() => { if (!this.provisional.has(node)) this.diagnostics.registerFlow(node, read); });
+  }
+
   /** Register a node, optionally linking its scheduler state and creation site for diagnostics. */
   register(node: RuntimeNode, schedulable?: SchedulableNode, origin?: RuntimeOrigin): void {
-    this.graph.register(node);
     if (schedulable) this.schedulables.set(node, schedulable);
+    if (this.provisioning) {
+      const entry = { node, origin };
+      this.provisional.set(node, entry);
+      this.provisioning.nodes.push(entry);
+      return;
+    }
+    this.graph.register(node);
     if (origin) this.diagnostics.captureOrigin(node, origin);
     this.events.publish({ kind: "register", node });
   }
@@ -237,6 +352,8 @@ export class StreamixRuntime {
   }
 
   dependencies(node: RuntimeNode, sources: Iterable<RuntimeNode>): void {
+    const provisional = this.provisional.get(node);
+    if (provisional) { provisional.dependencies = new Set(sources); return; }
     this.graph.replace(node, sources);
     this.events.publish({ kind: "dependencies", node });
   }
@@ -251,6 +368,7 @@ export class StreamixRuntime {
 
   /** Publish a committed value change to current graph dependents. */
   changed(source: RuntimeNode): void {
+    if (this.provisional.has(source)) return;
     // Flows report emissions as execution 'next' events; the valueless graph
     // 'change' would double-count each emission in diagnostics consumers.
     if (this.events.observed && !this.hasFlow(source)) {
@@ -268,6 +386,7 @@ export class StreamixRuntime {
   }
 
   dispose(node: RuntimeNode): void {
+    this.provisional.delete(node);
     this.diagnostics.dispose(node);
     this.invalidators.delete(node);
     this.graph.remove(node);
@@ -280,6 +399,7 @@ export class StreamixRuntime {
    * unobserved, so an unobserved production emission allocates nothing.
    */
   beginExecution(node: RuntimeNode, name?: string, origin?: RuntimeOrigin): ExecutionSpan {
+    if (this.provisional.has(node)) return INACTIVE_EXECUTION;
     const accounting = isRuntimeInstrumentationEnabled();
     if (!accounting && !this.events.observed) return INACTIVE_EXECUTION;
     const observed = this.events.observed;

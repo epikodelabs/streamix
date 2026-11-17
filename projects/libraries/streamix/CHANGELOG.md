@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **React:** release abandoned render-owned instances and keep resource snapshot reads pure; verified Vue/Angular cleanup parity (#211).
+
 - **React compiler:** reject nested reactive aliases and destructures; verified Vue/Angular explicit-read boundaries (#203).
 
 - **Builders:** share semantic programs across watch refreshes in React, Vue and Angular (#205).

@@ -1,3 +1,4 @@
+import { internalRuntime } from '../runtime/runtime';
 import { __streamixDebugDispose, __streamixScopeMember } from '../runtime/introspection-hooks';
 import { isAtom, isAtomLike } from "../utils/helpers";
 import {
@@ -675,8 +676,11 @@ function createScopeInternal<T extends Record<string, any>>(
     _ownedAtoms: new Set(),
   }) as unknown as Scope;
 
+  internalRuntime.provisionalObject(newScope);
   if (isScope(parent)) {
-    parent._ownedAtoms.add(newScope);
+    const attach = () => { if (!newScope._disposed) parent._ownedAtoms.add(newScope); };
+    if (internalRuntime.isProvisional(parent)) attach();
+    else internalRuntime.afterCommit(attach);
   }
 
   const previousScope = currentScope;
@@ -1009,6 +1013,15 @@ export function registerWithCurrentScope(atomInstance: Readable<any>): void {
   if (!currentScope) return;
 
   const targetContext = currentScope;
+  if (internalRuntime.isProvisional(atomInstance) && !internalRuntime.isProvisional(targetContext)) {
+    internalRuntime.afterCommit(() => attachToScope(atomInstance, targetContext));
+    return;
+  }
+  attachToScope(atomInstance, targetContext);
+}
+
+function attachToScope(atomInstance: Readable<any>, targetContext: Scope): void {
+  if (targetContext._disposed || atomInstance.disposed) return;
   targetContext._ownedAtoms.add(atomInstance);
   atomScopeRegistry.set(atomInstance, targetContext);
 
