@@ -29,6 +29,27 @@ function execute(code: string): any {
 
 for (const [name, compile] of Object.entries(compilers)) {
   describe(`${name} atom lowering execution`, () => {
+    it('resolves hoisted vars and class bindings without hiding genuine outer reads', () => {
+      const state = execute(compile(`
+        import { atom, derived } from '@epikodelabs/streamix';
+        const count = atom(2);
+        const enabled = atom(true);
+        const summary = derived(() => {
+          const hoisted = (() => { if (true) { var count = 7; } return count; })();
+          const branch = (() => { switch (1) { case 1: const count = 3; return count; default: return 0; } })();
+          const localClass = (() => { class count { static value = 4; } return count.value; })();
+          const outer = (() => { function unrelated() { var count = 999; return count; } return count; })();
+          return hoisted + branch + localClass + outer;
+        });
+      `));
+      expect(state.summary.value).toBe(16);
+      state.count.set(3);
+      expect(state.summary.value).toBe(17);
+      state.summary.dispose();
+      state.count.dispose();
+      state.enabled.dispose();
+    });
+
     it('adopts let/var declarations and composed casts without changing runtime values', () => {
       const state = execute(compile(`
         import { atom, derived, type Writable } from '@epikodelabs/streamix';

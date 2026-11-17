@@ -1,6 +1,7 @@
 import ts from 'typescript';
 import { parse as parseSfc } from '@vue/compiler-sfc';
 import { applyMappedEdits, insertMappedText, createVueSourceMap, type VueSourceMap } from './source-map';
+import { hoistedVarDeclarations } from '@epikodelabs/streamix/compiler';
 
 export interface VueSfcDiagnostic {
   readonly category: 'error' | 'warning';
@@ -900,6 +901,8 @@ function containsBinding(name: ts.BindingName, text: string): boolean {
 /** Reject local declarations that shadow a top-level atom inside a callback. */
 function isShadowedIn(node: ts.Node, body: ts.Node, name: string): boolean {
   for (let scope = node.parent; scope; scope = scope.parent) {
+    if (hoistedVarDeclarations(scope).some(declaration => containsBinding(declaration.name, name))) return true;
+    if ((ts.isFunctionExpression(scope) || ts.isFunctionDeclaration(scope) || ts.isClassLike(scope)) && scope.name?.text === name) return true;
     if (ts.isFunctionLike(scope) && scope.parameters?.some(param => containsBinding(param.name, name))) return true;
     if (ts.isBlock(scope) || ts.isSourceFile(scope)) {
       if (scope.statements.some(statement =>

@@ -1,5 +1,6 @@
 import ts from 'typescript';
 import { createTokenSourceMap } from './source-map';
+import { hoistedVarDeclarations } from '@epikodelabs/streamix/compiler';
 
 export interface ReactJsxTransformResult {
   /** Transformed TypeScript/TSX source. */
@@ -100,11 +101,15 @@ function boundNames(name: ts.BindingName, out: Set<string>): void {
 function scopeBinds(node: ts.Node, name: string): boolean {
   const names = new Set<string>();
   if (ts.isFunctionLike(node)) for (const param of node.parameters) boundNames(param.name, names);
+  if ((ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node) || ts.isClassLike(node)) && node.name)
+    names.add(node.name.text);
+  for (const declaration of hoistedVarDeclarations(node)) boundNames(declaration.name, names);
   if (ts.isBlock(node) || ts.isSourceFile(node) || ts.isCaseBlock(node)) {
     const statements = ts.isCaseBlock(node) ? node.clauses.flatMap(clause => [...clause.statements]) : node.statements;
     for (const stmt of statements) {
       if (ts.isVariableStatement(stmt)) for (const declaration of stmt.declarationList.declarations) boundNames(declaration.name, names);
       if (ts.isFunctionDeclaration(stmt) && stmt.name) names.add(stmt.name.text);
+      if (ts.isClassDeclaration(stmt) && stmt.name) names.add(stmt.name.text);
     }
   }
   if (ts.isArrowFunction(node) && ts.isExpression(node.body)) { /* parameters already checked */ }
@@ -425,6 +430,7 @@ export function transformReactJsx(
       const atomMaps = new Map(moduleAtomMaps);
       const writableBindings = new Set<string>(moduleWritableAtoms);
       const localReactiveDeclarations = new Set<ts.VariableDeclaration>();
+      const localAtomMapDeclarations = new Set<ts.VariableDeclaration>();
       // Statements whose declarations supply names the generated hook bindings
       // reference directly (local atoms/scopes, aliases, map bases, and
       // destructured map members). Bindings must be inserted after the last
@@ -548,6 +554,7 @@ export function transformReactJsx(
               }
               if (entries.size > 0) {
                 atomMaps.set(declaration.name.text, entries);
+                localAtomMapDeclarations.add(declaration);
                 bindingDependencies.add(index);
               }
             }
@@ -602,16 +609,21 @@ export function transformReactJsx(
         const names = new Set<string>(); boundNames(param.name, names);
         for (const name of names) if (!atoms.has(name) && !scopes.has(name)) plainShadowed.add(name);
       }
+      const componentDeclarations = new Set(hoistedVarDeclarations(node));
       for (const statement of functionBody.statements) {
-        if (!ts.isVariableStatement(statement)) continue;
-        for (const declaration of statement.declarationList.declarations) {
-          const names = new Set<string>(); boundNames(declaration.name, names);
-          for (const name of names) {
-            if (!atomMaps.has(name) && !localReactiveDeclarations.has(declaration) &&
-                !(ts.isIdentifier(declaration.name) && declaration.initializer && ts.isIdentifier(declaration.initializer) && atoms.has(declaration.initializer.text)) &&
-                !(ts.isObjectBindingPattern(declaration.name) && atoms.has(name))) {
-              plainShadowed.add(name);
-            }
+        if ((ts.isClassDeclaration(statement) || ts.isFunctionDeclaration(statement)) && statement.name)
+          plainShadowed.add(statement.name.text);
+        if (ts.isVariableStatement(statement))
+          for (const declaration of statement.declarationList.declarations) componentDeclarations.add(declaration);
+      }
+      for (const declaration of componentDeclarations) {
+        const names = new Set<string>(); boundNames(declaration.name, names);
+        for (const name of names) {
+          if (!localAtomMapDeclarations.has(declaration) && !localReactiveDeclarations.has(declaration) &&
+              !(ts.isIdentifier(declaration.name) && declaration.initializer && ts.isIdentifier(declaration.initializer) && atoms.has(declaration.initializer.text)) &&
+              !(ts.isObjectBindingPattern(declaration.name) && declaration.initializer &&
+                ts.isIdentifier(declaration.initializer) && atomMaps.has(declaration.initializer.text) && atoms.has(name))) {
+            plainShadowed.add(name);
           }
         }
       }
