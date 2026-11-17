@@ -12,6 +12,20 @@ import { compileSxComponent } from '@epikodelabs/streamix/angular/compiler';
 import { installSxLifecycleIntoComponentSource } from '@epikodelabs/streamix/angular/compiler';
 import { findSxComponentTemplate, installSxComponentTemplate, resolveSourceRoot, virtualRootOf } from './options';
 
+/** Factory recognition must look through type-only casts and debug wrappers. */
+function unwrapReactiveInitializer(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  for (;;) {
+    if (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+        ts.isTypeAssertionExpression(current) || ts.isSatisfiesExpression(current)) {
+      current = current.expression;
+    } else if (ts.isCallExpression(current) && ts.isIdentifier(current.expression) &&
+        /^__sxDebug_*$/.test(current.expression.text) && current.arguments.length > 0) {
+      current = current.arguments[0];
+    } else return current;
+  }
+}
+
 /** Input for one generator pass. */
 export interface SxGenerateProjectOptions {
   readonly sourceRoot: string;
@@ -253,9 +267,10 @@ function componentHasReactiveFields(checker: ts.TypeChecker, component: ts.Class
     const type = checker.getTypeAtLocation(member.initializer);
     if (type.getProperty('type') && type.getProperty('value') &&
         type.getProperty('subscribe')) return true;
-    return ts.isCallExpression(member.initializer) &&
-      ts.isIdentifier(member.initializer.expression) &&
-      factories.has(member.initializer.expression.text);
+    const initializer = unwrapReactiveInitializer(member.initializer);
+    return ts.isCallExpression(initializer) &&
+      ts.isIdentifier(initializer.expression) &&
+      factories.has(initializer.expression.text);
   });
 }
 
@@ -319,7 +334,7 @@ function scopeWritablePathsFor(
   sourcePath: string,
 ): Record<string, readonly string[]> | undefined {
   const scopes = scopeMembersFor(program, sourcePath, property => {
-    const initializer = property.initializer;
+    const initializer = property.initializer ? unwrapReactiveInitializer(property.initializer) : undefined;
 
     if (!initializer) return false;
     if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
@@ -356,7 +371,7 @@ function scopeMembersFor(
 
   const visit = (node: ts.Node): void => {
     if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name)) {
-      const initializer = node.initializer;
+      const initializer = node.initializer ? unwrapReactiveInitializer(node.initializer) : undefined;
       if (
         initializer &&
         ts.isCallExpression(initializer) &&
@@ -699,15 +714,13 @@ export function rewriteDerivedAtomReads(source: string): string {
     return undefined;
   };
 
-  const unwrapDebug = (node: ts.Expression): ts.Expression => ts.isCallExpression(node) &&
-    ts.isIdentifier(node.expression) && node.expression.text.startsWith('__sxDebug') ? node.arguments[0] : node;
   const collectAtoms = (node: ts.Node): void => {
     if (
       (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node)) &&
       ts.isIdentifier(node.name) &&
       node.initializer &&
-      ts.isCallExpression(unwrapDebug(node.initializer)) &&
-      factoryNames.has(factoryKind((unwrapDebug(node.initializer) as ts.CallExpression).expression) ?? '')
+      ts.isCallExpression(unwrapReactiveInitializer(node.initializer)) &&
+      factoryNames.has(factoryKind((unwrapReactiveInitializer(node.initializer) as ts.CallExpression).expression) ?? '')
     ) {
       const symbol = checker.getSymbolAtLocation(node.name);
       if (symbol) atoms.add(symbol);

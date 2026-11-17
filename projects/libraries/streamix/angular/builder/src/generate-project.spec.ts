@@ -1,6 +1,18 @@
 import { rewriteDerivedAtomReads } from './generate-project';
 
 describe('Angular derived shorthand', () => {
+  it('recognizes cast-wrapped class fields and debug wrappers in either order', () => {
+    const transformed = rewriteDerivedAtomReads(`
+      import { atom, derived, type Writable } from '@epikodelabs/streamix';
+      class Counter {
+        count = (__sxDebug((atom(2) as Writable<number>), {})) satisfies Writable<number>;
+        other = (__sxDebug(atom(3), {}) as Writable<number>);
+        total = derived(() => this.count + this.other);
+      }
+    `);
+    expect(transformed).toContain('derived(() => this.count.value + this.other.value)');
+  });
+
   it('lowers chained derived and flow inputs, object members, and shorthand keys', () => {
     const transformed = rewriteDerivedAtomReads(`
       const count = atom(2);
@@ -105,6 +117,42 @@ describe('Angular derived shorthand', () => {
 
 
 describe('external Angular component templates', () => {
+  it('adopts cast-wrapped atom and scope fields for native bindings', async () => {
+    const { mkdtemp, mkdir, readFile, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-cast-fields-'));
+    try {
+      const src = join(root, 'projects/apps/demo/src');
+      await mkdir(src, { recursive: true });
+      await writeFile(join(root, 'projects/apps/demo/tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true }, include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'globals.d.ts'), `
+        declare module '@epikodelabs/streamix' {
+          export interface Writable<T> { type: 'atom'; value: T; subscribe(cb: () => void): () => void; set(value: T): void; }
+          export function atom<T>(value: T): Writable<T>;
+          export function scope<T>(value: T): any;
+        }
+      `);
+      await writeFile(join(src, 'counter.ts'), `
+        import { atom, scope, type Writable } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ template: '<input [(value)]="model.title"><output>{{ count.value }}</output>' })
+        export class Counter {
+          count = (atom(2)) as Writable<number>;
+          model = (scope({ title: 'ready' })) satisfies unknown;
+        }
+      `);
+      await generateProject({ workspaceRoot: root, sourceRoot: 'projects/apps/demo/src' });
+      const generated = await readFile(join(root, '.angular/.streamix/demo/src/counter.ts'), 'utf8');
+      expect(generated).toContain('ctx.count');
+      expect(generated).toMatch(/ctx\.model\.get\(['"]title['"]\)/);
+      expect(generated).toMatch(/ctx\.model\.set\(['"]title['"],\s*event\.target\.value\)/);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('compiles an authored templateUrl without changing the authored HTML file', async () => {
     const { mkdtemp, mkdir, readFile, writeFile, rm } = await import('node:fs/promises');
     const { join } = await import('node:path');

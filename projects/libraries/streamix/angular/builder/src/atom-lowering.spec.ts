@@ -23,11 +23,51 @@ function execute(code: string): any {
     statement.declarationList.declarations.every(declaration =>
       ts.isIdentifier(declaration.name) && !declaration.name.text.startsWith('__')));
   const body = statements.map(statement => printer.printNode(ts.EmitHint.Unspecified, statement, file)).join('\n');
-  return new Function('atom', 'derived', `${body}\nreturn { count, enabled, summary };`)(atom, derived);
+  const javascript = ts.transpileModule(body, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return new Function('atom', 'derived', `${javascript}\nreturn { count, enabled, summary };`)(atom, derived);
 }
 
 for (const [name, compile] of Object.entries(compilers)) {
   describe(`${name} atom lowering execution`, () => {
+    it('adopts let/var declarations and composed casts without changing runtime values', () => {
+      const state = execute(compile(`
+        import { atom, derived, type Writable } from '@epikodelabs/streamix';
+        let count = ((atom(2)) as Writable<number>) satisfies Writable<number>;
+        var enabled = (atom(true));
+        const summary = (derived(() => enabled ? count * 2 : 0));
+      `));
+      expect(state.summary.value).toBe(4);
+      state.count.set(3);
+      expect(state.summary.value).toBe(6);
+      state.summary.dispose();
+      state.count.dispose();
+      state.enabled.dispose();
+    });
+
+    it('keeps loop, catch, destructuring and switch shadows separate from outer atoms', () => {
+      const state = execute(compile(`
+        import { atom, derived } from '@epikodelabs/streamix';
+        const count = atom(2);
+        const enabled = atom(true);
+        const summary = derived(() => {
+          let sum = count;
+          for (const { count } of [{count: 3}]) sum += count;
+          for (const count in {a: 1}) sum += count.length;
+          for (let count = 0; count < 2; count++) sum += count;
+          try { throw {count: 4}; } catch ({count}) { sum += count; }
+          switch (1) { case 1: const count = 5; sum += count; break; default: break; }
+          switch (0) { default: const count = 6; sum += count; }
+          return sum;
+        });
+      `));
+      expect(state.summary.value).toBe(22);
+      state.count.set(3);
+      expect(state.summary.value).toBe(23);
+      state.summary.dispose();
+      state.count.dispose();
+      state.enabled.dispose();
+    });
+
     it('tracks chained formulas, templates, object members and conditional dependencies', () => {
       const state = execute(compile(`
         import { atom, derived } from '@epikodelabs/streamix';
