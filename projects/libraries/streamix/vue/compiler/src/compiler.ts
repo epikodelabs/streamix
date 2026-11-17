@@ -198,12 +198,16 @@ export function transformVueSfc(
   // are separate names, so `derived(() => price * quantity)` still closes
   // over raw atoms rather than Vue computed refs.
   for (const declaration of reactive) {
-    const bridge = declaration.kind === 'atom' ? 'useWritable' : 'useIterable';
+    // useWritable's second parameter is the diagnostic name; useIterable's
+    // second parameter is initialValue, so the diagnostic name moves third.
+    const bridge = declaration.kind === 'atom'
+      ? `useWritable(${declaration.name}, '${declaration.name}')`
+      : `useIterable(${declaration.name}, undefined, '${declaration.name}')`;
 
     scriptEdits.push({
       start: declaration.statementEnd,
       end: declaration.statementEnd,
-      replacement: `\nconst ${reactiveBridgeName(declaration.name)} = ${bridge}(${declaration.name}, '${declaration.name}');`,
+      replacement: `\nconst ${reactiveBridgeName(declaration.name)} = ${bridge};`,
     });
   }
 
@@ -665,6 +669,26 @@ function factoryImports(script: string): FactoryImports {
   return { aliases };
 }
 
+/**
+ * Strips value-transparent wrappers (parentheses, `as`/angle-bracket
+ * assertions, `satisfies`) so cast-wrapped factory initializers such as
+ * `atom(0) as Writable<number>` adopt like the bare call they contain.
+ * React parity: the React compiler applies the same unwrap to declaration
+ * initializers.
+ */
+function unwrapCast(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function collectReactiveDeclarations(
   script: string,
   imports: FactoryImports,
@@ -674,20 +698,22 @@ function collectReactiveDeclarations(
 
   for (const statement of file.statements) {
     if (!ts.isVariableStatement(statement)) continue;
-    if ((statement.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
+    // const and let (and legacy var) declarations adopt alike, mirroring the
+    // React compiler; the binding kind never gates reactivity.
 
     for (const declaration of statement.declarationList.declarations) {
-      if (
-        !ts.isIdentifier(declaration.name) ||
-        !declaration.initializer ||
-        !ts.isCallExpression(declaration.initializer) ||
-        !ts.isIdentifier(declaration.initializer.expression)
-      ) {
-        continue;
+      if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
+      // Casts and the introspection wrapper may nest in either order; peel
+      // value-transparent layers until a factory call (or nothing) remains.
+      let call: ts.CallExpression | undefined;
+      let current = unwrapCast(declaration.initializer);
+      for (;;) {
+        if (!ts.isCallExpression(current)) break;
+        const inner = unwrapIntrospectionWrapper(current);
+        if (inner === current) { call = current; break; }
+        current = unwrapCast(inner);
       }
-
-      const call = unwrapIntrospectionWrapper(declaration.initializer);
-      if (!ts.isIdentifier(call.expression)) continue;
+      if (!call || !ts.isIdentifier(call.expression)) continue;
       const callee = call.expression.text;
       const aliased = imports.aliases.get(callee);
       // Adopt only an explicit Streamix import. A same-named local helper is
@@ -716,11 +742,11 @@ function collectReactiveDeclarations(
  * (the alias grows trailing underscores on name collisions). Adoption and
  * bridge spans key on the factory call, never on the wrapper around it.
  */
-function unwrapIntrospectionWrapper(call: ts.CallExpression): ts.CallExpression {
+function unwrapIntrospectionWrapper(call: ts.CallExpression): ts.Expression {
   const callee = call.expression;
   if (ts.isIdentifier(callee) && /^__sxDebug_*$/.test(callee.text) && call.arguments.length > 0) {
     const inner = call.arguments[0];
-    if (ts.isCallExpression(inner)) return inner;
+    return unwrapCast(inner);
   }
   return call;
 }
@@ -881,6 +907,20 @@ function isShadowedIn(node: ts.Node, body: ts.Node, name: string): boolean {
         ts.isFunctionDeclaration(statement) && statement.name?.text === name ||
         ts.isClassDeclaration(statement) && statement.name?.text === name)) return true;
     }
+    // Brace-less switch arms share the switch's scope, so their declarations
+    // shadow just like block statements do.
+    if (ts.isCaseBlock(scope)) {
+      if (scope.clauses.some(clause => clause.statements.some(statement =>
+        ts.isVariableStatement(statement) && statement.declarationList.declarations.some(decl => containsBinding(decl.name, name)) ||
+        ts.isFunctionDeclaration(statement) && statement.name?.text === name ||
+        ts.isClassDeclaration(statement) && statement.name?.text === name))) return true;
+    }
+    // Catch parameters and loop headers (for/for-of/for-in, including for
+    // await) bind names exactly like parameters do.
+    if (ts.isCatchClause(scope) && scope.variableDeclaration && containsBinding(scope.variableDeclaration.name, name)) return true;
+    if ((ts.isForStatement(scope) || ts.isForOfStatement(scope) || ts.isForInStatement(scope)) &&
+        scope.initializer && ts.isVariableDeclarationList(scope.initializer) &&
+        scope.initializer.declarations.some(decl => containsBinding(decl.name, name))) return true;
     if (scope === body) break;
   }
   return false;

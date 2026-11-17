@@ -36,6 +36,107 @@ describe('Vue compiler correctness regressions', () => {
     expect(result.code).not.toContain('return count.value;');
   });
 
+  it('does not rewrite a for-of loop variable shadowing an atom inside derived', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const price = atom(2);
+      const total = derived(() => { let sum = price.value; for (const price of [3, 4]) sum += price; return sum; });
+    `, '{{ total }}');
+    expectNoError(result);
+    expect(result.code).toContain('for (const price of [3, 4]) sum += price;');
+    expect(result.code).not.toContain('sum += price.value');
+  });
+
+  it('does not rewrite a for-in loop variable shadowing an atom inside derived', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const key = atom('');
+      const joined = derived(() => { let out = key.value; for (const key in { a: 1 }) out += key; return out; });
+    `, '{{ joined }}');
+    expectNoError(result);
+    expect(result.code).toContain('for (const key in { a: 1 }) out += key;');
+    expect(result.code).not.toContain('out += key.value');
+  });
+
+  it('does not rewrite a for header initializer shadowing an atom inside derived', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const step = atom(1);
+      const doubled = derived(() => { let out = step.value; for (let step = 0; step < 2; step++) out += step; return out; });
+    `, '{{ doubled }}');
+    expectNoError(result);
+    expect(result.code).toContain('for (let step = 0; step < 2; step++) out += step;');
+    expect(result.code).not.toContain('out += step.value');
+  });
+
+  it('does not rewrite a catch binding shadowing an atom inside derived', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const err = atom('none');
+      const status = derived(() => { try { JSON.parse('{'); } catch (err) { return String(err); } });
+    `, '{{ status }}');
+    expectNoError(result);
+    expect(result.code).toContain('return String(err);');
+    expect(result.code).not.toContain('return err.value;');
+  });
+
+  it('does not rewrite a brace-less case clause declaration shadowing an atom inside derived', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const mode = atom('a');
+      const label = derived(() => {
+        switch (mode.value) {
+          case 'a':
+            const mode = 'b';
+            return mode;
+          default:
+            return mode.value;
+        }
+      });
+    `, '{{ label }}');
+    expectNoError(result);
+    expect(result.code).toContain("const mode = 'b';\n            return mode;");
+  });
+
+  it('adopts reactive let declarations like const', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      let count = atom(1);
+      const doubled = derived(() => count * 2);
+    `, '{{ doubled }}');
+    expectNoError(result);
+    expect(result.code).toContain("const __sx_count = useWritable(count, 'count');");
+    expect(result.code).toContain('const doubled = derived(() => count.value * 2);');
+    expect(result.code).toContain("const __sx_doubled = useIterable(doubled, undefined, 'doubled');");
+  });
+
+  it('adopts cast-wrapped and parenthesized factory initializers', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(1) as ReturnType<typeof atom>;
+      const total = <ReturnType<typeof atom>>atom(2);
+      const rate = (atom(3));
+      const kept = derived(() => count.value + total.value + rate.value);
+    `, '{{ kept }}');
+    expectNoError(result);
+    expect(result.code).toContain("const __sx_count = useWritable(count, 'count');");
+    expect(result.code).toContain("const __sx_total = useWritable(total, 'total');");
+    expect(result.code).toContain("const __sx_rate = useWritable(rate, 'rate');");
+  });
+
+  it('adopts a cast around the introspection wrapper in either nesting order', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      declare const __sxDebug: (call: unknown, meta: unknown) => unknown;
+      const first = __sxDebug(atom(1), {}) as ReturnType<typeof atom>;
+      const second = __sxDebug((atom(2)), {}) satisfies unknown;
+      const kept = derived(() => first.value + second.value);
+    `, '{{ kept }}');
+    expectNoError(result);
+    expect(result.code).toContain("const __sx_first = useWritable(first, 'first');");
+    expect(result.code).toContain("const __sx_second = useWritable(second, 'second');");
+  });
+
   it('uses the generated scope bridge identifier within an assignment RHS', () => {
     const result = compile(`
       import { scope } from '@epikodelabs/streamix';

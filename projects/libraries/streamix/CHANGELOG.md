@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **React compiler:** adopt cast-wrapped reactive initializers and preserve switch-local shadowing (#105).
+- **Vue compiler:** preserve loop/catch/switch shadows, pass bridge names correctly, and adopt let/var and cast-wrapped declarations (#86, #87, #105).
 - **React:** fixed Activity recovery, subscription deduplication and snapshot hydration.
 - **React compiler:** preserved local objects that shadow atom-map names (#199).
 - **React compiler:** preserved assignment results and single RHS evaluation, including concise callbacks (#164).

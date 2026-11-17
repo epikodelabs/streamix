@@ -45,9 +45,9 @@ describe('Vue SFC compiler', () => {
     expect(result.code).toContain('const factor = atom(2);');
     expect(result.code).toContain("const __sx_factor = useWritable(factor, 'factor');");
     expect(result.code).toContain('const doubled = derived(() => count.value * factor.value);');
-    expect(result.code).toContain("const __sx_doubled = useIterable(doubled, 'doubled');");
+    expect(result.code).toContain("const __sx_doubled = useIterable(doubled, undefined, 'doubled');");
     expect(result.code).toContain('const updates = flow(async function* () { yield 1; });');
-    expect(result.code).toContain("const __sx_updates = useIterable(updates, 'updates');");
+    expect(result.code).toContain("const __sx_updates = useIterable(updates, undefined, 'updates');");
     expect(result.code).toContain('{{ __sx_count }} {{ __sx_doubled }} {{ __sx_updates }}');
   });
 
