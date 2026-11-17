@@ -4,6 +4,10 @@
 
 - **React:** release abandoned render-owned instances and keep resource snapshot reads pure; verified Vue/Angular cleanup parity (#211).
 
+- **Builders:** React watch diagnostics report the same authored workspace-relative path as full regeneration; added React and Vue path-parity coverage, with Angular's consistent source-relative behavior verified (#209).
+
+- **React Vite:** JSX detection parses `.tsx`/`.jsx` candidates instead of regex-guessing comparisons and type assertions, so ordinary modules no longer build a semantic program (#210).
+
 - **React compiler:** reject nested reactive aliases and destructures; verified Vue/Angular explicit-read boundaries (#203).
 
 - **Builders:** share semantic programs across watch refreshes in React, Vue and Angular (#205).
