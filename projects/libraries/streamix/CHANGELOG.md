@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **React compiler:** reject nested reactive aliases and destructures; verified Vue/Angular explicit-read boundaries (#203).
+
 - **Builders:** share semantic programs across watch refreshes in React, Vue and Angular (#205).
 
 - **Compiler parity:** resolve hoisted `var` and class shadows in React/Vue without hiding genuine atom reads; verified Angular symbol resolution (#165).

@@ -51,7 +51,9 @@ export function Counter() {
 The source is stable for the committed component lifetime. Keep local reactive
 declarations before conditional returns and outside loops or nested callbacks:
 React hook order must remain static, so unsupported nested declarations fail at
-build time instead of becoming a raw atom in JSX.
+build time instead of becoming a raw atom in JSX. This includes block-local
+aliases of known sources and destructured atom-map members. Declare those
+aliases directly in the component body as well.
 
 ### A shape the compiler rejects
 

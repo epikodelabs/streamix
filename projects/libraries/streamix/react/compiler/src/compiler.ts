@@ -496,28 +496,6 @@ export function transformReactJsx(
         if (statementReturns) hasEarlierReturn = true;
       });
 
-      // The generated ownership hooks must be at component scope. A factory
-      // hidden in a conditional/loop block cannot be lifted without changing
-      // React hook order, so reject it instead of leaving JSX to render the
-      // raw atom object.
-      if (isComponent) {
-        const inspectNestedDeclarations = (node: ts.Node): void => {
-          const initializer = ts.isVariableDeclaration(node) && node.initializer
-            ? unwrapCast(node.initializer)
-            : undefined;
-          if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
-              initializer && ts.isCallExpression(initializer) &&
-              ["atom", "derived", "flow", "scope"].includes(factoryKind(initializer, imports, checker) ?? "") &&
-              node.parent.parent.parent !== functionBody) {
-            diagnostics.push(diagnostic(node, "error",
-              "A component-local reactive declaration inside a nested block cannot be compiled safely. Move it to component scope or use an explicit React hook."));
-            return;
-          }
-          ts.forEachChild(node, inspectNestedDeclarations);
-        };
-        inspectNestedDeclarations(functionBody);
-      }
-
       // Static aliases retain atom identity. Object maps are supported only
       // when every property is a known atom reference; arbitrary objects stay
       // ordinary JavaScript and are never guessed to be reactive.
@@ -633,6 +611,99 @@ export function transformReactJsx(
         while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) base = base.expression;
         return ts.isIdentifier(base) && isHidden(base);
       };
+      // Resolve aliases at their declaration site. Name-only sets cannot
+      // distinguish an outer source from a block/catch/parameter shadow.
+      if (isComponent) {
+        type Shape = true | Map<string, Shape>;
+        const visiting = new Set<ts.VariableDeclaration>();
+        const bindingShape = (binding: ts.BindingName, name: string, shape: Shape | undefined): Shape | undefined => {
+          if (ts.isIdentifier(binding)) return binding.text === name ? shape : undefined;
+          for (let index = 0; index < binding.elements.length; index++) {
+            const element = binding.elements[index];
+            if (ts.isOmittedExpression(element)) continue;
+            const key = ts.isArrayBindingPattern(binding) ? String(index) : element.propertyName
+              ? staticPropertyName(element.propertyName) : ts.isIdentifier(element.name) ? element.name.text : undefined;
+            const selected = element.dotDotDotToken ? shape : shape === true ? true : key ? shape?.get(key) : undefined;
+            const result = bindingShape(element.name, name, selected);
+            if (result) return result;
+          }
+          return undefined;
+        };
+        const declarationShape = (declaration: ts.VariableDeclaration, name: string): Shape | undefined => {
+          if (!declaration.initializer || visiting.has(declaration)) return undefined;
+          visiting.add(declaration);
+          const shape = bindingShape(declaration.name, name, expressionShape(declaration.initializer));
+          visiting.delete(declaration);
+          return shape;
+        };
+        const expressionShape = (expression: ts.Expression): Shape | undefined => {
+          expression = unwrapCast(expression);
+          if (factoryKind(expression, imports, checker)) return true;
+          if (ts.isIdentifier(expression)) {
+            for (let scope = expression.parent; scope; scope = scope.parent) {
+              if (!scopeBinds(scope, expression.text)) continue;
+              const declarations = [...hoistedVarDeclarations(scope)];
+              if (ts.isBlock(scope) || ts.isSourceFile(scope) || ts.isCaseBlock(scope)) {
+                const statements = ts.isCaseBlock(scope) ? scope.clauses.flatMap(clause => [...clause.statements]) : scope.statements;
+                for (const statement of statements) if (ts.isVariableStatement(statement)) declarations.push(...statement.declarationList.declarations);
+              }
+              if ((ts.isForStatement(scope) || ts.isForOfStatement(scope) || ts.isForInStatement(scope)) &&
+                  scope.initializer && ts.isVariableDeclarationList(scope.initializer)) declarations.push(...scope.initializer.declarations);
+              for (const declaration of declarations) {
+                const names = new Set<string>(); boundNames(declaration.name, names);
+                if (names.has(expression.text)) return declarationShape(declaration, expression.text);
+              }
+              return undefined; // Parameter, catch, function or class shadow.
+            }
+            return moduleAtoms.has(expression.text) ? true : undefined;
+          }
+          if (ts.isObjectLiteralExpression(expression) || ts.isArrayLiteralExpression(expression)) {
+            const entries = new Map<string, Shape>();
+            const properties = ts.isObjectLiteralExpression(expression) ? expression.properties : expression.elements;
+            properties.forEach((property, index) => {
+              const key = ts.isArrayLiteralExpression(expression) ? String(index) :
+                (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) ? staticPropertyName(property.name) : undefined;
+              const value = ts.isPropertyAssignment(property) ? property.initializer :
+                ts.isShorthandPropertyAssignment(property) ? property.name : ts.isExpression(property) ? property : undefined;
+              const shape = value && expressionShape(value);
+              if (key && shape) entries.set(key, shape);
+            });
+            return entries.size ? entries : undefined;
+          }
+          if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+            const shape = expressionShape(expression.expression);
+            const key = ts.isPropertyAccessExpression(expression) ? expression.name.text :
+              expression.argumentExpression && (ts.isStringLiteral(expression.argumentExpression) || ts.isNumericLiteral(expression.argumentExpression)) ? expression.argumentExpression.text : undefined;
+            return shape === true ? undefined : key ? shape?.get(key) : undefined;
+          }
+          // Explicit local hooks retain source identity too; inspect their
+          // factory, without adding ownership/subscription hooks here.
+          if (ts.isCallExpression(expression) && ts.isIdentifier(expression.expression) &&
+              ['useStreamixLocal', 'useAtom'].includes(expression.expression.text)) {
+            const imported = sourceFile.statements.some(statement => ts.isImportDeclaration(statement) &&
+              ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text === '@epikodelabs/streamix/react' &&
+              statement.importClause?.namedBindings && ts.isNamedImports(statement.importClause.namedBindings) &&
+              statement.importClause.namedBindings.elements.some(element => element.name.text === (expression.expression as ts.Identifier).text));
+            const callback = expression.arguments[0];
+            if (imported && !scopeBinds(node, expression.expression.text) && !scopeBinds(functionBody, expression.expression.text) &&
+                !isShadowedName(expression.expression.text, expression.expression, node) &&
+                callback && ts.isArrowFunction(callback) && ts.isExpression(callback.body)) return expressionShape(callback.body);
+          }
+          return undefined;
+        };
+        const inspectNestedDeclarations = (child: ts.Node): void => {
+          const names = new Set<string>();
+          if (ts.isVariableDeclaration(child)) boundNames(child.name, names);
+          if (ts.isVariableDeclaration(child) && child.initializer && child.parent.parent.parent !== functionBody &&
+              [...names].some(name => declarationShape(child, name))) {
+            diagnostics.push(diagnostic(child, "error",
+              "A component-local reactive declaration or alias inside a nested block cannot be compiled safely. Move it to component scope or use an explicit React hook."));
+            return;
+          }
+          ts.forEachChild(child, inspectNestedDeclarations);
+        };
+        inspectNestedDeclarations(functionBody);
+      }
       /** Whether an assignment expression's result is consumed by its parent. */
       const assignmentValueUsed = (expression: ts.Expression): boolean => {
         let current: ts.Node = expression;
