@@ -153,13 +153,13 @@ describe("Streamix React adoption regressions", () => {
     expect(result.code).toContain("count.next(count.value >>> 1)");
     expect(result.code).toContain("count.next(count.value * 4)");
     expect(result.code).toContain("count.next(flag.value)");
-    // Short-circuit writes only assign when the operator's condition holds.
-    expect(result.code).toContain("const __streamixCurrent");
-    expect((result.code.match(/const __streamixCurrent/g) ?? []).length).toBe(3);
-    expect(result.code).toContain("if (__streamixCurrent");
-    expect(result.code).toContain("!__streamixCurrent");
-    expect(result.code).toContain("=== null ||");
-    expect(result.code).toContain("=== undefined");
+    // Short-circuit writes only assign when the operator's condition holds,
+    // and the conditional form keeps the right side in the enclosing scope so
+    // `await`/`yield` operands stay valid.
+    expect(result.code).toContain("count.value && (count.next(flag.value), count.value)");
+    expect(result.code).toContain("count.value || (count.next(guess.value), count.value)");
+    expect(result.code).toContain("count.value ?? (count.next(guess.value), count.value)");
+    expect(result.code).not.toContain("__streamixCurrent");
   });
 
   it("lowers explicit .value reads in JSX without producing a second .value", () => {

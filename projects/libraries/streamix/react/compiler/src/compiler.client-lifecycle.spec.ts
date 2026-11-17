@@ -13,7 +13,39 @@ type CompiledModule = {
   status?: Writable<string>;
   assignmentResult?: unknown;
   assignmentCalls?: number;
+  orValue?: Writable<number | null>;
+  andValue?: Writable<number | null>;
+  nullishValue?: Writable<number | null>;
+  rhsCalls?: number;
+  runOr?: (value: number) => Promise<number | null>;
+  runAnd?: (value: number) => Promise<number | null>;
+  runNullish?: (value: number) => Promise<number | null>;
+  yieldOr?: (initial: number) => Generator<number, number | null, number>;
+  yieldAnd?: (initial: number) => Generator<number, number | null, number>;
+  yieldNullish?: (initial: number) => Generator<number, number | null, number>;
 };
+
+const LOGICAL_ATOM_SOURCE = `
+  import { atom } from "@epikodelabs/streamix";
+  export let orValue = atom<number | null>(0);
+  export let andValue = atom<number | null>(2);
+  export let nullishValue = atom<number | null>(null);
+  export let rhsCalls = 0;
+  async function rhs(value: number) { rhsCalls++; await Promise.resolve(); return value; }
+  export async function runOr(value: number) { return orValue ||= await rhs(value); }
+  export async function runAnd(value: number) { return andValue &&= await rhs(value); }
+  export async function runNullish(value: number) { return nullishValue ??= await rhs(value); }
+  export function* yieldOr(initial: number) { return orValue ||= yield initial; }
+  export function* yieldAnd(initial: number) { return andValue &&= yield initial; }
+  export function* yieldNullish(initial: number) { return nullishValue ??= yield initial; }
+  export function App() { return <output>{String(orValue)}</output>; }
+`;
+
+function disposeLogicalAtoms(module: CompiledModule): void {
+  module.orValue!.dispose();
+  module.andValue!.dispose();
+  module.nullishValue!.dispose();
+}
 
 function compileGeneratedModule(
   source: string,
@@ -336,5 +368,84 @@ idescribe("React JSX compiler client lifecycle", () => {
     root = undefined;
     await flushMicrotasks();
     expect(created[0]._disposed).toBe(true);
+  });
+
+  it("keeps awaited logical assignments in the async context and preserves results", async () => {
+    const module = compileGeneratedModule(LOGICAL_ATOM_SOURCE);
+    const orValue = module.orValue!;
+    const andValue = module.andValue!;
+    const nullishValue = module.nullishValue!;
+    try {
+      // Falsy, truthy and nullish current values assign through the RHS.
+      expect(await module.runOr!(10)).toBe(10);
+      expect(orValue.value).toBe(10);
+      expect(await module.runAnd!(20)).toBe(20);
+      expect(andValue.value).toBe(20);
+      expect(await module.runNullish!(30)).toBe(30);
+      expect(nullishValue.value).toBe(30);
+      expect(module.rhsCalls).toBe(3);
+      // Writes keep the exported atom identity.
+      expect(module.orValue).toBe(orValue);
+      expect(orValue.disposed).toBe(false);
+
+      // Truthy and non-nullish values short-circuit before the awaited RHS.
+      expect(await module.runOr!(11)).toBe(10);
+      expect(await module.runNullish!(31)).toBe(30);
+      expect(module.rhsCalls).toBe(3);
+      // &&= assigns while the current value is truthy.
+      expect(await module.runAnd!(21)).toBe(21);
+      expect(module.rhsCalls).toBe(4);
+
+      // A falsy &&= operand skips the RHS and returns the current value.
+      andValue.next(0);
+      expect(await module.runAnd!(22)).toBe(0);
+      expect(module.rhsCalls).toBe(4);
+      // A falsy RHS is still written and returned by ||=.
+      orValue.next(0);
+      expect(await module.runOr!(0)).toBe(0);
+      expect(orValue.value).toBe(0);
+      expect(module.rhsCalls).toBe(5);
+    } finally {
+      disposeLogicalAtoms(module);
+    }
+  });
+
+  it("keeps yielded logical assignments in the generator context and preserves results", () => {
+    const module = compileGeneratedModule(LOGICAL_ATOM_SOURCE);
+    const orValue = module.orValue!;
+    const andValue = module.andValue!;
+    const nullishValue = module.nullishValue!;
+    try {
+      // ||= yields only while the current value is falsy.
+      orValue.next(0);
+      const or = module.yieldOr!(1);
+      expect(or.next()).toEqual({ value: 1, done: false });
+      expect(or.next(5)).toEqual({ value: 5, done: true });
+      expect(orValue.value).toBe(5);
+      expect(module.yieldOr!(2).next()).toEqual({ value: 5, done: true });
+
+      // &&= yields only while the current value is truthy.
+      andValue.next(3);
+      const and = module.yieldAnd!(3);
+      expect(and.next()).toEqual({ value: 3, done: false });
+      expect(and.next(9)).toEqual({ value: 9, done: true });
+      expect(andValue.value).toBe(9);
+      andValue.next(0);
+      expect(module.yieldAnd!(4).next()).toEqual({ value: 0, done: true });
+      expect(andValue.value).toBe(0);
+
+      // ??= yields only while the current value is nullish.
+      nullishValue.next(null);
+      const nullish = module.yieldNullish!(5);
+      expect(nullish.next()).toEqual({ value: 5, done: false });
+      expect(nullish.next(8)).toEqual({ value: 8, done: true });
+      expect(nullishValue.value).toBe(8);
+      nullishValue.next(0);
+      expect(module.yieldNullish!(6).next()).toEqual({ value: 0, done: true });
+      expect(nullishValue.value).toBe(0);
+      expect(module.orValue).toBe(orValue);
+    } finally {
+      disposeLogicalAtoms(module);
+    }
   });
 });

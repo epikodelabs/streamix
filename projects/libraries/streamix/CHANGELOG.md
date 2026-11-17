@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **React compiler:** lower logical atom assignments (`&&=`, `||=`, `??=`) to conditional expressions instead of generated synchronous arrows, so `await` and `yield` operands stay in their async/generator context; runtime coverage verifies laziness, results and atom identity (#233). Vue and Angular never synthesize an assignment wrapper, so they are unaffected.
+
 - **Builders:** React and Angular install the virtual `tsconfig.app.json` atomically as part of the generation transaction; a failure after the output swap now restores the last committed virtual tree byte for byte instead of serving the failed generation (#231). Vue has no post-swap filesystem write, so the equivalent defect does not exist there.
 
 - **React:** release abandoned render-owned instances and keep resource snapshot reads pure; verified Vue/Angular cleanup parity (#211).

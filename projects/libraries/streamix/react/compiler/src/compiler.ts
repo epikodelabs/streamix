@@ -838,7 +838,7 @@ export function transformReactJsx(
             : writeAtom(factory, factory.createIdentifier(atomName), nextValue);
         }
         if (isLogicalAssignment(node.operatorToken.kind)) {
-          return writeLogicalAtom(factory, atomName, node.operatorToken.kind, right, isJavaScript);
+          return writeLogicalAtom(factory, atomName, node.operatorToken.kind, right);
         }
         // The operator table and the write-operator predicate disagree;
         // leaving the statement unrewritten would write the atom object itself.
@@ -2254,62 +2254,31 @@ function isLogicalAssignment(kind: ts.SyntaxKind): boolean {
 
 /**
  * Lowers `atom &&= right`, `atom ||= right`, and `atom ??= right` while
- * preserving JavaScript's short-circuit and result semantics: the atom only
- * emits when the operator's condition assigns, and the expression evaluates to
- * the atom's value afterwards.
+ * preserving JavaScript's short-circuit and result semantics: the right side
+ * runs only when the operator's condition assigns, and the expression evaluates
+ * to the atom's value afterwards. The conditional form keeps the right side in
+ * the enclosing expression; a generated synchronous arrow would make `await`
+ * and `yield` invalid in async and generator functions.
  */
 function writeLogicalAtom(
   factory: ts.NodeFactory,
   atomName: string,
   kind: ts.SyntaxKind,
   right: ts.Expression,
-  isJavaScript: boolean,
-): ts.CallExpression {
+): ts.BinaryExpression {
   const atom = factory.createIdentifier(atomName);
-  const current = factory.createUniqueName("__streamixCurrent");
-  const condition = kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken
-    ? current as ts.Expression
+  const value = () => factory.createPropertyAccessExpression(factory.createIdentifier(atomName), "value");
+  const operator = kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken
+    ? ts.SyntaxKind.AmpersandAmpersandToken
     : kind === ts.SyntaxKind.BarBarEqualsToken
-      ? factory.createPrefixUnaryExpression(ts.SyntaxKind.ExclamationToken, current as ts.Expression)
-      : factory.createBinaryExpression(
-          factory.createBinaryExpression(
-            factory.createParenthesizedExpression(isJavaScript ? current : factory.createAsExpression(current, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword))),
-            factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
-            factory.createNull(),
-          ),
-          factory.createToken(ts.SyntaxKind.BarBarToken),
-          factory.createBinaryExpression(
-            factory.createParenthesizedExpression(isJavaScript ? current : factory.createAsExpression(current, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword))),
-            factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
-            factory.createIdentifier("undefined"),
-          ),
-        );
-  return factory.createCallExpression(
-    factory.createParenthesizedExpression(factory.createArrowFunction(
-      undefined,
-      undefined,
-      [],
-      undefined,
-      factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-      factory.createBlock([
-        factory.createVariableStatement(undefined, factory.createVariableDeclarationList([
-          factory.createVariableDeclaration(current, undefined, undefined, factory.createPropertyAccessExpression(atom, "value")),
-        ], ts.NodeFlags.Const)),
-        factory.createIfStatement(
-          condition,
-          factory.createBlock([
-            factory.createExpressionStatement(writeAtom(factory, atom, right)),
-            factory.createReturnStatement(factory.createPropertyAccessExpression(atom, "value")),
-          ]),
-          factory.createBlock([
-            factory.createReturnStatement(current as ts.Expression),
-          ]),
-        ),
-      ], true),
-    )),
-    undefined,
-    [],
-  );
+      ? ts.SyntaxKind.BarBarToken
+      : ts.SyntaxKind.QuestionQuestionToken;
+  const write = factory.createParenthesizedExpression(factory.createBinaryExpression(
+    writeAtom(factory, atom, right),
+    factory.createToken(ts.SyntaxKind.CommaToken),
+    value(),
+  ));
+  return factory.createBinaryExpression(value(), factory.createToken(operator), write);
 }
 
 function rewriteAtomReads(
