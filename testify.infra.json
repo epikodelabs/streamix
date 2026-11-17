@@ -14,6 +14,7 @@
     "./projects/libraries/streamix/vue/editor/src"
   ],
   "testDirs": [
+    "./projects/libraries/streamix/compiler/src",
     "./projects/libraries/streamix/angular/builder/src",
     "./projects/libraries/streamix/angular/src/tests/ssr",
     "./projects/libraries/streamix/react/builder/src",

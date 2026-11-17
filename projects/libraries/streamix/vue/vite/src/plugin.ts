@@ -2,7 +2,12 @@ import type { Plugin } from 'vite';
 import { basename, dirname } from 'node:path';
 import ts from 'typescript';
 import { parse as parseSfc } from '@vue/compiler-sfc';
-import { injectIntrospectionActivation, instrumentStreamixSource } from '@epikodelabs/streamix/compiler';
+import {
+  createStreamixProgram,
+  findStreamixProgramConfig,
+  injectIntrospectionActivation,
+  instrumentStreamixSource,
+} from '@epikodelabs/streamix/compiler';
 import {
   transformVueSfc,
   formatVueSfcDiagnostics,
@@ -24,79 +29,18 @@ const ENTRY_NAMES = ['main.tsx', 'main.jsx', 'main.ts', 'main.js', 'index.tsx', 
 
 /**
  * Semantic program over the authored tree, with one virtual `<name>.vue.ts`
- * overlay per instrumented SFC script. Cached per tsconfig; rebuilt when the
- * overlay text changes (HMR edits are in-memory, not on disk).
+ * overlay per instrumented SFC script. Solution-style configs (`files: []` +
+ * references) fall back to the Vite workspace config.
  */
 function instrumentProgram(
   fileName: string,
   source: string,
   virtualScripts: ReadonlyMap<string, string>,
 ): ts.Program {
-  const parseConfig = (configPath: string | undefined) => {
-    const rawConfig = configPath ? (ts.readConfigFile(configPath, ts.sys.readFile).config ?? {}) : {};
-    return configPath
-      ? ts.parseJsonConfigFileContent(
-          { ...rawConfig, compilerOptions: { ...(rawConfig.compilerOptions ?? {}), allowJs: true } },
-          ts.sys, dirname(configPath), { jsx: ts.JsxEmit.Preserve }, configPath,
-        )
-      : { fileNames: [] as string[], options: {
-          jsx: ts.JsxEmit.Preserve, module: ts.ModuleKind.ESNext,
-          moduleResolution: ts.ModuleResolutionKind.Bundler,
-        } as ts.CompilerOptions };
-  };
-  let configPath = ts.findConfigFile(dirname(fileName), ts.sys.fileExists, 'tsconfig.json');
-  let parsed = parseConfig(configPath);
-  // Solution-style configs (`files: []` + references) give the checker no
-  // roots; fall back to the Vite workspace config before instrumenting.
-  if (parsed.fileNames.length === 0) {
-    const fallback = ts.findConfigFile(process.cwd(), ts.sys.fileExists, 'tsconfig.json');
-    if (fallback && fallback !== configPath) {
-      const fallbackParsed = parseConfig(fallback);
-      if (fallbackParsed.fileNames.length > 0) {
-        configPath = fallback;
-        parsed = fallbackParsed;
-      }
-    }
-  }
+  const config = findStreamixProgramConfig(dirname(fileName), process.cwd());
   const overlays = new Map(virtualScripts);
   overlays.set(fileName, source);
-  const rootNames = [...new Set([...parsed.fileNames, ...overlays.keys()])];
-  const host = ts.createCompilerHost({ ...parsed.options, allowJs: true });
-  const getSourceFile = host.getSourceFile.bind(host);
-  const readFile = host.readFile?.bind(host);
-  const fileExists = host.fileExists.bind(host);
-  // Overlay keys come from join()-free ids with platform separators while the
-  // program canonicalizes host paths; overlays are few, so match normalized.
-  const overlayFor = (name: string): string | undefined => {
-    const direct = overlays.get(name);
-    if (direct !== undefined) return direct;
-    const wanted = name.replace(/\\/g, '/').toLowerCase();
-    for (const [key, value] of overlays) {
-      if (key.replace(/\\/g, '/').toLowerCase() === wanted) return value;
-    }
-    return undefined;
-  };
-  const scriptKindFor = (name: string): ts.ScriptKind => {
-    if (/\.tsx$/i.test(name)) return ts.ScriptKind.TSX;
-    if (/\.jsx$/i.test(name)) return ts.ScriptKind.JSX;
-    if (/\.js$/i.test(name)) return ts.ScriptKind.JS;
-    return ts.ScriptKind.TS;
-  };
-  const overlaySources = new Map<string, ts.SourceFile>();
-  host.getSourceFile = (name, languageVersion, onError, shouldCreateNewSourceFile) => {
-    const text = overlayFor(name);
-    if (text === undefined) return getSourceFile(name, languageVersion, onError, shouldCreateNewSourceFile);
-    const key = name.replace(/\\/g, '/').toLowerCase();
-    let source = overlaySources.get(key);
-    if (!source) {
-      source = ts.createSourceFile(name, text, languageVersion, true, scriptKindFor(name));
-      overlaySources.set(key, source);
-    }
-    return source;
-  };
-  host.readFile = name => overlayFor(name) ?? readFile?.(name);
-  host.fileExists = name => overlayFor(name) !== undefined || fileExists(name);
-  return ts.createProgram({ rootNames, options: { ...parsed.options, allowJs: true }, host });
+  return createStreamixProgram(config, overlays);
 }
 
 /**

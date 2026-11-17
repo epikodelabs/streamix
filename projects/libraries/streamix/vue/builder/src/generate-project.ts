@@ -3,7 +3,12 @@ import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from 'n
 import { randomUUID } from 'node:crypto';
 import ts from 'typescript';
 import { parse as parseSfc } from '@vue/compiler-sfc';
-import { injectIntrospectionActivation, instrumentStreamixSource } from '@epikodelabs/streamix/compiler';
+import {
+  createStreamixProgram,
+  findStreamixProgramConfig,
+  injectIntrospectionActivation,
+  instrumentStreamixSource,
+} from '@epikodelabs/streamix/compiler';
 import {
   formatVueSfcDiagnostics,
   transformVueSfc,
@@ -124,66 +129,13 @@ async function stripLegacySidecars(root: string): Promise<void> {
   }
 }
 
-/** Semantic program over the authored tree; overlays replace real files and add virtual script modules. */
+/** Semantic program over the authored tree; overlays replace real files and
+ * add virtual script modules. Solution-style app tsconfigs (`files: []` +
+ * references) give the checker no roots; the shared resolver falls back to
+ * the workspace config. */
 function createSourceProgram(workspaceRoot: string, sourceRoot: string, overlays = new Map<string, string>()): ts.Program {
-  const source = resolve(workspaceRoot, sourceRoot);
-  const sourceConfigPath = ts.findConfigFile(source, ts.sys.fileExists, 'tsconfig.json');
-  const workspaceConfigPath = ts.findConfigFile(workspaceRoot, ts.sys.fileExists, 'tsconfig.json');
-  const parseConfig = (configPath: string | undefined) => {
-    const rawConfig = configPath ? (ts.readConfigFile(configPath, ts.sys.readFile).config ?? {}) : {};
-    return configPath
-      ? ts.parseJsonConfigFileContent(
-          { ...rawConfig, compilerOptions: { ...(rawConfig.compilerOptions ?? {}), allowJs: true } },
-          ts.sys, dirname(configPath), { jsx: ts.JsxEmit.Preserve }, configPath,
-        )
-      : { fileNames: [] as string[], options: {
-          jsx: ts.JsxEmit.Preserve, module: ts.ModuleKind.ESNext,
-          moduleResolution: ts.ModuleResolutionKind.Bundler,
-        } as ts.CompilerOptions };
-  };
-  // Solution-style app tsconfigs (`files: []` + references) give the checker
-  // no roots; instrumentation then queries unloaded nodes and can crash
-  // TypeScript. Use the workspace program instead.
-  let parsed = parseConfig(sourceConfigPath);
-  if (parsed.fileNames.length === 0 && workspaceConfigPath && workspaceConfigPath !== sourceConfigPath) {
-    parsed = parseConfig(workspaceConfigPath);
-  }
-  const rootNames = [...new Set([...parsed.fileNames, ...overlays.keys()])];
-  // Overlay keys come from join() and keep platform separators, while the
-  // program canonicalizes host paths to forward slashes (and Windows drive
-  // casing varies). Index normalized paths once for the whole batch.
-  const normalizedOverlays = new Map([...overlays].map(([path, text]) => [path.replace(/\\/g, '/').toLowerCase(), text]));
-  const overlayFor = (fileName: string): string | undefined =>
-    normalizedOverlays.get(fileName.replace(/\\/g, '/').toLowerCase());
-  const host = ts.createCompilerHost({ ...parsed.options, allowJs: true });
-  const getSourceFile = host.getSourceFile.bind(host);
-  const readFile = host.readFile?.bind(host);
-  const fileExists = host.fileExists.bind(host);
-  // TypeScript may ask for the same file more than once. Returning a fresh
-  // SourceFile each time splits nodes and symbols across instances and
-  // corrupts the checker during instrumentation.
-  const overlaySources = new Map<string, ts.SourceFile>();
-  host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
-    const text = overlayFor(fileName);
-    if (text === undefined) return getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
-    const key = fileName.replace(/\\/g, '/').toLowerCase();
-    let source = overlaySources.get(key);
-    if (!source) {
-      source = ts.createSourceFile(fileName, text, languageVersion, true, scriptKindFor(fileName));
-      overlaySources.set(key, source);
-    }
-    return source;
-  };
-  host.readFile = fileName => overlayFor(fileName) ?? readFile?.(fileName);
-  host.fileExists = fileName => overlayFor(fileName) !== undefined || fileExists(fileName);
-  return ts.createProgram({ rootNames, options: { ...parsed.options, allowJs: true }, host });
-}
-
-function scriptKindFor(fileName: string): ts.ScriptKind {
-  if (/\.tsx$/i.test(fileName)) return ts.ScriptKind.TSX;
-  if (/\.jsx$/i.test(fileName)) return ts.ScriptKind.JSX;
-  if (/\.js$/i.test(fileName)) return ts.ScriptKind.JS;
-  return ts.ScriptKind.TS;
+  const config = findStreamixProgramConfig(resolve(workspaceRoot, sourceRoot), workspaceRoot);
+  return createStreamixProgram(config, overlays);
 }
 
 /**
