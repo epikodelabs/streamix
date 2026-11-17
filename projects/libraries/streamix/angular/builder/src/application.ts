@@ -4,7 +4,7 @@ import { watch, type FSWatcher } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 
-import { generateProject, regenerateAngularFile } from './generate-project';
+import { generateProject, regenerateAngularFiles } from './generate-project';
 import {
   buildDelegateOptions,
   resolveSourceRoot,
@@ -251,14 +251,14 @@ const applicationBuilder = createBuilder(async function* (options, context) {
     stopLibraries = watchLibraries(context.workspaceRoot, sourceRoot, () => {
       rebuildQueue = rebuildQueue.then(async () => {
         if (!stopped) await refreshApplication(context.workspaceRoot, sourceRoot,
-          (workspace, root, file) => regenerateAngularFile(workspace, root, file, introspection));
+          (workspace, root, files) => regenerateAngularFiles(workspace, root, files, introspection));
       }).catch(error => context.logger.warn(`Streamix library update failed: ${String(error)}`));
     }, message => context.logger.warn(message));
     stopWatcher = startSourceWatcher(context, sourceRoot, paths => {
       rebuildQueue = rebuildQueue.then(async () => {
         if (stopped) return;
         if (paths && !paths.some(path => path.endsWith('.html'))) {
-          for (const path of paths) await regenerateAngularFile(context.workspaceRoot, sourceRoot, path, introspection);
+          await regenerateAngularFiles(context.workspaceRoot, sourceRoot, paths, introspection);
         } else {
           await generateProject({ sourceRoot, introspection, workspaceRoot: context.workspaceRoot });
         }

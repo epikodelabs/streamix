@@ -32,13 +32,17 @@ for (const [name, builder] of Object.entries({ angular, react, vue })) {
     });
 
     it('refreshes authored modules in place when a library changes', async () => {
+      await writeFile(join(root, sourceRoot, 'secondary.ts'), "export { value } from '@shared';");
+      await writeFile(join(root, sourceRoot, 'ignored.spec.ts'), '');
       const refreshed: string[] = [];
+      let batches = 0;
       let changed!: () => void;
       const change = new Promise<void>(resolve => { changed = resolve; });
       const warnings: string[] = [];
       stop = builder.watchLibraries(root, sourceRoot, () => {
-        void builder.refreshApplication(root, sourceRoot, async (_root, _source, file) => {
-          refreshed.push(file);
+        void builder.refreshApplication(root, sourceRoot, async (_root, _source, files) => {
+          batches += 1;
+          refreshed.push(...files);
         }).then(changed);
       }, message => warnings.push(message));
       await writeFile(join(root, 'libs/shared/src/index.ts'), 'export const value = 2;');
@@ -48,7 +52,8 @@ for (const [name, builder] of Object.entries({ angular, react, vue })) {
           timeout = setTimeout(() => reject(new Error('Library edit did not trigger regeneration')), 4000);
         })]);
       } finally { clearTimeout(timeout); }
-      expect(refreshed).toEqual(['main.ts']);
+      expect(batches).toBe(1);
+      expect(refreshed.sort()).toEqual(['main.ts', 'secondary.ts']);
       expect(warnings).toEqual([]);
     });
 

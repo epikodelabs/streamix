@@ -221,8 +221,40 @@ async function collectAdoptableFiles(directory: string): Promise<string[]> {
   return files;
 }
 
-/** Synchronize an original source change into the delegated virtual project. */
+/** One semantic graph per phase and refresh; never retained across saves. */
+export async function regenerateReactFiles(workspaceRoot: string, sourceRoot: string, changedPaths: readonly string[], introspection = false): Promise<void> {
+  const source = validatedSourceDirectory(workspaceRoot, sourceRoot);
+  const overlays = new Map<string, string>();
+  for (const changedPath of changedPaths) {
+    const path = changedPath.replace(/\\/g, '/');
+    if (!path || isAbsolute(path) || win32.isAbsolute(path) || path.split(/[\\/]/).some(part => part === '..' || part === '.')) continue;
+    if (!/\.[jt]sx?$/i.test(path) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(path)) continue;
+    const origin = join(source, path);
+    try { overlays.set(origin, await readFile(origin, 'utf8')); }
+    catch (error) { if (!['ENOENT', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+  }
+  const results = new Map<string, ReturnType<typeof transformReactJsx>>();
+  if (overlays.size) {
+    const program = createSourceProgram(workspaceRoot, sourceRoot, overlays);
+    for (const [origin, content] of overlays) {
+      const transformed = transformReactJsx(content, origin, { program });
+      const errors = transformed.diagnostics.filter(item => item.category === 'error');
+      if (errors.length) throw new Error(formatReactJsxDiagnostics(content, origin, errors));
+      results.set(origin, transformed);
+    }
+  }
+  const registrationProgram = introspection && results.size
+    ? createSourceProgram(workspaceRoot, sourceRoot, new Map([...results].map(([path, result]) => [path, result.code])))
+    : undefined;
+  for (const path of changedPaths) await regenerateReactFileInternal(workspaceRoot, sourceRoot, path, introspection, { results, registrationProgram, overlays });
+}
+
 export async function regenerateReactFile(workspaceRoot: string, sourceRoot: string, changedPath: string, introspection = false): Promise<void> {
+  await regenerateReactFiles(workspaceRoot, sourceRoot, [changedPath], introspection);
+}
+
+/** Synchronize an original source change into the delegated virtual project. */
+async function regenerateReactFileInternal(workspaceRoot: string, sourceRoot: string, changedPath: string, introspection: boolean, batch: { results: Map<string, ReturnType<typeof transformReactJsx>>; registrationProgram?: ts.Program; overlays: Map<string, string> }): Promise<void> {
   const originalRoot = validatedSourceDirectory(workspaceRoot, sourceRoot);
   const destRoot = join(workspaceRoot, ".angular", ".streamix", virtualRootOf(sourceRoot));
   const normalized = changedPath.replace(/\\/g, "/");
@@ -230,8 +262,7 @@ export async function regenerateReactFile(workspaceRoot: string, sourceRoot: str
       normalized.split("/").some(part => part === ".." || part === ".")) return;
   const origin = join(originalRoot, normalized);
   const destination = join(destRoot, normalized);
-  let content: string;
-  try { content = await readFile(origin, "utf8"); }
+  try { if (!batch.overlays.has(origin)) await readFile(origin); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EISDIR") return;
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -241,18 +272,14 @@ export async function regenerateReactFile(workspaceRoot: string, sourceRoot: str
   }
   await mkdir(dirname(destination), { recursive: true });
   if (/\.[jt]sx?$/i.test(normalized) && !/\.(?:d|spec|test)\.[jt]sx?$/i.test(normalized)) {
-    // The watcher can invoke us before an editor has flushed the buffer to
-    // disk. Give semantic analysis the exact text being transformed instead
-    // of silently checking an older SourceFile from disk.
-    const program = createSourceProgram(workspaceRoot, sourceRoot, new Map([[origin, content]]));
-    const transformed = transformReactJsx(content, origin, { program });
-    const errors = transformed.diagnostics.filter(item => item.category === "error");
-    if (errors.length) throw new Error(formatReactJsxDiagnostics(content, origin, errors));
+    // Adoption and registration use the same authored snapshot for this batch.
+    const transformed = batch.results.get(origin);
+    if (!transformed) return; // A newly appearing file is handled by its next watch event.
     // Registration after adoption (see generateReactProject): the transformed
     // text is what the browser runs, so its positions are the honest metadata.
     let code = transformed.code;
     if (introspection) {
-      const registrationProgram = createSourceProgram(workspaceRoot, sourceRoot, new Map([[origin, code]]));
+      const registrationProgram = batch.registrationProgram!;
       const sourceFile = registrationProgram.getSourceFile(origin) ?? ts.createSourceFile(origin, code, ts.ScriptTarget.Latest, true);
       code = instrumentStreamixSource({ file: sourceFile, checker: registrationProgram.getTypeChecker(),
         sourcePath: relative(workspaceRoot, origin), enabled: true });
@@ -298,16 +325,10 @@ function createSourceProgram(
   }
   // Overlay keys come from join() and keep platform separators, while the
   // program canonicalizes host paths to forward slashes (and Windows drive
-  // casing varies). Overlays are tiny: match on normalized forms.
-  const overlayFor = (fileName: string): string | undefined => {
-    const direct = overlays.get(fileName);
-    if (direct !== undefined) return direct;
-    const wanted = fileName.replace(/\\/g, '/').toLowerCase();
-    for (const [key, value] of overlays) {
-      if (key.replace(/\\/g, '/').toLowerCase() === wanted) return value;
-    }
-    return undefined;
-  };
+  // casing varies). Index normalized paths once for the whole batch.
+  const normalizedOverlays = new Map([...overlays].map(([path, text]) => [path.replace(/\\/g, '/').toLowerCase(), text]));
+  const overlayFor = (fileName: string): string | undefined =>
+    normalizedOverlays.get(fileName.replace(/\\/g, '/').toLowerCase());
   const host = ts.createCompilerHost({ ...parsed.options, allowJs: true });
   const getSourceFile = host.getSourceFile.bind(host);
   const readFile = host.readFile?.bind(host);
@@ -330,7 +351,7 @@ function createSourceProgram(
   };
   host.readFile = fileName => overlayFor(fileName) ?? readFile?.(fileName);
   host.fileExists = fileName => overlayFor(fileName) !== undefined || fileExists(fileName);
-  return ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, allowJs: true }, host });
+  return ts.createProgram({ rootNames: [...new Set([...parsed.fileNames, ...overlays.keys()])], options: { ...parsed.options, allowJs: true }, host });
 }
 
 function scriptKindFor(fileName: string): ts.ScriptKind {

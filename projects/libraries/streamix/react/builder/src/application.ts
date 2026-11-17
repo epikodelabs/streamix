@@ -1,7 +1,7 @@
 import { refreshApplication, watchLibraries } from "./watch-libraries";
 import { createBuilder, type BuilderOutput, type Target } from "@angular-devkit/architect";
 import { Observable } from "rxjs";
-import { generateReactProject, regenerateReactFile } from "./generate-project";
+import { generateReactProject, regenerateReactFiles } from "./generate-project";
 import { watch, type FSWatcher } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
@@ -137,14 +137,14 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
         stopLibraries = watchLibraries(context.workspaceRoot, sourceRoot, () => {
           rebuildQueue = rebuildQueue.then(async () => {
             if (!stopped) await refreshApplication(context.workspaceRoot, sourceRoot,
-              (workspace, root, file) => regenerateReactFile(workspace, root, file, introspection));
+              (workspace, root, files) => regenerateReactFiles(workspace, root, files, introspection));
           }).catch(error => context.logger.warn(`Streamix library update failed: ${String(error)}`));
         }, message => context.logger.warn(message));
         stopWatcher = startSourceWatcher(context, sourceRoot, paths => {
           rebuildQueue = rebuildQueue.then(async () => {
             if (stopped) return;
             if (paths) {
-              for (const path of paths) await regenerateReactFile(context.workspaceRoot, sourceRoot, path, introspection);
+              await regenerateReactFiles(context.workspaceRoot, sourceRoot, paths, introspection);
             } else {
               await generateReactProject(context.workspaceRoot, sourceRoot, introspection);
             }

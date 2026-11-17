@@ -4,7 +4,7 @@ import { watch, type FSWatcher } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { Observable } from 'rxjs';
-import { generateVueProject, regenerateVueFile } from './generate-project';
+import { generateVueProject, regenerateVueFiles } from './generate-project';
 
 interface ObservableLike<T> {
   subscribe(observer: {
@@ -146,14 +146,14 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
         stopLibraries = watchLibraries(context.workspaceRoot, sourceRoot, () => {
           rebuildQueue = rebuildQueue.then(async () => {
             if (!stopped) await refreshApplication(context.workspaceRoot, sourceRoot,
-              (workspace, root, file) => regenerateVueFile(workspace, root, file, introspection));
+              (workspace, root, files) => regenerateVueFiles(workspace, root, files, introspection));
           }).catch(error => context.logger.warn(`Streamix library update failed: ${String(error)}`));
         }, message => context.logger.warn(message));
         stopWatcher = startSourceWatcher(context, sourceRoot, paths => {
           rebuildQueue = rebuildQueue.then(async () => {
             if (stopped) return;
             if (paths) {
-              for (const path of paths) await regenerateVueFile(context.workspaceRoot, sourceRoot, path, introspection);
+              await regenerateVueFiles(context.workspaceRoot, sourceRoot, paths, introspection);
             } else {
               await generateVueProject(context.workspaceRoot, sourceRoot, introspection);
             }

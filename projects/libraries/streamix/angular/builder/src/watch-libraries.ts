@@ -91,11 +91,10 @@ export function watchLibraries(
 export async function refreshApplication(
   workspaceRoot: string,
   sourceRoot: string,
-  regenerate: (workspace: string, source: string, file: string) => Promise<void>,
+  regenerate: (workspace: string, source: string, files: string[]) => Promise<void>,
 ): Promise<void> {
   const root = resolve(workspaceRoot, sourceRoot);
-  for (const file of ts.sys.readDirectory(root, ['.ts', '.tsx', '.js', '.jsx', '.vue'],
-    ['**/*.spec.*', '**/*.test.*', '**/*.d.ts', '**/node_modules/**'])) {
-    await regenerate(workspaceRoot, sourceRoot, relative(root, file));
-  }
+  const files = ts.sys.readDirectory(root, ['.ts', '.tsx', '.js', '.jsx', '.vue'],
+    ['**/*.spec.*', '**/*.test.*', '**/*.d.ts', '**/node_modules/**']);
+  await regenerate(workspaceRoot, sourceRoot, files.map(file => relative(root, file)));
 }

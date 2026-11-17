@@ -543,15 +543,9 @@ function createOverlayProgram(
   const getSourceFile = host.getSourceFile.bind(host);
   const readFile = host.readFile?.bind(host);
   const fileExists = host.fileExists.bind(host);
-  const overlayFor = (fileName: string): string | undefined => {
-    const direct = overlays.get(fileName);
-    if (direct !== undefined) return direct;
-    const wanted = fileName.replace(/\\/g, '/').toLowerCase();
-    for (const [key, value] of overlays) {
-      if (key.replace(/\\/g, '/').toLowerCase() === wanted) return value;
-    }
-    return undefined;
-  };
+  const normalizedOverlays = new Map([...overlays].map(([path, text]) => [path.replace(/\\/g, '/').toLowerCase(), text]));
+  const overlayFor = (fileName: string): string | undefined =>
+    normalizedOverlays.get(fileName.replace(/\\/g, '/').toLowerCase());
   const overlaySources = new Map<string, ts.SourceFile>();
   host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
     const text = overlayFor(fileName);
@@ -569,8 +563,28 @@ function createOverlayProgram(
   return ts.createProgram({ rootNames: [...rootNames], options, host });
 }
 
-/** Synchronize an authored source change into the delegated virtual project. */
+/** A fresh semantic graph is shared by all files in this watch batch. */
+export async function regenerateAngularFiles(workspaceRoot: string, sourceRoot: string, changedPaths: readonly string[], introspection = false): Promise<void> {
+  const sourceDirectory = resolve(workspaceRoot, resolveSourceRoot({ sourceRoot }));
+  const overlays = new Map<string, string>();
+  for (const changedPath of changedPaths) {
+    const path = changedPath.replace(/\\/g, '/');
+    if (!path || isAbsolute(path) || win32.isAbsolute(path) || path.split(/[\\/]/).some(part => part === '..' || part === '.')) continue;
+    if (!/\.[jt]sx?$/i.test(path) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(path)) continue;
+    try { overlays.set(join(sourceDirectory, path), await readFile(join(sourceDirectory, path), 'utf8')); }
+    catch (error) { if (!['ENOENT', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+  }
+  let program: Promise<ts.Program> | undefined;
+  const semanticProgram = (create: () => Promise<ts.Program>): Promise<ts.Program> => program ??= create();
+  for (const path of changedPaths) await regenerateAngularFileInternal(workspaceRoot, sourceRoot, path, introspection, semanticProgram, overlays);
+}
+
 export async function regenerateAngularFile(workspaceRoot: string, sourceRoot: string, changedPath: string, introspection = false): Promise<void> {
+  await regenerateAngularFiles(workspaceRoot, sourceRoot, [changedPath], introspection);
+}
+
+/** Synchronize an authored source change into the delegated virtual project. */
+async function regenerateAngularFileInternal(workspaceRoot: string, sourceRoot: string, changedPath: string, introspection: boolean, semanticProgram: (create: () => Promise<ts.Program>) => Promise<ts.Program>, overlays: Map<string, string>): Promise<void> {
   const validatedRoot = resolveSourceRoot({ sourceRoot });
   const sourceDirectory = resolve(workspaceRoot, validatedRoot);
   const outputDirectory = resolve(workspaceRoot, virtualRootOf(validatedRoot));
@@ -581,7 +595,7 @@ export async function regenerateAngularFile(workspaceRoot: string, sourceRoot: s
   const destination = join(outputDirectory, normalized);
   let authored: string;
   try {
-    authored = await readFile(origin, 'utf8');
+    authored = overlays.get(origin) ?? await readFile(origin, 'utf8');
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'EISDIR') return;
@@ -603,27 +617,29 @@ export async function regenerateAngularFile(workspaceRoot: string, sourceRoot: s
     return;
   }
 
-  const tsconfigPath = resolve(sourceDirectory, '..', 'tsconfig.app.json');
-  const tsconfig = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
-  if (tsconfig.error) {
-    throw new Error(`Streamix Angular builder could not read ${tsconfigPath}: ` +
-      ts.flattenDiagnosticMessageText(tsconfig.error.messageText, '\n'));
-  }
-  const parsedConfig = ts.parseJsonConfigFileContent(
-    tsconfig.config, ts.sys, dirname(tsconfigPath), undefined, tsconfigPath,
-  );
-  if (parsedConfig.errors.length) {
-    throw new Error(`Streamix Angular builder cannot use ${tsconfigPath}:\n` +
-      ts.formatDiagnosticsWithColorAndContext(parsedConfig.errors, {
-        getCanonicalFileName: path => path, getCurrentDirectory: () => workspaceRoot,
-        getNewLine: () => '\n',
-      }));
-  }
-  const programRoots = [...new Set([
-    ...parsedConfig.fileNames,
-    ...(introspection ? await listFiles(sourceDirectory, false) : []),
-  ])];
-  const program = createOverlayProgram(programRoots, parsedConfig.options, new Map([[origin, authored]]));
+  const program = await semanticProgram(async () => {
+    const tsconfigPath = resolve(sourceDirectory, '..', 'tsconfig.app.json');
+    const tsconfig = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+    if (tsconfig.error) {
+      throw new Error(`Streamix Angular builder could not read ${tsconfigPath}: ` +
+        ts.flattenDiagnosticMessageText(tsconfig.error.messageText, '\n'));
+    }
+    const parsedConfig = ts.parseJsonConfigFileContent(
+      tsconfig.config, ts.sys, dirname(tsconfigPath), undefined, tsconfigPath,
+    );
+    if (parsedConfig.errors.length) {
+      throw new Error(`Streamix Angular builder cannot use ${tsconfigPath}:\n` +
+        ts.formatDiagnosticsWithColorAndContext(parsedConfig.errors, {
+          getCanonicalFileName: path => path, getCurrentDirectory: () => workspaceRoot,
+          getNewLine: () => '\n',
+        }));
+    }
+    const programRoots = [...new Set([
+      ...parsedConfig.fileNames,
+      ...(introspection ? await listFiles(sourceDirectory, false) : []),
+    ])];
+    return createOverlayProgram([...new Set([...programRoots, ...overlays.keys()])], parsedConfig.options, overlays);
+  });
   const checker = program.getTypeChecker();
   const compiled = await compileVirtualSource({
     workspaceRoot, sourceDirectory, sourcePath: origin, authored, program, checker, introspection,

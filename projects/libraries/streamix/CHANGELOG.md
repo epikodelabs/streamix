@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Builders:** share semantic programs across watch refreshes in React, Vue and Angular (#205).
+
 - **Compiler parity:** resolve hoisted `var` and class shadows in React/Vue without hiding genuine atom reads; verified Angular symbol resolution (#165).
 - **React compiler:** reject implicit class-component atom writes and preserve explicit source methods; verified Vue/Angular handler-write parity (#200).
 - **React compiler:** adopt cast-wrapped reactive initializers and preserve switch-local shadowing (#105).

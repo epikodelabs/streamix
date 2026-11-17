@@ -151,16 +151,10 @@ function createSourceProgram(workspaceRoot: string, sourceRoot: string, overlays
   const rootNames = [...new Set([...parsed.fileNames, ...overlays.keys()])];
   // Overlay keys come from join() and keep platform separators, while the
   // program canonicalizes host paths to forward slashes (and Windows drive
-  // casing varies). Overlays are tiny: match on normalized forms.
-  const overlayFor = (fileName: string): string | undefined => {
-    const direct = overlays.get(fileName);
-    if (direct !== undefined) return direct;
-    const wanted = fileName.replace(/\\/g, '/').toLowerCase();
-    for (const [key, value] of overlays) {
-      if (key.replace(/\\/g, '/').toLowerCase() === wanted) return value;
-    }
-    return undefined;
-  };
+  // casing varies). Index normalized paths once for the whole batch.
+  const normalizedOverlays = new Map([...overlays].map(([path, text]) => [path.replace(/\\/g, '/').toLowerCase(), text]));
+  const overlayFor = (fileName: string): string | undefined =>
+    normalizedOverlays.get(fileName.replace(/\\/g, '/').toLowerCase());
   const host = ts.createCompilerHost({ ...parsed.options, allowJs: true });
   const getSourceFile = host.getSourceFile.bind(host);
   const readFile = host.readFile?.bind(host);
@@ -237,12 +231,12 @@ async function instrumentVueTree(workspaceRoot: string, source: string, staging:
 }
 
 /** Single-file variant for watch regeneration of one SFC. */
-async function instrumentVueFileText(workspaceRoot: string, sourceRoot: string, origin: string, text: string): Promise<string> {
+async function instrumentVueFileText(workspaceRoot: string, sourceRoot: string, origin: string, text: string, sharedProgram?: ts.Program): Promise<string> {
   const parsed = parseSfc(text, { filename: origin });
   const script = parsed.descriptor.scriptSetup ?? parsed.descriptor.script;
   if (!script) return text;
   const virtualName = origin.replace(/\.vue$/i, '.vue.ts');
-  const program = createSourceProgram(workspaceRoot, sourceRoot, new Map([[virtualName, script.content]]));
+  const program = sharedProgram ?? createSourceProgram(workspaceRoot, sourceRoot, new Map([[virtualName, script.content]]));
   const sourceFile = program.getSourceFile(virtualName);
   if (!sourceFile) return text;
   const instrumented = instrumentStreamixSource({ file: sourceFile, checker: program.getTypeChecker(),
@@ -264,12 +258,43 @@ async function collectScriptFiles(directory: string): Promise<string[]> {
   return files;
 }
 
+/** Share one introspection graph across every script in a watch batch. */
+export async function regenerateVueFiles(workspaceRoot: string, sourceRoot: string, changedPaths: readonly string[], introspection = false): Promise<void> {
+  const source = validatedSourceDirectory(workspaceRoot, sourceRoot);
+  const overlays = new Map<string, string>();
+  const inputs = new Map<string, Buffer>();
+  if (introspection) for (const changedPath of changedPaths) {
+    const path = changedPath.replace(/\\/g, '/');
+    if (!path || isAbsolute(path) || win32.isAbsolute(path) || path.split(/[\\/]/).some(part => part === '..' || part === '.')) continue;
+    const origin = join(source, path);
+    if (!/\.(?:vue|[jt]sx?)$/i.test(path) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(path)) continue;
+    try {
+      const input = await readFile(origin);
+      inputs.set(origin, input);
+      const text = input.toString('utf8');
+      if (path.endsWith('.vue')) {
+        const parsed = parseSfc(text, { filename: origin });
+        const script = parsed.descriptor.scriptSetup ?? parsed.descriptor.script;
+        if (script) overlays.set(origin.replace(/\.vue$/i, '.vue.ts'), script.content);
+      } else overlays.set(origin, text);
+    } catch (error) { if (!['ENOENT', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+  }
+  const program = overlays.size ? createSourceProgram(workspaceRoot, sourceRoot, overlays) : undefined;
+  for (const path of changedPaths) await regenerateVueFileInternal(workspaceRoot, sourceRoot, path, introspection, program, inputs);
+}
+
+export async function regenerateVueFile(workspaceRoot: string, sourceRoot: string, changedPath: string, introspection = false): Promise<void> {
+  await regenerateVueFiles(workspaceRoot, sourceRoot, [changedPath], introspection);
+}
+
 /** Synchronizes one authored change into the delegated virtual project. */
-export async function regenerateVueFile(
+async function regenerateVueFileInternal(
   workspaceRoot: string,
   sourceRoot: string,
   changedPath: string,
-  introspection = false,
+  introspection: boolean,
+  program: ts.Program | undefined,
+  inputs: Map<string, Buffer>,
 ): Promise<void> {
   const originalRoot = validatedSourceDirectory(workspaceRoot, sourceRoot);
   const destRoot = join(workspaceRoot, '.angular', '.streamix', virtualRootOf(sourceRoot));
@@ -281,7 +306,7 @@ export async function regenerateVueFile(
   const destination = join(destRoot, normalized);
   let content: Buffer;
   try {
-    content = await readFile(origin);
+    content = inputs.get(origin) ?? await readFile(origin);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     // fs.watch reports directory changes too. They are mirrored by the file
@@ -297,7 +322,7 @@ export async function regenerateVueFile(
   let map: string | undefined;
   if (normalized.endsWith('.vue')) {
     let input = content.toString('utf8');
-    if (introspection) input = await instrumentVueFileText(workspaceRoot, originalRoot, origin, input);
+    if (introspection) input = await instrumentVueFileText(workspaceRoot, originalRoot, origin, input, program);
     const transformed = transformVueSfc(input, relative(workspaceRoot, origin));
     const errors = transformed.diagnostics.filter(diagnostic => diagnostic.category === 'error');
     if (errors.length > 0) {
@@ -307,9 +332,9 @@ export async function regenerateVueFile(
     map = transformed.sourceMap ? `${JSON.stringify(transformed.sourceMap)}\n` : undefined;
   } else if (introspection && /\.[jt]sx?$/i.test(normalized) && !/\.(?:d|spec|test)\.[jt]sx?$/i.test(normalized)) {
     const text = content.toString('utf8');
-    const program = createSourceProgram(workspaceRoot, originalRoot, new Map([[origin, text]]));
-    const sourceFile = program.getSourceFile(origin) ?? ts.createSourceFile(origin, text, ts.ScriptTarget.Latest, true);
-    output = Buffer.from(instrumentStreamixSource({ file: sourceFile, checker: program.getTypeChecker(),
+    const registrationProgram = program ?? createSourceProgram(workspaceRoot, originalRoot, new Map([[origin, text]]));
+    const sourceFile = registrationProgram.getSourceFile(origin) ?? ts.createSourceFile(origin, text, ts.ScriptTarget.Latest, true);
+    output = Buffer.from(instrumentStreamixSource({ file: sourceFile, checker: registrationProgram.getTypeChecker(),
       sourcePath: relative(workspaceRoot, origin), enabled: true }));
   }
   // A watch edit of the entry must keep the injected activation, or the
