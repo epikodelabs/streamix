@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **React Vite:** watch invalidation now drops only the cached programs that contain the edited source or use the edited config, instead of clearing every project on each edit; created source modules and JSON/config edits still reset the cache because they can change module resolution (#106). Vue Vite keeps no program cache and is unaffected.
+
 - **Builders/Vite:** React and Vue builders and Vite plugins now share one tsconfig parser, solution-style fallback, and overlay compiler host (`@epikodelabs/streamix/compiler`), leaving config discovery, diagnostics, and watch/cache invalidation host-specific (#122).
 
 - **React tracing:** attribute committed renders to each component's own subscribed sources instead of a shared write counter, so batched commits cannot hand one component's write to another; equal-reference emissions on explicit dedupe-off subscriptions now produce a render trace, and `read()`/`write()` emit the same `explicit atom read`/`explicit atom write` events as Vue without claiming a render. Angular's per-flush render event remains an intentional framework difference (#207).

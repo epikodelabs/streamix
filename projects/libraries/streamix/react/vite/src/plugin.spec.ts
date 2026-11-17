@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import ts from "typescript";
 import { sx } from "./plugin";
 
@@ -49,6 +52,92 @@ describe("Streamix React Vite plugin", () => {
     expect(transformed.code).toContain("@epikodelabs/streamix");
   });
 
+  it("invalidates only the cached program that contains the edited source", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-vite-watch-"));
+    try {
+      const projectA = join(root, "a");
+      const projectB = join(root, "b");
+      await mkdir(projectA, { recursive: true });
+      await mkdir(projectB, { recursive: true });
+      const config = JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler" },
+        include: ["*.ts"],
+      });
+      await writeFile(join(projectA, "tsconfig.json"), config);
+      await writeFile(join(projectB, "tsconfig.json"), config);
+      const fileA = join(projectA, "a.ts");
+      const fileB = join(projectB, "b.ts");
+      const originalA = `import { atom } from "@epikodelabs/streamix";\nexport const count = atom(0);`;
+      const sourceB = `import { atom } from "@epikodelabs/streamix";\nexport const title = atom("b");`;
+      await writeFile(fileA, originalA);
+      await writeFile(fileB, sourceB);
+
+      const plugin = sx();
+      const context = { error: (message: string): never => { throw new Error(message); } } as any;
+      const transform = (source: string, path: string) => transformOf(plugin).call(context, source, path) as { code: string };
+      const watchChange = watchChangeOf(plugin);
+
+      transform(originalA, fileA);
+      transform(sourceB, fileB);
+
+      const readFileSpy = spyOn(ts.sys, "readFile").and.callThrough();
+      const editedA = `import { atom } from "@epikodelabs/streamix";\nexport const count = atom(1);`;
+      await writeFile(fileA, editedA);
+      watchChange(fileA, { event: "update" });
+
+      readFileSpy.calls.reset();
+      transform(editedA, fileA); // A rebuilds: config plus source reads
+      const rebuildReads = readFileSpy.calls.count();
+
+      readFileSpy.calls.reset();
+      transform(sourceB, fileB); // B stays cached: only its config is read
+      const cachedReads = readFileSpy.calls.count();
+      readFileSpy.and.callThrough();
+
+      expect(rebuildReads).toBeGreaterThan(1);
+      expect(cachedReads).toBe(1);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rebuilds a project after a dependency edit changes symbol identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-vite-dependency-"));
+    try {
+      const app = join(root, "app");
+      await mkdir(app, { recursive: true });
+      await writeFile(join(app, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
+        include: ["*.ts", "*.tsx"],
+      }));
+      const dependency = join(app, "dep.ts");
+      await writeFile(dependency, `
+        export interface AtomLike<T> { readonly value: T; subscribe(callback: () => void): () => void; }
+        export declare const status: AtomLike<string>;
+      `);
+      const view = join(app, "view.tsx");
+      const viewSource = `import { status } from "./dep";\nexport function App() { return <output>{status}</output>; }`;
+      await writeFile(view, viewSource);
+
+      const plugin = sx();
+      const context = { error: (message: string): never => { throw new Error(message); } } as any;
+      const transform = (source: string, path: string) => transformOf(plugin).call(context, source, path) as { code: string };
+      const watchChange = watchChangeOf(plugin);
+
+      const adopted = transform(viewSource, view);
+      expect(adopted.code).toContain('useStreamixSource(status, "status")');
+
+      // The dependency is no longer structurally reactive.
+      await writeFile(dependency, `export declare const status: string;`);
+      watchChange(dependency, { event: "update" });
+      const plain = transform(viewSource, view);
+      expect(plain.code).not.toContain("useStreamixSource");
+      expect(plain.code).not.toContain("@epikodelabs/streamix/react");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("builds with the inspector when introspection is on and completely without otherwise", () => {
     const context = { error: (message: string): never => { throw new Error(message); } } as any;
     const source = `import { atom } from "@epikodelabs/streamix";\nexport const count = atom(0);`;
@@ -73,4 +162,10 @@ describe("Streamix React Vite plugin", () => {
 function transformOf(plugin: ReturnType<typeof sx>): (source: string, id: string) => unknown {
   const transform = plugin.transform!;
   return (typeof transform === "function" ? transform : transform.handler) as (source: string, id: string) => unknown;
+}
+
+function watchChangeOf(plugin: ReturnType<typeof sx>): (id: string, change: { event: "create" | "update" | "delete" }) => unknown {
+  const watchChange = plugin.watchChange!;
+  return (typeof watchChange === "function" ? watchChange : watchChange.handler) as
+    (id: string, change: { event: "create" | "update" | "delete" }) => unknown;
 }

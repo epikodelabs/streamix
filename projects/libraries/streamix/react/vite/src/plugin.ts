@@ -98,14 +98,37 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
         },
       };
     },
-    watchChange() {
-      // Source edits, config edits, and resolved re-exports can all change a
-      // symbol's identity. Recreate the project graph on the next transform.
-      // Drop cached graphs on edits; a second map retained stale programs
-      // indefinitely when the affected project was never transformed again.
-      programs.clear();
+    watchChange(id, change) {
+      const fileName = id.replace(/[?#].*$/, "");
+      // Config and package edits can change options or module resolution for
+      // every project, not only the one that lists the file.
+      if (/\.json$/i.test(fileName)) {
+        programs.clear();
+        return;
+      }
+      const normalized = normalizePath(fileName);
+      let matched = false;
+      for (const [key, program] of programs) {
+        // A source edit changes symbol identity for every project that has
+        // already resolved that file; unrelated projects keep their graph.
+        const configFilePath = program.getCompilerOptions()["configFilePath"];
+        if ((typeof configFilePath === "string" && normalizePath(configFilePath) === normalized) ||
+            program.getSourceFiles().some(file => normalizePath(file.fileName) === normalized)) {
+          programs.delete(key);
+          matched = true;
+        }
+      }
+      // A newly created module can satisfy an import that previously failed
+      // to resolve, and that dependency is absent from every cached graph.
+      if (!matched && change.event === "create" && /\.[cm]?[jt]sx?$/i.test(fileName)) programs.clear();
     },
   };
+}
+
+/** Program file names and Vite ids differ by separators and, on Windows,
+ * drive casing. */
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/").toLowerCase();
 }
 
 /** True only when the source parses to a real JSX node in a JSX-capable file. */
