@@ -101,6 +101,77 @@ describe('runtime instrumentation gating', () => {
     }
   });
 
+  it('does not backfill diagnostics for flows created while capture was disabled', async () => {
+    const hold = (yielded: number) => {
+      let release!: (value: number) => void;
+      const source = flow<number>(async function* () {
+        yield yielded;
+        yield await new Promise<number>(resolve => { release = resolve; });
+      });
+      return { source, release: (value: number) => release(value) };
+    };
+
+    setRuntimeInstrumentationEnabled(false);
+    const legacy = hold(1);
+    const seen: number[] = [];
+    const stop = legacy.source.subscribe(value => seen.push(value));
+    try {
+      for (let i = 0; i < 20 && seen.length === 0; i++) await tick();
+      expect(seen).toEqual([1]);
+      // The state reader is allocated at creation. Re-enabling cannot rebuild
+      // it, so pre-activation flows stay intentionally unobservable.
+      setRuntimeInstrumentationEnabled(true);
+      expect(internalRuntime.diagnostics.flows(internalRuntime.graph)
+        .find(state => state.node === legacy.source)).toBeUndefined();
+      expect(internalRuntime.diagnostics.executions.describe(legacy.source)).toBeUndefined();
+
+      // A flow created after activation registers its state and executions.
+      const fresh = hold(2);
+      const freshSeen: number[] = [];
+      const freshStop = fresh.source.subscribe(value => freshSeen.push(value));
+      try {
+        for (let i = 0; i < 20 && freshSeen.length === 0; i++) await tick();
+        expect(internalRuntime.diagnostics.flows(internalRuntime.graph)
+          .find(state => state.node === fresh.source)).toBeDefined();
+        expect(internalRuntime.diagnostics.executions.describe(fresh.source))
+          .toEqual(jasmine.objectContaining({ active: true }));
+      } finally {
+        fresh.release(0);
+        for (let i = 0; i < 20 && !fresh.source.disposed; i++) await tick();
+        await freshStop();
+      }
+    } finally {
+      legacy.release(0);
+      for (let i = 0; i < 20 && !legacy.source.disposed; i++) await tick();
+      await stop();
+    }
+  });
+
+  it('releases flow state and execution records when a flow is disposed', async () => {
+    let release: ((value: number) => void) | undefined;
+    const source = flow<number>(async function* () {
+      yield 1;
+      yield await new Promise<number>(resolve => { release = resolve; });
+    });
+    const stop = source.subscribe(() => {});
+    try {
+      for (let i = 0; i < 20 && !internalRuntime.diagnostics.executions.describe(source); i++) await tick();
+      expect(internalRuntime.diagnostics.flows(internalRuntime.graph)
+        .find(state => state.node === source)).toBeDefined();
+      expect(internalRuntime.diagnostics.executions.describe(source))
+        .toEqual(jasmine.objectContaining({ active: true }));
+
+      source.dispose();
+      expect(internalRuntime.diagnostics.flows(internalRuntime.graph)
+        .find(state => state.node === source)).toBeUndefined();
+      expect(internalRuntime.diagnostics.executions.describe(source)).toBeUndefined();
+    } finally {
+      release?.(0);
+      await stop();
+      source.dispose();
+    }
+  });
+
   it('leaves no flow entry or execution record while disabled', async () => {
     // Stay mid-flight so the flow remains registered and its record would be
     // observable; a completed flow disposes and forgets records on its own.

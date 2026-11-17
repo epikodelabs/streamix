@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Inspector:** coalesced trace rows now replace their repeat count instead of appending every intermediate count, and emission-bearing, valued, lifecycle, or previously valued rows no longer merge (#154).
+
+- **Inspector:** previews keep arrays recognizable, distinguish `Date`/`Map`/`Set`/`NaN`/`Infinity`/`bigint`/`Symbol`/`undefined`, and mark omitted entries, summarized depth and length caps instead of silently dropping them (#155).
+
+- **Inspector:** the 1000-event history is a ring buffer instead of a push/shift array and still yields frozen chronological snapshots; a Node 22 probe at capacity measured 14 ms vs 110 ms per 500k events. The panel keeps its row shift because DOM removal dominates (#156).
+
+- **Diagnostics:** late activation is documented and covered: nodes created while capture was off stay unobservable after re-enable (no state backfill), disposal releases flow and execution records, and disabling capture freezes rather than clears history (#119).
+
 - **React Vite:** watch invalidation now drops only the cached programs that contain the edited source or use the edited config, instead of clearing every project on each edit; created source modules and JSON/config edits still reset the cache because they can change module resolution (#106). Vue Vite keeps no program cache and is unaffected.
 
 - **Builders/Vite:** React and Vue builders and Vite plugins now share one tsconfig parser, solution-style fallback, and overlay compiler host (`@epikodelabs/streamix/compiler`), leaving config discovery, diagnostics, and watch/cache invalidation host-specific (#122).

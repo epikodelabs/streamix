@@ -127,9 +127,26 @@ describe('debug runtime introspection', () => {
     expect(streamixInspector.details(record.id)).toBeUndefined();
     expect(streamixInspector.trace().some(e => e.id === record.id && e.kind === 'complete')).toBe(true);
     const counter = __streamixDebug(atom(0), metadata('counter'));
-    try { for (let i = 1; i <= 1100; i++) counter.set(i); }
-    finally { counter.dispose(); }
-    expect(streamixInspector.trace().length).toBe(1000);
+    try {
+      for (let i = 1; i <= 1100; i++) counter.set(i);
+      const trace = streamixInspector.trace();
+      expect(trace.length).toBe(1000);
+      // The ring keeps the newest events in chronological order.
+      const changes = trace.filter(event => event.name === 'counter' && event.kind === 'change');
+      expect(changes.length).toBe(1000);
+      expect(changes[0].emission).toBe(101);
+      expect(changes[changes.length - 1].emission).toBe(1100);
+      // A snapshot is frozen; later events replace only future snapshots.
+      const later = __streamixDebug(atom(0), metadata('counter-later'));
+      try {
+        for (let i = 1; i <= 3; i++) later.set(i);
+        expect(trace.length).toBe(1000);
+        const newest = streamixInspector.trace();
+        expect(newest.length).toBe(1000);
+        expect(newest[newest.length - 1].name).toBe('counter-later');
+        expect(trace[trace.length - 1].name).toBe('counter');
+      } finally { later.dispose(); }
+    } finally { counter.dispose(); }
   });
   it('preserves subscription identity and receiver and links component fields to their target', async () => {
     const source = __streamixDebug(atom(1), metadata('App.value'));
@@ -176,6 +193,29 @@ describe('debug runtime introspection', () => {
     const node = __streamixDebug(atom(1), metadata('observed'));
     try { expect(() => node.set(2)).not.toThrow(); }
     finally { stop(); node.dispose(); }
+  });
+  it('preserves shapes and marks truncation in previews', () => {
+    // Arrays stay arrays instead of turning into {"0":…} objects.
+    expect(streamixPreview([1, 2, 3])).toBe('[1,2,3]');
+    // Special values and built-ins are recognizable, never {} or null.
+    expect(streamixPreview(new Date('2024-01-02T03:04:05.000Z'))).toBe('[Date 2024-01-02T03:04:05.000Z]');
+    expect(streamixPreview(new Map([['a', 1], ['b', 2]]))).toBe('[Map size=2]');
+    expect(streamixPreview(new Set([1, 2, 3]))).toBe('[Set size=3]');
+    expect(streamixPreview(NaN)).toBe('[NaN]');
+    expect(streamixPreview(Infinity)).toBe('[Infinity]');
+    expect(streamixPreview(10n)).toBe('[bigint 10]');
+    // Undefined values and summarized depth stay visible and labelled.
+    expect(streamixPreview({ skipped: undefined, kept: 1 })).toBe('{"skipped":"[undefined]","kept":1}');
+    expect(streamixPreview({ deep: { nested: { value: 1 } } })).toContain('"nested":"[Object]"');
+    // Omitted entries and length caps carry an explicit marker.
+    const array = streamixPreview(Array.from({ length: 20 }, (_, index) => index));
+    expect(array).toContain('[+8 more]');
+    const object = streamixPreview(Object.fromEntries(Array.from({ length: 20 }, (_, index) => ['k' + index, index])));
+    expect(object).toContain('"…":"[+8 more]"');
+    const bounded = streamixPreview(Array.from({ length: 20 }, () => 'abcdefghijklmnopqrstuvwxyz'.repeat(2)));
+    expect(bounded.length).toBe(240);
+    expect(bounded.endsWith('…')).toBeTrue();
+    expect(streamixPreview('x'.repeat(500))).toBe('x'.repeat(239) + '…');
   });
   it('counts callback-free flow subscriptions and keeps the producer alive until the last handle closes', async () => {
     const source = atom(1);

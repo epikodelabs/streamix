@@ -199,4 +199,39 @@ describe('inspector trace history', () => {
       expect(subscription.hidden).toBeFalse();
     } finally { /* host teardown in afterEach */ }
   });
+
+  it('replaces the repeat count instead of accumulating intermediate counts', () => {
+    for (let index = 0; index < 4; index++) internalRuntime.events.publish({ kind: 'render', node: {}, label: 'repeat-probe' });
+    flush();
+    const rows = Array.from(trace().children).filter(row => row.textContent!.includes('repeat-probe')) as HTMLDivElement[];
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent).toBe('render: repeat-probe ×4');
+    expect(rows[0].textContent).not.toContain('×2');
+  });
+
+  it('keeps the repeat suffix bounded for long runs', () => {
+    for (let index = 0; index < 100; index++) internalRuntime.events.publish({ kind: 'render', node: {}, label: 'many-probe' });
+    flush();
+    const rows = Array.from(trace().children).filter(row => row.textContent!.includes('many-probe')) as HTMLDivElement[];
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent).toBe('render: many-probe ×100');
+    expect(rows[0].textContent!.split('×').length).toBe(2);
+  });
+
+  it('does not coalesce valued or lifecycle rows, or merge repeats into them', () => {
+    const emit = (kind: 'change' | 'render' | 'subscription' | 'unsubscribe', label: string, value?: string) =>
+      internalRuntime.events.publish({ kind, node: {}, label, ...(value !== undefined ? { value } : {}) });
+    emit('change', 'valued-probe', 'one');
+    emit('change', 'valued-probe', 'two');
+    emit('render', 'valued-probe');
+    flush();
+    expect(Array.from(trace().children).filter(row => row.textContent!.includes('valued-probe')).length).toBe(3);
+
+    emit('subscription', 'lifecycle-probe');
+    emit('subscription', 'lifecycle-probe');
+    emit('unsubscribe', 'lifecycle-probe');
+    emit('unsubscribe', 'lifecycle-probe');
+    flush();
+    expect(Array.from(trace().children).filter(row => row.textContent!.includes('lifecycle-probe')).length).toBe(4);
+  });
 });

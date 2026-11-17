@@ -93,29 +93,74 @@ const pipelineUsers = new WeakMap<object, Set<number>>();
 const listeners = new Set<(event: StreamixInspectionEvent) => void>();
 let sequence = 0;
 let enabled = false;
-const events: StreamixInspectionEvent[] = [];
+/** Bounded chronological history as a ring: appending at capacity overwrites
+ * the oldest slot instead of shifting a 1000-entry array per event. */
+const traceCapacity = 1000;
+const events: StreamixInspectionEvent[] = new Array(traceCapacity);
+let eventStart = 0;
+let eventCount = 0;
+function traceSnapshot(): readonly StreamixInspectionEvent[] {
+  const snapshot = new Array<StreamixInspectionEvent>(eventCount);
+  for (let index = 0; index < eventCount; index++) {
+    snapshot[index] = events[(eventStart + index) % traceCapacity];
+  }
+  return Object.freeze(snapshot);
+}
 const object = (value: unknown): value is object => value !== null && (typeof value === 'object' || typeof value === 'function');
 
-/** Bounded, getter-free previews. Inspecting an object must not execute user getters. */
+/** Bounded, getter-free previews. Inspecting an object must not execute user
+ * getters or serialization hooks. Arrays keep their shape, special values stay
+ * distinguishable, and both omitted entries and the overall length cap are
+ * marked instead of silently disappearing. */
 export function streamixPreview(value: unknown): string {
   const seen = new WeakSet<object>();
+  const sizeOf = (prototype: object, instance: object): number | string => {
+    const getter = Object.getOwnPropertyDescriptor(prototype, 'size')?.get;
+    return getter ? Reflect.apply(getter, instance, []) as number : '?';
+  };
   const summarize = (v: unknown, depth: number): unknown => {
-    if (typeof v === 'string') return v.slice(0, 240);
-    if (typeof v === 'bigint' || typeof v === 'symbol') return String(v);
+    if (typeof v === 'string') return v.length > 240 ? v.slice(0, 239) + '…' : v;
+    if (typeof v === 'bigint') return `[bigint ${String(v)}]`;
+    if (typeof v === 'symbol') return `[symbol ${String(v)}]`;
+    if (typeof v === 'number' && !Number.isFinite(v)) return `[${String(v)}]`;
+    if (typeof v === 'undefined') return '[undefined]';
     if (typeof v === 'function') return '[function]';
     if (!object(v)) return v;
     if (seen.has(v)) return '[circular]';
-    if (depth === 0) return '[object]';
+    if (depth === 0) return Array.isArray(v) ? '[Array]' : '[Object]';
     seen.add(v);
+    if (v instanceof Date) {
+      let iso: string;
+      try { iso = Reflect.apply(Date.prototype.toISOString, v, []); }
+      catch { iso = 'invalid'; }
+      return `[Date ${iso}]`;
+    }
+    if (v instanceof Map) return `[Map size=${sizeOf(Map.prototype, v)}]`;
+    if (v instanceof Set) return `[Set size=${sizeOf(Set.prototype, v)}]`;
+    if (Array.isArray(v)) {
+      const shown = Math.min(v.length, 12);
+      const result: unknown[] = [];
+      for (let index = 0; index < shown; index++) result.push(summarize(v[index], depth - 1));
+      if (v.length > shown) result.push(`[+${v.length - shown} more]`);
+      return result;
+    }
+    const keys = Object.keys(v);
     const result: Record<string, unknown> = {};
-    for (const key of Object.keys(v).slice(0, 12)) {
+    for (const key of keys.slice(0, 12)) {
       const descriptor = Object.getOwnPropertyDescriptor(v, key);
       result[key] = descriptor && 'value' in descriptor ? summarize(descriptor.value, depth - 1) : '[getter]';
     }
+    if (keys.length > 12) result['…'] = `[+${keys.length - 12} more]`;
     return result;
   };
-  try { return (typeof value === 'string' ? value : JSON.stringify(summarize(value, 2)) ?? String(value)).slice(0, 240); }
-  catch { return '[unavailable]'; }
+  try {
+    if (typeof value === 'string') return value.length > 240 ? value.slice(0, 239) + '…' : value;
+    const summary = summarize(value, 2);
+    // Primitive markers (Date, Map, NaN, …) read better unquoted; containers
+    // serialize as JSON-like text.
+    const preview = typeof summary === 'string' ? summary : JSON.stringify(summary) ?? String(value);
+    return preview.length > 240 ? preview.slice(0, 239) + '…' : preview;
+  } catch { return '[unavailable]'; }
 }
 function publish(entry: Entry, kind: string, value?: unknown, error?: unknown, pullMs?: number, count?: number): void {
   const emission = count ?? entry.metrics.total;
@@ -128,8 +173,13 @@ function publish(entry: Entry, kind: string, value?: unknown, error?: unknown, p
 }
 function appendEvent(event: StreamixInspectionEvent): void {
   pruneEntries();
-  events.push(event);
-  if (events.length > 1000) events.shift();
+  if (eventCount < traceCapacity) {
+    events[(eventStart + eventCount) % traceCapacity] = event;
+    eventCount++;
+  } else {
+    events[eventStart] = event;
+    eventStart = (eventStart + 1) % traceCapacity;
+  }
   for (const listener of [...listeners]) { try { listener(event); } catch { /* observer isolation */ } }
 }
 
@@ -201,13 +251,17 @@ export const streamixInspector: StreamixInspectorAPI = Object.freeze({
   },
   details,
   observe: (callback: (event: StreamixInspectionEvent) => void) => { listeners.add(callback); return () => { listeners.delete(callback); }; },
-  trace: () => Object.freeze([...events]),
+  trace: traceSnapshot,
 });
 
 /** Marker identity for events that describe no runtime node. */
 const devtoolsTraceNode: object = { kind: 'devtools' };
 
-/** Called only by instrumented entry points; does nothing in production or SSR. */
+/** Called only by instrumented entry points; does nothing in production or SSR.
+ * Activation is not retroactive: state readers are allocated when a node is
+ * created, so nodes created while instrumentation was off stay unobservable
+ * (no historical values, and flows are not backfilled). Disposal releases
+ * their diagnostics; disabling capture only freezes what was already recorded. */
 export function enableStreamixIntrospection(): void {
   if (enabled || !streamixDevtoolsEnabled || typeof window === 'undefined' || typeof document === 'undefined') return;
   enabled = true;

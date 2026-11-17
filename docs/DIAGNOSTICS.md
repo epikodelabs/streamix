@@ -56,6 +56,16 @@ them:
   flag is the single activation switch, and discovery depends on it — flows
   register into `flowStates` (the discovery source) only while accounting is
   on, so an inspector without accounting sees no flows at all.
+- **Activation is not retroactive.** Per-node state readers are allocated at
+  creation, and flows are discovered from their registered readers. Nodes
+  created while instrumentation was off therefore stay unobservable after
+  `setEnabled(true)`: their historical values and executions cannot be
+  reconstructed, and flows are not backfilled. Compiler-debugged objects
+  still join the listing on their next `__streamixDebug` call, but without
+  history. This is the intentional production boundary — an unobservable
+  object is not a missing diagnostic node. `setEnabled(false)` likewise
+  freezes existing records rather than clearing them; disposal (not the
+  toggle) releases them.
 
 ## The rules at a glance
 
