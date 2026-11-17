@@ -1,11 +1,11 @@
 /**
- * Entry activation injected by every framework toolchain (Angular, React, and
- * Vue builders; the React Vite plugin) for introspection builds. One shape,
- * one place: activation runs before application code so flows register before
- * the inspector observes them, and the panel mounts after the entry module
- * evaluates. The gate stays `import.meta.env.DEV` inside the imported
- * functions, so production bundles carry inert definitions.
+ * Inject a first-import side effect, not an enable() statement in the entry
+ * body: ES module dependencies evaluate before the entry's body executes.
+ * The activation subentry enables diagnostics before application imports run.
  */
+const activationImport = "import '@epikodelabs/streamix/introspection/activate';";
+
 export function injectIntrospectionActivation(code: string): string {
-  return `import { enableStreamixIntrospection as __sxEnable, mountStreamixInspector as __sxMount } from '@epikodelabs/streamix/introspection';\n__sxEnable();\n${code}\n__sxMount();\n`;
+  if (code.includes(activationImport)) return code;
+  return `${activationImport}\nimport { mountStreamixInspector as __sxMount } from '@epikodelabs/streamix/introspection';\n${code}\n__sxMount();\n`;
 }

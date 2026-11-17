@@ -119,7 +119,8 @@ describe('runtime instrumentation gating', () => {
       for (let i = 0; i < 20 && seen.length === 0; i++) await tick();
       expect(seen).toEqual([1]);
       // The state reader is allocated at creation. Re-enabling cannot rebuild
-      // it, so pre-activation flows stay intentionally unobservable.
+      // it, so these diagnostics registries stay empty even though the
+      // inspector can still backfill the flow's listing from the graph.
       setRuntimeInstrumentationEnabled(true);
       expect(internalRuntime.diagnostics.flows(internalRuntime.graph)
         .find(state => state.node === legacy.source)).toBeUndefined();

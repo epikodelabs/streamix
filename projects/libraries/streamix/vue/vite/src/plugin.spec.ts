@@ -70,7 +70,7 @@ describe('Streamix Vue Vite plugin', () => {
     expect(enabledSfc.code).toContain('__sxDebug(atom(0)');
     expect(enabledSfc.code).toContain("useWritable(count, 'count')");
     const enabledEntry = transform.call(context(), entry, '/workspace/src/main.ts') as { code: string };
-    expect(enabledEntry.code).toContain('__sxEnable();');
+    expect(enabledEntry.code).toContain("import '@epikodelabs/streamix/introspection/activate';");
     expect(enabledEntry.code).toContain('__sxMount();');
 
     const off = transformOf(sxVue());

@@ -93,21 +93,21 @@ describe("React Angular-hosted source generation", () => {
 
       const virtualRoot = await generateReactProject(root, sourceRoot, true);
       const generated = await readFile(generatedPath, "utf8");
-      expect(generated).toContain("__sxEnable();");
+      expect(generated).toContain("introspection/activate");
       expect(generated).toContain("__sxMount();");
       expect(generated).toContain("__sxDebug(atom(0)");
-      expect(generated.indexOf("__sxEnable();")).toBeLessThan(generated.indexOf("export const count"));
+      expect(generated.indexOf("introspection/activate")).toBeLessThan(generated.indexOf("export const count"));
       // Authored source stays clean: injection lives only in the generated tree.
       expect(await readFile(join(source, "main.tsx"), "utf8")).toBe(authored);
 
       // A watch edit of the entry must keep the activation.
       await regenerateReactFile(root, sourceRoot, "main.tsx", true);
-      expect(await readFile(generatedPath, "utf8")).toContain("__sxEnable();");
+      expect(await readFile(generatedPath, "utf8")).toContain("introspection/activate");
       // Dropping the flag regenerates without it.
       await generateReactProject(root, sourceRoot, false);
-      expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).not.toContain("__sxEnable");
+      expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).not.toContain("introspection/activate");
       await regenerateReactFile(root, sourceRoot, "main.tsx", false);
-      expect(await readFile(generatedPath, "utf8")).not.toContain("__sxEnable");
+      expect(await readFile(generatedPath, "utf8")).not.toContain("introspection/activate");
     } finally {
       await rm(root, { force: true, recursive: true });
     }
@@ -339,7 +339,7 @@ describe("React Angular-hosted source generation", () => {
       await writeFile(join(source, "main.tsx"), main);
       await writeFile(join(source, "helper.ts"), helper);
       const virtualRoot = await generateReactProject(root, sourceRoot, true);
-      expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).toContain("__sxEnable();");
+      expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).toContain("introspection/activate");
       expect(await readFile(join(virtualRoot, "helper.ts"), "utf8")).not.toContain("__sxDebug");
     } finally {
       await rm(root, { force: true, recursive: true });

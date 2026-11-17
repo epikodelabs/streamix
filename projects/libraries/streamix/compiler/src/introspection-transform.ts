@@ -101,16 +101,27 @@ export function instrumentStreamixSource({ file, checker, sourcePath, enabled }:
   }
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
-      if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'subscribe' &&
-          !node.questionDotToken && !node.expression.questionDotToken) {
+        if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'subscribe') {
         const receiver = node.expression.expression;
-        const type = checker.getTypeAtLocation(receiver);
+        const type = checker.getNonNullableType(checker.getTypeAtLocation(receiver));
         const discriminator = type.getProperty('type');
-        if (discriminator && checker.typeToString(checker.getTypeOfSymbolAtLocation(discriminator, receiver)) === '"atom"') {
+        const subscribe = type.getProperty('subscribe');
+        const names = discriminator
+          ? checker.typeToString(checker.getTypeOfSymbolAtLocation(discriminator, receiver)).split(/\s*\|\s*/) : [];
+        // Only known Streamix-compatible discriminators, not arbitrary objects
+        // that happen to have a subscribe() method. Readonly source wrappers
+        // and optional receivers are eligible too.
+        if (subscribe && names.length > 0 && names.every(name =>
+          name === '"atom"' || name === '"source"' || name === '"flow"' || name === 'undefined')) {
           const metadata = { ...metadataFor(node, 'subscription', 'subscribe'), ...location(node.expression.name) };
           insert(receiver.getStart(file), subscribeHelper + '(');
           insert(receiver.end, ', ' + JSON.stringify(metadata) + ')');
           removals.set(receiver.end, node.expression.end - receiver.end);
+          // Keep the short circuit for a?.subscribe() and a?.b.subscribe().
+          // For a.subscribe?.(), the original call's ?. remains in place.
+          if (ts.isOptionalChain(node.expression) && !node.questionDotToken) {
+            insert(node.expression.end, '?.');
+          }
           usesSubscribe = true;
         }
       }

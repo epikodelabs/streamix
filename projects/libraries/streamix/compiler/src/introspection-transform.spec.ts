@@ -5,6 +5,8 @@ import { instrumentStreamixSource } from './introspection-transform';
 function transform(source: string, enabled = true): string {
   const declarations = `
     export interface Atom<T> { type: 'atom'; value: T; subscribe(fn?: (v:T)=>void): (() => void) & { readonly unsubscribed: boolean }; }
+    export interface Source { type: 'source'; subscribe(fn?: (v: unknown) => void): () => void; }
+    export declare function externalSource(): Source;
     export interface Operator { type: 'operator'; apply(source: unknown): unknown; }
     export declare function on(event: string): Atom<unknown>;
     export declare function interval(ms: number): Atom<number>;
@@ -49,6 +51,13 @@ function local(state: (v: number) => number) { return state(2); }`;
     expect(result).toContain('return state(2);');
     expect(result).toContain('"name":"count"');
     expect(result).toContain('"line":3,"column":15');
+  });
+  it('ignores custom subscribe-shaped objects without a Streamix discriminator', () => {
+    const source = `const plain = { subscribe() {} };
+plain.subscribe();
+const custom = { type: 'custom', subscribe() {} };
+custom.subscribe();`;
+    expect(transform(source)).toBe(source);
   });
   it('captures nested calls and scope member locations without changing their order', () => {
     const source = `import { scope, pipe, map, atom } from '@epikodelabs/streamix';
@@ -126,12 +135,40 @@ const value = atom(sideEffect());`;
 });
 
 describe('introspection entry activation', () => {
-  it('wraps the entry code with enable before and mount after', () => {
+  it('uses a side-effect activation dependency before application imports', () => {
+    const input = `import { createApp } from 'vue';\ncreateApp({}).mount('#app');`;
+    const code = injectIntrospectionActivation(input);
+    const file = ts.createSourceFile('main.ts', code, ts.ScriptTarget.Latest, true);
+    const imports = file.statements.filter(ts.isImportDeclaration);
+    expect((imports[0].moduleSpecifier as ts.StringLiteral).text).toBe('@epikodelabs/streamix/introspection/activate');
+    expect(code).toContain('__sxMount();');
+    expect(injectIntrospectionActivation(code)).toBe(code);
+  });
+  it('instruments compatible sources and preserves optional subscribe short circuits', () => {
+    const result = transform(`import { atom, externalSource } from '@epikodelabs/streamix';
+const node = atom(1);
+const maybe = atom(2);
+node?.subscribe(() => {});
+maybe.subscribe?.(() => {});
+externalSource().subscribe(() => {});`);
+    expect(result).toMatch(/__sxSubscribe\(node,[^\n]*\)\?\.\(\(\) => \{\}\)/);
+    expect(result).toMatch(/__sxSubscribe\(maybe,[^\n]*\)\?\.\(\(\) => \{\}\)/);
+    expect(result).toContain('__sxSubscribe(externalSource()');
+    const parsed = ts.createSourceFile('out.ts', result, ts.ScriptTarget.Latest, true) as ts.SourceFile & {
+      readonly parseDiagnostics: readonly ts.Diagnostic[];
+    };
+    expect(parsed.parseDiagnostics.length).toBe(0);
+  });
+  it('does not emit metadata in disabled transforms', () => {
+    const source = `import { atom } from '@epikodelabs/streamix';\nconst value = atom(1);`;
+    expect(transform(source, false)).toBe(source);
+  });
+
+  it('wraps the entry code with activation before and mount after', () => {
     const code = injectIntrospectionActivation(`import { createApp } from 'vue';\ncreateApp({}).mount('#app');`);
-    expect(code).toContain("import { enableStreamixIntrospection as __sxEnable, mountStreamixInspector as __sxMount } from '@epikodelabs/streamix/introspection';");
-    expect(code.indexOf('__sxEnable();')).toBeLessThan(code.indexOf('createApp'));
+    expect(code).toContain("import '@epikodelabs/streamix/introspection/activate';");
+    expect(code.indexOf('introspection/activate')).toBeLessThan(code.indexOf('createApp'));
     expect(code.indexOf('createApp')).toBeLessThan(code.indexOf('__sxMount();'));
-    // A repeated injection must not nest: the activation import is unique.
-    expect(injectIntrospectionActivation(code).match(/__sxEnable\(\);/g)!.length).toBe(2);
+    expect(injectIntrospectionActivation(code)).toBe(code);
   });
 });

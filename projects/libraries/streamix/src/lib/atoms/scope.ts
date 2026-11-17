@@ -1,5 +1,6 @@
 import { internalRuntime } from '../runtime/runtime';
 import { __streamixDebugDispose, __streamixScopeMember } from '../runtime/introspection-hooks';
+import { isRuntimeInstrumentationEnabled } from '../runtime/instrumentation';
 import { isAtom, isAtomLike } from "../utils/helpers";
 import {
     atom,
@@ -677,6 +678,14 @@ function createScopeInternal<T extends Record<string, any>>(
   }) as unknown as Scope;
 
   internalRuntime.provisionalObject(newScope);
+  if (isRuntimeInstrumentationEnabled()) {
+    // Read _rawState here, within the scope implementation, rather than from
+    // the inspector. Do not access public getters or evaluate expressions.
+    internalRuntime.diagnostics.registerScopeState(newScope, () => ({
+      disposed: newScope._disposed,
+      members: Object.keys(newScope._rawState).map(name => ({ name, value: newScope._rawState[name] })),
+    }));
+  }
   if (isScope(parent)) {
     const attach = () => { if (!newScope._disposed) parent._ownedAtoms.add(newScope); };
     if (internalRuntime.isProvisional(parent)) attach();

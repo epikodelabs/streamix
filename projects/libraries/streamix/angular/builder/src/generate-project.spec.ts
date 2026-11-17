@@ -480,7 +480,7 @@ describe('Angular debug project generation', () => {
       const debug = await readFile(generatedPath, 'utf8');
       expect(debug).toContain('__sxDebug(state(0),');
       expect(debug).toContain('"file":"projects/apps/demo/src/main.ts","line":2');
-      expect(debug.indexOf('__sxEnable();')).toBeLessThan(debug.indexOf('export const count'));
+      expect(debug.indexOf('introspection/activate')).toBeLessThan(debug.indexOf('export const count'));
       expect(debug).toContain('__sxMount();');
       await generateProject({ workspaceRoot: root, sourceRoot, introspection: false });
       expect(await readFile(generatedPath, 'utf8')).toBe(original);
@@ -505,7 +505,7 @@ describe('Angular debug project generation', () => {
       const helper = `export class Counter {\n  private value = 0;\n  increment() { return ++this.value; }\n}\n`;
       await writeFile(join(src, 'helper.ts'), helper);
       await generateProject({ workspaceRoot: root, sourceRoot, introspection: true });
-      expect(await readFile(join(root, '.angular/.streamix/demo/src/main.ts'), 'utf8')).toContain('__sxEnable();');
+      expect(await readFile(join(root, '.angular/.streamix/demo/src/main.ts'), 'utf8')).toContain('introspection/activate');
       expect(await readFile(join(root, '.angular/.streamix/demo/src/helper.ts'), 'utf8')).toBe(helper);
     } finally { await rm(root, { recursive: true, force: true }); }
   });

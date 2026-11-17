@@ -56,16 +56,16 @@ them:
   flag is the single activation switch, and discovery depends on it — flows
   register into `flowStates` (the discovery source) only while accounting is
   on, so an inspector without accounting sees no flows at all.
-- **Activation is not retroactive.** Per-node state readers are allocated at
-  creation, and flows are discovered from their registered readers. Nodes
-  created while instrumentation was off therefore stay unobservable after
-  `setEnabled(true)`: their historical values and executions cannot be
-  reconstructed, and flows are not backfilled. Compiler-debugged objects
-  still join the listing on their next `__streamixDebug` call, but without
-  history. This is the intentional production boundary — an unobservable
-  object is not a missing diagnostic node. `setEnabled(false)` likewise
-  freezes existing records rather than clearing them; disposal (not the
-  toggle) releases them.
+- **Activation backfills the listing, not history.** Enabling the inspector
+  scans the runtime graph and registered flows and lists what already exists,
+  without evaluating atoms or starting producers; compiler metadata wins over
+  inferred names. Per-node state readers are still allocated at creation, so a
+  node created while instrumentation was off is listed without historical
+  values or execution records — those cannot be reconstructed. The
+  `@epikodelabs/streamix/introspection/activate` entry enables the inspector
+  from its first static import, before application imports run.
+  `setEnabled(false)` freezes existing records rather than clearing them;
+  disposal (not the toggle) releases them.
 
 ## The rules at a glance
 

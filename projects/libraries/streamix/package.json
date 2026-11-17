@@ -24,6 +24,7 @@
     "aggregates/",
     "dom/",
     "networking/",
+    "introspection/",
     "react/",
     "vue/",
     "CHANGELOG.md"

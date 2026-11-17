@@ -83,6 +83,9 @@
       "@epikodelabs/streamix/vue": [
         "./projects/libraries/streamix/vue/src/lib/index.ts"
       ],
+      "@epikodelabs/streamix/introspection/activate": [
+        "./projects/libraries/streamix/introspection/activate/src/public-api.ts"
+      ],
       "@epikodelabs/streamix/introspection": [
         "./projects/libraries/streamix/introspection/src/lib/index.ts"
       ],

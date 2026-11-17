@@ -94,7 +94,7 @@ export declare const status: AtomLike<string>;`);
           for (const file of files) await builder.single(root, sourceRoot, file, introspection);
           expect(await snapshot()).toEqual(reactive);
           if (introspection) {
-            expect(reactive['main.ts']).toContain('__sxEnable();');
+            expect(reactive['main.ts']).toContain('introspection/activate');
             expect(reactive[files[0]]).toContain('__sxDebug');
             if (name === 'vue') expect(reactive['Counter.vue']).toContain('__sxDebug');
           }
