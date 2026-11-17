@@ -2,6 +2,8 @@ import { createOperator, DONE, NEXT, normalizeError, type Operator } from "../at
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
+import { asStreamixSource } from "../utils/source-protocol";
+import type { SourceCapabilities, SyncPoll } from "../utils/source-protocol";
 
 /**
  * Skip source values until a notifier emits.
@@ -65,7 +67,10 @@ export function skipUntil<T = any, N = any>(
         // Notifier emitted: open the gate
         if (!gateOpened) {
           gateOpened = true;
-          droppingBacklog = !!(source as any).__hasBufferedValues?.();
+          // Only values already held by the source count as backlog; the
+          // protocol's `hasBufferedEvents` deliberately excludes both the
+          // terminal state and lazily producible values.
+          droppingBacklog = asStreamixSource(source).hasBufferedEvents?.() ?? false;
           runner.removeSource(NOTIFIER_INDEX).catch(() => {});
         }
         return null;
@@ -74,7 +79,7 @@ export function skipUntil<T = any, N = any>(
       // Source value
       if (gateOpened && droppingBacklog) {
         // Drop values that were already buffered before the gate opened.
-        droppingBacklog = !!(source as any).__hasBufferedValues?.();
+        droppingBacklog = asStreamixSource(source).hasBufferedEvents?.() ?? false;
         return null;
       }
 
@@ -86,17 +91,14 @@ export function skipUntil<T = any, N = any>(
       return null;
     };
 
-    const iterator: AsyncIterator<T> & {
-      __tryNext?: () => IteratorResult<T> | null;
-      __hasBufferedValues?: () => boolean;
-    } = {
+    const iterator: AsyncIterator<T> & SourceCapabilities<T> = {
       async next() {
         if (isDone) return DONE;
 
         while (true) {
           // 1. Try sync drain
-          const sync = this.__tryNext?.();
-          if (sync) return sync;
+          const sync = this.pollSync?.();
+          if (sync?.status === 'available') return sync.result;
 
           // 2. Wait for runner
           const result = await runner.next();
@@ -110,20 +112,26 @@ export function skipUntil<T = any, N = any>(
         }
       },
 
-      __tryNext() {
-        if (isDone) return DONE;
+      pollSync(): SyncPoll<T> {
+        if (isDone) return { status: "available", result: DONE };
 
-        while (runner.__hasBufferedValues?.()) {
-          const res = runner.__tryNext?.();
-          if (!res || res.done) break;
+        while (true) {
+          const poll = runner.pollSync();
+          if (poll.status === 'unavailable') break;
+          if (poll.result.done) {
+            isDone = true;
+            return { status: "available", result: DONE };
+          }
 
-          const out = handleEvent(res.value);
-          if (out) return out;
+          const out = handleEvent(poll.result.value);
+          if (out) return { status: "available", result: out };
         }
-        return isDone ? DONE : null;
+        return isDone ? { status: "available", result: DONE } : { status: "unavailable" };
       },
 
-      __hasBufferedValues: () => runner.__hasBufferedValues?.() ?? false,
+      hasBufferedEvents: () => runner.hasBufferedEvents?.() ?? false,
+
+      isTerminal: () => isDone,
 
       async return(value) {
         isDone = true;

@@ -8,6 +8,7 @@ import {
 } from "../atoms";
 import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
+import type { SourceCapabilities, SyncPoll } from "../utils/source-protocol";
 
 /**
  * Delay values from the source until a notifier emits.
@@ -55,6 +56,7 @@ export function delayUntil<T = any, N = any>(
 
     const close = () => {
       isDone = true;
+      buffer.length = 0;
       runner.return?.().catch(() => {});
     };
 
@@ -109,10 +111,8 @@ export function delayUntil<T = any, N = any>(
       return null;
     };
 
-    const iterator: AsyncIterator<T> & {
-      __tryNext?: () => IteratorResult<T> | null;
-      __hasBufferedValues?: () => boolean;
-      flushOne?: () => IteratorResult<T> | null;
+    const iterator: AsyncIterator<T> & SourceCapabilities<T> & {
+      flushOne(): IteratorResult<T> | null;
     } = {
       async next() {
         if (isDone) return DONE;
@@ -148,37 +148,45 @@ export function delayUntil<T = any, N = any>(
         }
       },
 
-      __tryNext: () => {
-        if (isDone) return DONE;
+      pollSync(): SyncPoll<T> {
+        if (isDone) return { status: "available", result: DONE };
 
         // 1. Try flushing buffer if gate is open
         if (gateOpened) {
           const flushed = iterator.flushOne!();
-          if (flushed) return flushed;
+          if (flushed) return { status: "available", result: flushed };
         }
 
         // 2. If source completed and gate opened, but buffer is empty
         if (sourceCompleted && gateOpened && buffer.length === 0) {
           close();
-          return DONE;
+          return { status: "available", result: DONE };
         }
 
         // 3. Try draining sync events from runner
-        while (runner.__hasBufferedValues?.()) {
-          const res = runner.__tryNext?.();
-          if (!res || res.done) break;
+        while (true) {
+          const poll = runner.pollSync();
+          if (poll.status === 'unavailable') break;
+          if (poll.result.done) {
+            close();
+            return { status: "available", result: DONE };
+          }
 
-          const out = handleEvent(res.value);
-          if (out) return out;
-          
+          const out = handleEvent(poll.result.value);
+          if (out) return { status: "available", result: out };
+
           // After handling an event, check buffer again
           if (gateOpened) {
             const flushed = iterator.flushOne!();
-            if (flushed) return flushed;
+            if (flushed) return { status: "available", result: flushed };
+          }
+          if (sourceCompleted && gateOpened && buffer.length === 0) {
+            close();
+            return { status: "available", result: DONE };
           }
         }
 
-        return isDone ? DONE : null;
+        return isDone ? { status: "available", result: DONE } : { status: "unavailable" };
       },
 
       flushOne() {
@@ -187,11 +195,15 @@ export function delayUntil<T = any, N = any>(
         return { done: false, value };
       },
 
-      __hasBufferedValues: () => 
-        (gateOpened && buffer.length > 0) || (runner.__hasBufferedValues?.() ?? false),
+      // Held values count even while the gate prevents their delivery.
+      hasBufferedEvents: () =>
+        buffer.length > 0 || (runner.hasBufferedEvents?.() ?? false),
+
+      isTerminal: () => isDone || (sourceCompleted && gateOpened),
 
       async return(value) {
         isDone = true;
+        buffer.length = 0;
         await runner.return?.();
         return value !== undefined ? { value, done: true } : DONE;
       },
@@ -199,6 +211,7 @@ export function delayUntil<T = any, N = any>(
       async throw(err) {
         const error = normalizeError(err);
         isDone = true;
+        buffer.length = 0;
         await runner.return?.();
         return Promise.reject(error);
       }

@@ -434,6 +434,71 @@ describe('Scope System', () => {
   });
 
   describe('loading state', () => {
+    it('settles loading when an owned source completes without a value', async () => {
+      const s = scope(() => ({ empty: flow<number>([]) }));
+      const empty = s.get('empty');
+      try {
+        expect(s.loading).toBeTrue();
+        await delay();
+        expect(empty.disposed).toBeFalse();
+        expect(empty.value as unknown).toBe(NO_INITIAL_VALUE);
+        expect(hasAtomEmitted(empty)).toBeFalse();
+        expect(s.loading).toBeFalse();
+        expect((s as any)._pendingCount).toBe(0);
+      } finally {
+        s.dispose();
+      }
+    });
+
+    it('settles empty source loading through ancestor scopes', async () => {
+      const parent = scope({ child: { empty: () => flow<number>([]) } });
+      try {
+        expect(parent.loading).toBeTrue();
+        expect(parent.child.loading).toBeTrue();
+        await delay();
+        expect(parent.child.loading).toBeFalse();
+        expect(parent.loading).toBeFalse();
+        expect((parent.child as any)._pendingCount).toBe(0);
+        expect((parent as any)._pendingCount).toBe(0);
+      } finally {
+        parent.dispose();
+      }
+    });
+
+    it('does not settle an empty completed source twice when it is later disposed', async () => {
+      const s = scope(() => ({ empty: flow<number>([]), waiting: atom<number>() }));
+      try {
+        await delay();
+        expect(s.loading).toBeTrue();
+        expect((s as any)._pendingCount).toBe(1);
+        s.get('empty').dispose();
+        await delay();
+        expect(s.loading).toBeTrue();
+        expect((s as any)._pendingCount).toBe(1);
+        s.get('waiting').set(7);
+        expect(s.loading).toBeFalse();
+        expect((s as any)._pendingCount).toBe(0);
+      } finally {
+        s.dispose();
+      }
+    });
+
+    it('does not decrement loading again when an emitted source completes', async () => {
+      const s = scope(() => ({ finite: flow([1]), waiting: atom<number>() }));
+      try {
+        await delay();
+        expect(s.get('finite').disposed).toBeFalse();
+        expect(hasAtomEmitted(s.get('finite'))).toBeTrue();
+        expect(s.loading).toBeTrue();
+        expect((s as any)._pendingCount).toBe(1);
+        s.get('waiting').set(7);
+        expect(s.loading).toBeFalse();
+        expect((s as any)._pendingCount).toBe(0);
+      } finally {
+        s.dispose();
+      }
+    });
+
     it('should stay loading while async flow inputs of nested derived members initialize', async () => {
       let emitLeft!: (value: number) => void;
       let emitRight!: (value: number) => void;

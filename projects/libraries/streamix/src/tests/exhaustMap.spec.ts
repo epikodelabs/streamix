@@ -146,12 +146,14 @@ describe('exhaustMap', () => {
           ? { value: 1, done: false as const }
           : { value: undefined, done: true as const };
       },
-      __tryNext() {
+      pollSync() {
         return calls === 1
-          ? null
-          : { value: undefined, done: true as const };
+          ? { status: 'unavailable' as const }
+          : { status: 'available' as const, result: { value: undefined, done: true as const } };
       }
-    } as AsyncIterator<number> & { __tryNext: () => IteratorResult<number> | null };
+    } as AsyncIterator<number> & {
+      pollSync: () => { status: 'unavailable' } | { status: 'available'; result: IteratorResult<number> };
+    };
 
     const iterator = exhaustMap((value: number) => [value]).apply(source);
 

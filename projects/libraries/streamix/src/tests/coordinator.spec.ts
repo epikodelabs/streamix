@@ -4,34 +4,47 @@ import {
   getIterator,
   NEXT,
   raceNext,
+  type SourceCapabilities,
+  type SyncPoll,
 } from '@epikodelabs/streamix';
 
-function createPushSource<T>(onPush?: () => void): AsyncIterator<T> & {
-  __onPush?: () => void;
-  __tryNext: () => IteratorResult<T> | null;
+/**
+ * A push-driven source built directly on the source protocol: values are
+ * produced synchronously by `pollSync` and new events are announced through
+ * the registered readiness listener.
+ */
+function createPushSource<T>(): AsyncIterator<T> & {
+  pollSync: () => SyncPoll<T>;
+  onReady: (listener: () => void) => () => void;
   push: (value: T) => void;
 } {
   const queue: T[] = [];
+  let notify: (() => void) | undefined;
 
   const source: AsyncIterator<T> & {
-    __onPush?: () => void;
-    __tryNext: () => IteratorResult<T> | null;
+    pollSync: () => SyncPoll<T>;
+    onReady: (listener: () => void) => () => void;
     push: (value: T) => void;
   } = {
-    __onPush: onPush,
-    __tryNext: () => {
+    pollSync: (): SyncPoll<T> => {
       if (queue.length === 0) {
-        return null;
+        return { status: 'unavailable' };
       }
 
-      return NEXT(queue.shift()!);
+      return { status: 'available', result: NEXT(queue.shift()!) };
+    },
+    onReady: (listener: () => void) => {
+      notify = listener;
+      return () => {
+        if (notify === listener) notify = undefined;
+      };
     },
     push: (value: T) => {
       queue.push(value);
-      source.__onPush?.();
+      notify?.();
     },
     next: async () => {
-      throw new Error('next() should not be called when __tryNext is present');
+      throw new Error('next() should not be called when pollSync is present');
     },
     return: async () => DONE,
   };
@@ -71,14 +84,14 @@ describe('createAsyncCoordinator', () => {
     }
   });
 
-  it('returns null from a batched tryNext when earlier waiters consume the buffer', async () => {
+  it('reports unavailable from a batched pollSync when earlier waiters consume the buffer', async () => {
     const source = createPushSource<number>();
     const coordinator = createAsyncCoordinator([source], { syncDrain: true });
     try {
       const waiting = coordinator.next();
       coordinator.batch(() => {
         source.push(1);
-        expect(coordinator.__tryNext!()).toBeNull();
+        expect(coordinator.pollSync()).toEqual({ status: 'unavailable' });
       });
       expect((await waiting).value).toEqual({ type: 'value', value: 1, sourceIndex: 0 });
     } finally {
@@ -90,11 +103,14 @@ describe('createAsyncCoordinator', () => {
     const coordinator = createAsyncCoordinator<number>();
     try {
       for (let i = 0; i < 100; i++) {
-        const source = { next: async () => DONE, __onPush: undefined };
+        const source = { next: async () => DONE };
         expect(coordinator.addSource(source, i)).toBe(0);
         expect((await coordinator.next()).value).toEqual({ type: 'complete', sourceIndex: 0 });
         expect(coordinator.isSourceComplete(0)).toBe(true);
-        expect(source.__onPush).toBeUndefined();
+        // The coordinator must never grow protocol capabilities onto a plain
+        // source: capability declaration stays with the adapter.
+        expect('onReady' in source).toBeFalse();
+        expect('pollSync' in source).toBeFalse();
       }
     } finally {
       await coordinator.return!();
@@ -115,16 +131,24 @@ describe('createAsyncCoordinator', () => {
 
   it('does not detach a replacement when an older waiter receives completion', async () => {
     let complete = false;
+    let notify: (() => void) | undefined;
     const source = {
-      __onPush: undefined as (() => void) | undefined,
-      __tryNext: () => complete ? DONE : null,
+      pollSync: (): SyncPoll<number> => complete
+        ? { status: 'available', result: DONE }
+        : { status: 'unavailable' },
+      onReady: (listener: () => void) => {
+        notify = listener;
+        return () => {
+          if (notify === listener) notify = undefined;
+        };
+      },
       next: async () => DONE
     };
     const coordinator = createAsyncCoordinator<number>([source], { syncDrain: true });
     try {
       const old = coordinator.next();
       complete = true;
-      source.__onPush!();
+      notify!();
       // Replace synchronously after resolving the waiter, before its continuation.
       const removing = coordinator.removeSource(0);
       const replacement = createPushSource<number>();
@@ -138,40 +162,45 @@ describe('createAsyncCoordinator', () => {
       await coordinator.return!();
     }
   });
-  it('restores source push handlers when returned', async () => {
-    const originalOnPush = () => {};
-    const source: AsyncIterator<number> & { __onPush?: () => void } = {
-      __onPush: originalOnPush,
+
+  it('unregisters its readiness listener when returned', async () => {
+    const unregister = jasmine.createSpy('unregister');
+    const onReady = jasmine.createSpy('onReady').and.returnValue(unregister);
+    const source: AsyncIterator<number> & SourceCapabilities<number> = {
       next: async () => new Promise<IteratorResult<number>>(() => {}),
       return: async () => DONE,
+      onReady,
     };
 
     const coordinator = createAsyncCoordinator([source]);
 
-    expect(source.__onPush).not.toBe(originalOnPush);
+    expect(onReady).toHaveBeenCalled();
     await coordinator.return?.();
-    expect(source.__onPush).toBe(originalOnPush);
+    expect(unregister).toHaveBeenCalled();
+    // The source object stays untouched: no wrapped hook is left behind.
+    expect((source as any).onReady).toBe(onReady);
   });
 
-  it('restores source push handlers when a source is removed', async () => {
-    const originalOnPush = () => {};
-    const source: AsyncIterator<number> & { __onPush?: () => void } = {
-      __onPush: originalOnPush,
+  it('unregisters its readiness listener when a source is removed', async () => {
+    const unregister = jasmine.createSpy('unregister');
+    const onReady = jasmine.createSpy('onReady').and.returnValue(unregister);
+    const source: AsyncIterator<number> & SourceCapabilities<number> = {
       next: async () => new Promise<IteratorResult<number>>(() => {}),
       return: async () => DONE,
+      onReady,
     };
 
     const coordinator = createAsyncCoordinator<number>();
     const index = coordinator.addSource(source);
 
-    expect(source.__onPush).not.toBe(originalOnPush);
+    expect(onReady).toHaveBeenCalled();
     await coordinator.removeSource(index);
-    expect(source.__onPush).toBe(originalOnPush);
+    expect(unregister).toHaveBeenCalled();
 
     await coordinator.return?.();
   });
 
-  it('drains pushed values in source order via __onPush', () => {
+  it('drains pushed values in source order via readiness notifications', () => {
     const source = createPushSource<number>();
     const coordinator = createAsyncCoordinator([source]);
 
@@ -181,27 +210,32 @@ describe('createAsyncCoordinator', () => {
     const firstEvent = { type: 'value' as const, value: 1, sourceIndex: 0 };
     const secondEvent = { type: 'value' as const, value: 2, sourceIndex: 0 };
 
-    expect(coordinator.__tryNext?.()).toEqual(
-      NEXT(firstEvent)
+    expect(coordinator.pollSync()).toEqual(
+      { status: 'available', result: NEXT(firstEvent) }
     );
-    expect(coordinator.__tryNext?.()).toEqual(
-      NEXT(secondEvent)
+    expect(coordinator.pollSync()).toEqual(
+      { status: 'available', result: NEXT(secondEvent) }
     );
   });
 
-  it('continues draining when an original __onPush hook throws', async () => {
-    const source = createPushSource<number>(() => {
-      throw new Error('push hook boom');
-    });
+  it('converts a throwing pollSync into an error event and keeps draining', async () => {
+    let shouldThrow = true;
+    const source: AsyncIterator<number> & SourceCapabilities<number> = {
+      pollSync: (): SyncPoll<number> => {
+        if (shouldThrow) throw new Error('poll boom');
+        return { status: 'available', result: DONE };
+      },
+      next: async () => DONE,
+      return: async () => DONE,
+    };
     const coordinator = createAsyncCoordinator([source]);
 
-    source.push(1);
+    const event = await coordinator.next();
+    expect((event.value as any).type).toBe('error');
+    expect((event.value as any).error.message).toBe('poll boom');
 
-    const event = { type: 'value' as const, value: 1, sourceIndex: 0 };
-
-    expect(await coordinator.next()).toEqual(
-      NEXT(event)
-    );
+    shouldThrow = false;
+    expect(coordinator.pollSync()).toEqual({ status: 'available', result: DONE });
 
     await coordinator.return?.();
   });
@@ -223,7 +257,7 @@ describe('createAsyncCoordinator', () => {
     await expectAsync(coordinator.return?.()).toBeResolvedTo(DONE);
   });
 
-  it('returns null while an async source is still pending and ignores late results from removed sources', async () => {
+  it('reports unavailable while an async source is still pending and ignores late results from removed sources', async () => {
     const deferred = createDeferred<IteratorResult<number>>();
     let returned = false;
     const source: AsyncIterator<number> = {
@@ -236,8 +270,9 @@ describe('createAsyncCoordinator', () => {
 
     const coordinator = createAsyncCoordinator([source], { syncDrain: true });
 
-    expect(coordinator.__tryNext?.()).toBeNull();
-    expect(coordinator.__hasBufferedValues?.()).toBeFalse();
+    expect(coordinator.pollSync()).toEqual({ status: 'unavailable' });
+    expect(coordinator.hasBufferedEvents()).toBeFalse();
+    expect(coordinator.isTerminal()).toBeFalse();
 
     await coordinator.removeSource(0);
     deferred.resolve(NEXT(1));
@@ -250,10 +285,8 @@ describe('createAsyncCoordinator', () => {
 
   it('falls back to async next when a synchronous fast path has no value yet', async () => {
     const deferred = createDeferred<IteratorResult<number>>();
-    const source: AsyncIterator<number> & {
-      __tryNext: () => IteratorResult<number> | null;
-    } = {
-      __tryNext: () => null,
+    const source: AsyncIterator<number> & SourceCapabilities<number> = {
+      pollSync: () => ({ status: 'unavailable' }),
       next: () => deferred.promise,
       return: async () => DONE,
     };
@@ -270,15 +303,16 @@ describe('createAsyncCoordinator', () => {
     await coordinator.return?.();
   });
 
-  it('ignores invalid removals and reports completion for invalid indices', async () => {
+  it('reports terminal state through the protocol probes for exhausted sources', async () => {
     const coordinator = createAsyncCoordinator<number>();
 
     await coordinator.removeSource(-1);
     await coordinator.removeSource(0);
     await coordinator.removeSourceByKey('missing');
 
-    expect(coordinator.__hasBufferedValues?.()).toBeTrue();
-    expect(coordinator.__tryNext?.()).toEqual(DONE);
+    expect(coordinator.isTerminal()).toBeTrue();
+    expect(coordinator.hasBufferedEvents()).toBeFalse();
+    expect(coordinator.pollSync()).toEqual({ status: 'available', result: DONE });
     expect(coordinator.isSourceComplete(-1)).toBeTrue();
     expect(coordinator.isSourceComplete(0)).toBeTrue();
   });

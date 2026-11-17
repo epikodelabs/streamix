@@ -1,25 +1,26 @@
 import { createAsyncCoordinator } from '../lib/utils/coordinator';
+import type { SyncPoll } from '../lib/utils/source-protocol';
 
 describe('runtime coordinator ownership', () => {
   it('never drains a synchronous fast path past an outstanding async pull', async () => {
     let resolve!: (value: IteratorResult<number>) => void;
     let pulls = 0;
-    const source = {
+    const source: AsyncIterator<number> & { pollSync: () => SyncPoll<number> } = {
       next() {
         pulls++;
         return new Promise<IteratorResult<number>>(r => { resolve = r; });
       },
-      __tryNext() { return { done: false as const, value: 999 }; },
+      pollSync() { return { status: 'available' as const, result: { done: false as const, value: 999 } }; },
       async return() { return { done: true as const, value: undefined }; }
     };
     // Force a pull by initially reporting no synchronous value.
     let fast = false;
-    const originalTry = source.__tryNext;
-    source.__tryNext = () => fast ? originalTry() : null as any;
+    const originalPoll = source.pollSync;
+    source.pollSync = () => fast ? originalPoll() : { status: 'unavailable' as const };
     const coordinator = createAsyncCoordinator([source], { syncDrain: true });
     expect(pulls).toBe(1);
     fast = true;
-    expect(coordinator.__tryNext!()).toBeNull();
+    expect(coordinator.pollSync()).toEqual({ status: 'unavailable' });
     expect(pulls).toBe(1);
     resolve({ done: false, value: 1 });
     expect((await coordinator.next()).value).toEqual({ type: 'value', value: 1, sourceIndex: 0 });

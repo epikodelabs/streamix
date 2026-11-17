@@ -1,4 +1,4 @@
-import { atom, from, iterate, pipe, takeUntil, timer } from '@epikodelabs/streamix';
+import { atom, from, iterate, pipe, takeUntil, timer, type SourceCapabilities } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -111,17 +111,15 @@ describe('takeUntil', () => {
   });
 
   it('supports synchronous draining and teardown helpers', async () => {
-    const iterator = takeUntil(timer(100)).apply(iterate(from([1, 2]))[Symbol.asyncIterator]()) as AsyncIterator<number> & {
-      __tryNext?: () => IteratorResult<number> | null;
-      __hasBufferedValues?: () => boolean;
-    };
+    const iterator = takeUntil(timer(100)).apply(iterate(from([1, 2]))[Symbol.asyncIterator]()) as AsyncIterator<number> & SourceCapabilities<number>;
 
     await wait(0);
-    expect(iterator.__tryNext?.()).toEqual({ value: 1, done: false });
-    expect(iterator.__tryNext?.()).toEqual({ value: 2, done: false });
-    expect(iterator.__tryNext?.()).toEqual({ value: undefined, done: true });
-    expect(iterator.__tryNext?.()).toEqual({ value: undefined, done: true });
-    expect(iterator.__hasBufferedValues?.()).toBeTrue();
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: 1, done: false } });
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: 2, done: false } });
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: undefined, done: true } });
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: undefined, done: true } });
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
+    expect(iterator.isTerminal?.()).toBeTrue();
     expect(await iterator.return?.('done')).toEqual({ value: 'done', done: true });
   });
 
@@ -129,14 +127,23 @@ describe('takeUntil', () => {
     const openIterator = takeUntil(timer(100)).apply(iterate(from([1]))[Symbol.asyncIterator]());
     await expectAsync(openIterator.throw?.('stop')).toBeRejectedWithError('stop');
 
-    const completedIterator = takeUntil(timer(100)).apply(iterate(from([1]))[Symbol.asyncIterator]()) as AsyncIterator<number> & {
-      __tryNext?: () => IteratorResult<number> | null;
-    };
+    const completedIterator = takeUntil(timer(100)).apply(iterate(from([1]))[Symbol.asyncIterator]()) as AsyncIterator<number> & SourceCapabilities<number>;
 
     await wait(0);
-    completedIterator.__tryNext?.();
-    completedIterator.__tryNext?.();
+    completedIterator.pollSync?.();
+    completedIterator.pollSync?.();
     await expectAsync(completedIterator.throw?.('again')).toBeRejectedWithError('again');
+  });
+
+  it('reports empty terminal state without buffered events', async () => {
+    const iterator = takeUntil(from([])).apply(from<number>([])[Symbol.asyncIterator]()) as AsyncIterator<number> & SourceCapabilities<number>;
+
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: undefined, done: true } });
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
+    expect(iterator.isTerminal?.()).toBeTrue();
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    await iterator.return?.();
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
   });
 
   it('supports direct return on open iterators with and without an explicit value', async () => {
@@ -147,44 +154,38 @@ describe('takeUntil', () => {
     expect(await valuedIterator.return?.('closed')).toEqual({ value: 'closed', done: true });
   });
 
-  it('returns null from __tryNext when only async sources are pending', () => {
+  it('reports unavailable from pollSync when only async sources are pending', () => {
     const source = atom<number>();
-    const iterator = takeUntil(timer(100)).apply(iterate(source)[Symbol.asyncIterator]()) as AsyncIterator<number> & {
-      __tryNext?: () => IteratorResult<number> | null;
-    };
+    const iterator = takeUntil(timer(100)).apply(iterate(source)[Symbol.asyncIterator]()) as AsyncIterator<number> & SourceCapabilities<number>;
 
-    expect(iterator.__tryNext?.()).toBeNull();
+    expect(iterator.pollSync?.()).toEqual({ status: 'unavailable' });
   });
 
   it('closes synchronously when the notifier emits before buffered source values are consumed', async () => {
     const source = atom<number>();
     source.next(1);
 
-    const iterator = takeUntil(from([true])).apply(iterate(source)[Symbol.asyncIterator]()) as AsyncIterator<number> & {
-      __tryNext?: () => IteratorResult<number> | null;
-    };
+    const iterator = takeUntil(from([true])).apply(iterate(source)[Symbol.asyncIterator]()) as AsyncIterator<number> & SourceCapabilities<number>;
 
     await wait(0);
-    expect(iterator.__tryNext?.()).toEqual({ value: undefined, done: true });
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: undefined, done: true } });
   });
 
-  it('propagates synchronous source errors through __tryNext()', async () => {
+  it('propagates synchronous source errors through pollSync()', async () => {
     const source = {
       async next() {
         return new Promise<IteratorResult<number>>(() => {});
       },
-      __tryNext() {
+      pollSync(): { status: 'unavailable' } {
         throw new Error('sync source failure');
       },
       async return() {
         return { value: undefined, done: true as const };
       }
-    } as AsyncIterator<number> & { __tryNext: () => IteratorResult<number> | null };
+    } as AsyncIterator<number> & { pollSync: () => never };
 
-    const iterator = takeUntil(timer(100)).apply(source) as AsyncIterator<number> & {
-      __tryNext?: () => IteratorResult<number> | null;
-    };
+    const iterator = takeUntil(timer(100)).apply(source) as AsyncIterator<number> & SourceCapabilities<number>;
 
-    await expectAsync(Promise.resolve().then(() => iterator.__tryNext?.())).toBeRejectedWithError('sync source failure');
+    await expectAsync(Promise.resolve().then(() => iterator.pollSync?.())).toBeRejectedWithError('sync source failure');
   });
 });

@@ -1,4 +1,4 @@
-import { atom, bufferUntil, from, iterate, pipe } from '@epikodelabs/streamix';
+import { atom, bufferUntil, from, iterate, pipe, type SourceCapabilities } from '@epikodelabs/streamix';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -198,16 +198,25 @@ describe("bufferUntil", () => {
   });
 
   it("supports synchronous helper inspection and flushing", async () => {
-    const iterator = bufferUntil(from([true])).apply(iterate(from([1, 2]))[Symbol.asyncIterator]()) as AsyncIterator<number[]> & {
-      __tryNext?: () => IteratorResult<number[]> | null;
-      __hasBufferedValues?: () => boolean;
-    };
+    const iterator = bufferUntil(from([true])).apply(iterate(from([1, 2]))[Symbol.asyncIterator]()) as AsyncIterator<number[]> & SourceCapabilities<number[]>;
 
-    expect(iterator.__hasBufferedValues?.()).toBeFalse();
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
     await waitTick();
 
-    expect(iterator.__tryNext?.()).toEqual({ value: [1, 2], done: false });
-    expect(iterator.__tryNext?.()).toEqual({ value: undefined, done: true });
-    expect(iterator.__hasBufferedValues?.()).toBeTrue();
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: [1, 2], done: false } });
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: undefined, done: true } });
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
+    expect(iterator.isTerminal?.()).toBeTrue();
+  });
+
+  it("reports empty completion separately from buffered events", async () => {
+    const iterator = bufferUntil(from([])).apply(from<number>([])[Symbol.asyncIterator]()) as AsyncIterator<number[]> & SourceCapabilities<number[]>;
+
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: { value: undefined, done: true } });
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
+    expect(iterator.isTerminal?.()).toBeTrue();
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    await iterator.return?.();
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
   });
 });

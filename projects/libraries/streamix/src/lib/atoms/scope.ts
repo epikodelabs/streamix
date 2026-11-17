@@ -2,6 +2,7 @@ import { internalRuntime } from '../runtime/runtime';
 import { __streamixDebugDispose, __streamixScopeMember } from '../runtime/introspection-hooks';
 import { isRuntimeInstrumentationEnabled } from '../runtime/instrumentation';
 import { isAtom, isAtomLike } from "../utils/helpers";
+import { getProducerCompletion } from "./delivery";
 import {
     atom,
     derived,
@@ -513,6 +514,7 @@ export type ScopeConfig<T extends Record<string, any>> = DefinedInput<T> & ThisT
 let currentScope: Scope | null = null;
 const atomScopeRegistry = new WeakMap<Readable<any>, Scope>();
 const emittedAtomsRegistry = new WeakSet<Readable<any>>();
+const settledAtomsRegistry = new WeakSet<Readable<any>>();
 
 /**
  * Returns the scope currently being constructed or evaluated.
@@ -1040,9 +1042,11 @@ function attachToScope(atomInstance: Readable<any>, targetContext: Scope): void 
   if (disposers instanceof Set) {
     const earlyDetachmentHook = () => {
       targetContext._ownedAtoms.delete(atomInstance);
+      const pending = settledAtomsRegistry.has(atomInstance) ? 0 : -1;
+      settledAtomsRegistry.add(atomInstance);
       if (!targetContext._disposed) {
         updateScopeHierarchy(targetContext, {
-          pending: emittedAtomsRegistry.has(atomInstance) ? 0 : -1,
+          pending,
           dirty: atomInstance.dirty ? -1 : 0,
         });
       }
@@ -1053,6 +1057,12 @@ function attachToScope(atomInstance: Readable<any>, targetContext: Scope): void 
 
   const stopEmitTracking = onAtomEmit(atomInstance, () => markAtomAsEmitted(atomInstance));
   targetContext.cleanups.add(() => stopEmitTracking());
+
+  const completion = getProducerCompletion(atomInstance);
+  if (completion) {
+    const stopCompletionTracking = completion.onComplete(() => settleAtomLoading(atomInstance));
+    targetContext.cleanups.add(stopCompletionTracking);
+  }
 
   const stopDirtyTracking = onAtomDirtyChange(atomInstance, (dirty) => {
     if (targetContext._disposed) return;
@@ -1067,9 +1077,15 @@ function attachToScope(atomInstance: Readable<any>, targetContext: Scope): void 
 export function markAtomAsEmitted(atomInstance: Readable<any>): void {
   if (emittedAtomsRegistry.has(atomInstance)) return;
   emittedAtomsRegistry.add(atomInstance);
+  settleAtomLoading(atomInstance);
+}
 
+/** Settles initial loading without inventing a value for an empty source. */
+function settleAtomLoading(atomInstance: Readable<any>): void {
+  if (settledAtomsRegistry.has(atomInstance)) return;
+  settledAtomsRegistry.add(atomInstance);
   const contextRef = atomScopeRegistry.get(atomInstance);
-  if (contextRef) updatePendingHierarchy(contextRef, -1);
+  if (contextRef && !contextRef._disposed) updatePendingHierarchy(contextRef, -1);
 }
 
 /**

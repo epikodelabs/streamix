@@ -1,6 +1,7 @@
 import { __streamixPipeline } from '../runtime/introspection-hooks';
 import { isAsyncIterable, isAtomLike, isIterable } from "../utils/helpers";
 import { flow, trackDependencies, type Readable } from "./atom";
+import { getProducerCompletion } from "./delivery";
 import { isPromiseLike, type MaybePromise, type Operator } from "./operator";
 import { getCurrentScope, setCurrentScope } from "./scope";
 import { COMPLETED_REPLAY, REPLAY_ITERATOR } from './replay';
@@ -192,12 +193,13 @@ export function pipe(
 
     const result = flow(resultIterable);
     // The landing atom is terminal after completion. Ask the replay operator
-    // for a fresh cache reader instead of iterating that disposed atom.
+    // for a fresh cache reader instead of iterating the completed atom, which
+    // now keeps its last value instead of disposing.
     const replayIndex = ops.findLastIndex(op => COMPLETED_REPLAY in op);
     if (replayIndex >= 0) {
       Object.defineProperty(result, REPLAY_ITERATOR, {
         value: () => {
-          if (!result.disposed) return undefined;
+          if (!result.disposed && getProducerCompletion(result)?.completed !== true) return undefined;
           let replay = (ops[replayIndex] as any)[COMPLETED_REPLAY]() as AsyncIterator<any> | undefined;
           if (!replay) return undefined;
           for (const op of ops.slice(replayIndex + 1)) replay = op.apply(replay);

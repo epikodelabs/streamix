@@ -71,13 +71,13 @@ describe('createAsyncPushable', () => {
     pushable.dispose();
   });
 
-  it('supports synchronous __tryNext()', () => {
+  it('supports synchronous pollSync()', () => {
     const pushable = createAsyncPushable<number>();
 
     pushable.push(10);
 
-    expect((pushable as any).__tryNext()).toEqual(NEXT(10));
-    expect((pushable as any).__tryNext()).toBeNull();
+    expect(pushable.pollSync()).toEqual({ status: 'available', result: NEXT(10) });
+    expect(pushable.pollSync()).toEqual({ status: 'unavailable' });
 
     pushable.dispose();
   });
@@ -85,15 +85,15 @@ describe('createAsyncPushable', () => {
   it('tracks buffered values', () => {
     const pushable = createAsyncPushable<number>();
 
-    expect((pushable as any).__hasBufferedValues()).toBeFalse();
+    expect(pushable.hasBufferedEvents()).toBeFalse();
 
     pushable.push(1);
 
-    expect((pushable as any).__hasBufferedValues()).toBeTrue();
+    expect(pushable.hasBufferedEvents()).toBeTrue();
 
-    (pushable as any).__tryNext();
+    pushable.pollSync();
 
-    expect((pushable as any).__hasBufferedValues()).toBeFalse();
+    expect(pushable.hasBufferedEvents()).toBeFalse();
 
     pushable.dispose();
   });
@@ -118,7 +118,7 @@ describe('createAsyncPushable', () => {
     await pushable.return?.();
 
     expect(await pushable.next()).toEqual(DONE);
-    expect((pushable as any).__tryNext()).toEqual(DONE);
+    expect(pushable.pollSync()).toEqual({ status: 'available', result: DONE });
   });
 
   it('throw() rejects and terminates', async () => {

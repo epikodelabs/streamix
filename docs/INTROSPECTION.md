@@ -148,7 +148,7 @@ return trackOperatorExecution(iterator, name, captureOrigin());
 ```
 
 `trackOperatorExecution` instruments `next`/`return`/`throw` in place
-(preserving `__tryNext`/`__onPush` hooks), accounts the execution under the
+(preserving the source protocol capabilities: `pollSync`/`onReady`), accounts the execution under the
 operator's `name`, and attaches the origin of the line that applied the
 operator. When instrumentation is off and no listener is attached, it returns
 the original iterator untouched — your operator cannot tell.

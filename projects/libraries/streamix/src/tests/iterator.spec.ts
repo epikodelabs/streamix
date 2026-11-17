@@ -15,6 +15,39 @@ type TestObserver<T> = {
 };
 
 describe('createAsyncIterator', () => {
+  it('keeps buffered pushes pending until consumed when no readiness listener is registered', async () => {
+    const capture = createRegisterCapture();
+    const iterator = createAsyncIterator<number>({ register: capture.fn })();
+    try {
+      const initial = iterator.next();
+      capture.receiver!.next(1);
+      await initial;
+
+      let consumed = false;
+      const pending = capture.receiver!.next(2);
+      expect(pending instanceof Promise).toBeTrue();
+      const settled = Promise.resolve(pending).then(() => { consumed = true; });
+      await Promise.resolve();
+      expect(consumed).toBeFalse();
+      expect(iterator.pollSync?.()).toEqual({ status: 'available', result: NEXT(2) });
+      await settled;
+      expect(consumed).toBeTrue();
+    } finally { await iterator.return?.(); }
+  });
+
+  it('registers lazily even when readiness observers attach', async () => {
+    const register = jasmine.createSpy('register').and.returnValue(createSubscription());
+    const iterator = createAsyncIterator<number>({ register })();
+    const stop = iterator.onReady?.(() => {});
+    try {
+      expect(register).not.toHaveBeenCalled();
+      expect(iterator.hasBufferedEvents?.()).toBeFalse();
+      expect(iterator.isTerminal?.()).toBeFalse();
+      expect(iterator.pollSync?.()).toEqual({ status: 'unavailable' });
+      expect(register).toHaveBeenCalledTimes(1);
+    } finally { stop?.(); await iterator.return?.(); }
+  });
+
   it('delivers values via for-await-of and supports return', async () => {
     const registered: TestObserver<number>[] = [];
     const register = (receiver: TestObserver<number>) => {
@@ -58,9 +91,10 @@ describe('createAsyncIterator', () => {
     await flush();
 
     registerCapture.receiver!.next(2);
-    const buffered = (iterator as any).__tryNext?.();
-    expect(buffered).toEqual(NEXT(2));
-    expect((iterator as any).__hasBufferedValues?.()).toBeFalse();
+    const buffered = iterator.pollSync?.();
+    expect(buffered).toEqual({ status: 'available', result: NEXT(2) });
+    expect(iterator.hasBufferedEvents?.()).toBeFalse();
+    expect(iterator.isTerminal?.()).toBeFalse();
   });
 
   it("registers exactly once", () => {
@@ -156,12 +190,12 @@ describe('createAsyncIterator', () => {
     capture.receiver!.next(2);
     await flush();
 
-    expect((iterator as any).__hasBufferedValues?.()).toBeTrue();
+    expect(iterator.hasBufferedEvents?.()).toBeTrue();
 
     await iterator.return?.();
 
     expect(await iterator.next()).toEqual(DONE);
-    expect((iterator as any).__tryNext?.()).toEqual(DONE);
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: DONE });
   });
 
   it("calls unsubscribe on throw", async () => {
@@ -227,61 +261,9 @@ describe('createAsyncIterator', () => {
 
     await flush();
 
-    expect((iterator as any).__tryNext()).toEqual(NEXT(2));
-    expect((iterator as any).__tryNext()).toEqual(NEXT(3));
-    expect((iterator as any).__tryNext()).toBeNull();
-  });
-
-  it("buffers __pushNext before registration", async () => {
-    const capture = createRegisterCapture();
-
-    const iterator = createAsyncIterator<number>({
-      register: capture.fn
-    })();
-
-    (iterator as any).__pushNext(123);
-
-    expect(await iterator.next()).toEqual(NEXT(123));
-  });
-
-  it("buffers completion before registration", async () => {
-    const capture = createRegisterCapture();
-
-    const iterator = createAsyncIterator<number>({
-      register: capture.fn
-    })();
-
-    (iterator as any).__pushComplete();
-
-    expect(await iterator.next()).toEqual(DONE);
-  });
-
-  it("buffers error before registration", async () => {
-    const capture = createRegisterCapture();
-
-    const iterator = createAsyncIterator<number>({
-      register: capture.fn
-    })();
-
-    (iterator as any).__pushError(new Error("boom"));
-
-    await expectAsync(iterator.next())
-      .toBeRejectedWithError("boom");
-  });
-
-  it("conflates pending pushes", async () => {
-    const capture = createRegisterCapture();
-
-    const iterator = createAsyncIterator<number>({
-      register: capture.fn,
-      conflate: true
-    })();
-
-    (iterator as any).__pushNext(1);
-    (iterator as any).__pushNext(2);
-    (iterator as any).__pushNext(3);
-
-    expect(await iterator.next()).toEqual(NEXT(3));
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: NEXT(2) });
+    expect(iterator.pollSync?.()).toEqual({ status: 'available', result: NEXT(3) });
+    expect(iterator.pollSync?.()).toEqual({ status: 'unavailable' });
   });
 
   it("marks observer disposed after return", async () => {

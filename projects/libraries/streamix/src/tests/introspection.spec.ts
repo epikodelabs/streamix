@@ -174,37 +174,48 @@ describe('debug runtime introspection', () => {
     } finally { model.dispose(); __streamixDebugDispose(fallback); }
     expect(streamixInspector.inspect({ name: 'model' }).length).toBe(0);
   });
-  it('captures real pipeline values and bounded terminal history without retaining disposed objects', async () => {
+  it('retains completed pipeline state until disposal and bounds terminal history', async () => {
     const op = __streamixDebug(map((v: number) => v * 2), metadata('double', 'operator'));
     const values = __streamixDebug(pipe([1, 2], op), metadata('numbers', 'flow'));
     const record = streamixInspector.inspect({ name: 'numbers' })[0];
-    expect(record.composition.length).toBe(1);
-    const seen: number[] = [];
-    for await (const value of values) seen.push(value);
-    expect(seen).toEqual([2, 4]);
-    expect(streamixInspector.details(record.id)).toBeUndefined();
-    expect(streamixInspector.trace().some(e => e.id === record.id && e.kind === 'complete')).toBe(true);
-    const counter = __streamixDebug(atom(0), metadata('counter'));
     try {
-      for (let i = 1; i <= 1100; i++) counter.set(i);
-      const trace = streamixInspector.trace();
-      expect(trace.length).toBe(1000);
-      // The ring keeps the newest events in chronological order.
-      const changes = trace.filter(event => event.name === 'counter' && event.kind === 'change');
-      expect(changes.length).toBe(1000);
-      expect(changes[0].emission).toBe(101);
-      expect(changes[changes.length - 1].emission).toBe(1100);
-      // A snapshot is frozen; later events replace only future snapshots.
-      const later = __streamixDebug(atom(0), metadata('counter-later'));
+      expect(record.composition.length).toBe(1);
+      const seen: number[] = [];
+      for await (const value of values) seen.push(value);
+      expect(seen).toEqual([2, 4]);
+      // Producer completion keeps the flow and its last value; explicit
+      // disposal is what removes the row.
+      expect(values.disposed).toBeFalse();
+      expect(values.value).toBe(4);
+      expect(streamixInspector.details(record.id)).toEqual(jasmine.objectContaining({ state: 'complete', value: '4' }));
+      expect(streamixInspector.trace().some(e => e.id === record.id && e.kind === 'complete')).toBe(true);
+      values.dispose();
+      expect(streamixInspector.details(record.id)).toBeUndefined();
+
+      const counter = __streamixDebug(atom(0), metadata('counter'));
       try {
-        for (let i = 1; i <= 3; i++) later.set(i);
+        for (let i = 1; i <= 1100; i++) counter.set(i);
+        const trace = streamixInspector.trace();
         expect(trace.length).toBe(1000);
-        const newest = streamixInspector.trace();
-        expect(newest.length).toBe(1000);
-        expect(newest[newest.length - 1].name).toBe('counter-later');
-        expect(trace[trace.length - 1].name).toBe('counter');
-      } finally { later.dispose(); }
-    } finally { counter.dispose(); }
+        // The ring keeps the newest events in chronological order.
+        const changes = trace.filter(event => event.name === 'counter' && event.kind === 'change');
+        expect(changes.length).toBe(1000);
+        expect(changes[0].emission).toBe(101);
+        expect(changes[changes.length - 1].emission).toBe(1100);
+        // A snapshot is frozen; later events replace only future snapshots.
+        const later = __streamixDebug(atom(0), metadata('counter-later'));
+        try {
+          for (let i = 1; i <= 3; i++) later.set(i);
+          expect(trace.length).toBe(1000);
+          const newest = streamixInspector.trace();
+          expect(newest.length).toBe(1000);
+          expect(newest[newest.length - 1].name).toBe('counter-later');
+          expect(trace[trace.length - 1].name).toBe('counter');
+        } finally { later.dispose(); }
+      } finally { counter.dispose(); }
+    } finally {
+      values.dispose();
+    }
   });
   it('preserves subscription identity and receiver and links component fields to their target', async () => {
     const source = __streamixDebug(atom(1), metadata('App.value'));

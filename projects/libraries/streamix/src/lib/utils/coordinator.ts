@@ -9,6 +9,7 @@
 import { DONE } from "../atoms";
 import { normalizeError } from "../atoms/atom";
 import { RuntimeSourceExecution } from "../runtime/source-execution";
+import { asStreamixSource, type StreamixSource, type SyncPoll } from "./source-protocol";
 
 /**
 
@@ -41,19 +42,27 @@ export interface AsyncCoordinatorOptions {
  *
  * Supports dynamic source management and both sync and async draining.
  *
+ * The coordinator is itself a {@link StreamixSource}: it exposes the standard
+ * async pull plus the protocol's synchronous poll, buffered-events and
+ * terminal-state probes. It declares no readiness notification — consumers
+ * are woken through their pending `next()`.
+ *
  * @typeParam T - The type of value emitted by the sources.
  */
-export interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
-  /**
-   * Synchronously drain all available values from all sources (if supported).
-   * Returns DONE if all sources are complete, otherwise null if no values are available.
-   */
-  __tryNext?: () => IteratorResult<RunnerEvent<T>> | null;
+export interface AsyncCoordinator<T> extends StreamixSource<RunnerEvent<T>> {
+  [Symbol.asyncIterator](): AsyncIterator<RunnerEvent<T>>;
 
   /**
-   * Returns true if there are buffered values or all sources are done.
+   * The coordinator always supports the synchronous poll: it drains buffered
+   * source events and reports the all-sources-completed state through it.
    */
-  __hasBufferedValues?: () => boolean;
+  pollSync(): SyncPoll<RunnerEvent<T>>;
+
+  /** Events buffered from the sources but not yet consumed. */
+  hasBufferedEvents(): boolean;
+
+  /** True once every source has completed or the coordinator was returned. */
+  isTerminal(): boolean;
 
   /**
    * Dynamically add a new source to the coordinator.
@@ -100,9 +109,9 @@ export interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
  * Creates an async coordinator that merges multiple async iterators.
  *
  * The coordinator supports:
- * - Synchronous draining for sources that support it (via `__tryNext`)
+ * - Synchronous draining for sources that support it (via `pollSync`)
  * - Concurrent async pulling for async sources
- * - Push notification support for sources with `__onPush`
+ * - Push notification support for sources with `onReady`
  * - Dynamic addition and removal of sources during iteration
  * - Automatic cleanup and error propagation
  *
@@ -135,17 +144,17 @@ export function createAsyncCoordinator<T = any>(
   const execution = new RuntimeSourceExecution<T, RunnerEvent<T>>(DONE);
 
   // Use sparse arrays to support dynamic indices
-  const sourceList: (AsyncIterator<T> | null)[] = [...sources];
+  const sourceList: (StreamixSource<T> | null)[] = sources.map(asStreamixSource);
   sources.forEach((source, index) => execution.attach(index, source));
   const completed: boolean[] = sources.map(() => false);
   const pendingPulls: boolean[] = sources.map(() => false);
-  const originalPushHandlers: Array<(() => void) | undefined> = [];
-  const wiredPushHandlers: Array<(() => void) | undefined> = [];
-  // Sources that expose `__onPush` are push-driven: if their synchronous
-  // `__tryNext()` has nothing yet, the push hook will wake the coordinator.
-  // Sources that only expose `__tryNext()` use it as a fast path and still
-  // need an ordinary async `next()` fallback (for example a pending Promise).
-  const pushDriven: boolean[] = sources.map(source => "__onPush" in (source as any));
+  const readyUnwires: Array<(() => void) | undefined> = [];
+  // Sources that declare `onReady` are push-driven: if their synchronous
+  // `pollSync()` has nothing yet, the readiness listener will wake the
+  // coordinator. Sources that only expose `pollSync()` use it as a fast path
+  // and still need an ordinary async `next()` fallback (for example a pending
+  // Promise).
+  const pushDriven: boolean[] = sources.map(source => typeof asStreamixSource(source).onReady === "function");
 
   let isDraining = false;
   let iteratorReturned = false;
@@ -201,7 +210,7 @@ export function createAsyncCoordinator<T = any>(
    * @param index The index of the source to detach.
    * @returns The detached source iterator, or null if not found.
    */
-  function detachSource(index: number): AsyncIterator<T> | null {
+  function detachSource(index: number): StreamixSource<T> | null {
     if (index < 0 || index >= sourceList.length) return null;
 
     const source = sourceList[index];
@@ -212,7 +221,7 @@ export function createAsyncCoordinator<T = any>(
     pendingPulls[index] = false;
     sourceList[index] = null;
     execution.detach(index);
-    restoreSource(source, index);
+    restoreSource(index);
 
     return source;
   }
@@ -284,7 +293,8 @@ export function createAsyncCoordinator<T = any>(
   }
 
   /**
-   * Drains a single event from one source, using `__tryNext` if available.
+   * Drains a single event from one source, using `pollSync` when the source
+   * declares the synchronous-poll capability.
    * @param i The index of the source to drain.
    */
   function drainOneSource(i: number) {
@@ -299,17 +309,18 @@ export function createAsyncCoordinator<T = any>(
       return;
     }
 
-    const src: any = sourceList[i];
+    const src = sourceList[i]!;
 
-    if (src.__tryNext) {
+    if (src.pollSync) {
       try {
-        const r = src.__tryNext();
-        if (r) {
-          if (r.done) {
+        const poll = src.pollSync();
+        if (poll.status === "available") {
+          const result = poll.result;
+          if (result.done) {
             markSourceComplete(i);
             pushEvent({ type: "complete", sourceIndex: i }, i);
           } else {
-            pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
+            pushEvent({ type: "value", value: result.value, sourceIndex: i }, i);
           }
           return;
         }
@@ -319,10 +330,11 @@ export function createAsyncCoordinator<T = any>(
         return;
       }
 
-      // `__tryNext()` is a synchronous fast path. For explicitly push-driven
-      // iterators, a null result means their `__onPush` hook will wake us when
-      // a value arrives. Other iterators still need an ordinary async pull so
-      // promises, timers, and async generators cannot be stranded.
+      // `pollSync()` is a synchronous fast path. For explicitly push-driven
+      // sources, an `unavailable` outcome means their readiness listener will
+      // wake us when an event arrives. Other sources still need an ordinary
+      // async pull so promises, timers, and async generators cannot be
+      // stranded.
       if (pushDriven[i]) return;
     }
 
@@ -346,8 +358,8 @@ export function createAsyncCoordinator<T = any>(
         if (!sourceList[i] || completed[i]) continue;
 
         // Drain at most one event per source per pass. For push-based sources,
-        // __onPush triggers this function repeatedly, preserving cross-source
-        // emission ordering without source-local metadata.
+        // readiness notifications trigger this function repeatedly, preserving
+        // cross-source emission ordering without source-local metadata.
         drainOneSource(i);
       }
     } finally {
@@ -358,48 +370,39 @@ export function createAsyncCoordinator<T = any>(
   }
 
   /**
-   * Wires up a source's `__onPush` handler to trigger a drain.
+   * Registers a readiness listener on a source that declares the `onReady`
+   * capability. The source is not mutated: the returned unregister function
+   * detaches the listener again.
    * @param src The source iterator.
    * @param index The index of the source.
    */
-  function wireSource(src: AsyncIterator<T> & { __onPush?: () => void }, index: number) {
-    const orig = src.__onPush;
-    const wired = () => {
-      try {
-        orig?.();
-      } catch {
-        // Preserve draining even if the source's push hook throws.
-      }
+  function wireSource(src: StreamixSource<T>, index: number) {
+    const onReady = src.onReady;
+    if (!onReady) return;
+    readyUnwires[index] = onReady.call(src, () => {
       if (sourceList[index] !== src) return;
-      // Drain this source immediately on push to preserve push-time ordering.
+      // Drain this source immediately on readiness to preserve push-time ordering.
       drainOneSource(index);
       notify();
-    };
-    originalPushHandlers[index] = orig;
-    wiredPushHandlers[index] = wired;
-    src.__onPush = wired;
+    });
   }
 
   /**
-   * Restores the original `__onPush` handler for a source.
-   * @param src The source iterator.
+   * Unregisters a source's readiness listener.
    * @param index The index of the source.
    */
-  function restoreSource(src: AsyncIterator<T>, index: number) {
-    const source = src as AsyncIterator<T> & { __onPush?: () => void };
-    if (source.__onPush === wiredPushHandlers[index]) {
-      source.__onPush = originalPushHandlers[index];
-    }
-    originalPushHandlers[index] = undefined;
-    wiredPushHandlers[index] = undefined;
+  function restoreSource(index: number) {
+    const unwire = readyUnwires[index];
+    readyUnwires[index] = undefined;
+    unwire?.();
   }
 
   // Wire up initial sources
   for (let i = 0; i < sources.length; i++) {
-    wireSource((sources as any[])[i], i);
+    wireSource(sourceList[i]!, i);
   }
 
-  const iterator: any = {
+  const iterator: AsyncCoordinator<T> = {
     [Symbol.asyncIterator]() {
       return this;
     },
@@ -417,19 +420,23 @@ export function createAsyncCoordinator<T = any>(
       return execution.wait().then(acceptEvent);
     },
 
-    __tryNext() {
-      if (iteratorReturned) return DONE;
+    pollSync(): SyncPoll<RunnerEvent<T>> {
+      if (iteratorReturned) return { status: "available", result: DONE };
 
       drainSources();
 
       const event = execution.take();
-      if (event !== undefined) return acceptEvent(event);
+      if (event !== undefined) return { status: "available", result: acceptEvent(event) };
 
-      return allDone() ? DONE : null;
+      return allDone() ? { status: "available", result: DONE } : { status: "unavailable" };
     },
 
-    __hasBufferedValues() {
-      return execution.hasEvents || allDone();
+    hasBufferedEvents() {
+      return execution.hasEvents;
+    },
+
+    isTerminal() {
+      return allDone();
     },
 
     return() {
@@ -442,9 +449,9 @@ export function createAsyncCoordinator<T = any>(
       for (let i = 0; i < sourceList.length; i++) {
         completed[i] = true;
         pendingPulls[i] = false;
+        restoreSource(i);
         const source = sourceList[i];
         if (!source) continue;
-        restoreSource(source, i);
         toClose.push(source);
         sourceList[i] = null;
       }
@@ -470,6 +477,7 @@ export function createAsyncCoordinator<T = any>(
       if (iteratorReturned) {
         throw new Error('Cannot add source to returned coordinator');
       }
+      const sourceView = asStreamixSource(source);
 
       // Reuse a freed slot to prevent unbounded sparse array growth
       // Initial indices identify fixed inputs (e.g. mergeMap's outer source).
@@ -477,16 +485,16 @@ export function createAsyncCoordinator<T = any>(
       let index = sourceList.findIndex((item, i) =>
         item === null && (i >= initialSourceCount || explicitlyRemoved.has(i)));
       if (index >= 0) {
-        sourceList[index] = source;
+        sourceList[index] = sourceView;
         completed[index] = false;
         pendingPulls[index] = false;
-        pushDriven[index] = "__onPush" in (source as any);
+        pushDriven[index] = typeof sourceView.onReady === "function";
       } else {
         index = sourceList.length;
-        sourceList.push(source);
+        sourceList.push(sourceView);
         completed.push(false);
         pendingPulls.push(false);
-        pushDriven.push("__onPush" in (source as any));
+        pushDriven.push(typeof sourceView.onReady === "function");
       }
       execution.attach(index, source);
       slotTokens[index] = {};
@@ -494,11 +502,11 @@ export function createAsyncCoordinator<T = any>(
       activeCount++;
 
       if (key !== undefined) {
-        keyToSource.set(key, source);
+        keyToSource.set(key, sourceView);
       }
 
       // Wire up push notification
-      wireSource(source, index);
+      wireSource(sourceView, index);
 
       // Trigger immediate drain for new source
       Promise.resolve().then(() => drainSources());
