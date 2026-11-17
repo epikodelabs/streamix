@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **React tracing:** attribute committed renders to each component's own subscribed sources instead of a shared write counter, so batched commits cannot hand one component's write to another; equal-reference emissions on explicit dedupe-off subscriptions now produce a render trace, and `read()`/`write()` emit the same `explicit atom read`/`explicit atom write` events as Vue without claiming a render. Angular's per-flush render event remains an intentional framework difference (#207).
+
 - **React compiler:** lower logical atom assignments (`&&=`, `||=`, `??=`) to conditional expressions instead of generated synchronous arrows, so `await` and `yield` operands stay in their async/generator context; runtime coverage verifies laziness, results and atom identity (#233). Vue and Angular never synthesize an assignment wrapper, so they are unaffected.
 
 - **Builders:** React and Angular install the virtual `tsconfig.app.json` atomically as part of the generation transaction; a failure after the output swap now restores the last committed virtual tree byte for byte instead of serving the failed generation (#231). Vue has no post-swap filesystem write, so the equivalent defect does not exist there.

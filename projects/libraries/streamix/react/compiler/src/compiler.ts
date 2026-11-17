@@ -871,12 +871,17 @@ export function transformReactJsx(
       const bindings: ts.Statement[] = [];
       const atomBindings = new Map<string, ts.Identifier>();
       const scopeBindings = new Map<string, ts.Identifier>();
+      // Source references subscribed by this component. The render trace
+      // carries them so the runtime can attribute a commit to this component's
+      // own writes instead of consuming a shared counter.
+      const traceSources = new Map<string, ts.Expression>();
       // Every generated-binding reference site, recorded so the eager-read
       // guard can tell which closures would read a binding before it is
       // declared.
       const bindingReferenceSites: ts.Node[] = [];
       const bindingForAtom = (atomName: string, _source: ts.Node): ts.Identifier => {
         bindingReferenceSites.push(_source);
+        traceSources.set(atomName, factory.createIdentifier(atomName));
         const existing = atomBindings.get(atomName);
         if (existing) return existing;
         const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
@@ -903,6 +908,7 @@ export function transformReactJsx(
       };
       const bindingForSource = (atomSource: ts.Expression, key: string, _source: ts.Node = atomSource): ts.Identifier => {
         bindingReferenceSites.push(_source);
+        traceSources.set(key, atomSource);
         const existing = atomBindings.get(key);
         if (existing) return existing;
         const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
@@ -939,6 +945,12 @@ export function transformReactJsx(
         const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
         scopeBindings.set(bindingKey, name);
         needsRuntimeImport = true;
+        const sourceExpression = factory.createCallExpression(
+          factory.createPropertyAccessExpression(factory.createIdentifier(scopeName), "get"),
+          undefined,
+          [factory.createStringLiteral(property)],
+        );
+        traceSources.set(bindingKey, sourceExpression);
         const statement = factory.createVariableStatement(
           undefined,
           factory.createVariableDeclarationList([
@@ -948,11 +960,7 @@ export function transformReactJsx(
               undefined,
               asAny(
                 factory.createCallExpression(factory.createIdentifier("useStreamixSource"), undefined, [
-                  factory.createCallExpression(
-                    factory.createPropertyAccessExpression(factory.createIdentifier(scopeName), "get"),
-                    undefined,
-                    [factory.createStringLiteral(property)],
-                  ),
+                  sourceExpression,
                   factory.createStringLiteral(`${scopeName}.${property}`),
                 ]),
               ),
@@ -1447,20 +1455,25 @@ export function transformReactJsx(
         bindings.push(factory.createExpressionStatement(factory.createCallExpression(
           factory.createIdentifier("useStreamixAfterCommit"),
           undefined,
-          [factory.createArrowFunction(
-            undefined,
-            undefined,
-            [],
-            undefined,
-            factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-            factory.createBlock([
-              factory.createExpressionStatement(factory.createCallExpression(
-                factory.createIdentifier("__streamixTrace"),
-                undefined,
-                [factory.createStringLiteral("render"), factory.createStringLiteral(traceName)],
-              )),
-            ], true),
-          )],
+          [
+            factory.createArrowFunction(
+              undefined,
+              undefined,
+              [],
+              undefined,
+              factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+              factory.createBlock([
+                factory.createExpressionStatement(factory.createCallExpression(
+                  factory.createIdentifier("__streamixTrace"),
+                  undefined,
+                  [factory.createStringLiteral("render"), factory.createStringLiteral(traceName)],
+                )),
+              ], true),
+            ),
+            // Attribution list: the runtime traces this render only when one
+            // of these sources was written since this component's last commit.
+            factory.createArrayLiteralExpression([...traceSources.values()]),
+          ],
         )));
       }
 

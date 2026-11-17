@@ -4,12 +4,13 @@ import {
 } from "react";
 import {
   recordStreamixDevtoolsEvent,
+  streamixDevtoolsEnabled,
   streamixDevtoolsSnapshot,
   subscribeStreamixDevtools,
   type StreamixDevtoolsEvent,
 } from "@epikodelabs/streamix";
 
-export { recordStreamixDevtoolsEvent };
+export { recordStreamixDevtoolsEvent, streamixDevtoolsEnabled };
 export type { StreamixDevtoolsEvent };
 
 /** Returns a live, bounded event trace for custom DevTools integrations. */

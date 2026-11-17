@@ -333,4 +333,94 @@ idescribe("React tracing parity with the Angular layer", () => {
       stop();
     }
   });
+
+  it("attributes a batched commit to the component that owns the write", async () => {
+    const left = atom(0);
+    const right = atom(0);
+    const events: string[] = [];
+    const stop = subscribeStreamixDevtools(event => {
+      if (event.type === "write" || event.type === "render") events.push(`${event.type}:${event.source}`);
+    });
+    let rerenderParent!: () => void;
+    function Left() {
+      const value = useStreamixSource(left, "left");
+      useStreamixAfterCommit(() => __streamixTrace("render", "Left"), [left]);
+      return createElement("output", null, String(value));
+    }
+    function Right() {
+      const value = useStreamixSource(right, "right");
+      useStreamixAfterCommit(() => __streamixTrace("render", "Right"), [right]);
+      return createElement("output", null, String(value));
+    }
+    function Parent() {
+      const [, setVersion] = useState(0);
+      rerenderParent = () => setVersion(version => version + 1);
+      return createElement("div", null, createElement(Left), createElement(Right));
+    }
+    try {
+      await act(async () => { root.render(createElement(Parent)); await Promise.resolve(); });
+      events.length = 0;
+      // Both components commit in one batch; Left's effect runs first even
+      // though Right owns the write.
+      await act(async () => {
+        right.next(2);
+        rerenderParent();
+        await Promise.resolve();
+      });
+      expect(events).toEqual(["write:right", "render:Right"]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("traces a render for an equal-reference emission on a mixed-dedupe source", async () => {
+    const state = atom({ count: 1 });
+    const events: string[] = [];
+    const stop = subscribeStreamixDevtools(event => {
+      if (event.type === "write" || event.type === "render") events.push(`${event.type}:${event.source}`);
+    });
+    function Mixed() {
+      // Explicit hooks keep the dedupe-off entry: the same reference still
+      // notifies and re-renders. The compiler binding uses its own entry.
+      useAtomValue(state);
+      useStreamixSource(state, "state");
+      useStreamixAfterCommit(() => __streamixTrace("render", "Mixed"), [state]);
+      return createElement("output", null, String(state.value.count));
+    }
+    try {
+      await act(async () => { root.render(createElement(Mixed)); await Promise.resolve(); });
+      events.length = 0;
+      await act(async () => { state.next(state.value); await Promise.resolve(); });
+      expect(events).toEqual(["write:explicit atom read", "render:Mixed"]);
+    } finally {
+      stop();
+      state.dispose();
+    }
+  });
+
+  it("traces escape-hatch reads and writes without attributing a render", async () => {
+    const source = atom(1);
+    const events: string[] = [];
+    const stop = subscribeStreamixDevtools(event => {
+      if (event.type === "read" || event.type === "write" || event.type === "render") {
+        events.push(`${event.type}:${event.source}`);
+      }
+    });
+    try {
+      await act(async () => {
+        expect(read(source)).toBe(1);
+        write(source, 2);
+        // The hatch write is an event, not a write count: a following legacy
+        // render trace stays unattributed.
+        __streamixTrace("render", "Ghost");
+        await Promise.resolve();
+      });
+      // Vue parity: the same types and labels as the Vue adapter's hatches.
+      expect(events).toEqual(["read:explicit atom read", "write:explicit atom write"]);
+      expect(source.value).toBe(2);
+    } finally {
+      stop();
+      source.dispose();
+    }
+  });
 });

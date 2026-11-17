@@ -229,6 +229,8 @@ describe("Streamix React adoption regressions", () => {
   it("traces committed renders for arrow and memo components under their declared name", () => {
     const arrow = transformReactJsx(`const status = atom("Ready"); export const App = () => <div>{status}</div>;`);
     expect(arrow.code).toContain('__streamixTrace("render", "App")');
+    // The commit trace carries the component's own sources for attribution.
+    expect(arrow.code).toMatch(/useStreamixAfterCommit\([\s\S]*?\[status\]/);
 
     const memo = transformReactJsx(`
       import { memo } from "react";
@@ -236,6 +238,22 @@ describe("Streamix React adoption regressions", () => {
       export const App = memo(() => <div>{status}</div>);
     `);
     expect(memo.code).toContain('__streamixTrace("render", "App")');
+    expect(memo.code).toMatch(/useStreamixAfterCommit\([\s\S]*?\[status\]/);
+  });
+
+  it("passes scope members and dynamic selections to the commit trace", () => {
+    const result = transformReactJsx(`
+      import { atom, scope } from "@epikodelabs/streamix";
+      const count = atom(0);
+      const model = { count };
+      export function View({ key }: { key: string }) {
+        const state = scope({ label: "Ready" });
+        return <output>{state.label}{model[key]}</output>;
+      }
+    `);
+
+    expect(result.diagnostics.filter(d => d.category === "error")).toEqual([]);
+    expect(result.code).toMatch(/useStreamixAfterCommit\([\s\S]*?\[state\.get\("label"\), model\[key\]\]/);
   });
 
   it("lowers standalone derived callbacks to tracked value reads", () => {
