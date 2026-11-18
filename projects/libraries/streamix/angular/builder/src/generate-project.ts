@@ -380,46 +380,130 @@ function streamixNamespaceAliases(file: ts.SourceFile): ReadonlySet<string> {
   return namespaces;
 }
 
+interface ComponentScopeCreation {
+  readonly field: string;
+  readonly call: ts.CallExpression;
+  /**
+   * True when the assignment runs before the compiled view mounts
+   * (`ngAfterViewInit`): field initializers, constructors, and the
+   * `ngOnChanges`/`ngOnInit` hooks. Template member paths are only safe for
+   * these; destruction ownership applies to every creation.
+   */
+  readonly beforeView: boolean;
+}
+
 /**
- * Component class fields initialized by `scope(...)`. Only instance fields of
- * decorated components are component-owned; module-level and static scopes
+ * Component-owned `scope(...)` creations in one source file.
+ *
+ * Recognizes field initializers, direct `this.field = scope(...)` assignments,
+ * and assignments of a scope held in a local variable. Only instance members
+ * of decorated components are component-owned; module-level and static scopes
  * have a wider lifetime and must not be disposed with one component.
  */
-function scopeFieldsFor(program: ts.Program, sourcePath: string): string[] {
+function componentScopeCreations(
+  program: ts.Program,
+  sourcePath: string,
+): ComponentScopeCreation[] {
   const file = program.getSourceFile(sourcePath);
   if (!file) return [];
 
   const aliases = streamixMemberHelperAliases(file);
   const namespaces = streamixNamespaceAliases(file);
-  const fields: string[] = [];
+  const creations: ComponentScopeCreation[] = [];
 
-  const isScopeInitializer = (initializer: ts.Expression): boolean => {
-    const value = unwrapReactiveInitializer(initializer);
-    if (!ts.isCallExpression(value)) return false;
+  const scopeCall = (expression: ts.Expression | undefined): ts.CallExpression | undefined => {
+    if (!expression) return undefined;
+    const value = unwrapReactiveInitializer(expression);
+    if (!ts.isCallExpression(value)) return undefined;
     const callee = value.expression;
-    if (ts.isIdentifier(callee)) {
-      return aliases.scope.has(callee.text);
-    }
-    return ts.isPropertyAccessExpression(callee) &&
-      ts.isIdentifier(callee.expression) &&
-      namespaces.has(callee.expression.text) &&
-      callee.name.text === 'scope';
+    const isScope = ts.isIdentifier(callee)
+      ? aliases.scope.has(callee.text)
+      : ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        namespaces.has(callee.expression.text) &&
+        callee.name.text === 'scope';
+    return isScope ? value : undefined;
+  };
+
+  const isStatic = (node: ts.ClassElement): boolean =>
+    ts.canHaveModifiers(node) &&
+    (ts.getModifiers(node)?.some(modifier => modifier.kind === ts.SyntaxKind.StaticKeyword) ?? false);
+
+  const collectFromBody = (body: ts.Node, beforeView: boolean): void => {
+    // Locals that currently hold a scope. Name-based tracking is deliberate:
+    // a false positive only adds a field to the destroy-time read, where the
+    // runtime skips anything without a disposer.
+    const scopeLocals = new Map<string, ts.CallExpression>();
+
+    const visit = (node: ts.Node): void => {
+      // `this` inside a plain function or nested class is not the component.
+      // Arrow functions keep the surrounding `this` and are traversed.
+      if (node !== body && (ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node) ||
+          ts.isClassLike(node) || ts.isMethodDeclaration(node))) return;
+
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+        const call = scopeCall(node.initializer);
+        if (call) scopeLocals.set(node.name.text, call);
+      }
+
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const right = unwrapReactiveInitializer(node.right);
+        const created = scopeCall(node.right) ??
+          (ts.isIdentifier(right) ? scopeLocals.get(right.text) : undefined);
+
+        if (created) {
+          if (ts.isIdentifier(node.left)) {
+            scopeLocals.set(node.left.text, created);
+          } else if (
+            ts.isPropertyAccessExpression(node.left) &&
+            node.left.expression.kind === ts.SyntaxKind.ThisKeyword &&
+            ts.isIdentifier(node.left.name)
+          ) {
+            creations.push({ field: node.left.name.text, call: created, beforeView });
+          }
+        }
+      }
+
+      ts.forEachChild(node, visit);
+    };
+
+    visit(body);
   };
 
   for (const component of decoratedComponents(program, sourcePath)) {
     for (const member of component.members) {
-      if (!ts.isPropertyDeclaration(member) || !ts.isIdentifier(member.name) ||
-          !member.initializer) continue;
-      if (ts.getModifiers(member)?.some(modifier => modifier.kind === ts.SyntaxKind.StaticKeyword)) {
+      if (isStatic(member)) continue;
+
+      if (ts.isPropertyDeclaration(member)) {
+        if (ts.isIdentifier(member.name)) {
+          const call = scopeCall(member.initializer);
+          if (call) creations.push({ field: member.name.text, call, beforeView: true });
+        }
         continue;
       }
-      if (isScopeInitializer(member.initializer)) {
-        fields.push(member.name.text);
+
+      if (ts.isConstructorDeclaration(member) && member.body) {
+        collectFromBody(member.body, true);
+        continue;
+      }
+
+      if ((ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) ||
+          ts.isSetAccessorDeclaration(member)) && member.body) {
+        const name = ts.isIdentifier(member.name) ? member.name.text : undefined;
+        const beforeView = name === 'ngOnChanges' || name === 'ngOnInit';
+        collectFromBody(member.body, beforeView);
       }
     }
   }
 
-  return [...new Set(fields)];
+  return creations;
+}
+
+/** Component class fields that can hold a component-owned `scope(...)`. */
+function scopeFieldsFor(program: ts.Program, sourcePath: string): string[] {
+  return [
+    ...new Set(componentScopeCreations(program, sourcePath).map(creation => creation.field)),
+  ];
 }
 
 /** Local names imported from Streamix for `method(...)` and `scope(...)`. */
@@ -511,8 +595,9 @@ function flattenScopeMembers(
 }
 
 /**
- * Scope members declared in `scope({...})` initializers, optionally filtered
- * per value member. Nested scopes are flattened into dotted value paths.
+ * Scope members declared in `scope({...})` creations that run before the
+ * compiled view mounts, optionally filtered per value member. Nested scopes
+ * are flattened into dotted value paths.
  */
 function scopeMembersFor(
   program: ts.Program,
@@ -523,34 +608,21 @@ function scopeMembersFor(
   if (!file) return undefined;
 
   const aliases = streamixMemberHelperAliases(file);
-  const scopes: Record<string, readonly string[]> = {};
+  const scopes: Record<string, string[]> = {};
 
-  const visit = (node: ts.Node): void => {
-    if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name)) {
-      const initializer = node.initializer ? unwrapReactiveInitializer(node.initializer) : undefined;
-      if (
-        initializer &&
-        ts.isCallExpression(initializer) &&
-        ts.isIdentifier(initializer.expression) &&
-        aliases.scope.has(initializer.expression.text) &&
-        initializer.arguments.length > 0 &&
-        ts.isObjectLiteralExpression(initializer.arguments[0])
-      ) {
-        const members = flattenScopeMembers(
-          initializer.arguments[0],
-          [],
-          aliases,
-          accept,
-        );
-        if (members.length > 0) {
-          scopes[node.name.text] = members;
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
+  for (const creation of componentScopeCreations(program, sourcePath)) {
+    if (!creation.beforeView) continue;
+    const argument = creation.call.arguments[0];
+    if (!argument || !ts.isObjectLiteralExpression(argument)) continue;
 
-  ts.forEachChild(file, visit);
+    const members = flattenScopeMembers(argument, [], aliases, accept);
+    if (members.length === 0) continue;
+
+    scopes[creation.field] = [
+      ...new Set([...(scopes[creation.field] ?? []), ...members]),
+    ];
+  }
+
   return Object.keys(scopes).length > 0 ? scopes : undefined;
 }
 
@@ -626,8 +698,17 @@ async function compileVirtualSource({
     throw new Error(`[streamix] ${relativePath}: multiple @Component classes with Streamix sources ` +
       'in one file are not supported by this compiler. Split components into separate files.');
   }
+  const ownedScopeFields = scopeFieldsFor(program, sourcePath);
   const match = findSxComponentTemplate(source);
   if (!match) {
+    if (ownedScopeFields.length > 0) {
+      // Scope ownership does not depend on template compilation. Install the
+      // teardown lifecycle and leave the dynamic (or absent) template to
+      // Angular.
+      return {
+        text: installSxLifecycleIntoComponentSource(source, { ownedScopeFields }).source,
+      };
+    }
     if (hasReactiveComponent) {
       throw new Error(
         `[streamix] ${relativePath}: a component with Streamix sources needs a static @Component template or templateUrl. ` +
@@ -657,7 +738,6 @@ async function compileVirtualSource({
     templateText = match.template;
   }
   const scopeValuePaths = scopeValuePathsFor(program, sourcePath);
-  const ownedScopeFields = scopeFieldsFor(program, sourcePath);
   const compiled = compileSxComponent({
     componentPath: sourcePath,
     templatePath,

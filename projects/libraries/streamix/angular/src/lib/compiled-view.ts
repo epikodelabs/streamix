@@ -200,7 +200,9 @@ function disposeOwnedScopes(
   }
 
   for (const scope of owned) {
-    if (!scope) continue;
+    // A field can be reassigned after construction; anything without a
+    // disposer at destruction time was never component-owned.
+    if (!scope || typeof scope.dispose !== 'function') continue;
     try {
       scope.dispose();
     } catch (error) {

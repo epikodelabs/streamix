@@ -188,6 +188,81 @@ describe('external Angular component templates', () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it('owns constructor-created scopes and maps their template members', async () => {
+    const { mkdtemp, mkdir, readFile, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-constructor-scope-'));
+    try {
+      const src = join(root, 'projects/apps/demo/src');
+      await mkdir(src, { recursive: true });
+      await writeFile(join(root, 'projects/apps/demo/tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true }, include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'globals.d.ts'), `
+        declare module '@epikodelabs/streamix' {
+          export function scope<T>(value: T): any;
+        }
+      `);
+      await writeFile(join(src, 'panel.ts'), `
+        import { scope } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ template: '<output>{{ model.title }}</output><p>{{ aliased.body }}</p>' })
+        export class Panel {
+          model: any;
+          aliased: any;
+
+          constructor() {
+            this.model = scope({ title: 'ready' });
+            const local = scope({ body: 'draft' });
+            this.aliased = local;
+          }
+        }
+      `);
+      await generateProject({ workspaceRoot: root, sourceRoot: 'projects/apps/demo/src' });
+      const generated = await readFile(join(root, '.angular/.streamix/demo/src/panel.ts'), 'utf8');
+      // Constructor-created scopes are visible to template bindings and are
+      // component-owned, including scopes passed through a local variable.
+      expect(generated).toContain("model.get('title')");
+      expect(generated).toContain("aliased.get('body')");
+      expect(generated).toContain('ownedScopes: () => [this.model, this.aliased]');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('installs scope cleanup for a component without a compilable template', async () => {
+    const { mkdtemp, mkdir, readFile, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-dynamic-template-'));
+    try {
+      const src = join(root, 'projects/apps/demo/src');
+      await mkdir(src, { recursive: true });
+      await writeFile(join(root, 'projects/apps/demo/tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true }, include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'globals.d.ts'), `
+        declare module '@epikodelabs/streamix' {
+          export function scope<T>(value: T): any;
+        }
+      `);
+      await writeFile(join(src, 'panel.ts'), `
+        import { scope } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({})
+        export class Panel {
+          model = scope({ title: 'ready' });
+        }
+      `);
+      await generateProject({ workspaceRoot: root, sourceRoot: 'projects/apps/demo/src' });
+      const generated = await readFile(join(root, '.angular/.streamix/demo/src/panel.ts'), 'utf8');
+      // No template to transform, but the scope still needs a lifetime owner.
+      expect(generated).toContain('ɵinstallSxCompiledView(');
+      expect(generated).toContain('ownedScopes: () => [this.model]');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('bridges nested scope values and leaves method members callable', async () => {
     const { mkdtemp, mkdir, readFile, writeFile, rm } = await import('node:fs/promises');
     const { join } = await import('node:path');

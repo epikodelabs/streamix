@@ -126,10 +126,15 @@ call.
 Keep reactive sources as ordinary component fields. The compiler cannot safely
 observe replacement through accessor-backed fields.
 
-A `scope(...)` initializer declared as an instance field is component-owned:
-the generated view disposes it when the component is destroyed, including when
-Angular tears down the server platform after SSR. Module-level and static
-scopes are left alone because their lifetime is wider than one component.
+A `scope(...)` created as an instance-field initializer or assigned to a field
+in the constructor, `ngOnChanges`, or `ngOnInit` is component-owned: the
+generated view disposes it when the component is destroyed, including when
+Angular tears down the server platform after SSR. Scopes created later in
+methods are also disposed with the component, but only creations that run
+before `ngAfterViewInit` supply member paths for compiled template bindings.
+Components whose template metadata is computed at runtime still install this
+cleanup. Module-level and static scopes are left alone because their lifetime
+is wider than one component.
 
 ## 5. Use reactive template bindings
 
