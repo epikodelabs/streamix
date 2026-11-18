@@ -345,4 +345,41 @@ describe("React Angular-hosted source generation", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  it("mirrors authored deletions by removing the generated twin and its map", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-builder-delete-"));
+    const sourceRoot = "projects/apps/demo/src";
+    try {
+      const source = join(root, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
+        include: ["projects/apps/demo/src/**/*.ts", "projects/apps/demo/src/**/*.tsx"],
+      }));
+      await writeFile(join(source, "main.tsx"), `
+        import { atom } from '@epikodelabs/streamix';
+        let count = atom(0);
+        export function App() { return <button onClick={() => count++}>{count}</button>; }
+      `);
+      await writeFile(join(source, "extra.ts"), `
+        import { atom } from '@epikodelabs/streamix';
+        export const keep = atom(1);
+      `);
+      const virtualRoot = await generateReactProject(root, sourceRoot);
+      const virtualExtra = join(virtualRoot, "extra.ts");
+      await readFile(virtualExtra, "utf8");
+
+      // Deleting the authored source removes its virtual twin and map, so the
+      // delegated build never resolves a stale module.
+      await rm(join(source, "extra.ts"));
+      await regenerateReactFile(root, sourceRoot, "extra.ts");
+      await expectAsync(readFile(virtualExtra, "utf8")).toBeRejected();
+      await expectAsync(readFile(`${virtualExtra}.map`, "utf8")).toBeRejected();
+
+      // Siblings stay untouched.
+      expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).toContain("useStreamixSource");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });

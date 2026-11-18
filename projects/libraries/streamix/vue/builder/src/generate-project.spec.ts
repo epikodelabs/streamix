@@ -56,6 +56,46 @@ describe('Vue builder project generation', () => {
     expect(virtualRootOf('projects/apps/demo/src')).toBe('demo/src');
     expect(virtualRootOf('projects/apps/demo/client')).toBe('demo/client');
   });
+
+  it('mirrors authored deletions by removing the generated SFC and its map', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-builder-delete-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    const source = join(workspace, sourceRoot);
+
+    try {
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'Counter.vue'), `
+        <script setup lang="ts">
+        import { atom } from '@epikodelabs/streamix';
+        const count = atom(0);
+        </script>
+        <template><button @click="count++">{{ count }}</button></template>
+      `);
+      await writeFile(join(source, 'Extra.vue'), `
+        <script setup lang="ts">
+        import { atom } from '@epikodelabs/streamix';
+        const keep = atom(1);
+        </script>
+        <template><span>{{ keep }}</span></template>
+      `);
+
+      const output = await generateVueProject(workspace, sourceRoot);
+      const virtualExtra = join(output, 'Extra.vue');
+      await readFile(virtualExtra, 'utf8');
+
+      // Deleting the authored SFC removes its virtual twin and map, so the
+      // delegated build never resolves a stale component.
+      await rm(join(source, 'Extra.vue'));
+      await regenerateVueFile(workspace, sourceRoot, 'Extra.vue');
+      await expectAsync(readFile(virtualExtra, 'utf8')).toBeRejected();
+      await expectAsync(readFile(`${virtualExtra}.map`, 'utf8')).toBeRejected();
+
+      // Siblings stay untouched.
+      expect(await readFile(join(output, 'Counter.vue'), 'utf8')).toContain("useWritable(count, 'count')");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('Vue builder production safety', () => {
