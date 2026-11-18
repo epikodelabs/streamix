@@ -10,6 +10,7 @@ import type {
 } from '@epikodelabs/streamix';
 import { NO_INITIAL_VALUE } from '@epikodelabs/streamix';
 import { recordStreamixDevtoolsEvent } from './devtools';
+import { registerSSRDisposal } from './ssr-disposal';
 
 type Disposable = { dispose(): void };
 type ErrorSource = {
@@ -299,7 +300,9 @@ function asyncIterableRef<T>(
  *
  * Pass a factory to make this composable own the returned source. Owned
  * disposable Streamix sources are disposed when the current Vue effect scope
- * stops (component unmount, `effectScope().stop()`, etc.).
+ * stops (component unmount, `effectScope().stop()`, etc.). During server
+ * rendering the component scope is never stopped, so disposal is also
+ * registered with the SSR render context and runs when rendering completes.
  *
  * This composable requires an active Vue effect scope. For manual ownership
  * outside Vue setup, use {@link createIterableBridge} and dispose it directly.
@@ -319,6 +322,7 @@ export function useIterable<T>(
   requireEffectScope('useIterable()');
   const bridge = createIterableBridgeImpl(sourceOrFactory, initialValue, sourceName);
   onScopeDispose(bridge.dispose);
+  registerSSRDisposal(bridge.dispose);
   return bridge.ref;
 }
 

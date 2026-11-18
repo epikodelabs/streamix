@@ -12,6 +12,7 @@ import {
   subscribeStreamixDevtools,
   type StreamixDevtoolsEvent,
 } from '@epikodelabs/streamix';
+import { registerSSRDisposal } from './ssr-disposal';
 
 export { recordStreamixDevtoolsEvent };
 export type { StreamixDevtoolsEvent };
@@ -29,6 +30,7 @@ export function useStreamixDevtoolsEvents(): Readonly<
   if (getCurrentScope()) {
     onScopeDispose(unsubscribe);
   }
+  registerSSRDisposal(unsubscribe);
 
   return trace;
 }
@@ -43,6 +45,7 @@ export const StreamixDevtools = defineComponent({
     });
 
     onScopeDispose(unsubscribe);
+    registerSSRDisposal(unsubscribe);
 
     return () =>
       h(

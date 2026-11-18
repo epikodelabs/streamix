@@ -3,6 +3,7 @@ import {
   onScopeDispose,
 } from 'vue';
 import type { Scope } from '@epikodelabs/streamix';
+import { registerSSRDisposal } from './ssr-disposal';
 
 /**
  * Creates a Streamix scope whose lifetime is tied to the current Vue effect
@@ -25,7 +26,10 @@ export function useScope<T extends Scope<any>>(factory: () => T): T {
     );
   }
   const instance = factory();
+  // The server renderer never stops component effect scopes, so SSR needs the
+  // render context's cleanup queue as well. Disposal is idempotent.
   onScopeDispose(() => instance.dispose());
+  registerSSRDisposal(() => instance.dispose());
 
   return instance;
 }
