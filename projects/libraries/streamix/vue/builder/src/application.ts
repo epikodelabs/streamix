@@ -5,6 +5,7 @@ import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { Observable } from 'rxjs';
 import { generateVueProject, regenerateVueFiles } from './generate-project';
+import { shouldWatchSources } from './options';
 
 interface ObservableLike<T> {
   subscribe(observer: {
@@ -141,8 +142,7 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
       await generateVueProject(context.workspaceRoot, sourceRoot, introspection);
       if (stopped) return;
 
-      if (['serve', 'dev-server'].includes(context.target?.target ?? '') ||
-          ['serve', 'dev-server'].includes(target) || options['watch'] === true) {
+      if (shouldWatchSources(target, context.target?.target, options['watch'])) {
         stopLibraries = watchLibraries(context.workspaceRoot, sourceRoot, () => {
           rebuildQueue = rebuildQueue.then(async () => {
             if (!stopped) await refreshApplication(context.workspaceRoot, sourceRoot,

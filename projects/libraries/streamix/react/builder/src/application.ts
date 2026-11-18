@@ -2,6 +2,7 @@ import { refreshApplication, watchLibraries } from "./watch-libraries";
 import { createBuilder, type BuilderOutput, type Target } from "@angular-devkit/architect";
 import { Observable } from "rxjs";
 import { generateReactProject, regenerateReactFiles } from "./generate-project";
+import { shouldWatchSources } from "./options";
 import { watch, type FSWatcher } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
@@ -133,7 +134,7 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
       if (stopped) return;
       // Watch the actual authored tree; the delegated builder watches only the virtual copy.
       // Queue edits so writes never interleave, and retain the previous virtual copy on errors.
-      if (["serve", "dev-server"].includes(context.target?.target ?? "") || ["serve", "dev-server"].includes(target) || options["watch"] === true) {
+      if (shouldWatchSources(target, context.target?.target, options["watch"])) {
         stopLibraries = watchLibraries(context.workspaceRoot, sourceRoot, () => {
           rebuildQueue = rebuildQueue.then(async () => {
             if (!stopped) await refreshApplication(context.workspaceRoot, sourceRoot,
