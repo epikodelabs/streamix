@@ -14,6 +14,23 @@ describe('Vue SFC compiler', () => {
     expect(result.code).toContain('self(count) + self.read(count)');
   });
 
+  it('keeps an empty conditional branch Vue-owned without diagnostics', () => {
+    const result = transformVueSfc(`
+      <script setup lang="ts">
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(0);
+      </script>
+      <template>
+        <span v-if="count"></span>
+      </template>
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    // The empty branch stays Vue-owned: its condition is bridged and the
+    // body is preserved verbatim — no structural code is emitted for it.
+    expect(result.code).toContain('<span v-if="__sx_count"></span>');
+  });
+
   it('preserves CRLF source columns in diagnostic frames', () => {
     const source = '<template>\r\n  {{ count }}\r\n</template>';
     const formatted = formatVueSfcDiagnostics(source, 'Counter.vue', [{

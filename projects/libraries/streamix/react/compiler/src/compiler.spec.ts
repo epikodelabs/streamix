@@ -9,6 +9,25 @@ describe("React JSX compiler", () => {
     expect(result.code).toContain('self(count) + self.read(count)');
   });
 
+  it("bridges an empty conditional branch condition without touching the branch", () => {
+    const result = transformReactJsx(`
+      function Row() {
+        const count = atom(0);
+        return (
+          <section>
+            {count > 0 ? null : <em>closed</em>}
+          </section>
+        );
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.bindingCount).toBe(1);
+    // The condition is bridged and the empty (null) branch passes through
+    // untouched: no structural code is emitted for it.
+    expect(result.code).toContain("{__streamixBinding0 > 0 ? null : <em>closed</em>}");
+  });
+
   it("adopts direct atom and scoped JSX reads and rewrites atom assignment", () => {
     const result = transformReactJsx(`
       function Counter() {
