@@ -96,6 +96,9 @@ describe('Vue SSR disposal', () => {
   });
 
   it('releases bridges when rendering fails', async () => {
+    // The rejection is the assertion; Vue's dev-mode warning for the
+    // intentionally thrown render error is expected.
+    const renderWarning = spyOn(console, 'warn');
     const shared = atom('ready');
     const app = createSSRApp({
       setup() {
@@ -108,6 +111,7 @@ describe('Vue SSR disposal', () => {
     });
 
     await expectAsync(renderToString(app)).toBeRejectedWithError('render failed');
+    expect(renderWarning).toHaveBeenCalled();
     expect(shared.subscriberCount).toBe(0);
     shared.dispose();
   });

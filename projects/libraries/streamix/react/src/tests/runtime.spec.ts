@@ -243,6 +243,10 @@ idescribe("React runtime escape hatches", () => {
   });
 
   it("settles a mounted Suspense boundary when a pending resource is disposed", async () => {
+    // The error boundary handling is the assertion; React's dev-mode error
+    // log for the caught render error is expected and should not pollute the
+    // test output.
+    spyOn(console, "error");
     class Boundary extends Component<{ children?: ReactNode }, { message?: string }> {
       override state: { message?: string } = {};
       static getDerivedStateFromError(error: unknown) {
