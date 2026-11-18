@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Vue:** generated bridges, devtools subscriptions, and `useScope` instances now register with Vue's SSR render context, so `renderToString` and streaming renders release subscriptions, async iterators, and owned Streamix scopes instead of leaking one set per request (#212). React SSR never subscribes during rendering and Angular destroys the platform after rendering, so neither adapter had the equivalent leak.
+
+- **Vue compiler:** scope members are classified before a bridge is chosen: nested scope values resolve through `get('…').get('…')`, `method(...)` members stay ordinary calls and are never invoked as source factories, and members the compiler cannot classify are rejected with guidance (#213). React and Angular received equivalent nested-member and method classification for parity.
+
 - **React:** disposing a pending resource now flips it to a terminal error and settles the promise Suspense is waiting on, so a mounted boundary retries instead of hanging; settled resources keep their data (#208).
 
 - **SSR:** React and Vue snapshots encode `undefined` explicitly (payload version 2; version 1 stays readable) and reject values JSON would silently change — non-finite numbers, `Date`, `Map`, `Set`, bigint, symbols, functions, cycles, and nested `undefined` — before emitting a payload (#149).

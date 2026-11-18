@@ -120,9 +120,17 @@ Interpolation, bindings, `v-text`, `v-html`, supported events, and supported
 values and flows become read-only bridges; each scope field the template uses
 gets its own bridge.
 
+The compiler classifies scope members before bridging them. Nested scope
+objects are traversed to their atom leaves (`{{ state.profile.name }}` bridges
+`state.get('profile').get('name')`), while `method(...)` members stay ordinary
+method calls (`@click="state.increment()"`) and are never treated as sources.
+A member the compiler cannot classify is rejected instead of guessed.
+
 The generated bridges subscribe inside the component effect scope, unsubscribe
-on unmount, and dispose compiler-owned scopes. Do not manually retain a
-generated bridge.
+on unmount, and dispose compiler-owned scopes. During server rendering Vue
+never stops component effect scopes, so the bridges also register with the SSR
+render context and are released when `renderToString` (or a streaming render)
+finishes. Do not manually retain a generated bridge.
 
 ### Generated bridge model
 

@@ -100,6 +100,11 @@ export function Profile() {
 }
 ```
 
+Nested scope objects are traversed to their atom leaves, so
+`{profile.address.city}` subscribes to `profile.get('address').get('city')`.
+`method(...)` members are callable actions, not sources:
+`onClick={() => profile.toggle()}` stays an ordinary method call.
+
 ## 5. Derive values
 
 Use `derived` for values computed from Streamix sources. The compiler turns

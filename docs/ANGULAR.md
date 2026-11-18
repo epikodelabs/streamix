@@ -116,6 +116,13 @@ readonly profile = scope({ name: 'Ada', subscribed: true });
 </button>
 ```
 
+Nested scope objects are traversed to their atom leaves: reading
+`{{ profile.address.city }}` subscribes to
+`profile.get('address').get('city')`, and a two-way binding writes back through
+`profile.get('address').set('city', ...)`. `method(...)` members are callable
+actions, not sources, so `(click)="profile.toggle()"` stays an ordinary method
+call.
+
 Keep reactive sources as ordinary component fields. The compiler cannot safely
 observe replacement through accessor-backed fields.
 
