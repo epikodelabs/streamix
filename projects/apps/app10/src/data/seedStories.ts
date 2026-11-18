@@ -14,6 +14,23 @@ export const INITIAL_STORIES: Story[] = [
     coverCaption: 'Plate I — The brass tidal dial found in Watchhouse Seven.',
     promptNote:
       'Keep the pacing unhurried and tactile. Avoid naming what lies beneath the outer breakwater just yet.',
+    wordCloud: [
+      { word: 'fog', weight: 3 },
+      { word: 'salt', weight: 2 },
+      { word: 'brass', weight: 3 },
+      { word: 'low tide', weight: 2 },
+      { word: 'ledger', weight: 2 },
+      { word: 'lantern', weight: 1 },
+      { word: 'shingle', weight: 1 },
+      { word: 'ghost ship', weight: 3 },
+      { word: 'memory', weight: 2 },
+      { word: 'driftwood', weight: 1 },
+      { word: 'tuning fork', weight: 1 },
+      { word: 'frost', weight: 2 },
+      { word: 'harbour', weight: 1 },
+      { word: 'secret', weight: 2 },
+    ],
+    activeThemeWords: ['fog', 'brass', 'memory'],
     sentences: [
       {
         id: 'sc-1',
@@ -134,6 +151,21 @@ export const INITIAL_STORIES: Story[] = [
     coverCaption: 'Plate II — Sorting wall B-14 beneath the central exchange.',
     promptNote:
       'Focus on small bureaucratic details, handwriting quirks, and the quiet intimacy between strangers.',
+    wordCloud: [
+      { word: 'wax seal', weight: 3 },
+      { word: 'shorthand', weight: 2 },
+      { word: 'tramline', weight: 1 },
+      { word: 'airmail', weight: 2 },
+      { word: 'longing', weight: 3 },
+      { word: 'cedar', weight: 1 },
+      { word: 'watermark', weight: 2 },
+      { word: 'bridge', weight: 2 },
+      { word: 'postmark', weight: 3 },
+      { word: 'pigeonhole', weight: 1 },
+      { word: 'stranger', weight: 2 },
+      { word: 'silence', weight: 1 },
+    ],
+    activeThemeWords: ['wax seal', 'longing'],
     sentences: [
       {
         id: 'ul-1',
@@ -217,6 +249,21 @@ export const INITIAL_STORIES: Story[] = [
     coverCaption: 'Plate III — Carriage Four crossing the Greywater Viaduct.',
     promptNote:
       'Balance botanical precision with the cold mechanical rhythm of the mountain climb.',
+    wordCloud: [
+      { word: 'frost', weight: 3 },
+      { word: 'fern', weight: 3 },
+      { word: 'glacier', weight: 2 },
+      { word: 'steam', weight: 2 },
+      { word: 'iron arch', weight: 1 },
+      { word: 'viaduct', weight: 2 },
+      { word: 'lantern', weight: 1 },
+      { word: 'timberline', weight: 1 },
+      { word: 'isolation', weight: 3 },
+      { word: 'condensation', weight: 2 },
+      { word: 'silence', weight: 2 },
+      { word: 'signal', weight: 1 },
+    ],
+    activeThemeWords: ['frost', 'fern', 'isolation'],
     sentences: [
       {
         id: 'gt-1',

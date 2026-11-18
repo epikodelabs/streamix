@@ -10,6 +10,7 @@ interface NewStoryInput {
   maxDays: number;
   openingSentence: string;
   promptNote: string;
+  themeWords?: string[];
   coverImage: string;
   coverCaption: string;
 }
@@ -57,6 +58,7 @@ const genre = ref('Literary Fiction');
 const maxDays = ref(16);
 const openingSentence = ref('');
 const promptNote = ref('');
+const themeWordsInput = ref('');
 const plateIdx = ref(0);
 
 const sentenceValidation = computed(() => validateSingleSentence(openingSentence.value));
@@ -84,6 +86,12 @@ const handleMaxDaysInput = (event: Event) => {
 const handleSubmit = () => {
   if (!canSubmit.value) return;
   const plate = PLATE_OPTIONS[plateIdx.value] || PLATE_OPTIONS[0];
+  const parsedThemeWords = themeWordsInput.value
+    .split(',')
+    .map((word) => word.trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 12);
+
   emit('createStory', {
     title: title.value.trim(),
     subtitle: subtitle.value.trim(),
@@ -93,6 +101,7 @@ const handleSubmit = () => {
     promptNote:
       promptNote.value.trim() ||
       'Maintain a consistent voice and advance the scene by one clear beat per day.',
+    themeWords: parsedThemeWords,
     coverImage: plate.image,
     coverCaption: plate.caption,
   });
@@ -100,6 +109,7 @@ const handleSubmit = () => {
   subtitle.value = '';
   openingSentence.value = '';
   promptNote.value = '';
+  themeWordsInput.value = '';
   emit('close');
 };
 </script>
@@ -217,14 +227,9 @@ const handleSubmit = () => {
         </div>
 
         <div>
-          <div class="flex items-center justify-between mb-1">
-            <label for="opening-sentence" class="text-xs font-medium text-[#1C1917]">
-              Opening Sentence (Sentence 1)
-            </label>
-            <span class="text-xs text-[#78716C] tabular-nums">
-              {{ sentenceValidation.charCount }}/240
-            </span>
-          </div>
+          <label for="opening-sentence" class="block text-xs font-medium text-[#1C1917] mb-1">
+            Opening Sentence (Sentence 1)
+          </label>
           <textarea
             id="opening-sentence"
             v-model="openingSentence"
@@ -251,6 +256,20 @@ const handleSubmit = () => {
             type="text"
             placeholder="e.g., Favor concrete sensory details over exposition."
             maxlength="160"
+            class="w-full px-3 py-2 text-sm bg-white border border-[#D6CEBE] rounded text-[#1C1917] focus:outline-none focus:border-[#1E3A8A]"
+          />
+        </div>
+
+        <div>
+          <label for="theme-words-seed" class="block text-xs font-medium text-[#1C1917] mb-1">
+            Initial Word Cloud Motifs (Optional, comma-separated)
+          </label>
+          <input
+            id="theme-words-seed"
+            v-model="themeWordsInput"
+            type="text"
+            placeholder="e.g., fog, pocket watch, cobblestone, silence"
+            maxlength="140"
             class="w-full px-3 py-2 text-sm bg-white border border-[#D6CEBE] rounded text-[#1C1917] focus:outline-none focus:border-[#1E3A8A]"
           />
         </div>

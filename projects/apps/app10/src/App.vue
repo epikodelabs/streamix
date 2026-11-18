@@ -21,6 +21,7 @@ import type {
   SlushPitch,
   Story,
   StoryPitch,
+  ThemeWord,
   ViewTab,
 } from './types/story';
 import {
@@ -49,9 +50,23 @@ interface NewStoryInput {
   maxDays: number;
   openingSentence: string;
   promptNote: string;
+  themeWords?: string[];
   coverImage: string;
   coverCaption: string;
 }
+
+const DEFAULT_CLOUD_WORDS: ThemeWord[] = [
+  { word: 'memory', weight: 3 },
+  { word: 'silence', weight: 2 },
+  { word: 'lantern', weight: 2 },
+  { word: 'threshold', weight: 3 },
+  { word: 'letter', weight: 1 },
+  { word: 'rain', weight: 2 },
+  { word: 'secret', weight: 3 },
+  { word: 'clockwork', weight: 1 },
+  { word: 'shadow', weight: 2 },
+  { word: 'return', weight: 1 },
+];
 
 interface IncomingAiCandidate {
   author: string;
@@ -76,7 +91,16 @@ function loadInitialPayload(): PersistedPayload {
     if (raw) {
       const parsed = JSON.parse(raw) as PersistedPayload;
       if (Array.isArray(parsed.stories) && parsed.dailyState) {
-        return parsed;
+        const hydratedStories = parsed.stories.map((story) => {
+          const seed = INITIAL_STORIES.find((candidate) => candidate.id === story.id);
+          if (!seed) return story;
+          return {
+            ...story,
+            wordCloud: story.wordCloud && story.wordCloud.length > 0 ? story.wordCloud : seed.wordCloud,
+            activeThemeWords: story.activeThemeWords ?? seed.activeThemeWords,
+          };
+        });
+        return { ...parsed, stories: hydratedStories };
       }
     }
   } catch {
@@ -248,6 +272,7 @@ const fetchAiCandidatesForStory = async (target: Story): Promise<CandidateSenten
       subtitle: target.subtitle,
       genre: target.genre,
       promptNote: target.promptNote,
+      themeWords: target.activeThemeWords || [],
       recentSentences: target.sentences.slice(-8).map((s) => ({
         author: s.author,
         text: s.text,
@@ -522,13 +547,15 @@ const handleStartCommission = (pitch: StoryPitch, sourceMonthKey: string) => {
     coverImage,
     coverCaption: pitch.coverCaption,
     promptNote: pitch.promptNote,
+    wordCloud: DEFAULT_CLOUD_WORDS,
+    activeThemeWords: [],
     sentences: [
       {
         id: `${id}-s1`,
         day: 1,
         text: pitch.openingSentence,
         author: 'The Commission',
-            canonizedAt: 'Day 1 (Opening)',
+        canonizedAt: 'Day 1 (Opening)',
       },
     ],
     candidates: [],
@@ -612,17 +639,12 @@ const handleOpenActiveStory = (storyId: string) => {
 
 onMounted(() => {
   // Under a week: no pause ritual. Exactly one week: a light desk note. Over a
-  // week: the Interregnum. The Commission Desk never auto-opens on top of it.
+  // week: the Interregnum. Commission Desk opens on explicit user request.
   if (daysAway >= 7 && stories.value.length > 0) {
     if (daysAway > 7) {
       pauseNoticeVisible.value = false;
       isInterregnumOpen.value = true;
     }
-    return;
-  }
-
-  if (!currentMonthIssue.value && dismissedCommissionMonth.value !== currentMonthKey) {
-    isCommissionDeskOpen.value = true;
   }
 });
 
@@ -710,8 +732,63 @@ const handleAdvanceDay = () => {
   };
 };
 
+const handleToggleThemeWord = (storyId: string, word: string) => {
+  stories.value = stories.value.map((story) => {
+    if (story.id !== storyId) return story;
+    const current = story.activeThemeWords || [];
+    const exists = current.includes(word);
+    return {
+      ...story,
+      activeThemeWords: exists ? current.filter((candidate) => candidate !== word) : [...current, word],
+    };
+  });
+};
+
+const handleAddThemeWord = (storyId: string, word: string) => {
+  stories.value = stories.value.map((story) => {
+    if (story.id !== storyId) return story;
+    const baseCloud =
+      story.wordCloud && story.wordCloud.length > 0 ? story.wordCloud : DEFAULT_CLOUD_WORDS;
+    const alreadyInCloud = baseCloud.some((item) => item.word === word);
+    const nextCloud: ThemeWord[] = alreadyInCloud
+      ? baseCloud
+      : [...baseCloud, { word, weight: 2, isCustom: true }];
+    const currentActive = story.activeThemeWords || [];
+    const nextActive = currentActive.includes(word) ? currentActive : [...currentActive, word];
+    return { ...story, wordCloud: nextCloud, activeThemeWords: nextActive };
+  });
+};
+
+const handleRemoveThemeWord = (storyId: string, word: string) => {
+  stories.value = stories.value.map((story) => {
+    if (story.id !== storyId) return story;
+    const baseCloud =
+      story.wordCloud && story.wordCloud.length > 0 ? story.wordCloud : DEFAULT_CLOUD_WORDS;
+    return {
+      ...story,
+      wordCloud: baseCloud.filter((item) => item.word !== word),
+      activeThemeWords: (story.activeThemeWords || []).filter((candidate) => candidate !== word),
+    };
+  });
+};
+
+const handleClearThemeWords = (storyId: string) => {
+  stories.value = stories.value.map((story) =>
+    story.id === storyId ? { ...story, activeThemeWords: [] } : story
+  );
+};
+
 const handleCreateStory = (input: NewStoryInput) => {
   const id = `story-${Date.now()}`;
+  const customWords: ThemeWord[] = (input.themeWords || []).map((word, idx) => ({
+    word,
+    weight: idx % 3 === 0 ? 3 : idx % 2 === 0 ? 2 : 1,
+    isCustom: true,
+  }));
+  const mergedCloud: ThemeWord[] = [
+    ...customWords,
+    ...DEFAULT_CLOUD_WORDS.filter((defaultWord) => !customWords.some((custom) => custom.word === defaultWord.word)),
+  ];
   const newStory: Story = {
     id,
     issueNumber: `Vol. IV · No. ${stories.value.length + 15}`,
@@ -724,13 +801,15 @@ const handleCreateStory = (input: NewStoryInput) => {
     coverImage: input.coverImage,
     coverCaption: input.coverCaption,
     promptNote: input.promptNote,
+    wordCloud: mergedCloud,
+    activeThemeWords: input.themeWords || [],
     sentences: [
       {
         id: `${id}-s1`,
         day: 1,
         text: input.openingSentence,
         author: dailyState.value.penName,
-            canonizedAt: 'Day 1 (Opening)',
+        canonizedAt: 'Day 1 (Opening)',
       },
     ],
     candidates: [],
@@ -826,6 +905,10 @@ const submittedStoryTitle = computed(
         @dismiss-generation-error="generationError = null"
         @advance-day="handleAdvanceDay"
         @dismiss-last-canonized="handleDismissLastCanonized"
+        @toggle-theme-word="handleToggleThemeWord"
+        @add-theme-word="handleAddThemeWord"
+        @remove-theme-word="handleRemoveThemeWord"
+        @clear-theme-words="handleClearThemeWords"
       />
 
       <CanonArchiveView

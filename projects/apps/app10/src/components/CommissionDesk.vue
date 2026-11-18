@@ -279,7 +279,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown));
                 Unpressed commissions from previous months. Revive one when no issue is running.
               </p>
             </div>
-            <span class="text-xs text-[#78716C] tabular-nums">{{ slush.length }} filed</span>
           </div>
 
           <ul class="mt-3 divide-y divide-[#F1EDE4] bg-white border border-[#E5DFD3] rounded-md">

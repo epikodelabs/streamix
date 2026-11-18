@@ -73,9 +73,10 @@ try {
       // One Sentence Each owns the commission genre in a Streamix atom and the
       // midnight countdown in an iterable; the inspector must discover the atom.
       await page.waitForSelector('text=One Sentence Each');
-      // The monthly commission desk opens on the first visit. Requesting with
-      // the default "Surprise me" genre must fall back to the demo pitches
+      // The commission desk opens on explicit request. Requesting with the
+      // default "Surprise me" genre must fall back to the demo pitches
       // because the static build has no commission endpoint.
+      await page.getByRole('button', { name: 'Commission Desk' }).click();
       await page.getByRole('button', { name: 'Request This Month’s Commissions' }).click();
       await page.waitForFunction(() => document.body.textContent.includes('Demo commissions'));
       await page.getByRole('button', { name: 'Close commission desk' }).click();

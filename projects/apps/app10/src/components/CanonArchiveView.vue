@@ -65,11 +65,14 @@ const monthGroups = computed(() => {
 const paragraphs = computed(() => groupIntoParagraphs(archiveStory.value.sentences));
 
 const contributors = computed(() => {
-  const counts = new Map<string, number>();
+  const seen = new Set<string>();
+  const names: string[] = [];
   for (const s of archiveStory.value.sentences) {
-    counts.set(s.author, (counts.get(s.author) || 0) + 1);
+    if (seen.has(s.author)) continue;
+    seen.add(s.author);
+    names.push(s.author);
   }
-  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  return names;
 });
 
 const handleShelfSelect = async (story: Story) => {
@@ -87,9 +90,7 @@ const handleShelfSelect = async (story: Story) => {
 const handleDownloadEdition = () => {
   if (!archiveStory.value) return;
   const prose = paragraphs.value.map((para) => para.map((s) => s.text).join(' ')).join('\n\n');
-  const colophon = contributors.value
-    .map(([name, count]) => `- ${name} (${count} sentence${count > 1 ? 's' : ''})`)
-    .join('\n');
+  const colophon = contributors.value.map((name) => `- ${name}`).join('\n');
   const content = `${archiveStory.value.title}\n${archiveStory.value.subtitle}\n${archiveStory.value.issueNumber} · ${archiveStory.value.genre}\n\n---\n\n${prose}\n\n---\n\nContributors:\n${colophon}\n`;
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -144,7 +145,6 @@ const handleDownloadEdition = () => {
             open below; running issues open in the reading view.
           </p>
         </div>
-        <span class="text-xs text-[#78716C] tabular-nums">{{ stories.length }} volumes</span>
       </div>
 
       <div class="mt-5 space-y-7">
@@ -153,9 +153,6 @@ const handleDownloadEdition = () => {
             <h3 class="text-xs font-medium tracking-wider uppercase text-[#57534E]">
               {{ group.label }}
             </h3>
-            <span class="text-[11px] text-[#78716C] tabular-nums">
-              {{ group.stories.length }} {{ group.stories.length === 1 ? 'issue' : 'issues' }}
-            </span>
           </div>
 
           <div class="mt-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -180,9 +177,8 @@ const handleDownloadEdition = () => {
               <div class="font-display text-base font-semibold text-[#1C1917] mt-1 truncate">
                 {{ story.title }}
               </div>
-              <div class="text-xs text-[#57534E] mt-1 tabular-nums">
-                Day {{ story.currentDay }}/{{ story.maxDays }} · {{ story.sentences.length }}
-                sentences
+              <div class="text-xs text-[#57534E] mt-1">
+                Day {{ story.currentDay }}/{{ story.maxDays }}
               </div>
               <p
                 v-if="story.constraint"
@@ -257,8 +253,7 @@ const handleDownloadEdition = () => {
         </div>
 
         <div class="mt-10 pt-6 border-t border-[#E5DFD3] text-xs text-[#78716C] font-prose italic">
-          Finis · Completed across {{ archiveStory.sentences.length }} daily
-          {{ archiveStory.sentences.length === 1 ? 'round' : 'rounds' }} of collective editing.
+          Finis · Completed through its daily rounds of collective editing.
         </div>
       </article>
 
@@ -273,13 +268,6 @@ const handleDownloadEdition = () => {
               <dt class="text-[#57534E]">Issue Month</dt>
               <dd class="font-medium text-[#1C1917]">{{ formatMonthKey(archiveStory.monthKey) }}</dd>
             </div>
-            <div class="flex items-center justify-between">
-              <dt class="text-[#57534E]">Total Length</dt>
-              <dd class="font-medium text-[#1C1917] tabular-nums">
-                {{ archiveStory.sentences.length }}
-                {{ archiveStory.sentences.length === 1 ? 'sentence' : 'sentences' }}
-              </dd>
-            </div>
           </dl>
         </div>
 
@@ -289,14 +277,11 @@ const handleDownloadEdition = () => {
           </h3>
           <ul class="mt-3 divide-y divide-[#F1EDE4] text-xs">
             <li
-              v-for="[author, count] in contributors"
+              v-for="author in contributors"
               :key="author"
               class="py-2 flex items-center justify-between gap-2"
             >
               <span class="text-[#1C1917] font-medium">{{ author }}</span>
-              <span class="text-[#78716C] tabular-nums">
-                {{ count }} {{ count === 1 ? 'sentence' : 'sentences' }}
-              </span>
             </li>
           </ul>
         </div>

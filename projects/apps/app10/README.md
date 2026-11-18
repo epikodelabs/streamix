@@ -3,9 +3,11 @@
 A single-player fiction broadsheet, integrated from the Quiz sibling project.
 Each month a serial is commissioned from three pitches, then advanced one
 sentence at a time: draft a handful of candidate continuations, choose one to
-canonize, and finish the issue over its run. There are no ballots or vote
-counters — the editor is the only reader. Finished issues stay in a browsable
-archive.
+canonize, and finish the issue over its run. Each serial carries a thematic
+word cloud; clicking motifs locks them for the day, highlights them in
+candidate drafts, and sends them with the generation request. There are no
+ballots, vote tallies, or progress counters — the editor is the only reader.
+Finished issues stay in a browsable archive.
 
 Vue 3 + TypeScript + Tailwind CSS v4, with Streamix owning the small reactive
 surface:

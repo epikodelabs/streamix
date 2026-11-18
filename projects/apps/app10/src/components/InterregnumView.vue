@@ -75,9 +75,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown));
               <BookOpen class="w-3.5 h-3.5" aria-hidden="true" />
               What waited for you
             </span>
-            <span class="tabular-nums">
-              Day {{ story.currentDay }}/{{ story.maxDays }} · {{ story.sentences.length }}
-              canonized · {{ story.candidates.length }} drafted
+            <span>
+              Day {{ story.currentDay }}/{{ story.maxDays }}
             </span>
           </div>
 
@@ -94,7 +93,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown));
 
           <div v-if="recentSentences.length > 0" class="mt-4 pt-4 border-t border-[#E5DFD3]">
             <p class="text-[11px] uppercase tracking-wider text-[#78716C]">
-              Last {{ recentSentences.length === 1 ? 'sentence' : `${recentSentences.length} sentences` }}
+              The sentences you left
             </p>
             <div class="mt-2 space-y-2">
               <p

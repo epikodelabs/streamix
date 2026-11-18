@@ -11,8 +11,22 @@ import {
   PenLine,
   X,
 } from '@lucide/vue';
-import type { CanonSentence, DailyState, Story } from '../types/story';
+import type { CanonSentence, DailyState, Story, ThemeWord } from '../types/story';
 import { validateSingleSentence } from '../utils/sentenceValidation';
+import ThemeWordCloud from './ThemeWordCloud.vue';
+
+const DEFAULT_FALLBACK_CLOUD: ThemeWord[] = [
+  { word: 'memory', weight: 3 },
+  { word: 'silence', weight: 2 },
+  { word: 'lantern', weight: 2 },
+  { word: 'threshold', weight: 3 },
+  { word: 'letter', weight: 1 },
+  { word: 'rain', weight: 2 },
+  { word: 'secret', weight: 3 },
+  { word: 'clockwork', weight: 1 },
+  { word: 'shadow', weight: 2 },
+  { word: 'return', weight: 1 },
+];
 
 const props = defineProps<{
   stories: Story[];
@@ -31,6 +45,10 @@ const emit = defineEmits<{
   dismissGenerationError: [];
   advanceDay: [];
   dismissLastCanonized: [];
+  toggleThemeWord: [storyId: string, word: string];
+  addThemeWord: [storyId: string, word: string];
+  removeThemeWord: [storyId: string, word: string];
+  clearThemeWords: [storyId: string];
 }>();
 
 function getCountdownToMidnight(): string {
@@ -109,13 +127,6 @@ const orderedCandidates = computed(() => {
   return copy;
 });
 
-const totalWords = computed(() =>
-  story.value.sentences.reduce(
-    (sum, s) => sum + s.text.trim().split(/\s+/).filter(Boolean).length,
-    0
-  )
-);
-
 const validation = computed(() => validateSingleSentence(draftSentence.value));
 
 const composerPlaceholder = computed(
@@ -129,6 +140,57 @@ const isWaitingForNextDay = computed(() =>
     story.value && (props.dailyState.waitingStoryIds || []).includes(story.value.id)
   )
 );
+
+const storyWordCloud = computed<ThemeWord[]>(() =>
+  story.value.wordCloud && story.value.wordCloud.length > 0
+    ? story.value.wordCloud
+    : DEFAULT_FALLBACK_CLOUD
+);
+
+const storyActiveThemeWords = computed<string[]>(() => story.value.activeThemeWords || []);
+
+const splitWithThemeHighlights = (
+  text: string,
+  activeWords: string[]
+): Array<{ text: string; isTheme: boolean }> => {
+  const cleanWords = activeWords.map((w) => w.trim()).filter((w) => w.length >= 2);
+  if (cleanWords.length === 0) return [{ text, isTheme: false }];
+
+  const escaped = cleanWords
+    .sort((a, b) => b.length - a.length)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const regex = new RegExp(`\\b(${escaped.join('|')})\\b`, 'gi');
+  const parts: Array<{ text: string; isTheme: boolean }> = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      parts.push({ text: text.slice(lastIdx, match.index), isTheme: false });
+    }
+    parts.push({ text: match[0], isTheme: true });
+    lastIdx = match.index + match[0].length;
+  }
+
+  if (lastIdx < text.length) {
+    parts.push({ text: text.slice(lastIdx), isTheme: false });
+  }
+  return parts.length > 0 ? parts : [{ text, isTheme: false }];
+};
+
+const handleDraftWithTheme = () => {
+  if (isWaitingForNextDay.value) {
+    emit('unlockNextDayForStory', story.value.id, true);
+  } else {
+    emit('generateAiCandidates', story.value.id);
+  }
+  setTimeout(() => {
+    const el = document.getElementById('drafts-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, 80);
+};
 
 const handleCandidateSubmit = () => {
   if (hasSubmittedToday.value || !validation.value.valid) return;
@@ -196,15 +258,11 @@ defineExpose({
     </div>
 
     <!-- Editorial Story Switcher Strip -->
-    <div class="mb-8 pb-4 border-b border-[#E5DFD3]">
+    <div class="mb-6 pb-4 border-b border-[#E5DFD3]">
       <div class="flex items-center justify-between gap-4 mb-3">
         <h2 class="text-xs font-medium tracking-wider uppercase text-[#78716C]">
           Active Serialized Editions
         </h2>
-        <span class="text-xs text-[#78716C] tabular-nums">
-          {{ activeStories.length }} open
-          {{ activeStories.length === 1 ? 'story' : 'stories' }} accepting sentences
-        </span>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -227,12 +285,24 @@ defineExpose({
           <div class="font-display text-base font-semibold text-[#1C1917] mt-1 truncate">
             {{ item.title }}
           </div>
-          <div class="text-xs text-[#57534E] mt-1 tabular-nums">
-            {{ item.sentences.length }} canonized · {{ item.candidates.length }} candidates today
-          </div>
         </button>
       </div>
     </div>
+
+    <!-- User-Selected Thematic Word Cloud (Visible Above the Fold) -->
+    <section id="theme-word-cloud" aria-label="Story theme word cloud" class="mb-8">
+      <ThemeWordCloud
+        :words="storyWordCloud"
+        :active-words="storyActiveThemeWords"
+        :is-generating="isGeneratingCandidates"
+        :is-waiting-for-next-day="isWaitingForNextDay"
+        @toggle-word="emit('toggleThemeWord', story.id, $event)"
+        @add-word="emit('addThemeWord', story.id, $event)"
+        @remove-word="emit('removeThemeWord', story.id, $event)"
+        @clear-active="emit('clearThemeWords', story.id)"
+        @draft-with-theme="handleDraftWithTheme"
+      />
+    </section>
 
     <!-- Lead Story Asymmetric Split Hero -->
     <section aria-labelledby="story-title-heading" class="mb-12">
@@ -272,19 +342,9 @@ defineExpose({
           </div>
 
           <div class="mt-6 pt-5 border-t border-[#E5DFD3]">
-            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#57534E] tabular-nums">
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#57534E]">
               <span class="font-semibold text-[#1C1917]">
                 Day {{ story.currentDay }} of {{ story.maxDays }}
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>
-                {{ story.sentences.length }}
-                {{ story.sentences.length === 1 ? 'sentence' : 'sentences' }} canonized
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>
-                {{ story.candidates.length }}
-                {{ story.candidates.length === 1 ? 'draft' : 'drafts' }} to choose from
               </span>
             </div>
 
@@ -444,22 +504,6 @@ defineExpose({
           </dl>
         </div>
 
-        <div class="bg-[#F7F4EE] border border-[#E5DFD3] rounded-md p-5">
-          <h3 class="font-display text-base font-semibold text-[#1C1917]">Edition Ledger</h3>
-          <dl class="mt-3 space-y-2.5 text-xs">
-            <div class="flex items-center justify-between gap-4">
-              <dt class="text-[#57534E]">Total Word Count</dt>
-              <dd class="font-medium text-[#1C1917] tabular-nums">{{ totalWords }} words</dd>
-            </div>
-            <div class="flex items-center justify-between gap-4">
-              <dt class="text-[#57534E]">Remaining Turns</dt>
-              <dd class="font-medium text-[#1C1917] tabular-nums">
-                {{ Math.max(0, story.maxDays - story.currentDay + 1) }}
-                {{ Math.max(0, story.maxDays - story.currentDay + 1) === 1 ? 'day' : 'days' }}
-              </dd>
-            </div>
-          </dl>
-        </div>
       </aside>
     </section>
 
@@ -616,7 +660,19 @@ defineExpose({
                 </div>
 
                 <p class="font-prose text-[16px] sm:text-[17px] leading-relaxed text-[#1C1917] mt-2.5">
-                  {{ candidate.text }}
+                  <template
+                    v-for="(seg, segIdx) in splitWithThemeHighlights(
+                      candidate.text,
+                      storyActiveThemeWords
+                    )"
+                    :key="segIdx"
+                  >
+                    <mark
+                      v-if="seg.isTheme"
+                      class="bg-[#1E3A8A]/10 text-[#1E3A8A] px-0.5 rounded-xs font-medium"
+                    >{{ seg.text }}</mark>
+                    <span v-else>{{ seg.text }}</span>
+                  </template>
                 </p>
               </div>
 
@@ -644,12 +700,6 @@ defineExpose({
                 Add Sentence {{ story.sentences.length + 1 }}
               </h3>
             </div>
-            <span
-              :class="hasSubmittedToday ? 'text-[#9A3412]' : 'text-[#14532D]'"
-              class="text-xs font-medium tabular-nums"
-            >
-              {{ hasSubmittedToday ? '0 of 1 left today' : '1 of 1 left today' }}
-            </span>
           </div>
 
           <div v-if="hasSubmittedToday" class="pt-5 space-y-4">
@@ -678,14 +728,12 @@ defineExpose({
 
           <form v-else @submit.prevent="handleCandidateSubmit" class="pt-4 space-y-4">
             <div>
-              <div class="flex items-center justify-between mb-1.5">
-                <label for="candidate-sentence-textarea" class="text-xs font-medium text-[#57534E]">
-                  Propose as <strong class="text-[#1C1917]">{{ dailyState.penName }}</strong>
-                </label>
-                <span class="text-xs text-[#78716C] tabular-nums">
-                  {{ validation.wordCount }} words · {{ validation.charCount }}/240
-                </span>
-              </div>
+              <label
+                for="candidate-sentence-textarea"
+                class="block text-xs font-medium text-[#57534E] mb-1.5"
+              >
+                Propose as <strong class="text-[#1C1917]">{{ dailyState.penName }}</strong>
+              </label>
 
               <textarea
                 id="candidate-sentence-textarea"
@@ -698,6 +746,10 @@ defineExpose({
 
               <p v-if="draftSentence.trim().length > 0 && validation.error" class="text-xs text-[#9A3412] mt-1.5">
                 {{ validation.error }}
+              </p>
+
+              <p v-if="storyActiveThemeWords.length > 0" class="text-xs text-[#57534E] mt-2">
+                Active theme: <span class="text-[#1E3A8A] font-medium">{{ storyActiveThemeWords.join(' · ') }}</span>
               </p>
             </div>
 

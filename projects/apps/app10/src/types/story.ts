@@ -1,5 +1,11 @@
 export type ViewTab = 'active' | 'archive' | 'guide';
 
+export interface ThemeWord {
+  word: string;
+  weight: 1 | 2 | 3;
+  isCustom?: boolean;
+}
+
 export interface CanonSentence {
   id: string;
   day: number;
@@ -34,11 +40,13 @@ export interface Story {
   coverImage: string;
   coverCaption: string;
   promptNote: string;
-  sentences: CanonSentence[];
-  candidates: CandidateSentence[];
   monthKey?: string;
   constraint?: string;
   contributors?: string[];
+  wordCloud?: ThemeWord[];
+  activeThemeWords?: string[];
+  sentences: CanonSentence[];
+  candidates: CandidateSentence[];
 }
 
 export interface StoryPitch {
@@ -60,7 +68,7 @@ export interface CommissionRecord {
   pitches: StoryPitch[];
   chosenPitchId: string | null;
   revivedPitchIds?: string[];
-  requestedGenre?: string;
+  requestedGenre: string;
   source: 'llm' | 'demo';
   generatedAt: string;
 }
