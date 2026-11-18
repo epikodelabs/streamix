@@ -150,6 +150,41 @@ describe('external Angular component templates', () => {
       expect(generated).toContain('ctx.count');
       expect(generated).toMatch(/ctx\.model\.get\(['"]title['"]\)/);
       expect(generated).toMatch(/ctx\.model\.set\(['"]title['"],\s*event\.target\.value\)/);
+      expect(generated).toContain('ownedScopes: () => [this.model]');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('disposes a component scope field even when the template has no bindings', async () => {
+    const { mkdtemp, mkdir, readFile, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-scope-only-'));
+    try {
+      const src = join(root, 'projects/apps/demo/src');
+      await mkdir(src, { recursive: true });
+      await writeFile(join(root, 'projects/apps/demo/tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true }, include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'globals.d.ts'), `
+        declare module '@epikodelabs/streamix' {
+          export function scope<T>(value: T): any;
+        }
+      `);
+      await writeFile(join(src, 'panel.ts'), `
+        import { scope } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ template: '<p>Static</p>' })
+        export class Panel {
+          model = scope({ title: 'ready' });
+        }
+      `);
+      await generateProject({ workspaceRoot: root, sourceRoot: 'projects/apps/demo/src' });
+      const generated = await readFile(join(root, '.angular/.streamix/demo/src/panel.ts'), 'utf8');
+      // No compiled bindings, but the scope is still component-owned.
+      expect(generated).toContain('ɵinstallSxCompiledView(');
+      expect(generated).toContain('ownedScopes: () => [this.model]');
+      expect(generated).not.toContain('ɵsetupSxBindings');
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

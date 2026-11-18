@@ -4,7 +4,7 @@ import {
 import {
   TestBed,
 } from '@angular/core/testing';
-import { atom } from '@epikodelabs/streamix';
+import { atom, scope } from '@epikodelabs/streamix';
 
 import {
   createBindingTable,
@@ -81,6 +81,44 @@ idescribe('ɵinstallSxCompiledView', () => {
     fixture.destroy();
 
     expect(destroyed).toBe(1);
+  });
+
+  it('disposes component-owned scopes with the component', async () => {
+    @Component({
+      standalone: true,
+      template: '<span></span>',
+    })
+    class HostComponent {
+      readonly state = scope({ count: 0 });
+      readonly disposable = {
+        disposed: 0,
+        dispose(): void {
+          this.disposed += 1;
+        },
+      };
+
+      constructor() {
+        ɵinstallSxCompiledView(this, undefined, {
+          ownedScopes: () => [this.state, this.disposable, undefined],
+        });
+      }
+    }
+
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const component = fixture.componentInstance;
+    const state = component.state as unknown as { _disposed: boolean };
+    expect(state._disposed).toBeFalse();
+    expect(component.disposable.disposed).toBe(0);
+
+    fixture.destroy();
+
+    // Binding teardown and scope disposal are independent: the component had
+    // no compiled setup, but its owned instances still release.
+    expect(state._disposed).toBeTrue();
+    expect(component.disposable.disposed).toBe(1);
   });
 
   it('rebinds a replaced plain source field without Angular change detection', async () => {

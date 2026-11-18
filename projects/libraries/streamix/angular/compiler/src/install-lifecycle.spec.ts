@@ -31,6 +31,21 @@ export class CounterComponent {
     );
   });
 
+  it('installs component-owned scope disposal without setup code', () => {
+    const result = installSxLifecycleIntoComponentSource(
+      `export class PanelComponent {
+  readonly model = scope({ title: 'ready' });
+}`,
+      { ownedScopeFields: ['model'] },
+    );
+
+    expect(result.changed).toBeTrue();
+    expect(result.source).toContain('ɵinstallSxCompiledView');
+    expect(result.source).toContain('undefined,');
+    expect(result.source).toContain('ownedScopes: () => [this.model]');
+    expect(result.source).not.toContain('ngAfterViewInit');
+  });
+
   it('can install only structural source-reference support without setup code', () => {
     const result = installSxLifecycleIntoComponentSource(
       `export class HostComponent { source = first; }`,

@@ -47,6 +47,8 @@ export const SX_SETUP_RUNTIME_SYMBOLS = [
  */
 export interface SxLifecycleInitializerOptions {
   readonly sourceReferences?: readonly string[];
+  /** Component-owned `scope(...)` class fields disposed with the component. */
+  readonly ownedScopes?: readonly string[];
 }
 
 /**
@@ -83,10 +85,13 @@ export function emitComponentFieldInitializers(options: {
 }
 
 export function emitLifecycleInitializer(
-  setupName = 'ɵsetupSxBindings',
+  // `undefined` explicitly emits a scope-only install with no setup. A
+  // default parameter would silently substitute the setup name here.
+  setupName: string | undefined,
   options: SxLifecycleInitializerOptions = {},
 ): string {
   const sourceReferences = options.sourceReferences ?? [];
+  const ownedScopes = options.ownedScopes ?? [];
   const lines: string[] = [];
   const fields = emitComponentFieldInitializers(options);
 
@@ -98,13 +103,21 @@ export function emitLifecycleInitializer(
   lines.push(
     `protected readonly ɵsx = ɵinstallSxCompiledView(`,
     `  this,`,
-    `  ${setupName},`,
+    `  ${setupName ?? 'undefined'},`,
   );
 
+  const optionLines: string[] = [];
   if (sourceReferences.length > 0) {
-    lines.push(`  {`);
-    lines.push(`    sourceReferences: this.${SX_SOURCE_REFERENCES_FIELD},`);
-    lines.push(`  },`);
+    optionLines.push(`    sourceReferences: this.${SX_SOURCE_REFERENCES_FIELD},`);
+  }
+  if (ownedScopes.length > 0) {
+    optionLines.push(
+      `    ownedScopes: () => [${ownedScopes.map(field => `this.${field}`).join(', ')}],`,
+    );
+  }
+
+  if (optionLines.length > 0) {
+    lines.push(`  {`, ...optionLines, `  },`);
   }
 
   lines.push(`);`);

@@ -126,6 +126,11 @@ call.
 Keep reactive sources as ordinary component fields. The compiler cannot safely
 observe replacement through accessor-backed fields.
 
+A `scope(...)` initializer declared as an instance field is component-owned:
+the generated view disposes it when the component is destroyed, including when
+Angular tears down the server platform after SSR. Module-level and static
+scopes are left alone because their lifetime is wider than one component.
+
 ## 5. Use reactive template bindings
 
 The compiler adopts interpolation; safe native property, attribute, class, and

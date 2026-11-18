@@ -16,6 +16,8 @@ export interface SxComponentSourceTransformOptions {
   readonly setupName?: string;
   readonly runtimeImport?: string;
   readonly sourceReferenceFields?: readonly string[];
+  /** Component-owned `scope(...)` class fields disposed with the component. */
+  readonly ownedScopeFields?: readonly string[];
 }
 
 export interface SxComponentSourceTransformResult {
@@ -42,9 +44,13 @@ export function installSxLifecycleIntoComponentSource(
   const runtimeImport =
     options.runtimeImport ?? '@epikodelabs/streamix/angular';
   const sourceReferences = options.sourceReferenceFields ?? [];
+  const ownedScopes = options.ownedScopeFields ?? [];
   const hasSetup = !!options.inlineSetup;
+  // A component whose only Streamix ownership is scope fields still needs
+  // the install call so the scopes are disposed with the component.
+  const installsView = hasSetup || ownedScopes.length > 0;
 
-  if (!hasSetup && sourceReferences.length === 0) {
+  if (!installsView && sourceReferences.length === 0) {
     return { source, changed: false };
   }
 
@@ -93,13 +99,16 @@ export function installSxLifecycleIntoComponentSource(
   }
 
   const runtimeSymbols = [
-    ...(hasSetup ? ['ɵinstallSxCompiledView'] : []),
+    ...(installsView ? ['ɵinstallSxCompiledView'] : []),
     ...(sourceReferences.length > 0 ? ['ɵinstallSxSourceReferences', 'ɵsxNoInitialValue'] : []),
     ...(hasSetup ? runtimeSymbolsForSetup(options.inlineSetup!) : []),
   ];
 
-  const generated = hasSetup
-    ? emitLifecycleInitializer(setupName, { sourceReferences })
+  const generated = installsView
+    ? emitLifecycleInitializer(hasSetup ? setupName : undefined, {
+      sourceReferences,
+      ownedScopes,
+    })
     : emitComponentFieldInitializers({ sourceReferences });
 
   const members = [...classNode.members];

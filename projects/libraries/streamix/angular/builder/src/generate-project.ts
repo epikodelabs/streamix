@@ -366,6 +366,62 @@ interface ScopeMemberHelperAliases {
   readonly scope: ReadonlySet<string>;
 }
 
+/** Namespace imports of the Streamix package. */
+function streamixNamespaceAliases(file: ts.SourceFile): ReadonlySet<string> {
+  const namespaces = new Set<string>();
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+        !/^@epikodelabs\/streamix(?:\/|$)/.test(statement.moduleSpecifier.text)) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings && ts.isNamespaceImport(bindings)) {
+      namespaces.add(bindings.name.text);
+    }
+  }
+  return namespaces;
+}
+
+/**
+ * Component class fields initialized by `scope(...)`. Only instance fields of
+ * decorated components are component-owned; module-level and static scopes
+ * have a wider lifetime and must not be disposed with one component.
+ */
+function scopeFieldsFor(program: ts.Program, sourcePath: string): string[] {
+  const file = program.getSourceFile(sourcePath);
+  if (!file) return [];
+
+  const aliases = streamixMemberHelperAliases(file);
+  const namespaces = streamixNamespaceAliases(file);
+  const fields: string[] = [];
+
+  const isScopeInitializer = (initializer: ts.Expression): boolean => {
+    const value = unwrapReactiveInitializer(initializer);
+    if (!ts.isCallExpression(value)) return false;
+    const callee = value.expression;
+    if (ts.isIdentifier(callee)) {
+      return aliases.scope.has(callee.text);
+    }
+    return ts.isPropertyAccessExpression(callee) &&
+      ts.isIdentifier(callee.expression) &&
+      namespaces.has(callee.expression.text) &&
+      callee.name.text === 'scope';
+  };
+
+  for (const component of decoratedComponents(program, sourcePath)) {
+    for (const member of component.members) {
+      if (!ts.isPropertyDeclaration(member) || !ts.isIdentifier(member.name) ||
+          !member.initializer) continue;
+      if (ts.getModifiers(member)?.some(modifier => modifier.kind === ts.SyntaxKind.StaticKeyword)) {
+        continue;
+      }
+      if (isScopeInitializer(member.initializer)) {
+        fields.push(member.name.text);
+      }
+    }
+  }
+
+  return [...new Set(fields)];
+}
+
 /** Local names imported from Streamix for `method(...)` and `scope(...)`. */
 function streamixMemberHelperAliases(file: ts.SourceFile): ScopeMemberHelperAliases {
   const method = new Set<string>(['method']);
@@ -601,6 +657,7 @@ async function compileVirtualSource({
     templateText = match.template;
   }
   const scopeValuePaths = scopeValuePathsFor(program, sourcePath);
+  const ownedScopeFields = scopeFieldsFor(program, sourcePath);
   const compiled = compileSxComponent({
     componentPath: sourcePath,
     templatePath,
@@ -609,6 +666,7 @@ async function compileVirtualSource({
     scopeValuePaths,
     writableSourcePaths: standaloneWritableSources(program, checker, sourcePath),
     scopeWritablePaths: scopeWritablePathsFor(program, sourcePath),
+    ownedScopeFields,
   });
   if (!compiled.setupCode && !compiled.lifecycleInitializer) {
     if (scopeValuePaths) {
@@ -622,6 +680,7 @@ async function compileVirtualSource({
   const lifecycle = installSxLifecycleIntoComponentSource(source, {
     inlineSetup: compiled.setupCode,
     sourceReferenceFields: compiled.sourceReferenceFields,
+    ownedScopeFields,
   }).source;
   try {
     return { text: installSxComponentTemplate(lifecycle, compiled.transformedTemplate) };

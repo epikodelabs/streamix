@@ -51,6 +51,12 @@ export interface SxComponentBuildInput {
    * members must not appear: writing one throws at runtime.
    */
   readonly scopeWritablePaths?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Component class fields initialized by `scope(...)`. The generated view
+   * disposes them with the component, including components whose template
+   * compiles no bindings.
+   */
+  readonly ownedScopeFields?: readonly string[];
 }
 
 export interface SxComponentBuildOutput {
@@ -110,6 +116,8 @@ export function compileSxComponent(
     { resolveReactiveSource, resolveReactiveWritable },
   );
 
+  const ownedScopes = input.ownedScopeFields ?? [];
+
   // A component whose only compiled content is a control-flow block has no
   // binding-table slots but still needs the compiled view installed.
   if (
@@ -120,6 +128,15 @@ export function compileSxComponent(
       // A source-transparent sanitizer-sensitive binding may require only an
       // Angular `.value` fallback edit and no direct browser binding.
       transformedTemplate: transformed.template,
+      // A scope-only component still installs the view handle so its owned
+      // scopes are disposed with the component.
+      ...(ownedScopes.length > 0
+        ? {
+          lifecycleInitializer: emitLifecycleInitializer(undefined, {
+            ownedScopes,
+          }),
+        }
+        : {}),
       bindingCount: 0,
       sourceReferenceFields: transformed.sourceReferenceFields,
     };
@@ -132,6 +149,7 @@ export function compileSxComponent(
       'ɵsetupSxBindings',
       {
         sourceReferences: transformed.sourceReferenceFields,
+        ownedScopes,
         },
     ),
     bindingCount: transformed.bindingCount,

@@ -9,7 +9,7 @@ import {
   provideServerRendering,
   renderApplication,
 } from '@angular/platform-server';
-import { atom } from '@epikodelabs/streamix';
+import { atom, scope } from '@epikodelabs/streamix';
 
 import {
   createBindingTable,
@@ -115,6 +115,7 @@ describe('compiled view under server rendering', () => {
 const cleanupMessage = atom('hello');
 let cleanupMounts = 0;
 let subscribersDuringRender = 0;
+let cleanupInstance: SsrCleanupFixtureComponent | undefined;
 
 @Component({
   selector: 'sx-ssr-cleanup',
@@ -123,6 +124,8 @@ let subscribersDuringRender = 0;
   template: '<output></output>',
 })
 class SsrCleanupFixtureComponent implements AfterViewInit {
+  readonly state = scope({ count: 0 });
+
   readonly ɵsx = ɵinstallSxCompiledView(
     this,
     (host: Element) => {
@@ -138,7 +141,14 @@ class SsrCleanupFixtureComponent implements AfterViewInit {
         },
       };
     },
+    {
+      ownedScopes: () => [this.state],
+    },
   );
+
+  constructor() {
+    cleanupInstance = this;
+  }
 
   ngAfterViewInit(): void {
     // `afterNextRender` is inert under `ngServerMode`; the compiled view
@@ -171,5 +181,8 @@ describe('compiled view SSR teardown', () => {
     expect(cleanupMounts).toBe(1);
     expect(subscribersDuringRender).toBe(1);
     expect(cleanupMessage.subscriberCount).toBe(0);
+    expect(
+      (cleanupInstance!.state as unknown as { _disposed: boolean })._disposed,
+    ).toBeTrue();
   });
 });

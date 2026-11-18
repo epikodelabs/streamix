@@ -6,7 +6,7 @@
 
 - **Vue compiler:** scope members are classified before a bridge is chosen: nested scope values resolve through `get('…').get('…')`, `method(...)` members stay ordinary calls and are never invoked as source factories, and members the compiler cannot classify are rejected with guidance (#213). React and Angular received equivalent nested-member and method classification for parity.
 
-- **Angular:** SSR teardown coverage proves the compiled binding table subscribes during server rendering and unsubscribes before `renderApplication` resolves, so Angular's platform-destroy path matches Vue's explicit disposal contract (#212).
+- **Angular:** `scope(...)` instance fields are now component-owned: the generated view disposes them when the component is destroyed, including SSR platform teardown, while module-level and static scopes stay untouched. SSR regression coverage proves both the binding subscription and owned scopes release before `renderApplication` resolves (#212).
 
 - **React:** disposing a pending resource now flips it to a terminal error and settles the promise Suspense is waiting on, so a mounted boundary retries instead of hanging; settled resources keep their data (#208).
 

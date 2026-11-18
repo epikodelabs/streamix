@@ -36,6 +36,8 @@ export type SxCompiledViewSetup<T> = (
   server?: boolean,
 ) => SxTeardown;
 
+type Disposable = { dispose(): void };
+
 /**
  * Handle returned by {@link ɵinstallSxCompiledView}.
  *
@@ -62,6 +64,13 @@ export interface SxCompiledViewHandle {
  */
 export interface SxCompiledViewOptions {
   readonly sourceReferences?: SxSourceReferenceMap;
+  /**
+   * Component-owned Streamix scopes created by `scope(...)` class fields.
+   * Evaluated lazily during destruction so field declaration order never
+   * matters, and disposed after the compiled binding table. `undefined`
+   * entries and instances without a disposer are skipped.
+   */
+  readonly ownedScopes?: () => Iterable<Disposable | undefined>;
 }
 
 /**
@@ -81,7 +90,7 @@ export interface SxCompiledViewOptions {
  */
 export function ɵinstallSxCompiledView<T extends object>(
   context: T,
-  setup: SxCompiledViewSetup<T>,
+  setup: SxCompiledViewSetup<T> | undefined,
   options: SxCompiledViewOptions = {},
 ): SxCompiledViewHandle {
   const host = inject<ElementRef<Element>>(ElementRef).nativeElement;
@@ -94,7 +103,7 @@ export function ɵinstallSxCompiledView<T extends object>(
   let destroyed = false;
 
   const mount = (): void => {
-    if (destroyed) {
+    if (destroyed || !setup) {
       return;
     }
 
@@ -128,7 +137,7 @@ export function ɵinstallSxCompiledView<T extends object>(
     // server hook and the first client render can both reach this path when
     // the platform does not set `ngServerMode` (a plain server TestBed, for
     // example).
-    if (destroyed || mounted) {
+    if (!setup || destroyed || mounted) {
       return;
     }
 
@@ -139,9 +148,11 @@ export function ɵinstallSxCompiledView<T extends object>(
     mount();
   };
 
-  afterNextRender(() => {
-    start();
-  });
+  if (setup) {
+    afterNextRender(() => {
+      start();
+    });
+  }
 
   destroyRef.onDestroy(() => {
     destroyed = true;
@@ -154,6 +165,10 @@ export function ɵinstallSxCompiledView<T extends object>(
     teardown?.destroy();
     teardown = undefined;
     mounted = false;
+
+    // Binding tables are destroyed first so no live subscription observes a
+    // scope while its owned atoms are being disposed.
+    disposeOwnedScopes(options.ownedScopes);
   });
 
   return {
@@ -163,4 +178,33 @@ export function ɵinstallSxCompiledView<T extends object>(
       }
     },
   };
+}
+
+/**
+ * Disposes component-owned scopes registered by the compiler.
+ *
+ * Each instance is isolated: one failing cleanup must not leave the rest of
+ * the component's scopes alive.
+ */
+function disposeOwnedScopes(
+  read: SxCompiledViewOptions['ownedScopes'],
+): void {
+  if (!read) return;
+
+  let owned: Iterable<Disposable | undefined>;
+  try {
+    owned = read();
+  } catch (error) {
+    console.error('[streamix] reading component-owned scopes threw during destruction:', error);
+    return;
+  }
+
+  for (const scope of owned) {
+    if (!scope) continue;
+    try {
+      scope.dispose();
+    } catch (error) {
+      console.error('[streamix] component-owned scope disposal threw:', error);
+    }
+  }
 }
