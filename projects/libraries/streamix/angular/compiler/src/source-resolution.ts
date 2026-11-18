@@ -42,6 +42,23 @@ export function createReactiveSourcePathResolver(
   return path => paths[path];
 }
 
+/** Escapes one scope key for a generated single-quoted string literal. */
+function scopeKeyLiteral(segment: string): string {
+  return `'${segment.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+}
+
+/**
+ * Public atom accessor for a dotted member path. Nested scopes expose their
+ * own `get`, so `user.name` becomes `model.get('user').get('name')`; the
+ * Scope API does not resolve dotted keys.
+ */
+function scopeMemberAccess(scopePath: string, member: string): string {
+  if (!member) return scopePath;
+  return member
+    .split('.')
+    .reduce((access, segment) => `${access}.get(${scopeKeyLiteral(segment)})`, scopePath);
+}
+
 /**
  * Creates scope-member mappings from exact value paths discovered by an
  * upstream type checker. Each value maps to its public atom accessor.
@@ -53,9 +70,7 @@ export function createScopeValuePathResolver(
 
   for (const [scopePath, members] of Object.entries(scopes)) {
     for (const member of members) {
-      const property = member.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      mappings[`${scopePath}.${member}`] =
-        `${scopePath}.get('${property}')`;
+      mappings[`${scopePath}.${member}`] = scopeMemberAccess(scopePath, member);
     }
   }
 
@@ -104,10 +119,12 @@ export function createScopeWritableResolver(
 
   for (const [scopePath, members] of Object.entries(scopes)) {
     for (const member of members) {
-      const property = member.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const segments = member.split('.');
+      const last = segments[segments.length - 1];
+      const parent = scopeMemberAccess(scopePath, segments.slice(0, -1).join('.'));
       mappings[`${scopePath}.${member}`] = {
-        source: `${scopePath}.get('${property}')`,
-        write: value => `ctx.${scopePath}.set('${property}', ${value})`,
+        source: scopeMemberAccess(scopePath, member),
+        write: value => `ctx.${parent}.set(${scopeKeyLiteral(last)}, ${value})`,
       };
     }
   }

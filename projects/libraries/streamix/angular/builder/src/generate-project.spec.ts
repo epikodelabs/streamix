@@ -153,6 +153,44 @@ describe('external Angular component templates', () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it('bridges nested scope values and leaves method members callable', async () => {
+    const { mkdtemp, mkdir, readFile, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'sx-nested-scope-'));
+    try {
+      const src = join(root, 'projects/apps/demo/src');
+      await mkdir(src, { recursive: true });
+      await writeFile(join(root, 'projects/apps/demo/tsconfig.app.json'), JSON.stringify({
+        compilerOptions: { target: 'ES2022', experimentalDecorators: true }, include: ['src/**/*.ts'],
+      }));
+      await writeFile(join(src, 'globals.d.ts'), `
+        declare module '@epikodelabs/streamix' {
+          export function scope<T>(value: T): any;
+          export function method<T>(fn: T): T;
+        }
+      `);
+      await writeFile(join(src, 'profile.ts'), `
+        import { method, scope } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ template: '<output>{{ model.profile.name }}</output><button (click)="model.increment()">+</button>' })
+        export class Profile {
+          model = scope({
+            profile: { name: 'Ada' },
+            increment: method((self: any) => { self.profile.name = 'Grace'; }),
+          });
+        }
+      `);
+      await generateProject({ workspaceRoot: root, sourceRoot: 'projects/apps/demo/src' });
+      const generated = await readFile(join(root, '.angular/.streamix/demo/src/profile.ts'), 'utf8');
+      expect(generated).toContain("model.get('profile').get('name')");
+      // The method member stays a method call; it is never treated as a source.
+      expect(generated).toContain('ctx.model.increment()');
+      expect(generated).not.toContain("model.get('increment')");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('compiles an authored templateUrl without changing the authored HTML file', async () => {
     const { mkdtemp, mkdir, readFile, writeFile, rm } = await import('node:fs/promises');
     const { join } = await import('node:path');

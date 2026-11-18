@@ -2,6 +2,7 @@ import {
   transformAngularComponentTemplate,
 } from './build-transform';
 import {
+  createScopeValuePathResolver,
   createScopeWritableResolver,
   createWritableSourcePathResolver,
 } from './source-resolution';
@@ -52,6 +53,24 @@ describe('two-way bindings', () => {
     expect(result.template).toContain("[checked]=\"($any(model.get('done').value) !== __sxNoInitialValue) ? (model.get('done').value) : undefined\"");
     expect(result.setup).toContain(
       "ɵsxListener(table, 1, node0, \"change\", (event) => { ctx.model.set('done', event.target.checked); }, undefined, server);",
+    );
+  });
+
+  it('lowers a nested scope member two-way binding through each scope', () => {
+    const result = transformAngularComponentTemplate(
+      '<input [(value)]="model.user.name">',
+      'inline.html',
+      {
+        resolveReactiveSource: createScopeValuePathResolver({ model: ['user.name'] }),
+        resolveReactiveWritable: createScopeWritableResolver({ model: ['user.name'] }),
+      },
+    );
+
+    expect(result.template).toContain(
+      "[value]=\"($any(model.get('user').get('name').value) !== __sxNoInitialValue) ? (model.get('user').get('name').value) : undefined\"",
+    );
+    expect(result.setup).toContain(
+      "ɵsxListener(table, 1, node0, \"input\", (event) => { ctx.model.get('user').set('name', event.target.value); }, undefined, server);",
     );
   });
 

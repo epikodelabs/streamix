@@ -34,9 +34,9 @@ export interface SxComponentBuildInput {
   /** Explicit value-path -> reactive-source-path metadata. */
   readonly reactiveSourcePaths?: Readonly<Record<string, string>>;
   /**
-   * Scope value members grouped by Scope path. For example
-   * `{ model: ['count', 'user.name'] }` maps to public atom lookups such as
-   * `model.get('count')` and `model.get('user.name')`.
+   * Scope value members grouped by Scope path. Dotted members address nested
+   * scopes: `{ model: ['count', 'user.name'] }` maps to public atom lookups
+   * such as `model.get('count')` and `model.get('user').get('name')`.
    */
   readonly scopeValuePaths?: Readonly<Record<string, readonly string[]>>;
   /**

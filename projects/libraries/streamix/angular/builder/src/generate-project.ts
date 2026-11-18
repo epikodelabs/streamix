@@ -344,10 +344,7 @@ function scopeWritablePathsFor(
   program: ts.Program,
   sourcePath: string,
 ): Record<string, readonly string[]> | undefined {
-  const scopes = scopeMembersFor(program, sourcePath, property => {
-    const initializer = property.initializer ? unwrapReactiveInitializer(property.initializer) : undefined;
-
-    if (!initializer) return false;
+  return scopeMembersFor(program, sourcePath, initializer => {
     if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
       return false;
     }
@@ -357,27 +354,119 @@ function scopeWritablePathsFor(
         ? initializer.expression.text
         : undefined;
 
-      return name !== 'method' && name !== 'derivedExpr' && name !== 'flowExpr';
+      return name !== 'derivedExpr' && name !== 'flowExpr';
     }
 
     return true;
   });
+}
 
-  return scopes;
+interface ScopeMemberHelperAliases {
+  readonly method: ReadonlySet<string>;
+  readonly scope: ReadonlySet<string>;
+}
+
+/** Local names imported from Streamix for `method(...)` and `scope(...)`. */
+function streamixMemberHelperAliases(file: ts.SourceFile): ScopeMemberHelperAliases {
+  const method = new Set<string>(['method']);
+  const scope = new Set<string>(['scope']);
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+        !/^@epikodelabs\/streamix(?:\/|$)/.test(statement.moduleSpecifier.text)) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const item of bindings.elements) {
+      const imported = (item.propertyName ?? item.name).text;
+      if (imported === 'method') method.add(item.name.text);
+      if (imported === 'scope') scope.add(item.name.text);
+    }
+  }
+  return { method, scope };
+}
+
+function isMethodMember(
+  initializer: ts.Expression,
+  aliases: ScopeMemberHelperAliases,
+): boolean {
+  return ts.isCallExpression(initializer) && ts.isIdentifier(initializer.expression) &&
+    aliases.method.has(initializer.expression.text);
+}
+
+/** An explicit `scope(...)` member, including factory forms. */
+function isNestedScopeCall(
+  initializer: ts.Expression,
+  aliases: ScopeMemberHelperAliases,
+): boolean {
+  return ts.isCallExpression(initializer) && ts.isIdentifier(initializer.expression) &&
+    aliases.scope.has(initializer.expression.text);
+}
+
+/**
+ * Flattens the statically known value paths of one scope definition. Nested
+ * object literals and explicit `scope({...})` members are nested scopes, so
+ * their atom leaves are reported as dotted paths; `method(...)` members are
+ * callables and are never reported as sources.
+ */
+function flattenScopeMembers(
+  literal: ts.ObjectLiteralExpression,
+  prefix: readonly string[],
+  aliases: ScopeMemberHelperAliases,
+  accept: (initializer: ts.Expression) => boolean,
+): string[] {
+  const members: string[] = [];
+
+  for (const property of literal.properties) {
+    if (!ts.isPropertyAssignment(property) ||
+        (!ts.isIdentifier(property.name) && !ts.isStringLiteral(property.name))) continue;
+
+    const name = property.name.text;
+    const initializer = unwrapReactiveInitializer(property.initializer);
+
+    if (isMethodMember(initializer, aliases)) continue;
+
+    if (isNestedScopeCall(initializer, aliases)) {
+      const argument = (initializer as ts.CallExpression).arguments[0];
+      if (argument && ts.isObjectLiteralExpression(argument)) {
+        members.push(...flattenScopeMembers(
+          argument,
+          [...prefix, name],
+          aliases,
+          accept,
+        ));
+      }
+      continue;
+    }
+
+    if (ts.isObjectLiteralExpression(initializer)) {
+      members.push(...flattenScopeMembers(
+        initializer,
+        [...prefix, name],
+        aliases,
+        accept,
+      ));
+      continue;
+    }
+
+    if (!accept(initializer)) continue;
+    members.push([...prefix, name].join('.'));
+  }
+
+  return members;
 }
 
 /**
  * Scope members declared in `scope({...})` initializers, optionally filtered
- * per member.
+ * per value member. Nested scopes are flattened into dotted value paths.
  */
 function scopeMembersFor(
   program: ts.Program,
   sourcePath: string,
-  accept: (property: ts.PropertyAssignment) => boolean = () => true,
+  accept: (initializer: ts.Expression) => boolean = () => true,
 ): Record<string, readonly string[]> | undefined {
   const file = program.getSourceFile(sourcePath);
   if (!file) return undefined;
 
+  const aliases = streamixMemberHelperAliases(file);
   const scopes: Record<string, readonly string[]> = {};
 
   const visit = (node: ts.Node): void => {
@@ -387,17 +476,16 @@ function scopeMembersFor(
         initializer &&
         ts.isCallExpression(initializer) &&
         ts.isIdentifier(initializer.expression) &&
-        initializer.expression.text === 'scope' &&
+        aliases.scope.has(initializer.expression.text) &&
         initializer.arguments.length > 0 &&
         ts.isObjectLiteralExpression(initializer.arguments[0])
       ) {
-        const members = initializer.arguments[0].properties
-          .filter(ts.isPropertyAssignment)
-          .filter(accept)
-          .map(property =>
-            ts.isIdentifier(property.name) ? property.name.text : undefined,
-          )
-          .filter((name): name is string => !!name);
+        const members = flattenScopeMembers(
+          initializer.arguments[0],
+          [],
+          aliases,
+          accept,
+        );
         if (members.length > 0) {
           scopes[node.name.text] = members;
         }

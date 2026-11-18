@@ -20,7 +20,7 @@ describe('sx reactive source resolution', () => {
     });
 
     expect(resolve('model.count')).toBe("model.get('count')");
-    expect(resolve('model.user.name')).toBe("model.get('user.name')");
+    expect(resolve('model.user.name')).toBe("model.get('user').get('name')");
     expect(resolve('model.user')).toBeUndefined();
   });
 
@@ -41,11 +41,15 @@ describe('sx reactive source resolution', () => {
   });
 
   it('uses Scope.set for writable template paths', () => {
-    const resolve = createScopeWritableResolver({ model: ['title'] });
+    const resolve = createScopeWritableResolver({ model: ['title', 'user.name'] });
     const target = resolve('model.title');
 
     expect(target?.source).toBe("model.get('title')");
     expect(target?.write('nextTitle')).toBe("ctx.model.set('title', nextTitle)");
     expect(resolve('model.missing')).toBeUndefined();
+
+    const nested = resolve('model.user.name');
+    expect(nested?.source).toBe("model.get('user').get('name')");
+    expect(nested?.write('nextName')).toBe("ctx.model.get('user').set('name', nextName)");
   });
 });
