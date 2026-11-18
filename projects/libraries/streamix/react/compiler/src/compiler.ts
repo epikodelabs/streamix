@@ -215,6 +215,28 @@ function reactNonJsxHooks(file: ts.SourceFile): (expression: ts.Expression) => s
 }
 
 type FactoryImports = { aliases: Map<string, string>; namespaces: Set<string>; excluded: Set<string> };
+
+/**
+ * How a `scope({...})` member behaves at runtime. Nested scopes and
+ * `method(...)` members are callable and are not dependency sources: JSX
+ * reads must not subscribe to them or invoke them.
+ */
+type ScopeMemberShape = {
+  readonly name: string;
+  readonly kind: "source" | "nested" | "method";
+  readonly members: readonly ScopeMemberShape[];
+  /** A nested scope built by a factory the compiler cannot inspect. */
+  readonly opaque?: boolean;
+};
+
+type ScopeMemberResolution =
+  | { readonly kind: "source"; readonly depth: number }
+  | { readonly kind: "method"; readonly depth: number }
+  | { readonly kind: "nested"; readonly depth: number }
+  | { readonly kind: "missing"; readonly depth: number }
+  | { readonly kind: "opaque"; readonly depth: number }
+  /** The scope's definition was not statically available (props, factories). */
+  | { readonly kind: "unknown" };
 function streamixFactoryImports(file: ts.SourceFile): FactoryImports {
   const aliases = new Map<string, string>();
   const namespaces = new Set<string>();
@@ -310,6 +332,184 @@ function semanticFactoryKind(callee: ts.Expression, checker: ts.TypeChecker): st
   return isStreamixDeclaration ? name : undefined;
 }
 
+/** A `method(...)` member call, named or namespace-imported. */
+function isMethodMemberCall(
+  node: ts.Expression,
+  imports: FactoryImports,
+): boolean {
+  node = unwrapCast(node);
+  if (!ts.isCallExpression(node)) return false;
+  const callee = node.expression;
+
+  if (ts.isIdentifier(callee)) {
+    return imports.aliases.get(callee.text) === "method" ||
+      (callee.text === "method" && !imports.excluded.has(callee.text));
+  }
+
+  if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) &&
+      imports.namespaces.has(callee.expression.text)) {
+    return callee.name.text === "method";
+  }
+
+  return false;
+}
+
+function objectLiteralScopeMembers(
+  literal: ts.ObjectLiteralExpression,
+  imports: FactoryImports,
+  checker?: ts.TypeChecker,
+): readonly ScopeMemberShape[] | undefined {
+  const members: ScopeMemberShape[] = [];
+
+  for (const property of literal.properties) {
+    // A spread contributes members the compiler cannot enumerate; treat the
+    // whole definition as unknown rather than reporting false missing members.
+    if (ts.isSpreadAssignment(property)) return undefined;
+
+    let name: string | undefined;
+    let initializer: ts.Expression | undefined;
+
+    if (ts.isPropertyAssignment(property)) {
+      name = staticPropertyName(property.name);
+      initializer = property.initializer;
+    } else if (ts.isShorthandPropertyAssignment(property)) {
+      name = property.name.text;
+      initializer = property.name;
+    }
+
+    if (name === undefined || !initializer) continue;
+    members.push(classifyScopeMember(name, initializer, imports, checker));
+  }
+
+  return members;
+}
+
+function classifyScopeMember(
+  name: string,
+  initializer: ts.Expression,
+  imports: FactoryImports,
+  checker?: ts.TypeChecker,
+): ScopeMemberShape {
+  const value = unwrapCast(initializer);
+
+  // Bare callbacks are config-form derived values, not imperative methods.
+  if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) {
+    return { name, kind: "source", members: [] };
+  }
+
+  if (ts.isObjectLiteralExpression(value)) {
+    const members = objectLiteralScopeMembers(value, imports, checker);
+    return members
+      ? { name, kind: "nested", members }
+      : { name, kind: "nested", members: [], opaque: true };
+  }
+
+  if (isMethodMemberCall(value, imports)) {
+    return { name, kind: "method", members: [] };
+  }
+
+  if (ts.isCallExpression(value) && factoryKind(value, imports, checker) === "scope") {
+    const argument = value.arguments[0];
+    if (argument && ts.isObjectLiteralExpression(argument)) {
+      const members = objectLiteralScopeMembers(argument, imports, checker);
+      return members
+        ? { name, kind: "nested", members }
+        : { name, kind: "nested", members: [], opaque: true };
+    }
+    return { name, kind: "nested", members: [], opaque: true };
+  }
+
+  return { name, kind: "source", members: [] };
+}
+
+/** Classified member definitions for a scope, when statically available. */
+function scopeMemberShapes(
+  call: ts.Expression,
+  imports: FactoryImports,
+  checker?: ts.TypeChecker,
+): readonly ScopeMemberShape[] | undefined {
+  const value = unwrapCast(call);
+  if (!ts.isCallExpression(value)) return undefined;
+  const argument = value.arguments[0];
+  if (!argument || !ts.isObjectLiteralExpression(argument)) return undefined;
+  return objectLiteralScopeMembers(argument, imports, checker);
+}
+
+function collectModuleScopeMembers(
+  sourceFile: ts.SourceFile,
+  imports: FactoryImports,
+  checker?: ts.TypeChecker,
+): Map<string, readonly ScopeMemberShape[]> {
+  const scopes = new Map<string, readonly ScopeMemberShape[]>();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const initializer = declaration.initializer ? unwrapCast(declaration.initializer) : undefined;
+      if (!ts.isIdentifier(declaration.name) || !initializer || !ts.isCallExpression(initializer)) continue;
+      if (factoryKind(initializer, imports, checker) !== "scope") continue;
+      const members = scopeMemberShapes(initializer, imports, checker);
+      if (members) scopes.set(declaration.name.text, members);
+    }
+  }
+  return scopes;
+}
+
+function resolveScopeMember(
+  members: readonly ScopeMemberShape[] | undefined,
+  path: readonly string[],
+): ScopeMemberResolution {
+  if (!members) return { kind: "unknown" };
+
+  let current = members;
+  for (let index = 0; index < path.length; index++) {
+    const member = current.find(item => item.name === path[index]);
+    if (!member) return { kind: "missing", depth: index };
+    if (member.kind === "source") return { kind: "source", depth: index + 1 };
+    if (member.kind === "method") return { kind: "method", depth: index + 1 };
+    if (index === path.length - 1) return { kind: "nested", depth: index + 1 };
+    if (member.opaque) return { kind: "opaque", depth: index + 1 };
+    current = member.members;
+  }
+
+  return { kind: "nested", depth: path.length };
+}
+
+/** `state.get("profile").get("name")` for `[profile, name]`. */
+function createScopeSourceExpression(
+  factory: ts.NodeFactory,
+  scopeName: string,
+  path: readonly string[],
+): ts.Expression {
+  return path.reduce<ts.Expression>(
+    (access, segment) => factory.createCallExpression(
+      factory.createPropertyAccessExpression(access, "get"),
+      undefined,
+      [factory.createStringLiteral(segment)],
+    ),
+    factory.createIdentifier(scopeName),
+  );
+}
+
+/** Reads a whole `scope.member.path` chain; optional segments stop the walk. */
+function scopeMemberChain(
+  node: ts.Node,
+  scopes: ReadonlySet<string>,
+): { scope: string; path: readonly string[]; root: ts.Identifier } | undefined {
+  if (!ts.isPropertyAccessExpression(node)) return undefined;
+
+  const path: string[] = [];
+  let current: ts.Expression = node;
+
+  while (ts.isPropertyAccessExpression(current)) {
+    if (current.questionDotToken) return undefined;
+    path.unshift(current.name.text);
+    current = current.expression;
+  }
+
+  if (!ts.isIdentifier(current) || !scopes.has(current.text)) return undefined;
+  return { scope: current.text, path, root: current };
+}
+
 export function transformReactJsx(
   source: string,
   fileName = "component.tsx",
@@ -344,6 +544,7 @@ export function transformReactJsx(
   const moduleScopes = collectModuleBindings(sourceFile, "scope", imports, checker);
   const moduleWritableAtoms = collectModuleWritableBindings(sourceFile, imports, checker);
   const moduleAtomMaps = collectModuleAtomMaps(sourceFile, moduleAtoms, moduleWritableAtoms);
+  const moduleScopeMembers = collectModuleScopeMembers(sourceFile, imports, checker);
 
   const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
     const factory = context.factory;
@@ -428,6 +629,9 @@ export function transformReactJsx(
       // known atom references. It lets `model.count` and `{ count } = model`
       // retain the source identity without guessing about arbitrary objects.
       const atomMaps = new Map(moduleAtomMaps);
+      // Member shapes let JSX reads distinguish sources from callable
+      // methods and nested scopes; unknown definitions keep legacy behavior.
+      const scopeMembers = new Map(moduleScopeMembers);
       const writableBindings = new Set<string>(moduleWritableAtoms);
       const localReactiveDeclarations = new Set<ts.VariableDeclaration>();
       const localAtomMapDeclarations = new Set<ts.VariableDeclaration>();
@@ -472,7 +676,7 @@ export function transformReactJsx(
               }
               atoms.add(declaration.name.text);
               localReactiveDeclarations.add(declaration);
-              if (isComponent) reportLocalFactoryImpurity(initializer, diagnostics);
+              if (isComponent) reportLocalFactoryImpurity(initializer, diagnostics, imports);
               if ((statement.declarationList.flags & ts.NodeFlags.Let) !== 0) writableBindings.add(declaration.name.text);
               declaresReactive = true;
             }
@@ -486,8 +690,12 @@ export function transformReactJsx(
                 continue;
               }
               scopes.add(declaration.name.text);
+              {
+                const members = scopeMemberShapes(initializer, imports, checker);
+                if (members) scopeMembers.set(declaration.name.text, members);
+              }
               localReactiveDeclarations.add(declaration);
-              if (isComponent) reportLocalFactoryImpurity(initializer, diagnostics);
+              if (isComponent) reportLocalFactoryImpurity(initializer, diagnostics, imports);
               declaresReactive = true;
             }
           }
@@ -937,19 +1145,24 @@ export function transformReactJsx(
         bindings.push(statement);
         return name;
       };
-      const bindingForScope = (scopeName: string, property: string, _source: ts.Node): ts.Identifier => {
+      const scopeSourceExpression = (
+        scopeName: string,
+        path: readonly string[],
+      ): ts.Expression => createScopeSourceExpression(factory, scopeName, path);
+      const bindingForScope = (
+        scopeName: string,
+        path: readonly string[],
+        _source: ts.Node,
+      ): ts.Identifier => {
         bindingReferenceSites.push(_source);
-        const bindingKey = `${scopeName}.${property}`;
+        const memberPath = path.join(".");
+        const bindingKey = `${scopeName}.${memberPath}`;
         const existing = scopeBindings.get(bindingKey);
         if (existing) return existing;
         const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
         scopeBindings.set(bindingKey, name);
         needsRuntimeImport = true;
-        const sourceExpression = factory.createCallExpression(
-          factory.createPropertyAccessExpression(factory.createIdentifier(scopeName), "get"),
-          undefined,
-          [factory.createStringLiteral(property)],
-        );
+        const sourceExpression = scopeSourceExpression(scopeName, path);
         traceSources.set(bindingKey, sourceExpression);
         const statement = factory.createVariableStatement(
           undefined,
@@ -961,7 +1174,7 @@ export function transformReactJsx(
               asAny(
                 factory.createCallExpression(factory.createIdentifier("useStreamixSource"), undefined, [
                   sourceExpression,
-                  factory.createStringLiteral(`${scopeName}.${property}`),
+                  factory.createStringLiteral(`${scopeName}.${memberPath}`),
                 ]),
               ),
             ),
@@ -969,6 +1182,48 @@ export function transformReactJsx(
         );
         bindings.push(statement);
         return name;
+      };
+      /**
+       * Resolves a scope-rooted chain. Sources bridge only their source
+       * prefix; methods, nested scopes, and unreadable nested definitions are
+       * left as authored so the compiler never subscribes to a callable.
+       */
+      const rewriteScopeChain = (
+        value: ts.Node,
+        chain: { scope: string; path: readonly string[]; root: ts.Identifier },
+      ): ts.Expression | undefined => {
+        const resolution = resolveScopeMember(scopeMembers.get(chain.scope), chain.path);
+
+        if (resolution.kind === "unknown") return undefined;
+
+        if (resolution.kind === "source") {
+          const prefix = chain.path.slice(0, resolution.depth);
+          let expression: ts.Expression = bindingForScope(chain.scope, prefix, value);
+          for (const segment of chain.path.slice(resolution.depth)) {
+            expression = factory.createPropertyAccessExpression(expression, segment);
+          }
+          return expression;
+        }
+
+        if (resolution.kind === "missing") {
+          diagnostics.push(diagnostic(
+            value,
+            "error",
+            `Scope member "${`${chain.scope}.${chain.path.join(".")}`}" is not declared by the scope literal, ` +
+            "so the compiler cannot bridge it.",
+          ));
+        } else if (resolution.kind === "opaque") {
+          diagnostics.push(diagnostic(
+            value,
+            "error",
+            `Scope member "${`${chain.scope}.${chain.path.join(".")}`}" crosses a nested scope the compiler ` +
+            "cannot inspect. Use scope.get(...) with an explicit subscription instead.",
+          ));
+        }
+
+        // Methods and nested scopes are callable values. Leaving the authored
+        // chain intact keeps method calls and nested-scope references working.
+        return value as ts.Expression;
       };
       const rewriteJsxValue = (expression: ts.Expression): ts.Expression => {
         const jsxValueVisitor: ts.Visitor = (value) => {
@@ -1022,13 +1277,20 @@ export function transformReactJsx(
             }
             return bindingForSource(value, value.getText(sourceFile));
           }
+          {
+            const chain = scopeMemberChain(value, scopes);
+            if (chain && !isHidden(chain.root)) {
+              const rewritten = rewriteScopeChain(value, chain);
+              if (rewritten) return rewritten;
+            }
+          }
           if (
             ts.isPropertyAccessExpression(value) &&
             ts.isIdentifier(value.expression) &&
             scopes.has(value.expression.text) &&
             !isHidden(value.expression)
           ) {
-            return bindingForScope(value.expression.text, value.name.text, value);
+            return bindingForScope(value.expression.text, [value.name.text], value);
           }
           if (
             ts.isElementAccessExpression(value) &&
@@ -1038,7 +1300,21 @@ export function transformReactJsx(
             value.argumentExpression &&
             (ts.isStringLiteral(value.argumentExpression) || ts.isNumericLiteral(value.argumentExpression))
           ) {
-            return bindingForScope(value.expression.text, value.argumentExpression.text, value);
+            const key = value.argumentExpression.text;
+            const resolution = resolveScopeMember(scopeMembers.get(value.expression.text), [key]);
+            if (resolution.kind === "unknown" ||
+                (resolution.kind === "source" && resolution.depth === 1)) {
+              return bindingForScope(value.expression.text, [key], value);
+            }
+            if (resolution.kind === "missing") {
+              diagnostics.push(diagnostic(
+                value,
+                "error",
+                `Scope member "${`${value.expression.text}.${key}`}" is not declared by the scope literal, ` +
+                "so the compiler cannot bridge it.",
+              ));
+            }
+            return value;
           }
           if (
             ts.isElementAccessExpression(value) &&
@@ -1585,10 +1861,10 @@ export function transformReactJsx(
         ),
         factory.createStringLiteral(key),
       );
-      const recordScope = (scope: string, property: string): void => {
+      const recordScope = (scope: string, path: readonly string[]): void => {
         let properties = scopeSources.get(scope);
         if (!properties) scopeSources.set(scope, properties = new Set());
-        properties.add(property);
+        properties.add(path.join('.'));
       };
       const rewriteExpression = (expression: ts.Expression): ts.Expression => {
         const visit: ts.Visitor = value => {
@@ -1612,9 +1888,37 @@ export function transformReactJsx(
           if (ts.isPropertyAccessExpression(value) && ts.isIdentifier(value.expression) &&
               moduleScopes.has(value.expression.text) && ['get', 'set', 'dispose', 'subscribe'].includes(value.name.text) &&
               !isShadowedName(value.expression.text, value, node)) return value;
+          {
+            // Class snapshots follow the same member classification as JSX:
+            // nested scopes bridge through their leaves, methods stay calls.
+            const chain = scopeMemberChain(value, moduleScopes);
+            if (chain && !isShadowedName(chain.root.text, chain.root, node)) {
+              const resolution = resolveScopeMember(moduleScopeMembers.get(chain.scope), chain.path);
+              if (resolution.kind === 'source') {
+                const prefix = chain.path.slice(0, resolution.depth);
+                recordScope(chain.scope, prefix);
+                let expression: ts.Expression = snapshot(`${chain.scope}.${prefix.join('.')}`);
+                for (const segment of chain.path.slice(resolution.depth)) {
+                  expression = factory.createPropertyAccessExpression(expression, segment);
+                }
+                return expression;
+              }
+              if (resolution.kind === 'missing' || resolution.kind === 'opaque') {
+                diagnostics.push(diagnostic(
+                  value,
+                  'error',
+                  resolution.kind === 'missing'
+                    ? `Scope member "${`${chain.scope}.${chain.path.join('.')}`}" is not declared by the scope literal, so the compiler cannot bridge it.`
+                    : `Scope member "${`${chain.scope}.${chain.path.join('.')}`}" crosses a nested scope the compiler cannot inspect. Use scope.get(...) with an explicit subscription instead.`,
+                ));
+                return value;
+              }
+              if (resolution.kind !== 'unknown') return value;
+            }
+          }
           if (ts.isPropertyAccessExpression(value) && ts.isIdentifier(value.expression) &&
               moduleScopes.has(value.expression.text) && !isShadowedName(value.expression.text, value, node)) {
-            recordScope(value.expression.text, value.name.text);
+            recordScope(value.expression.text, [value.name.text]);
             return snapshot(`${value.expression.text}.${value.name.text}`);
           }
           if (ts.isPropertyAccessExpression(value) && value.name.text === "value" &&
@@ -1661,15 +1965,15 @@ export function transformReactJsx(
         ], ts.NodeFlags.Const)));
         snapshots.push(factory.createPropertyAssignment(atomName, binding));
       }
-      for (const [scopeName, properties] of scopeSources) for (const property of properties) {
-        const key = `${scopeName}.${property}`;
+      for (const [scopeName, properties] of scopeSources) for (const memberPath of properties) {
+        const path = memberPath.split('.');
+        const key = `${scopeName}.${memberPath}`;
         const binding = factory.createIdentifier(`__streamixClassBinding${bindingCount++}`);
         needsRuntimeImport = true;
         hookStatements.push(factory.createVariableStatement(undefined, factory.createVariableDeclarationList([
           factory.createVariableDeclaration(binding, undefined, undefined, factory.createCallExpression(
             factory.createIdentifier("useStreamixSource"), undefined,
-          [factory.createCallExpression(factory.createPropertyAccessExpression(factory.createIdentifier(scopeName), "get"), undefined,
-            [factory.createStringLiteral(property)]), factory.createStringLiteral(key)],
+            [createScopeSourceExpression(factory, scopeName, path), factory.createStringLiteral(key)],
           )),
         ], ts.NodeFlags.Const)));
         snapshots.push(factory.createPropertyAssignment(factory.createStringLiteral(key), binding));
@@ -2079,16 +2383,28 @@ function diagnostic(node: ts.Node, category: ReactJsxDiagnostic["category"], mes
 function reportLocalFactoryImpurity(
   factoryCall: ts.CallExpression,
   diagnostics: ReactJsxDiagnostic[],
+  imports?: FactoryImports,
 ): void {
   const knownPureFactories = new Set([
     "atom", "scope", "derived", "flow", "method", "derivedExpr", "flowExpr",
   ]);
+  // Resolve named and namespace imports before judging a nested call: an
+  // aliased `method`/`atom` helper is as pure as its unaliased spelling.
+  const pureCall = (expression: ts.Expression): boolean => {
+    if (ts.isIdentifier(expression)) {
+      return knownPureFactories.has(imports?.aliases.get(expression.text) ?? expression.text);
+    }
+    if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression) &&
+        imports?.namespaces.has(expression.expression.text)) {
+      return knownPureFactories.has(expression.name.text);
+    }
+    return false;
+  };
   let impurity: ts.Node | undefined;
   const visit = (node: ts.Node): void => {
     if (impurity || ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return;
     if (ts.isCallExpression(node)) {
-      const name = ts.isIdentifier(node.expression) ? node.expression.text : undefined;
-      if (!knownPureFactories.has(name ?? "")) {
+      if (!pureCall(node.expression)) {
         impurity = node;
         return;
       }
