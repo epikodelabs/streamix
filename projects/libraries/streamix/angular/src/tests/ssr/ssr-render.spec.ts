@@ -1,10 +1,21 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import {
+  AfterViewInit,
+  ChangeDetectionStrategy,
+  Component,
+} from '@angular/core';
 import { bootstrapApplication, provideClientHydration } from '@angular/platform-browser';
 import {
   provideServerRendering,
   renderApplication,
 } from '@angular/platform-server';
+import { atom } from '@epikodelabs/streamix';
 
+import {
+  createBindingTable,
+  ɵinstallSxCompiledView,
+  ɵsxTextNode,
+} from '../../lib';
 import { SsrFixtureComponent } from './ssr-fixture';
 
 const FIXTURE_PATH =
@@ -98,5 +109,67 @@ describe('compiled view under server rendering', () => {
     const html = await renderFixture();
 
     expect(html).toContain('value="hello"');
+  });
+});
+
+const cleanupMessage = atom('hello');
+let cleanupMounts = 0;
+let subscribersDuringRender = 0;
+
+@Component({
+  selector: 'sx-ssr-cleanup',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '<output></output>',
+})
+class SsrCleanupFixtureComponent implements AfterViewInit {
+  readonly ɵsx = ɵinstallSxCompiledView(
+    this,
+    (host: Element) => {
+      cleanupMounts++;
+      const table = createBindingTable(1);
+      const output = host.querySelector('output')!;
+      output.appendChild(output.ownerDocument!.createTextNode(''));
+      ɵsxTextNode(table, 0, output, cleanupMessage);
+      subscribersDuringRender = cleanupMessage.subscriberCount ?? 0;
+      return {
+        destroy() {
+          table.destroy();
+        },
+      };
+    },
+  );
+
+  ngAfterViewInit(): void {
+    // `afterNextRender` is inert under `ngServerMode`; the compiled view
+    // mounts from this hook during server rendering.
+    this.ɵsx.ɵafterViewInit();
+  }
+}
+
+/**
+ * Angular destroys the platform at the end of `renderApplication`, which
+ * destroys compiled views through `DestroyRef`. This proves the binding
+ * table — and every Streamix subscription it owns — is released before the
+ * render promise settles, matching the Vue adapter's SSR disposal contract.
+ */
+describe('compiled view SSR teardown', () => {
+  it('releases binding subscriptions when the server platform is destroyed', async () => {
+    await renderApplication(
+      context => bootstrapApplication(SsrCleanupFixtureComponent, {
+        providers: [provideServerRendering()],
+      }, context),
+      {
+        document: '<sx-ssr-cleanup></sx-ssr-cleanup>',
+        url: 'http://localhost/',
+        allowedHosts: ['localhost'],
+      },
+    );
+
+    // The compiled view really subscribed while the server rendered, so the
+    // zero below proves teardown rather than a skipped mount.
+    expect(cleanupMounts).toBe(1);
+    expect(subscribersDuringRender).toBe(1);
+    expect(cleanupMessage.subscriberCount).toBe(0);
   });
 });
