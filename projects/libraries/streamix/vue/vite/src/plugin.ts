@@ -32,15 +32,26 @@ const ENTRY_NAMES = ['main.tsx', 'main.jsx', 'main.ts', 'main.js', 'index.tsx', 
  * overlay per instrumented SFC script. Solution-style configs (`files: []` +
  * references) fall back to the Vite workspace config.
  */
-function instrumentProgram(
+function instrumentProgramFor(
+  programs: Map<string, ts.Program>,
   fileName: string,
   source: string,
   virtualScripts: ReadonlyMap<string, string>,
 ): ts.Program {
+  // A solution-style app tsconfig (`files: []` + references) leaves the
+  // checker with no roots; the shared resolver falls back to the Vite
+  // workspace config so instrumentation never queries unloaded nodes.
   const config = findStreamixProgramConfig(dirname(fileName), process.cwd());
+  const key = config.configPath ?? `standalone:${fileName}`;
+  const cached = programs.get(key);
+  // A Vite transform may receive an in-memory HMR edit not written to disk.
+  // Never silently discard semantic analysis because its TS SourceFile is stale.
+  if (cached?.getSourceFile(fileName)?.text === source) return cached;
   const overlays = new Map(virtualScripts);
   overlays.set(fileName, source);
-  return createStreamixProgram(config, overlays);
+  const program = createStreamixProgram(config, overlays, cached);
+  programs.set(key, program);
+  return program;
 }
 
 /**
@@ -56,6 +67,15 @@ function instrumentProgram(
  * bridge declarations and imports unmapped. Vite composes this map with Vue's.
  */
 export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
+  // One semantic program per resolved tsconfig, reused across transforms and
+  // invalidated by watchChange — mirroring the React Vite plugin's cache.
+  const programs = new Map<string, ts.Program>();
+  const instrumentProgram = (
+    fileName: string,
+    source: string,
+    virtualScripts: ReadonlyMap<string, string>,
+  ): ts.Program => instrumentProgramFor(programs, fileName, source, virtualScripts);
+
   /** Instrument one SFC: its script block registers through __streamixDebug. */
   const instrumentSfc = (source: string, fileName: string): string => {
     const parsed = parseSfc(source, { filename: fileName });
@@ -140,5 +160,43 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
 
       return { code: result.code, map: result.sourceMap ?? null };
     },
+    watchChange(id, change) {
+      const fileName = id.replace(/[?#].*$/, '');
+      // Config and package edits can change options or module resolution for
+      // every project, not only the one that lists the file.
+      if (/\.json$/i.test(fileName)) {
+        programs.clear();
+        return;
+      }
+      const normalized = normalizePath(fileName);
+      // An SFC's semantic program holds the virtual `<name>.vue.ts` script
+      // overlay, never the authored `<name>.vue` file itself.
+      const virtualVueName = /\.vue$/i.test(fileName)
+        ? normalizePath(fileName.replace(/\.vue$/i, '.vue.ts'))
+        : undefined;
+      let matched = false;
+      for (const [key, program] of programs) {
+        // A source edit changes symbol identity for every project that has
+        // already resolved that file; unrelated projects keep their graph.
+        const configFilePath = program.getCompilerOptions()['configFilePath'];
+        if ((typeof configFilePath === 'string' && normalizePath(configFilePath) === normalized) ||
+            program.getSourceFiles().some(file => normalizePath(file.fileName) === normalized ||
+              (virtualVueName !== undefined && normalizePath(file.fileName) === virtualVueName))) {
+          programs.delete(key);
+          matched = true;
+        }
+      }
+      // A newly created module can satisfy an import that previously failed
+      // to resolve, and that dependency is absent from every cached graph.
+      if (!matched && change.event === 'create' && /\.(?:[cm]?[jt]sx?|vue)$/i.test(fileName)) {
+        programs.clear();
+      }
+    },
   };
+}
+
+/** Program file names and Vite ids differ by separators and, on Windows,
+ * drive casing. */
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').toLowerCase();
 }
