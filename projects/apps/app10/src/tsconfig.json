@@ -2,10 +2,18 @@
   "extends": "../../../../tsconfig.json",
   "compilerOptions": {
     "outDir": "../../out-tsc/app",
-    "types": [],
+    "types": [
+      "vite/client",
+      "node"
+    ],
     "allowJs": true,
     "module": "ESNext",
-    "moduleResolution": "Bundler"
+    "moduleResolution": "Bundler",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
   },
   "files": [
     "main.ts"

@@ -29,6 +29,7 @@ try {
   const origin = `http://127.0.0.1:${server.address().port}`;
   for (const app of process.argv.includes('--app6') ? [6]
     : process.argv.includes('--app8') ? [8]
+    : process.argv.includes('--app10') ? [10]
     : production ? [5, 6]
     : [1, 2, 3, 4, 5, 6, 7, 8, 10]) {
     const page = await browser.newPage();
@@ -69,17 +70,22 @@ try {
         'The inspector must expose the response output');
     }
     if (app === 10 && !production) {
-      assert(await page.evaluate(() => window.__streamix.inspect().some(entry => entry.kind === 'scope')),
-        'The Vue demo (app10) must expose its board scope');
-      await page.getByPlaceholder('What needs doing?').fill('Inspector task');
-      await page.getByRole('button', { name: 'Add task' }).click();
-      await page.waitForFunction(() => document.querySelector('.tasks')?.textContent.includes('Inspector task'));
-      const kinds = await page.evaluate(() => new Set(window.__streamix.inspect().map(entry => entry.kind)));
-      for (const kind of ['atom', 'scope', 'derived', 'flow']) {
-        assert(kinds.has(kind), `The Vue demo must expose a ${kind} declaration`);
-      }
-      await page.locator('.filter select').selectOption('active');
-      await page.waitForFunction(() => document.querySelectorAll('.tasks li').length === 1);
+      // One Sentence Each owns the commission genre in a Streamix atom and the
+      // midnight countdown in an iterable; the inspector must discover the atom.
+      await page.waitForSelector('text=One Sentence Each');
+      // The monthly commission desk opens on the first visit. Requesting with
+      // the default "Surprise me" genre must fall back to the demo pitches
+      // because the static build has no commission endpoint.
+      await page.getByRole('button', { name: 'Request This Month’s Commissions' }).click();
+      await page.waitForFunction(() => document.body.textContent.includes('Demo commissions'));
+      await page.getByRole('button', { name: 'Close commission desk' }).click();
+      const kinds = await page.evaluate(() => window.__streamix.inspect().map(entry => entry.kind));
+      assert(kinds.includes('atom'), 'The fiction demo (app10) must expose its commission atom');
+      const navigation = page.getByRole('navigation', { name: 'Primary navigation' });
+      await navigation.getByRole('button', { name: 'How It Works' }).click();
+      await page.waitForFunction(() => document.body.textContent.includes('How One Sentence Each Works'));
+      await navigation.getByRole('button', { name: 'Canon Archive' }).click();
+      await page.waitForFunction(() => document.body.textContent.includes('Permanent Broadsheet Collection'));
     }
     if (app === 6) {
       if (process.argv.includes('--screenshot')) await page.screenshot({ path: resolve(root, 'app6-layout.png') });

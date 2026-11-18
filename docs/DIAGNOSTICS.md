@@ -206,9 +206,9 @@ A rule in this guide is only real if a test breaks when it is violated.
   previews, trace behavior.
 - Demo e2e (`scripts/verify-demo-introspection.mjs`) — discovery in the built
   development apps (app1–app8 and app10), app5 request output, app6 interaction
-  and scaling, app8 inspector entries plus its manual push/pull flow, app10 Vue
-  board interactions, and production parity (`--production`, using
-  `dist/apps-production`).
+  and scaling, app8 inspector entries plus its manual push/pull flow, app10
+  fiction-app tab interactions and commission-atom discovery, and production
+  parity (`--production`, using `dist/apps-production`).
 - Tests that toggle flags restore them in `finally`. Fixture flows that must
   stay observable mid-flight stay pending on a release function; a completed
   fixture releases its record with its atom by design.

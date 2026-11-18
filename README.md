@@ -35,7 +35,7 @@ This repository is an Angular CLI monorepo that hosts **Angular, React, and Vue*
 Run any of them with the Angular CLI:
 
 ```sh
-npx ng serve app1   # ... through app9
+npx ng serve app1   # ... through app10
 ```
 
 ## Builder not found after cloning
