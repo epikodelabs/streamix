@@ -344,9 +344,9 @@ function emitStructuralBlocks(
       lines.push(`          },`);
       lines.push(`          currentContext,`);
 
-      if (compiled.bindings.length > 0) {
+      if (compiled.bindings.length > 0 || compiled.nested.length > 0) {
         lines.push(`          () => {`);
-        lines.push(`            blockTable.destroy();`);
+        lines.push(...compiledInstanceDestroyLines(compiled, '            '));
         lines.push(`          },`);
       }
 
@@ -583,9 +583,9 @@ function emitNestedBlock(
   lines.push(`${pad}        },`);
   lines.push(`${pad}        currentContext,`);
 
-  if (nested.body.bindings.length > 0) {
+  if (nested.body.bindings.length > 0 || nested.body.nested.length > 0) {
     lines.push(`${pad}        () => {`);
-    lines.push(`${pad}          blockTable.destroy();`);
+    lines.push(...compiledInstanceDestroyLines(nested.body, `${pad}          `));
     lines.push(`${pad}        },`);
   }
 
@@ -716,6 +716,30 @@ function emitBodyContent(
 }
 
 /**
+ * The destroy body of a compiled block instance: its binding table (declared
+ * only when the body has direct bindings) and every nested block. Keyed rows
+ * destroy their compiled instance on removal, so a body that owns nested
+ * blocks must release them even with no direct bindings — a skipped nested
+ * block keeps subscribing to its sources and rendering into detached DOM.
+ */
+function compiledInstanceDestroyLines(
+  body: SxCompiledBlockBody,
+  pad: string,
+): readonly string[] {
+  const lines: string[] = [];
+
+  if (body.bindings.length > 0) {
+    lines.push(`${pad}blockTable.destroy();`);
+  }
+
+  for (const nested of body.nested) {
+    lines.push(`${pad}${nested.variable}.destroy();`);
+  }
+
+  return lines;
+}
+
+/**
  * The `{ first, last, destroy }` instance a factory returns.
  *
  * A body with several roots collects them in an array: the runtime only needs
@@ -735,15 +759,7 @@ function bodyInstanceLines(
   lines.push(`${pad}  first: ${first},`);
   lines.push(`${pad}  last: ${last},`);
   lines.push(`${pad}  destroy() {`);
-
-  if (body.bindings.length > 0) {
-    lines.push(`${pad}    blockTable.destroy();`);
-  }
-
-  for (const nested of body.nested) {
-    lines.push(`${pad}    ${nested.variable}.destroy();`);
-  }
-
+  lines.push(...compiledInstanceDestroyLines(body, `${pad}    `));
   lines.push(`${pad}  },`);
   lines.push(`${pad}};`);
   return lines;
@@ -776,8 +792,10 @@ function compiledBodyInstanceLines(
   lines.push(...nestedRefreshLines(body, spaces + 4));
   lines.push(`${pad}  },`);
   lines.push(`${pad}  ${context},`);
-  if (body.bindings.length > 0) {
-    lines.push(`${pad}  () => blockTable.destroy(),`);
+  if (body.bindings.length > 0 || body.nested.length > 0) {
+    lines.push(`${pad}  () => {`);
+    lines.push(...compiledInstanceDestroyLines(body, `${pad}    `));
+    lines.push(`${pad}  },`);
   }
   lines.push(`${pad});`);
   return lines;
@@ -795,10 +813,17 @@ function rootsReference(
   if (roots.length <= 1) {
     const node = roots[0];
 
-    // A body with no roots never renders; keep the contract typed anyway.
-    return node === undefined
-      ? { first: 'undefined as unknown as Node', last: 'undefined as unknown as Node' }
-      : { first: node, last: node };
+    // Empty bodies — top-level or nested — are anchored by the block
+    // compiler, so an empty roots array here would render an invalid range;
+    // refuse it loudly instead of emitting undefined.
+    if (node === undefined) {
+      throw new Error(
+        'sx compiled block body has no root nodes. ' +
+        'An empty block body must be anchored by the block compiler.',
+      );
+    }
+
+    return { first: node, last: node };
   }
 
   const array = `${roots[0]}Roots`;

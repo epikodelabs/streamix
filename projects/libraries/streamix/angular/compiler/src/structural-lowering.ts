@@ -636,22 +636,17 @@ function tryLowerConditionalBlock(
 
     const body = bodySourceOf(branch.children, template);
 
-    if (!body) {
-      return undefined;
-    }
-
     let compiled: SxCompiledBlockTemplate;
 
     try {
-      compiled = compileSxBlockTemplate(body, 'sx-block.html', {
+      // An empty branch compiles to a stable zero-node anchor instead of
+      // refusing the whole block: the condition is reactive and lowable, and
+      // rendering nothing is exactly what the author asked for.
+      compiled = compileSxBlockTemplate(body ?? '', 'sx-block.html', {
         documentExpression: 'doc',
         resolveReactiveSource,
       });
     } catch {
-      return undefined;
-    }
-
-    if (compiled.rootNodes.length === 0) {
       return undefined;
     }
 
@@ -692,22 +687,16 @@ function tryLowerSwitchBlock(
   for (const group of block.groups) {
     const body = bodySourceOf(group.children, template);
 
-    if (!body) {
-      return undefined;
-    }
-
     let compiled: SxCompiledBlockTemplate;
 
     try {
-      compiled = compileSxBlockTemplate(body, 'sx-block.html', {
+      // An empty case body compiles to a stable zero-node anchor like an
+      // empty branch; the case comparison stays fully compiled.
+      compiled = compileSxBlockTemplate(body ?? '', 'sx-block.html', {
         documentExpression: 'doc',
         resolveReactiveSource,
       });
     } catch {
-      return undefined;
-    }
-
-    if (compiled.rootNodes.length === 0) {
       return undefined;
     }
 
@@ -785,14 +774,12 @@ function tryLowerCollectionBlock(
 
   const body = bodySourceOf(block.children, template);
 
-  if (!body) {
-    return undefined;
-  }
-
   let compiled: SxCompiledBlockTemplate;
 
   try {
-    compiled = compileSxBlockTemplate(body, 'sx-block.html', {
+    // An empty row body compiles to a stable zero-node anchor: each row
+    // renders nothing but keeps the keyed runtime's bookkeeping intact.
+    compiled = compileSxBlockTemplate(body ?? '', 'sx-block.html', {
       documentExpression: 'doc',
       resolveReactiveSource,
       allowLocals: true,
@@ -804,29 +791,17 @@ function tryLowerCollectionBlock(
     return undefined;
   }
 
-  if (compiled.rootNodes.length === 0) {
-    return undefined;
-  }
-
   let empty: SxCompiledBlockTemplate | undefined;
 
   if (block.empty) {
     const emptyBody = bodySourceOf(block.empty.children, template);
 
-    if (!emptyBody) {
-      return undefined;
-    }
-
     try {
-      empty = compileSxBlockTemplate(emptyBody, 'sx-block-empty.html', {
+      empty = compileSxBlockTemplate(emptyBody ?? '', 'sx-block-empty.html', {
         documentExpression: 'doc',
         resolveReactiveSource,
       });
     } catch {
-      return undefined;
-    }
-
-    if (empty.rootNodes.length === 0) {
       return undefined;
     }
   }

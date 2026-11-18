@@ -151,20 +151,33 @@ export class SxValueBlock<T> {
       return;
     }
 
-    this.current = value;
-
     if (value === undefined) {
+      this.current = value;
       this.removeInstance();
       return;
     }
 
     if (!this.instance) {
-      this.instance = this.factory.create(value);
-      moveInstanceAfter(this.anchor, this.instance);
+      const previous = this.current;
+      this.current = value;
+
+      try {
+        this.instance = this.factory.create(value);
+        moveInstanceAfter(this.anchor, this.instance);
+      } catch (error) {
+        // The value was committed before the factory ran, so a failed factory
+        // or move would leave `Object.is(current, value)` true with no
+        // instance: every later emission of the same value would be skipped.
+        // Roll back so the next emission re-creates the instance.
+        this.current = previous;
+        throw error;
+      }
+
       return;
     }
 
     this.factory.update?.(this.instance, value);
+    this.current = value;
   }
 
   private removeInstance(): void {
@@ -388,8 +401,18 @@ export class SxConditionalBlock {
       return;
     }
 
-    this.instance = this.branches[index].factory();
-    moveInstanceAfter(this.anchor, this.instance);
+    try {
+      this.instance = this.branches[index].factory();
+      moveInstanceAfter(this.anchor, this.instance);
+    } catch (error) {
+      // The selection was committed before the branch factory ran, so a
+      // failed factory or move would leave `index === current` with no
+      // instance: every later render would refresh nothing and never retry
+      // the branch. Roll back to the empty state instead — the next render
+      // re-selects and re-creates from scratch.
+      this.current = -1;
+      throw error;
+    }
   }
 
   private removeInstance(): void {
@@ -576,37 +599,56 @@ export class SxKeyedBlock<T> {
     }
 
     const next: CollectionRecord<T>[] = [];
+    const created: CollectionRecord<T>[] = [];
     let cursor: Node = this.anchor;
 
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      const key = this.trackBy(index, item);
-      let record = available.get(key);
+    try {
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index];
+        const key = this.trackBy(index, item);
+        let record = available.get(key);
 
-      if (record) {
-        available.delete(key);
-        record.item = item;
-        this.factory.update?.(
-          // Compiler-generated factories always create an updatable instance;
-          // the base interface only guarantees the block range contract.
-          record.instance as SxBlockInstance & {
-            update(context: Record<string, unknown>): void;
-          },
-          item,
-          index,
-          items.length,
-        );
-      } else {
-        record = {
-          key,
-          item,
-          instance: this.factory.create(item, index, items.length),
-        };
+        if (record) {
+          available.delete(key);
+          record.item = item;
+          this.factory.update?.(
+            // Compiler-generated factories always create an updatable instance;
+            // the base interface only guarantees the block range contract.
+            record.instance as SxBlockInstance & {
+              update(context: Record<string, unknown>): void;
+            },
+            item,
+            index,
+            items.length,
+          );
+        } else {
+          record = {
+            key,
+            item,
+            instance: this.factory.create(item, index, items.length),
+          };
+          created.push(record);
+        }
+
+        moveInstanceAfter(cursor, record.instance);
+        cursor = record.instance.last;
+        next.push(record);
       }
-
-      moveInstanceAfter(cursor, record.instance);
-      cursor = record.instance.last;
-      next.push(record);
+    } catch (error) {
+      // Instances created earlier in the failed pass are not tracked in
+      // `records` yet, so a plain rethrow would leak their DOM and
+      // subscriptions. Destroy them; reused records stay tracked and recover
+      // on the next render.
+      for (const record of created) {
+        try {
+          removeInstance(record.instance);
+        } catch {
+          // A half-inserted range cannot be walked; the subscriptions are
+          // still released below.
+        }
+        record.instance.destroy();
+      }
+      throw error;
     }
 
     for (const record of available.values()) {
@@ -782,7 +824,7 @@ function moveInstanceAfter(
 function removeInstance(
   instance: SxBlockInstance,
 ): void {
-  for (const node of collectRange(
+  for (const node of collectRemovalRange(
     instance.first,
     instance.last,
   )) {
@@ -805,6 +847,41 @@ function collectRange(
     }
 
     current = current.nextSibling;
+  }
+
+  throw new Error(
+    'Invalid sx structural DOM range.',
+  );
+}
+
+/**
+ * Like `collectRange`, but tolerates a sibling chain that was already broken
+ * by removal. Destroying an instance after its enclosing range was removed
+ * (a keyed row torn down before its nested blocks) walks a chain whose links
+ * are nulled, so `last` stays unreachable; everything the enclosing removal
+ * covered is detached already, and an all-detached walk needs no further
+ * removal. A node that is still attached means the range was changed outside
+ * the block runtime and remains invalid.
+ */
+function collectRemovalRange(
+  first: Node,
+  last: Node,
+): Node[] {
+  const nodes: Node[] = [];
+  let current: Node | null = first;
+
+  while (current) {
+    nodes.push(current);
+
+    if (current === last) {
+      return nodes;
+    }
+
+    current = current.nextSibling;
+  }
+
+  if (nodes.every(node => node.parentNode === null)) {
+    return nodes;
   }
 
   throw new Error(

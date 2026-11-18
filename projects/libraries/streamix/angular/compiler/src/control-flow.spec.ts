@@ -169,6 +169,102 @@ describe('standard Angular atom templates', () => {
     expect(result.setup).toContain('as Iterable<unknown>');
   });
 
+  it('destroys nested blocks in the keyed-row destroy callback', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (row of model.items; track row.id) { <li>@if (row.done) { <s>{{ row.name }}</s> }</li> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('ɵcreateSxConditionalBlock');
+    // The row body has no direct bindings, so the destroy callback exists
+    // only for its nested block: without it, removing a row leaves the
+    // nested conditional subscribed to its sources.
+    expect(result.setup).toContain('block2.destroy();');
+  });
+
+  it('destroys the nested blocks of a keyed row that also has direct bindings', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (row of model.items; track row.id) { <li>{{ model.status }}@if (row.done) { <s>{{ row.name }}</s> }</li> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    const tableDestroy = result.setup.indexOf('blockTable.destroy();');
+    const nestedDestroy = result.setup.indexOf('block3.destroy();');
+
+    expect(tableDestroy).toBeGreaterThan(-1);
+    expect(nestedDestroy).toBeGreaterThan(-1);
+    // Both destroys belong to the same compiled-instance callback, so a row
+    // removal releases the binding table and the nested block together.
+    expect(tableDestroy).toBeLessThan(nestedDestroy);
+  });
+
+  it('anchors a nested empty branch instead of emitting an undefined range', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (row of model.items; track row.id) { <li>@if (row.done) {}</li> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('ɵcreateSxConditionalBlock');
+    expect(result.setup).toContain('createComment("sx:empty")');
+    expect(result.setup).not.toContain('undefined as unknown as Node');
+  });
+
+  it('anchors a nested empty @empty body instead of emitting an undefined range', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (batch of model.items; track batch.id) { <li>@for (item of batch.entries; track $index) { <b>{{ item }}</b> } @empty {}</li> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('ɵcreateSxKeyedBlock');
+    expect(result.setup).toContain('createComment("sx:empty")');
+    expect(result.setup).not.toContain('undefined as unknown as Node');
+  });
+
+  it('lowers a top-level empty branch through a stable anchor', () => {
+    const result = transformAngularComponentTemplate(
+      `@if (model.ready) {} @else { <p>waiting</p> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('ɵcreateSxConditionalBlock');
+    expect(result.setup).toContain('createComment("sx:empty")');
+    expect(result.setup).not.toContain('undefined as unknown as Node');
+  });
+
+  it('lowers an all-empty top-level conditional', () => {
+    const result = transformAngularComponentTemplate(
+      `@if (model.ready) {}`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('ɵcreateSxConditionalBlock');
+    expect(result.setup).toContain('createComment("sx:empty")');
+  });
+
+  it('lowers an empty top-level @for body and @empty through stable anchors', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (item of model.items; track item.id) {} @empty {}`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.template).toBe('<span data-sx-block="0"></span>');
+    expect(result.setup).toContain('ɵcreateSxKeyedBlock');
+    expect(result.setup).toContain('createComment("sx:empty")');
+    expect(result.setup).not.toContain('undefined as unknown as Node');
+  });
+
   it('resolves every marker before replacing any of them', () => {
     const result = transformAngularComponentTemplate(
       `@if (model.ready) { <p>a</p> } @if (model.message) { <p>b</p> }`,

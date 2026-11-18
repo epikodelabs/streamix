@@ -1,5 +1,7 @@
 import {
   atom,
+  type DependencySource,
+  type Subscription,
 } from '@epikodelabs/streamix';
 
 import {
@@ -23,6 +25,38 @@ function elementBlock(tag: string, text: string): SxBlockInstance {
     last: element,
     destroy() {
       element.remove();
+    },
+  };
+}
+
+/**
+ * A source that forwards to an atom and counts value subscriptions, so a
+ * block's teardown can be observed from the outside.
+ */
+function countingSource<T>(
+  source: DependencySource<T>,
+  counters: { subscribed: number; unsubscribed: number },
+): DependencySource<T> {
+  return {
+    get value() {
+      return source.value;
+    },
+    subscribe(callback?: (current: T, previous: T) => unknown): Subscription {
+      counters.subscribed += 1;
+      const inner = source.subscribe(
+        callback as (current: T, previous: T) => unknown,
+      );
+      const unsubscribe = (): void => {
+        if (!inner.unsubscribed) {
+          counters.unsubscribed += 1;
+        }
+        inner();
+      };
+      return Object.assign(unsubscribe, {
+        get unsubscribed() {
+          return inner.unsubscribed;
+        },
+      }) as Subscription;
     },
   };
 }
@@ -276,6 +310,373 @@ idescribe('sx structural runtime', () => {
 
     block.destroy();
 
+    expect(host.querySelectorAll('li').length).toBe(0);
+  });
+
+  it('destroys nested blocks exactly once when their keyed row is removed', () => {
+    const host = document.createElement('div');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+
+    const rows = atom<readonly number[]>([1, 2]);
+    const counters = { subscribed: 0, unsubscribed: 0 };
+    const show = countingSource(atom<boolean | number>(true), counters);
+
+    const block = ɵcreateSxKeyedBlock(anchor, rows, {
+      create(_item) {
+        const li = document.createElement('li');
+        const nestedAnchor = document.createComment('sx');
+        li.appendChild(nestedAnchor);
+
+        const nested = ɵcreateSxConditionalBlock(nestedAnchor, [
+          {
+            source: show,
+            factory: () => {
+              // Two chained roots: the row's teardown removes this range
+              // before the nested block is destroyed.
+              const first = document.createElement('span');
+              const last = document.createElement('span');
+              const fragment = document.createDocumentFragment();
+              fragment.appendChild(first);
+              fragment.appendChild(last);
+              return { first, last, destroy() { first.remove(); last.remove(); } };
+            },
+          },
+          { source: null, factory: () => elementBlock('em', 'pending') },
+        ]);
+
+        return {
+          first: li,
+          last: li,
+          destroy() {
+            // Mirrors the compiled-instance destroy callback the compiler
+            // emits for a row body that owns nested blocks.
+            nested.destroy();
+          },
+        };
+      },
+    }, (_index, item) => item);
+
+    expect(host.querySelectorAll('li').length).toBe(2);
+    expect(counters.subscribed).toBe(2);
+    expect(counters.unsubscribed).toBe(0);
+
+    rows.next([2]);
+    rendererScheduler.flushNow();
+
+    // Removing row 1 destroyed its nested block exactly once, after the
+    // row's DOM was already removed.
+    expect(counters.unsubscribed).toBe(1);
+    expect(host.querySelectorAll('li').length).toBe(1);
+
+    block.destroy();
+
+    expect(counters.unsubscribed).toBe(2);
+    expect(host.querySelectorAll('li').length).toBe(0);
+  });
+
+  it('destroys a nested block after its enclosing branch was removed', () => {
+    const host = document.createElement('div');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+
+    const outer = atom<boolean | number>(true);
+    const counters = { subscribed: 0, unsubscribed: 0 };
+    const inner = countingSource(atom(true), counters);
+
+    const block = ɵcreateSxConditionalBlock(anchor, [
+      {
+        source: outer,
+        factory: () => {
+          const first = document.createElement('span');
+          const nestedAnchor = document.createComment('sx');
+          const last = document.createElement('span');
+          const fragment = document.createDocumentFragment();
+          fragment.appendChild(first);
+          fragment.appendChild(nestedAnchor);
+          fragment.appendChild(last);
+
+          const nested = ɵcreateSxConditionalBlock(nestedAnchor, [
+            { source: inner, factory: () => elementBlock('b', 'in') },
+          ]);
+
+          return {
+            first,
+            last,
+            destroy() {
+              nested.destroy();
+            },
+          };
+        },
+      },
+      { source: null, factory: () => elementBlock('em', 'waiting') },
+    ]);
+
+    expect(host.querySelector('b')?.textContent).toBe('in');
+    expect(counters.subscribed).toBe(1);
+
+    // The branch swap removes the branch range before the destroy callback
+    // runs, so the nested teardown walks an already-removed range.
+    outer.next(false);
+    rendererScheduler.flushNow();
+
+    expect(host.querySelector('b')).toBeNull();
+    expect(counters.unsubscribed).toBe(1);
+
+    block.destroy();
+    expect(counters.unsubscribed).toBe(1);
+  });
+
+  it('mounts an empty branch through a stable zero-node anchor', () => {
+    const host = document.createElement('div');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+
+    const show = atom<boolean | number>(false);
+
+    const block = ɵcreateSxConditionalBlock(anchor, [
+      {
+        source: show,
+        factory: () => {
+          // Mirrors the compiler's anchored empty body.
+          const empty = document.createComment('sx:empty');
+          return { first: empty, last: empty, destroy() { empty.remove(); } };
+        },
+      },
+      { source: null, factory: () => elementBlock('em', 'waiting') },
+    ]);
+
+    expect(host.textContent).toBe('waiting');
+
+    show.next(true);
+    rendererScheduler.flushNow();
+    expect(host.textContent).toBe('');
+
+    show.next(false);
+    rendererScheduler.flushNow();
+    expect(host.textContent).toBe('waiting');
+
+    show.next(1);
+    rendererScheduler.flushNow();
+    expect(host.textContent).toBe('');
+
+    block.destroy();
+    expect(host.childNodes.length).toBe(1);
+  });
+
+  it('retries a conditional branch whose factory threw once', () => {
+    const host = document.createElement('div');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+
+    const ready = atom<boolean | number>(false);
+    let attempts = 0;
+
+    const block = ɵcreateSxConditionalBlock(anchor, [
+      {
+        source: ready,
+        factory: () => {
+          attempts += 1;
+          if (attempts === 1) {
+            throw new Error('transient setup failure');
+          }
+          return elementBlock('strong', 'ready');
+        },
+      },
+      { source: null, factory: () => elementBlock('em', 'waiting') },
+    ]);
+
+    expect(host.textContent).toBe('waiting');
+    expect(attempts).toBe(0);
+
+    // The failed swap removes the previous branch, throws during the flush
+    // and must not wedge the block on the failed selection.
+    ready.next(true);
+    const errors = spyOn(console, 'error');
+    rendererScheduler.flushNow();
+
+    expect(attempts).toBe(1);
+    expect(errors).toHaveBeenCalled();
+    expect(host.textContent).toBe('');
+
+    // The same selection re-creates the branch instead of refreshing nothing.
+    ready.next(1);
+    rendererScheduler.flushNow();
+
+    expect(attempts).toBe(2);
+    expect(host.textContent).toBe('ready');
+
+    block.destroy();
+    expect(host.textContent).toBe('');
+  });
+
+  it('retries a value block whose factory threw once', () => {
+    const host = document.createElement('div');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+
+    let current: string | undefined = 'a';
+    let emit: ((value: string | undefined) => void) | undefined;
+    const source: DependencySource<string | undefined> = {
+      get value() {
+        return current;
+      },
+      subscribe(
+        callback?: (current: string | undefined, previous: string | undefined) => unknown,
+      ) {
+        emit = (value: string | undefined) => {
+          const previous = current;
+          current = value;
+          callback?.(value, previous);
+        };
+        return Object.assign(() => undefined, {
+          get unsubscribed() {
+            return true;
+          },
+        }) as Subscription;
+      },
+    };
+
+    let attempts = 0;
+    const block = ɵcreateSxValueBlock(
+      anchor,
+      source,
+      {
+        create(item) {
+          attempts += 1;
+          if (attempts === 2) {
+            throw new Error('transient setup failure');
+          }
+          return elementBlock('span', item);
+        },
+      },
+    );
+
+    expect(host.textContent).toBe('a');
+    expect(attempts).toBe(1);
+
+    const errors = spyOn(console, 'error');
+
+    // Removing the instance first puts the next emission on the create path.
+    emit!(undefined);
+    rendererScheduler.flushNow();
+    expect(host.textContent).toBe('');
+
+    emit!('b');
+    rendererScheduler.flushNow();
+
+    expect(attempts).toBe(2);
+    expect(errors).toHaveBeenCalled();
+    expect(host.textContent).toBe('');
+
+    // Re-emitting the failed value re-creates the instance instead of being
+    // skipped as unchanged.
+    emit!('b');
+    rendererScheduler.flushNow();
+
+    expect(attempts).toBe(3);
+    expect(host.textContent).toBe('b');
+
+    block.destroy();
+    expect(host.textContent).toBe('');
+  });
+
+  it('retries a keyed row whose factory threw once', () => {
+    const host = document.createElement('ul');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+
+    const rows = atom<readonly number[]>([1]);
+    let attempts = 0;
+
+    const block = ɵcreateSxKeyedBlock(anchor, rows, {
+      create(item) {
+        attempts += 1;
+        if (attempts === 2) {
+          throw new Error('transient row failure');
+        }
+        return elementBlock('li', String(item));
+      },
+    }, (_index, item) => item);
+
+    const initialRow = host.querySelector('li');
+    expect(initialRow?.textContent).toBe('1');
+
+    const errors = spyOn(console, 'error');
+
+    rows.next([1, 2]);
+    rendererScheduler.flushNow();
+
+    // The failed render did not commit the new record set: the reused row
+    // keeps its DOM and the collection stays consistent.
+    expect(attempts).toBe(2);
+    expect(errors).toHaveBeenCalled();
+    expect(host.querySelectorAll('li').length).toBe(1);
+    expect(host.querySelector('li')).toBe(initialRow);
+
+    rows.next([1, 2]);
+    rendererScheduler.flushNow();
+
+    expect(attempts).toBe(3);
+    expect(host.querySelectorAll('li').length).toBe(2);
+    expect(host.querySelector('li')).toBe(initialRow);
+
+    block.destroy();
+    expect(host.querySelectorAll('li').length).toBe(0);
+  });
+
+  it('destroys instances created before a keyed render throws', () => {
+    const host = document.createElement('ul');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+
+    const rows = atom<readonly number[]>([2]);
+    let destroyed = 0;
+    let failRowOne = true;
+
+    const block = ɵcreateSxKeyedBlock(anchor, rows, {
+      create(item) {
+        if (item === 1 && failRowOne) {
+          failRowOne = false;
+          throw new Error('transient row failure');
+        }
+        const li = document.createElement('li');
+        li.textContent = String(item);
+        return {
+          first: li,
+          last: li,
+          destroy() {
+            destroyed += 1;
+            li.remove();
+          },
+        };
+      },
+    }, (_index, item) => item);
+
+    expect(host.querySelectorAll('li').length).toBe(1);
+
+    const errors = spyOn(console, 'error');
+
+    // Row 3 is created and mounted before row 1's factory throws; the failed
+    // pass must release row 3 instead of leaking its DOM and subscriptions.
+    rows.next([3, 1]);
+    rendererScheduler.flushNow();
+
+    expect(destroyed).toBe(1);
+    expect(errors).toHaveBeenCalled();
+    expect(host.querySelectorAll('li').length).toBe(1);
+    expect(host.querySelector('li')?.textContent).toBe('2');
+
+    // The retried pass creates fresh instances; the stale row 2 leaves with
+    // the collection change and nothing is destroyed twice.
+    rows.next([3, 1]);
+    rendererScheduler.flushNow();
+
+    expect(destroyed).toBe(2);
+    expect([...host.querySelectorAll('li')].map(node => node.textContent)).toEqual(['3', '1']);
+
+    block.destroy();
+    expect(destroyed).toBe(4);
     expect(host.querySelectorAll('li').length).toBe(0);
   });
 });

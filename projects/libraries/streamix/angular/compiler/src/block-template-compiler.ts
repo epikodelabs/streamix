@@ -238,6 +238,19 @@ function appendTrailingRoot(state: EmitState): SxCompiledBlockBody {
     state.roots.push(tail);
   }
 
+  // A body with no DOM of its own (an empty `@if` branch, `@case`, `@for`
+  // body, or `@empty`) still needs a stable zero-node range. The runtime
+  // walks first..last to move and remove instances, so `undefined` range ends
+  // throw on every render and wedge the block. A comment node keeps the range
+  // contract intact: it mounts, moves, and removes like any other node.
+  if (state.roots.length === 0) {
+    const empty = nextVariable(state, 'empty');
+    state.create.push(
+      `const ${empty} = ${state.document}.createComment("sx:empty");`,
+    );
+    state.roots.push(empty);
+  }
+
   if (state.roots.length > 1) {
     const fragment = nextVariable(state, 'fragment');
     state.create.push(
