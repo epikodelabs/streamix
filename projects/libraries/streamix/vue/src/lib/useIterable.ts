@@ -327,6 +327,27 @@ export function useIterable<T>(
 }
 
 /**
+ * Bridges one compiler-generated `scope.get(...)` member.
+ *
+ * Scope members are not always sources: `method(...)` members are callables
+ * bound to the scope, and nested scopes are callable objects whose own
+ * members hold the sources. Passing either to {@link useIterable} would match
+ * its factory overload and invoke the member during setup. This helper
+ * classifies the resolved value first: real sources are bridged, everything
+ * else is returned untouched.
+ *
+ * Compiler-facing; author code can call `useIterable(scope.get(name))`
+ * explicitly when the member is known to be a source.
+ */
+export function useScopeMember<T>(member: T, sourceName: string): IterableRef<T> | T {
+  if (!isDependencySource<T>(member)) {
+    return member;
+  }
+
+  return useIterable(member, undefined, sourceName);
+}
+
+/**
  * Creates a manually owned bridge for code outside `setup()` or an active
  * Vue effect scope. Call {@link IterableBridge.dispose} when the owner ends.
  */

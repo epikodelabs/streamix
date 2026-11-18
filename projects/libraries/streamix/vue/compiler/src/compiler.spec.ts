@@ -68,10 +68,10 @@ describe('Vue SFC compiler', () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain('const state = useScope(() => scope({ title: \'Ready\', count: 0 }));');
     expect(result.code).toContain(
-      'import { useIterable, useScope } from "@epikodelabs/streamix/vue";',
+      'import { useScope, useScopeMember } from "@epikodelabs/streamix/vue";',
     );
-    expect(result.code).toContain("useIterable(state.get('count'), undefined, 'state.count');");
-    expect(result.code).toContain("useIterable(state.get('title'), undefined, 'state.title');");
+    expect(result.code).toContain("useScopeMember(state.get('count'), 'state.count');");
+    expect(result.code).toContain("useScopeMember(state.get('title'), 'state.title');");
     expect(result.code).toContain(':value="__sx_000073000074000061000074000065_00007400006900007400006c000065"');
     expect(result.code).toContain('@click="state.set(\'count\', __sx_000073000074000061000074000065_00006300006f00007500006e000074 + 1)"');
   });

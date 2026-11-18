@@ -55,9 +55,27 @@ export function formatVueSfcDiagnostics(
 
 interface FactoryImports {
   aliases: Map<string, FactoryKind>;
+  /** Local names for Streamix's `method(...)` scope-member helper. */
+  methodAliases: Set<string>;
 }
 
 type FactoryKind = 'atom' | 'derived' | 'flow' | 'scope';
+
+/**
+ * How a `scope({...})` member behaves at runtime. The compiler must not pass
+ * a nested scope or a `method(...)` member to a source bridge: both are
+ * callable, and the `useIterable` factory overload would invoke them.
+ */
+type ScopeMemberKind = 'source' | 'nested' | 'method';
+
+interface ScopeMemberDeclaration {
+  readonly name: string;
+  readonly kind: ScopeMemberKind;
+  /** Members of a nested scope, when its literal is statically available. */
+  readonly members: readonly ScopeMemberDeclaration[];
+  /** A nested scope built by a factory the compiler cannot inspect. */
+  readonly opaque?: boolean;
+}
 
 interface ReactiveDeclaration {
   /** Declared binding name. */
@@ -73,8 +91,8 @@ interface ReactiveDeclaration {
   /** The function, not only its body, is needed for parameter shadowing. */
   readonly derivedCallbackStart?: number;
   readonly derivedCallbackEnd?: number;
-  /** Scope object-literal member names, for scope declarations. */
-  readonly members: readonly string[];
+  /** Classified scope members, for scope declarations. */
+  readonly members: readonly ScopeMemberDeclaration[];
 }
 
 interface SpanEdit {
@@ -87,14 +105,15 @@ interface ScopeMemberRead {
   readonly start: number;
   readonly end: number;
   readonly scope: string;
-  readonly member: string;
+  /** Dotted member path below the scope, for example `profile.name`. */
+  readonly path: readonly string[];
 }
 
 interface ScopeMemberWrite {
   readonly start: number;
   readonly end: number;
   readonly scope: string;
-  readonly member: string;
+  readonly path: readonly string[];
   readonly rhs: string;
 }
 
@@ -107,7 +126,7 @@ const STREAMIX_MODULE = /^@epikodelabs\/streamix(?:\/|$)/;
 const FACTORY_NAMES = new Set<FactoryKind>(['atom', 'derived', 'flow', 'scope']);
 const BRIDGE_PREFIX = '__sx_';
 /** Composables the compiler emits; the import inserter only ships used ones. */
-const BRIDGE_COMPOSABLES = new Set(['useIterable', 'useScope', 'useWritable']);
+const BRIDGE_COMPOSABLES = new Set(['useIterable', 'useScope', 'useScopeMember', 'useWritable']);
 
 /** v-model element/prop mapping, mirroring the Angular two-way allow-list. */
 const V_MODEL_NATIVE: Readonly<Record<string, { prop: string; event: string; value: string }>> = {
@@ -123,13 +142,16 @@ const V_MODEL_NATIVE: Readonly<Record<string, { prop: string; event: string; val
  * Raw declarations are rewritten onto the Vue bridge composables: writable
  * atoms become `useWritable` (reads track; template assignments and
  * `v-model` emit through the computed setter via Vue's setup-binding proxy),
- * deriveds and flows become `useIterable`, every scope member the template
- * touches is bridged as its own read-only ref with member writes and
- * `v-model` lowered to `scope.set(...)`, and each scope itself is wrapped in
- * `useScope(...)` so its lifetime is tied to the component. Vue's native
- * setup auto-unwrap then makes templates read and write the atoms as
- * ordinary state — no manual composable calls and no copies of Streamix
- * state into Vue stores.
+ * deriveds and flows become `useIterable`, and each scope itself is wrapped in
+ * `useScope(...)` so its lifetime is tied to the component.
+ *
+ * Scope members are classified from the `scope({...})` literal before a
+ * bridge is chosen: atom/readable leaves (including leaves of nested scopes)
+ * become `useScopeMember` bridges with member writes and `v-model` lowered to
+ * `scope.set(...)`, while `method(...)` members are callables and stay
+ * authored calls. Vue's native setup auto-unwrap then makes templates read
+ * and write the atoms as ordinary state — no manual composable calls and no
+ * copies of Streamix state into Vue stores.
  */
 export function transformVueSfc(
   source: string,
@@ -246,41 +268,93 @@ export function transformVueSfc(
     });
   }
 
-  for (const scope of scopes) {
-    const used = [...new Set([...usedMembers(usage, scope.name), ...vModelBindings
-      .filter(model => model.scope === scope.name).map(model => model.member)])].sort();
-    const accepted: string[] = [];
+  const scopeByName = new Map(scopes.map(scope => [scope.name, scope]));
+  const scopeLabel = (scopeName: string, path: readonly string[]): string =>
+    `${scopeName}.${path.join('.')}`;
+  const scopeDiagnostic = (message: string): void => {
+    diagnostics.push({
+      category: 'error',
+      message,
+      start: templateOffset,
+      length: templateContent.length,
+    });
+  };
 
-    for (const member of used) {
-      if (!scope.members.includes(member)) {
-        diagnostics.push({
-          category: 'error',
-          message:
-            `Scope member ${JSON.stringify(`${scope.name}.${member}`)} is not declared by the scope literal, ` +
-            'so the compiler cannot bridge it.',
-          start: templateOffset,
-          length: templateContent.length,
-        });
+  // Every distinct member path the template reaches, including paths inside
+  // assignment right-hand sides. Members are classified before the compiler
+  // chooses a bridge: methods and nested scopes are callable, never sources.
+  const usedPaths = new Map<string, Set<string>>();
+  const addUsedPath = (scopeName: string, path: readonly string[]): void => {
+    let paths = usedPaths.get(scopeName);
+    if (!paths) {
+      paths = new Set();
+      usedPaths.set(scopeName, paths);
+    }
+    paths.add(path.join('.'));
+  };
+  for (const read of usage.reads) addUsedPath(read.scope, read.path);
+  for (const write of usage.writes) addUsedPath(write.scope, write.path);
+  for (const model of vModelBindings) addUsedPath(model.scope, model.path);
+
+  const bridgedPaths = new Map<string, Set<string>>();
+  for (const [scopeName, paths] of usedPaths) {
+    const scope = scopeByName.get(scopeName);
+    if (!scope) continue;
+
+    const accepted = new Set<string>();
+    bridgedPaths.set(scopeName, accepted);
+
+    for (const dotted of [...paths].sort()) {
+      const path = dotted.split('.');
+      const resolution = resolveScopePath(scope.members, path);
+
+      if (resolution.kind === 'missing') {
+        scopeDiagnostic(
+          `Scope member ${JSON.stringify(scopeLabel(scopeName, path))} is not declared by the scope literal, ` +
+          'so the compiler cannot bridge it.',
+        );
         continue;
       }
 
-      accepted.push(member);
+      if (resolution.kind === 'opaque') {
+        scopeDiagnostic(
+          `Scope member ${JSON.stringify(scopeLabel(scopeName, path))} crosses a nested scope the compiler ` +
+          'cannot inspect. Use scope.get(...) in script and bridge the atom explicitly.',
+        );
+        continue;
+      }
+
+      if (resolution.kind !== 'source') continue;
+
+      // A source value may be followed by ordinary property reads
+      // (`state.rows.length`); bridge the source prefix only.
+      accepted.add(path.slice(0, resolution.depth).join('.'));
+    }
+  }
+
+  for (const [scopeName, paths] of bridgedPaths) {
+    const scope = scopeByName.get(scopeName);
+    if (!scope) continue;
+
+    const accepted = [...paths].sort();
+    for (const dotted of accepted) {
+      const segments = dotted.split('.');
       scriptEdits.push({
         // Insert after the declaration statement, not inside the initializer.
         // This keeps multi-declarator statements syntactically valid.
         start: scope.statementEnd,
         end: scope.statementEnd,
         replacement:
-          `\nconst ${bridgeName(scope.name, member)} = useIterable(` +
-          `${scope.name}.get('${escapeSingleQuotes(member)}'), undefined, '${scope.name}.${member}');`,
+          `\nconst ${bridgeName(scopeName, segments)} = useScopeMember(` +
+          `${scopePathAccess(scopeName, segments)}, '${scopeLabel(scopeName, segments)}');`,
       });
     }
 
     // Only scopes the template actually reached are reported; an adopted but
     // untouched scope stays out of the bridge table (an unknown-member report
     // still records the key with an empty member list).
-    if (used.length > 0) {
-      bridgedScopes[scope.name] = accepted;
+    if ((usedPaths.get(scopeName)?.size ?? 0) > 0) {
+      bridgedScopes[scopeName] = accepted;
     }
   }
 
@@ -293,36 +367,92 @@ export function transformVueSfc(
       continue;
     }
 
-    if (!isBridged(bridgedScopes, read)) {
-      continue;
-    }
+    const scope = scopeByName.get(read.scope);
+    if (!scope) continue;
 
+    const resolution = resolveScopePath(scope.members, read.path);
+    if (resolution.kind !== 'source') continue;
+
+    const prefix = read.path.slice(0, resolution.depth);
+    const rest = read.path.slice(resolution.depth);
+    const bridge = bridgeName(read.scope, prefix);
     templateEdits.push({
       start: read.start,
       end: read.end,
-      replacement: bridgeName(read.scope, read.member),
+      replacement: rest.length === 0 ? bridge : `${bridge}.${rest.join('.')}`,
     });
   }
 
   // Whole `scope.member = rhs` assignments lower to `scope.set(member, rhs)`;
-  // reactive reads inside the right-hand side are rewritten in place first so
-  // the replacement does not depend on edit ordering.
+  // nested members lower through their parent scope. Reactive reads inside the
+  // right-hand side are rewritten in place first so the replacement does not
+  // depend on edit ordering.
   for (const write of usage.writes) {
+    const scope = scopeByName.get(write.scope);
+    if (!scope) continue;
+
+    const resolution = resolveScopePath(scope.members, write.path);
+    if (resolution.kind === 'missing' || resolution.kind === 'opaque') {
+      // Reported once by the usage pass above.
+      continue;
+    }
+
+    if (resolution.kind === 'method') {
+      scopeDiagnostic(
+        `Cannot assign to method member ${JSON.stringify(scopeLabel(write.scope, write.path))}. ` +
+        'Mutate scope state inside the method instead.',
+      );
+      continue;
+    }
+
+    if (resolution.kind === 'nested') {
+      scopeDiagnostic(
+        `Cannot assign to nested scope ${JSON.stringify(scopeLabel(write.scope, write.path))}. ` +
+        'Assign one of its atom members instead.',
+      );
+      continue;
+    }
+
+    if (resolution.depth !== write.path.length) {
+      scopeDiagnostic(
+        `Cannot assign through ${JSON.stringify(scopeLabel(write.scope, write.path.slice(0, resolution.depth)))}: ` +
+        'it is an atom holding an object, so the assignment would not emit. Replace the whole value with scope.set(...) instead.',
+      );
+      continue;
+    }
+
     templateEdits.push({
       start: write.start,
       end: write.end,
-      replacement: `${write.scope}.set('${escapeSingleQuotes(write.member)}', ${write.rhs})`,
+      replacement: `${scopeSetCall(write.scope, write.path)}${write.rhs})`,
     });
   }
 
   // `v-model="scope.member"` lowers to the bridged value plus an explicit
   // scope write, mirroring the Angular two-way allow-list.
   for (const model of vModelBindings) {
-    if (!isBridged(bridgedScopes, model)) {
+    const scope = scopeByName.get(model.scope);
+    if (!scope) continue;
+
+    const resolution = resolveScopePath(scope.members, model.path);
+    if (resolution.kind === 'missing' || resolution.kind === 'opaque') {
+      // Reported once by the usage pass above.
       continue;
     }
 
-    const bridge = bridgeName(model.scope, model.member);
+    if (resolution.kind !== 'source' || resolution.depth !== model.path.length) {
+      diagnostics.push({
+        category: 'error',
+        message:
+          `v-model cannot write to ${JSON.stringify(scopeLabel(model.scope, model.path))}: ` +
+          'only writable scope atoms can be lowered.',
+        start: templateOffset + model.start,
+        length: model.end - model.start,
+      });
+      continue;
+    }
+
+    const bridge = bridgeName(model.scope, model.path);
     const inputType = /\btype\s*=\s*(["']?)([^\s"'>]+)\1/i.exec(model.attributes)?.[2]?.toLowerCase();
     const unsupportedNative =
       (model.element === 'input' && inputType !== undefined && !['text', 'search', 'email', 'url', 'tel', 'password'].includes(inputType)) ||
@@ -333,7 +463,7 @@ export function transformVueSfc(
       diagnostics.push({
         category: 'error',
         message:
-          `v-model on <${model.element}> cannot be compiled for ${JSON.stringify(`${model.scope}.${model.member}`)}. ` +
+          `v-model on <${model.element}> cannot be compiled for ${JSON.stringify(scopeLabel(model.scope, model.path))}. ` +
           'Bind :value and an explicit scope.set(...) handler instead.',
         start: templateOffset + model.start,
         length: model.end - model.start,
@@ -346,7 +476,7 @@ export function transformVueSfc(
       end: model.end,
       replacement:
         `:${mapping.prop}="${bridge}" ` +
-        `@${mapping.event}="${model.scope}.set('${escapeSingleQuotes(model.member)}', ${mapping.value})"`,
+        `@${mapping.event}="${scopeSetCall(model.scope, model.path)}${mapping.value})"`,
     });
   }
 
@@ -384,6 +514,26 @@ function isAssignmentKind(kind: ts.SyntaxKind): boolean {
   return kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
 }
 
+/** Root identifier of a member chain, when it names a declared scope. */
+function scopeRootName(node: ts.Expression, scopes: ReadonlySet<string>): string | undefined {
+  let current = node;
+
+  for (;;) {
+    if (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+        ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    break;
+  }
+
+  return ts.isIdentifier(current) && scopes.has(current.text) ? current.text : undefined;
+}
+
 /** Reject shapes the compiler cannot lower without changing Vue semantics. */
 function unsupportedTemplateDiagnostics(
   template: string,
@@ -401,30 +551,28 @@ function unsupportedTemplateDiagnostics(
     const expression = template.slice(span.start, span.end);
     const { file, prefix } = parseTemplateExpression(expression);
     const visit = (node: ts.Node): void => {
-      const access = (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
-        ts.isIdentifier(node.expression) && scopes.has(node.expression.text)
-        ? node : undefined;
-      if (access && (ts.isElementAccessExpression(access) || access.questionDotToken)) {
-        add(span.start + node.getStart(file) - prefix, node.end - node.getStart(file),
-          `Unsupported dynamic scope access on ${(access.expression as ts.Identifier).text}. Use scope.get(...) in script and bind the returned ref.`);
+      if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+        const root = scopeRootName(node, scopes);
+        if (root && (ts.isElementAccessExpression(node) || node.questionDotToken)) {
+          add(span.start + node.getStart(file) - prefix, node.end - node.getStart(file),
+            `Unsupported dynamic scope access on ${root}. Use scope.get(...) in script and bind the returned ref.`);
+        }
       }
       let write: ts.Expression | undefined;
       if (ts.isBinaryExpression(node) && isAssignmentKind(node.operatorToken.kind) &&
           node.operatorToken.kind !== ts.SyntaxKind.EqualsToken) write = node.left;
       if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
           (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) write = node.operand;
-      if (write && ts.isPropertyAccessExpression(write) && ts.isIdentifier(write.expression) &&
-          scopes.has(write.expression.text)) {
-        add(span.start + write.getStart(file) - prefix, write.end - write.getStart(file),
-          `Unsupported compound scope write on ${write.expression.text}. Use an explicit scope.set(...) handler.`);
+      const writeRoot = write && scopeRootName(write, scopes);
+      if (writeRoot) {
+        add(span.start + write!.getStart(file) - prefix, write!.end - write!.getStart(file),
+          `Unsupported compound scope write on ${writeRoot}. Use an explicit scope.set(...) handler.`);
       }
       if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-          ts.isPropertyAccessExpression(node.left) && ts.isIdentifier(node.left.expression) &&
-          scopes.has(node.left.expression.text)) {
+          scopeRootName(node.left, scopes)) {
         const containsNestedWrite = (child: ts.Node): boolean => {
           if (ts.isBinaryExpression(child) && isAssignmentKind(child.operatorToken.kind) &&
-              ts.isPropertyAccessExpression(child.left) && ts.isIdentifier(child.left.expression) &&
-              scopes.has(child.left.expression.text)) return true;
+              scopeRootName(child.left, scopes)) return true;
           return ts.forEachChild(child, containsNestedWrite) ?? false;
         };
         if (containsNestedWrite(node.right)) {
@@ -525,7 +673,9 @@ function generatedNameDiagnostics(
   }
   const generated = declarations.filter(item => item.kind !== 'scope').map(item => reactiveBridgeName(item.name));
   for (const scope of declarations.filter(item => item.kind === 'scope')) {
-    generated.push(...scope.members.map(member => bridgeName(scope.name, member)));
+    for (const path of bridgeableScopePaths(scope.members)) {
+      generated.push(bridgeName(scope.name, path));
+    }
   }
   return [...new Set(generated)].filter(name => existing.has(name)).map(name => ({
     category: 'error' as const,
@@ -535,10 +685,10 @@ function generatedNameDiagnostics(
   }));
 }
 
-function bridgeName(scope: string, member: string): string {
+function bridgeName(scope: string, path: readonly string[]): string {
   // Hex encoding is identifier-safe and preserves component boundaries, so
   // `a_b.c` cannot collide with `a.b_c`, and quoted keys remain valid.
-  return `${BRIDGE_PREFIX}${encodeBridgePart(scope)}_${encodeBridgePart(member)}`;
+  return `${BRIDGE_PREFIX}${encodeBridgePart(scope)}_${encodeBridgePart(path.join('.'))}`;
 }
 
 function encodeBridgePart(value: string): string {
@@ -549,25 +699,56 @@ function reactiveBridgeName(name: string): string {
   return `${BRIDGE_PREFIX}${name}`;
 }
 
-function isBridged(
-  bridgedScopes: Readonly<Record<string, readonly string[]>>,
-  read: ScopeMemberRead,
-): boolean {
-  return (bridgedScopes[read.scope] ?? []).includes(read.member);
+/** `state.get('profile').get('name')` for `[profile, name]`. */
+function scopePathAccess(scope: string, path: readonly string[]): string {
+  return path.reduce(
+    (access, segment) => `${access}.get('${escapeSingleQuotes(segment)}')`,
+    scope,
+  );
 }
 
-function usedMembers(usage: TemplateUsage, scopeName: string): string[] {
-  const members = new Set<string>();
+/** `state.set('count', ` for `[count]`, `state.get('a').set('b', ` for `[a, b]`. */
+function scopeSetCall(scope: string, path: readonly string[]): string {
+  const last = path[path.length - 1];
+  return `${scopePathAccess(scope, path.slice(0, -1))}.set('${escapeSingleQuotes(last)}', `;
+}
 
-  for (const read of usage.reads) {
-    if (read.scope === scopeName) members.add(read.member);
+type ScopePathResolution =
+  | { readonly kind: 'source'; readonly depth: number }
+  | { readonly kind: 'method'; readonly depth: number }
+  | { readonly kind: 'nested'; readonly depth: number }
+  | { readonly kind: 'missing'; readonly depth: number }
+  | { readonly kind: 'opaque'; readonly depth: number };
+
+/**
+ * Resolves a template member path through the statically known scope tree.
+ *
+ * A `source` result stops at the first atom/readable member; any further path
+ * segments read properties of its value. Nested scopes, methods, missing
+ * members, and uninspectable nested scopes are reported distinctly so the
+ * compiler never guesses that a callable member is a source.
+ */
+function resolveScopePath(
+  members: readonly ScopeMemberDeclaration[],
+  path: readonly string[],
+): ScopePathResolution {
+  let current = members;
+
+  for (let index = 0; index < path.length; index++) {
+    const member = current.find(item => item.name === path[index]);
+    if (!member) return { kind: 'missing', depth: index };
+
+    if (member.kind === 'source') return { kind: 'source', depth: index + 1 };
+    if (member.kind === 'method') return { kind: 'method', depth: index + 1 };
+
+    // Nested scope. A factory the compiler cannot inspect makes every deeper
+    // member unknowable; reading the nested scope itself stays untouched.
+    if (index === path.length - 1) return { kind: 'nested', depth: index + 1 };
+    if (member.opaque) return { kind: 'opaque', depth: index + 1 };
+    current = member.members;
   }
 
-  for (const write of usage.writes) {
-    if (write.scope === scopeName) members.add(write.member);
-  }
-
-  return [...members].sort();
+  return { kind: 'nested', depth: path.length };
 }
 
 function insideAny(
@@ -644,6 +825,7 @@ function withRuntimeImport(source: string, installed: boolean): { insertion?: { 
 
 function factoryImports(script: string): FactoryImports {
   const aliases = new Map<string, FactoryKind>();
+  const methodAliases = new Set<string>();
   const file = ts.createSourceFile('script.ts', script, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 
   for (const statement of file.statements) {
@@ -658,7 +840,9 @@ function factoryImports(script: string): FactoryImports {
       for (const item of bindings.elements) {
         const imported = (item.propertyName ?? item.name).text;
 
-        if (isStreamix && imported === 'pipe') {
+        if (isStreamix && imported === 'method') {
+          methodAliases.add(item.name.text);
+        } else if (isStreamix && imported === 'pipe') {
           aliases.set(item.name.text, 'flow');
         } else if (isStreamix && FACTORY_NAMES.has(imported as FactoryKind)) {
           aliases.set(item.name.text, imported as FactoryKind);
@@ -667,7 +851,7 @@ function factoryImports(script: string): FactoryImports {
     }
   }
 
-  return { aliases };
+  return { aliases, methodAliases };
 }
 
 /**
@@ -730,7 +914,7 @@ function collectReactiveDeclarations(
         callEnd: call.end,
         statementEnd: statement.end,
         ...(kind === 'derived' ? derivedCallbackSpan(call, file) : {}),
-        members: kind === 'scope' ? scopeMemberNames(call) : [],
+        members: kind === 'scope' ? scopeMemberDeclarations(call, imports) : [],
       });
     }
   }
@@ -929,25 +1113,126 @@ function isShadowedIn(node: ts.Node, body: ts.Node, name: string): boolean {
   return false;
 }
 
-function scopeMemberNames(call: ts.CallExpression): string[] {
-  const argument = call.arguments[0];
+/** Generated bridges exist only for statically proven source members. */
+function bridgeableScopePaths(
+  members: readonly ScopeMemberDeclaration[],
+  prefix: readonly string[] = [],
+): string[][] {
+  const paths: string[][] = [];
 
-  if (!argument || !ts.isObjectLiteralExpression(argument)) {
-    return [];
+  for (const member of members) {
+    const path = [...prefix, member.name];
+    if (member.kind === 'source') paths.push(path);
+    else if (member.kind === 'nested') paths.push(...bridgeableScopePaths(member.members, path));
   }
 
-  const names: string[] = [];
+  return paths;
+}
 
-  for (const property of argument.properties) {
-    if (
-      (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
-      (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
-    ) {
-      names.push(property.name.text);
+function scopeMemberDeclarations(
+  call: ts.CallExpression,
+  imports: FactoryImports,
+): readonly ScopeMemberDeclaration[] {
+  const argument = call.arguments[0];
+
+  return argument && ts.isObjectLiteralExpression(argument)
+    ? objectLiteralScopeMembers(argument, imports)
+    : [];
+}
+
+function objectLiteralScopeMembers(
+  literal: ts.ObjectLiteralExpression,
+  imports: FactoryImports,
+): readonly ScopeMemberDeclaration[] {
+  const members: ScopeMemberDeclaration[] = [];
+
+  for (const property of literal.properties) {
+    let name: string | undefined;
+    let initializer: ts.Expression | undefined;
+
+    if (ts.isPropertyAssignment(property)) {
+      name = staticPropertyName(property.name);
+      initializer = property.initializer;
+    } else if (ts.isShorthandPropertyAssignment(property)) {
+      // A shorthand binding is often an imported atom. Classify it as a
+      // source; `useScopeMember` keeps a callable value untouched if the
+      // binding turns out to be a method or a nested scope.
+      name = property.name.text;
+      initializer = property.name;
+    }
+
+    if (name === undefined || !initializer) continue;
+    members.push(classifyScopeMember(name, initializer, imports));
+  }
+
+  return members;
+}
+
+function staticPropertyName(name: ts.PropertyName): string | undefined {
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) {
+    return name.text;
+  }
+  return undefined;
+}
+
+function classifyScopeMember(
+  name: string,
+  initializer: ts.Expression,
+  imports: FactoryImports,
+): ScopeMemberDeclaration {
+  const value = unwrapCast(initializer);
+
+  // Bare callbacks are config-form derived values (`scope()` wraps them in a
+  // dynamic expression), not imperative methods.
+  if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) {
+    return { name, kind: 'source', members: [] };
+  }
+
+  if (ts.isObjectLiteralExpression(value)) {
+    return { name, kind: 'nested', members: objectLiteralScopeMembers(value, imports) };
+  }
+
+  if (ts.isCallExpression(value) && ts.isIdentifier(value.expression)) {
+    const imported = imports.aliases.get(value.expression.text);
+
+    // Safety wins over guessing: a call shaped like the core helper is never
+    // treated as a source factory, even when its import is aliased or absent.
+    if (imports.methodAliases.has(value.expression.text) || value.expression.text === 'method') {
+      return { name, kind: 'method', members: [] };
+    }
+
+    if (imported === 'scope') {
+      const argument = value.arguments[0];
+      return argument && ts.isObjectLiteralExpression(argument)
+        ? { name, kind: 'nested', members: objectLiteralScopeMembers(argument, imports) }
+        : { name, kind: 'nested', members: [], opaque: true };
     }
   }
 
-  return names;
+  return { name, kind: 'source', members: [] };
+}
+
+interface ScopeMemberChain {
+  readonly scope: string;
+  /** Dotted member path below the scope. */
+  readonly path: readonly string[];
+}
+
+/** Reads a whole `scope.member.path` chain; optional segments stop the walk. */
+function scopeMemberChain(node: ts.Node, scopeNames: ReadonlySet<string>): ScopeMemberChain | undefined {
+  if (!ts.isPropertyAccessExpression(node)) return undefined;
+
+  const path: string[] = [];
+  let current: ts.Expression = node;
+
+  while (ts.isPropertyAccessExpression(current)) {
+    if (current.questionDotToken) return undefined;
+    path.unshift(current.name.text);
+    current = current.expression;
+  }
+
+  if (!ts.isIdentifier(current) || !scopeNames.has(current.text)) return undefined;
+  return { scope: current.text, path };
 }
 
 function collectTemplateUsage(
@@ -963,31 +1248,32 @@ function collectTemplateUsage(
     const expression = template.slice(span.start, span.end);
     const { file, prefix } = parseTemplateExpression(expression);
     const visit = (node: ts.Node): void => {
-      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-          ts.isPropertyAccessExpression(node.left) && ts.isIdentifier(node.left.expression) &&
-          scopeNames.has(node.left.expression.text)) {
-        const target = node.left;
-        const rhs = expression.slice(node.right.getStart(file) - prefix, node.right.end - prefix);
-        const rewritten = rewriteReactiveReadsInText(
-          rewriteReadsInText(rhs, scopeNames, reads, span.start + node.right.getStart(file) - prefix),
-          reactiveNames,
-        );
-        writes.push({
-          start: span.start + node.getStart(file) - prefix,
-          end: span.start + node.end - prefix,
-          scope: (target.expression as ts.Identifier).text,
-          member: target.name.text,
-          rhs: rewritten,
-        });
-        // Nested assignments require explicit sequencing, not overlapping edits.
-        return;
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const target = scopeMemberChain(node.left, scopeNames);
+        if (target) {
+          const rhs = expression.slice(node.right.getStart(file) - prefix, node.right.end - prefix);
+          const rewritten = rewriteReactiveReadsInText(
+            rewriteReadsInText(rhs, declarations, reads, span.start + node.right.getStart(file) - prefix),
+            reactiveNames,
+          );
+          writes.push({
+            start: span.start + node.getStart(file) - prefix,
+            end: span.start + node.end - prefix,
+            scope: target.scope,
+            path: target.path,
+            rhs: rewritten,
+          });
+          // Nested assignments require explicit sequencing, not overlapping edits.
+          return;
+        }
       }
-      if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) &&
-          scopeNames.has(node.expression.text)) {
+      const chain = scopeMemberChain(node, scopeNames);
+      if (chain) {
         reads.push({
           start: span.start + node.getStart(file) - prefix,
           end: span.start + node.end - prefix,
-          scope: node.expression.text, member: node.name.text,
+          scope: chain.scope,
+          path: chain.path,
         });
         return;
       }
@@ -1028,36 +1314,57 @@ function rewriteReactiveReadsInText(fragment: string, reactiveNames: ReadonlySet
   return applyEdits(fragment, edits.sort((left, right) => right.start - left.start));
 }
 
-/** Rewrites scope-member reads inside a right-hand-side fragment. */
+/** Rewrites source-member reads inside a right-hand-side fragment. */
 function rewriteReadsInText(
   fragment: string,
-  scopeNames: ReadonlySet<string>,
+  declarations: readonly ReactiveDeclaration[],
   reads: ScopeMemberRead[],
   absoluteStart: number,
 ): string {
+  const scopes = new Map(
+    declarations
+      .filter((item): item is ReactiveDeclaration & { kind: 'scope' } => item.kind === 'scope')
+      .map(scope => [scope.name, scope]),
+  );
+  const scopeNames = new Set(scopes.keys());
   const { file, prefix } = parseTemplateExpression(fragment);
   const edits: SpanEdit[] = [];
   const visit = (node: ts.Node): void => {
-    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) &&
-        scopeNames.has(node.expression.text)) {
+    const chain = scopeMemberChain(node, scopeNames);
+    if (chain) {
       const start = node.getStart(file) - prefix;
       const end = node.end - prefix;
       reads.push({ start: absoluteStart + start, end: absoluteStart + end,
-        scope: node.expression.text, member: node.name.text });
-      edits.push({ start, end, replacement: bridgeName(node.expression.text, node.name.text) });
+        scope: chain.scope, path: chain.path });
+
+      const scope = scopes.get(chain.scope)!;
+      const resolution = resolveScopePath(scope.members, chain.path);
+      if (resolution.kind === 'source') {
+        const prefixPath = chain.path.slice(0, resolution.depth);
+        const rest = chain.path.slice(resolution.depth);
+        edits.push({
+          start,
+          end,
+          replacement: rest.length === 0
+            ? bridgeName(chain.scope, prefixPath)
+            : `${bridgeName(chain.scope, prefixPath)}.${rest.join('.')}`,
+        });
+      }
       return;
     }
     ts.forEachChild(node, visit);
   };
   visit(file);
-  return applyEdits(fragment, edits.sort((a, b) => b.start - a.start));
+  return edits.length === 0
+    ? fragment
+    : applyEdits(fragment, edits.sort((a, b) => b.start - a.start));
 }
 
 interface VModelScopeBinding {
   readonly element: string;
   readonly attributes: string;
   readonly scope: string;
-  readonly member: string;
+  readonly path: readonly string[];
   readonly start: number;
   readonly end: number;
 }
@@ -1071,11 +1378,17 @@ function collectVModelScopeBindings(
 
   for (const tag of openingTags(template)) {
     for (const model of tag.attributes.matchAll(/(?:^|\s)(v-model)\s*=\s*(["'])(.*?)\2/g)) {
-      const path = /^([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)$/.exec(model[3].trim());
-      if (!path || !scopeNames.has(path[1])) continue;
+      const match = /^([A-Za-z_$][\w$]*)((?:\.[A-Za-z_$][\w$]*)+)$/.exec(model[3].trim());
+      if (!match || !scopeNames.has(match[1])) continue;
       const start = tag.attributesStart + model.index! + model[0].indexOf('v-model');
-      bindings.push({ element: tag.name, attributes: tag.attributes, scope: path[1],
-        member: path[2], start, end: start + model[0].trimStart().length });
+      bindings.push({
+        element: tag.name,
+        attributes: tag.attributes,
+        scope: match[1],
+        path: match[2].slice(1).split('.'),
+        start,
+        end: start + model[0].trimStart().length,
+      });
     }
   }
   return bindings;
