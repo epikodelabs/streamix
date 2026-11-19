@@ -169,6 +169,53 @@ describe('handoff', () => {
     expect(completed).toBeTrue();
   });
 
+  it('does not let a superseded preparation that never settles block completion', async () => {
+    const source = atom<number>();
+    const stale = deferred<string>();
+    const output = pipe(source, handoff<number, string>({
+      // Ignores the abort signal and never resolves.
+      prepare: value => value === 1 ? stale.promise : `r${value}`,
+      ready: () => undefined,
+      dispose: () => {},
+    }));
+    const reader = collect(iterate(output));
+
+    source.set(1);
+    await wait(5);
+    source.set(2);
+    await wait(5);
+    source.dispose();
+
+    expect(await reader).toEqual(['r2']);
+  });
+
+  it('disposes a superseded preparation that resolves after completion', async () => {
+    const source = atom<number>();
+    const stale = deferred<string>();
+    const disposed: string[] = [];
+    const output = pipe(source, handoff<number, string>({
+      prepare: value => value === 1 ? stale.promise : `r${value}`,
+      ready: () => undefined,
+      dispose: resource => { disposed.push(resource); },
+    }));
+    const reader = collect(iterate(output));
+
+    source.set(1);
+    await wait(5);
+    source.set(2);
+    await wait(5);
+    source.dispose();
+    expect(await reader).toEqual(['r2']);
+    await wait(5);
+    expect(disposed).toEqual(['r2']);
+
+    // The stale work finishes only after the output completed: it must be
+    // released without being emitted or resurrecting the operator.
+    stale.resolve('r1');
+    await wait(5);
+    expect(disposed).toEqual(['r2', 'r1']);
+  });
+
   it('aborts and disposes the active resource when the operator iterator returns', async () => {
     const { source, emit } = controlledSource<number>();
     const signals: AbortSignal[] = [];

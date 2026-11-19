@@ -70,6 +70,17 @@ export interface HandoffOptions<T, R> {
  * the source ends and the final replacement settles, disposing the active
  * resource at the end.
  *
+ * ## Cooperation requirements
+ *
+ * `prepare` and `ready` should settle promptly and honor their abort signal.
+ * Completion waits only for the *latest* replacement; a superseded operation
+ * that never settles no longer blocks the output, and its eventual resource
+ * (if any) is disposed without being emitted. The latest operation has no
+ * alternate completion path: if it ignores an abort signal and never settles,
+ * the output cannot complete until `return()`/`throw()` or an upstream failure
+ * stops it. `dispose` is invoked asynchronously at most once per resource;
+ * its promise is not awaited and rejections are ignored.
+ *
  * Typical scenarios:
  *
  * - Swapping the displayed image or video without blanking the screen while
@@ -105,7 +116,7 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
   return createOperator<T, R>('handoff', function (this, source) {
     const operator = this;
     const output = createAsyncPushable<R>();
-    let stopped = false, sourceDone = false, inFlight = 0, generation = 0, active: R | undefined;
+    let stopped = false, sourceDone = false, latestPending = false, generation = 0, active: R | undefined;
     let hasActive = false;
     let controller: AbortController | undefined;
     const dispose = (value: R) => { void Promise.resolve().then(() => options.dispose(value)).catch(() => {}); };
@@ -118,7 +129,7 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
     };
     const fail = (error: unknown) => { if (!stopped) { stop(); output.fail(normalizeError(error)); } };
     const finish = () => {
-      if (!stopped && sourceDone && inFlight === 0) {
+      if (!stopped && sourceDone && !latestPending) {
         stopped = true;
         if (hasActive) dispose(active as R);
         hasActive = false;
@@ -133,7 +144,9 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
           controller?.abort();
           const signal = (controller = new AbortController()).signal;
           const version = ++generation;
-          inFlight++;
+          // Only the latest replacement gates completion; superseded work is
+          // abandoned and may resolve later without holding the output open.
+          latestPending = true;
           const lifetime = __streamixBeginLifetime(operator);
           lifetime?.start();
           void (async () => {
@@ -150,7 +163,10 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
             lifetime?.output();
             lifetime?.finish('complete');
             if (hadOld) dispose(old as R);
-          })().finally(() => { inFlight--; finish(); });
+          })().finally(() => {
+            if (version === generation) latestPending = false;
+            finish();
+          });
         }
         sourceDone = true;
         finish();
