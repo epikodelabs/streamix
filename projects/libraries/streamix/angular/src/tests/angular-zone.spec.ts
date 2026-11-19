@@ -82,4 +82,79 @@ idescribe('sx Angular zone integration', () => {
       injector.destroy();
     }
   });
+
+  it('keeps the surviving zone boundary while a concurrent app stays alive', () => {
+    const callsA = { value: 0 };
+    const callsB = { value: 0 };
+    const zoneA = {
+      runOutsideAngular<T>(callback: () => T): T {
+        callsA.value += 1;
+        return callback();
+      },
+    } as NgZone;
+    const zoneB = {
+      runOutsideAngular<T>(callback: () => T): T {
+        callsB.value += 1;
+        return callback();
+      },
+    } as NgZone;
+
+    const parent = TestBed.inject(EnvironmentInjector);
+    const injectorA = createEnvironmentInjector(
+      [
+        { provide: NgZone, useValue: zoneA },
+        provideSxZoneScheduling(),
+      ],
+      parent,
+    );
+    const injectorB = createEnvironmentInjector(
+      [
+        { provide: NgZone, useValue: zoneB },
+        provideSxZoneScheduling(),
+      ],
+      parent,
+    );
+
+    let destroyedA = false;
+    let destroyedB = false;
+
+    try {
+      const flushOnce = (): void => {
+        const binding = rendererScheduler.register(() => {});
+        binding.markDirty();
+        binding.destroy();
+        rendererScheduler.flushNow();
+      };
+
+      // The last application to configure a zone owns the boundary.
+      flushOnce();
+      expect(callsA.value).toBe(0);
+      expect(callsB.value).toBe(1);
+
+      // Destroying the first application must not tear the boundary away
+      // from the surviving application.
+      injectorA.destroy();
+      destroyedA = true;
+
+      flushOnce();
+      expect(callsA.value).toBe(0);
+      expect(callsB.value).toBe(2);
+
+      // Destroying the owning application restores default frame scheduling:
+      // nothing routes through either zone any more.
+      injectorB.destroy();
+      destroyedB = true;
+
+      flushOnce();
+      expect(callsA.value).toBe(0);
+      expect(callsB.value).toBe(2);
+    } finally {
+      if (!destroyedA) {
+        injectorA.destroy();
+      }
+      if (!destroyedB) {
+        injectorB.destroy();
+      }
+    }
+  });
 });

@@ -83,6 +83,7 @@ export class RendererScheduler {
   private readonly freeIds: number[] = [];
 
   private cancelFrame?: CancelRender;
+  private schedulingFrame = false;
   private flushing = false;
   private zoneWarned = false;
 
@@ -106,11 +107,22 @@ export class RendererScheduler {
     this.scheduler = scheduler;
 
     if (this.dirtyIds.length > 0 && !this.flushing) {
-      this.cancelFrame = this.scheduler.schedule(() => {
-        this.cancelFrame = undefined;
-        this.flush();
-      });
+      this.scheduleFlush();
     }
+  }
+
+  /**
+   * Restores the default frame scheduler, but only while `scheduler` is the
+   * installed one. The zone boundary is process-global: a second application
+   * that configured its own boundary takes ownership, so destroying the first
+   * application must not tear the boundary away from the survivor.
+   */
+  restoreScheduler(scheduler: RenderScheduler): void {
+    if (this.scheduler !== scheduler) {
+      return;
+    }
+
+    this.setScheduler(animationFrameRenderScheduler);
   }
 
   register(flush: () => void): ScheduledBinding {
@@ -210,11 +222,43 @@ export class RendererScheduler {
     this.warnAboutZoneScheduling();
 
     if (!this.cancelFrame && !this.flushing) {
-      this.cancelFrame = this.scheduler.schedule(() => {
-        this.cancelFrame = undefined;
-        this.flush();
-      });
+      this.scheduleFlush();
     }
+  }
+
+  /**
+   * Schedules the next flush through the frame scheduler.
+   *
+   * A scheduler that invokes its callback synchronously has already consumed
+   * the frame by the time schedule() returns, so the returned cancel handle
+   * is stale: storing it would leave cancelFrame set forever and every later
+   * markDirty() would believe a frame is still pending. The scheduling flag
+   * spans only the schedule() call and distinguishes a synchronous callback
+   * from an asynchronous one; a pending frame is guarded by cancelFrame.
+   */
+  private scheduleFlush(): void {
+    if (this.cancelFrame || this.flushing || this.schedulingFrame) {
+      return;
+    }
+
+    this.schedulingFrame = true;
+
+    const handle = this.scheduler.schedule(() => {
+      this.schedulingFrame = false;
+      this.cancelFrame = undefined;
+      this.flush();
+    });
+
+    if (this.schedulingFrame) {
+      // The callback has not run yet (asynchronous scheduling): the frame is
+      // pending and the returned handle is live.
+      this.cancelFrame = handle;
+    }
+    // A synchronous callback cleared the flag itself, consumed the frame,
+    // and left nothing pending: the returned handle is stale and must be
+    // dropped.
+
+    this.schedulingFrame = false;
   }
 
   private flush(): void {
@@ -259,10 +303,7 @@ export class RendererScheduler {
       this.flushing = false;
 
       if (this.dirtyIds.length > 0 && !this.cancelFrame) {
-        this.cancelFrame = this.scheduler.schedule(() => {
-          this.cancelFrame = undefined;
-          this.flush();
-        });
+        this.scheduleFlush();
       }
     }
   }

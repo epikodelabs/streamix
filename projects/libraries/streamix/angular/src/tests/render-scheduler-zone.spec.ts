@@ -1,4 +1,5 @@
 import {
+  animationFrameRenderScheduler,
   RendererScheduler,
   createOutsideAngularRenderScheduler,
   type CancelRender,
@@ -21,6 +22,14 @@ class ManualScheduler implements RenderScheduler {
     const callback = this.callback;
     this.callback = undefined;
     callback?.();
+  }
+}
+
+class SynchronousScheduler implements RenderScheduler {
+  schedule(callback: () => void): CancelRender {
+    callback();
+
+    return () => {};
   }
 }
 
@@ -84,6 +93,77 @@ describe('outside-Angular renderer scheduling', () => {
 
     second.flush();
     expect(flushes).toBe(1);
+  });
+
+  it('keeps flushing when the scheduler invokes its callback synchronously', () => {
+    const renderer = new RendererScheduler(new SynchronousScheduler());
+    const calls: number[] = [];
+
+    const binding = renderer.register(() => calls.push(1));
+
+    binding.markDirty();
+    expect(calls).toEqual([1]);
+
+    // A synchronous scheduler consumes the frame before schedule() returns.
+    // Storing the stale cancel handle would leave every later markDirty()
+    // believing a frame is pending, and this second flush would never run.
+    binding.markDirty();
+    expect(calls).toEqual([1, 1]);
+  });
+
+  it('drains work a flush re-queues under a synchronous scheduler', () => {
+    const renderer = new RendererScheduler(new SynchronousScheduler());
+    let runs = 0;
+
+    const binding = renderer.register(() => {
+      runs += 1;
+      if (runs === 1) {
+        binding.markDirty();
+      }
+    });
+
+    binding.markDirty();
+
+    expect(runs).toBe(2);
+
+    // The stale-handle defect would also wedge later flushes.
+    binding.markDirty();
+    expect(runs).toBe(3);
+  });
+
+  it('restores the default scheduler only while the released scheduler owns it', () => {
+    jasmine.clock().install();
+    const request = spyOn(window, 'requestAnimationFrame').and.returnValue(1);
+    const cancel = spyOn(window, 'cancelAnimationFrame');
+
+    try {
+      const manual = new ManualScheduler();
+      const renderer = new RendererScheduler(manual);
+      let flushes = 0;
+
+      const binding = renderer.register(() => { flushes += 1; });
+
+      // Releasing a scheduler that was never installed changes nothing.
+      renderer.restoreScheduler(animationFrameRenderScheduler);
+      binding.markDirty();
+      manual.flush();
+      expect(flushes).toBe(1);
+
+      // Releasing the installed scheduler returns to the default frame
+      // scheduler and moves pending work onto it.
+      binding.markDirty();
+      renderer.restoreScheduler(manual);
+
+      manual.flush();
+      expect(flushes).toBe(1);
+      expect(request).toHaveBeenCalled();
+
+      jasmine.clock().tick(100);
+      expect(flushes).toBe(2);
+      expect(cancel).toHaveBeenCalledWith(1);
+    } finally {
+      jasmine.clock().uninstall();
+    }
   });
 
   describe('Zone.js diagnostics', () => {
