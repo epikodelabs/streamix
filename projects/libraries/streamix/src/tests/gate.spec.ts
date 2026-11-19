@@ -85,6 +85,105 @@ describe('gate', () => {
     expect(await values).toEqual([2, 3]);
   });
 
+  function controllable<T>() {
+    const pending: Array<(result: IteratorResult<T>) => void> = [];
+    const iterator: AsyncIterator<T> = {
+      next: () => new Promise<IteratorResult<T>>(resolve => { pending.push(resolve); }),
+      return: async () => ({ done: true, value: undefined }),
+    };
+    return {
+      iterator,
+      emit(value: T) {
+        pending.shift()!({ done: false, value });
+      },
+    };
+  }
+
+  function controllableControl() {
+    const control = controllable<boolean>();
+    return {
+      ...control,
+      input: {
+        type: 'atom',
+        value: false,
+        subscribe: () => () => {},
+        [Symbol.asyncIterator]: () => control.iterator,
+      } as unknown as Parameters<typeof gate>[0],
+    };
+  }
+
+  /** Reads the next admitted output value, or 'none' if the gate dropped it. */
+  function outputReader(output: AsyncIterator<number> & { return(): Promise<IteratorResult<number>> }) {
+    let pending: Promise<IteratorResult<number>> | undefined;
+    return async (): Promise<number | 'none' | 'done'> => {
+      pending ??= output.next();
+      const result = await Promise.race([
+        pending.then(value => ({ kind: 'value' as const, value })),
+        new Promise<{ kind: 'none' }>(resolve => {
+          setTimeout(() => resolve({ kind: 'none' }), 5);
+        }),
+      ]);
+      if (result.kind === 'none') return 'none';
+      pending = undefined;
+      return result.value.done ? 'done' : result.value.value;
+    };
+  }
+
+  it('admits same-tick values and control changes in resolution order', async () => {
+    const control = controllableControl();
+    const source = controllable<number>();
+    const output = gate(control.input).apply(source.iterator) as AsyncIterator<number> & {
+      return(): Promise<IteratorResult<number>>;
+    };
+    const take = outputReader(output);
+
+    control.emit(true);
+    await sleep(0);
+
+    // The value resolves before the close: it is admitted while still open.
+    source.emit(1);
+    control.emit(false);
+    expect(await take()).toBe(1);
+
+    // A close that resolves first drops the later value.
+    control.emit(true);
+    await sleep(0);
+    control.emit(false);
+    source.emit(2);
+    expect(await take()).toBe('none');
+
+    // An open that resolves first admits the later value.
+    control.emit(true);
+    source.emit(3);
+    expect(await take()).toBe(3);
+
+    // A value that resolves first while closed is dropped before the open.
+    control.emit(false);
+    await sleep(0);
+    source.emit(4);
+    control.emit(true);
+    expect(await take()).toBe('none');
+
+    await output.return();
+  });
+
+  it('retains a value resolved before a same-tick open under the latest policy', async () => {
+    const control = controllableControl();
+    const source = controllable<number>();
+    const output = gate(control.input, { closed: 'latest' }).apply(source.iterator) as AsyncIterator<number> & {
+      return(): Promise<IteratorResult<number>>;
+    };
+    const take = outputReader(output);
+
+    // The gate starts closed. The value resolves first and is retained; the
+    // open that resolves next flushes it.
+    source.emit(1);
+    control.emit(true);
+    expect(await take()).toBe(1);
+
+    await output.return();
+  });
+
   it('flushes retained values before live values on reopen', async () => {
     const control = atom(false);
     const source = createAsyncPushable<number>();

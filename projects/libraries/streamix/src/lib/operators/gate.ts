@@ -32,6 +32,13 @@ export type GateOptions =
  * while the gate is closed. The control stream may end independently: the
  * gate keeps its last state, and the output completes when the source ends.
  *
+ * Admission follows event resolution order. A value and a control change that
+ * resolve in the same tick are processed in the order their pulls resolve:
+ * closing before the value drops it, while a value that resolves before the
+ * close is admitted under the state that was current when it was pulled.
+ * Under `latest`/`buffer`, a value that resolves before an opening change is
+ * retained and flushed by that change.
+ *
  * Errors from either stream fail the output. A `buffer` capacity that is not
  * a positive integer fails synchronously when the operator is created.
  *
@@ -74,10 +81,17 @@ export function gate<T = any>(control: PipeInput<boolean>, options: GateOptions 
     const controlIt = from(control)[Symbol.asyncIterator]();
     let open = false, stopped = false;
     let pending: T[] = [];
+    let controlFinished = false;
+    const finishControl = (state: 'complete' | 'cancel' | 'error') => {
+      if (controlFinished) return;
+      controlFinished = true;
+      controlLifetime?.finish(state);
+    };
     const close = () => {
       if (stopped) return;
       stopped = true;
       pending = [];
+      finishControl('cancel');
       void Promise.resolve(source.return?.()).catch(() => {});
       void Promise.resolve(controlIt.return?.()).catch(() => {});
     };
@@ -88,37 +102,107 @@ export function gate<T = any>(control: PipeInput<boolean>, options: GateOptions 
       const values = pending; pending = [];
       for (const value of values) emit(value);
     };
+    type GateEvent<V> =
+      | { readonly type: 'value'; readonly value: V }
+      | { readonly type: 'done' }
+      | { readonly type: 'error'; readonly error: unknown };
+    type StreamEvent =
+      | { readonly stream: 'control'; readonly event: GateEvent<boolean> }
+      | { readonly stream: 'source'; readonly event: GateEvent<T> };
+
+    const readControl = (): Promise<StreamEvent> => controlIt.next().then(
+      result => ({
+        stream: 'control' as const,
+        event: result.done
+          ? { type: 'done' as const }
+          : { type: 'value' as const, value: result.value },
+      }),
+      error => ({ stream: 'control' as const, event: { type: 'error' as const, error } }),
+    );
+    const readSource = (): Promise<StreamEvent> => source.next().then(
+      result => ({
+        stream: 'source' as const,
+        event: result.done
+          ? { type: 'done' as const }
+          : { type: 'value' as const, value: result.value },
+      }),
+      error => ({ stream: 'source' as const, event: { type: 'error' as const, error } }),
+    );
+
     void (async () => {
+      let controlPull: Promise<StreamEvent> | undefined = readControl();
+      let sourcePull: Promise<StreamEvent> | undefined = readSource();
+      const never = new Promise<never>(() => {});
+
       try {
         while (!stopped) {
-          const item = await controlIt.next();
-          if (stopped || item.done) break;
-          open = Boolean(item.value);
-          flush();
-        }
-        controlLifetime?.finish(stopped ? 'cancel' : 'complete');
-      } catch (error) { controlLifetime?.finish('error'); fail(error); }
-    })();
-    void (async () => {
-      try {
-        while (!stopped) {
-          const item = await source.next();
-          if (stopped || item.done) break;
-          if (open) { emit(item.value); continue; }
-          if (options.closed === 'latest') pending = [item.value];
-          else if (options.closed === 'buffer') {
+          // One coordinator observes both pulls. Whichever resolves first is
+          // applied first, which makes same-tick admission deterministic.
+          const winner = await Promise.race([
+            controlPull ?? never,
+            sourcePull ?? never,
+          ]);
+          if (stopped) break;
+
+          if (winner.stream === 'control') {
+            if (winner.event.type === 'error') {
+              finishControl('error');
+              fail(winner.event.error);
+              break;
+            }
+            if (winner.event.type === 'done') {
+              controlPull = undefined;
+              finishControl('complete');
+              continue;
+            }
+            open = Boolean(winner.event.value);
+            flush();
+            controlPull = readControl();
+            continue;
+          }
+
+          if (winner.event.type === 'error') {
+            finishControl('cancel');
+            fail(winner.event.error);
+            break;
+          }
+          if (winner.event.type === 'done') {
+            sourcePull = undefined;
+            pending = [];
+            close();
+            output.dispose();
+            break;
+          }
+
+          const value = winner.event.value;
+          if (open) {
+            emit(value);
+          } else if (options.closed === 'latest') {
+            pending = [value];
+          } else if (options.closed === 'buffer') {
             if (pending.length >= options.capacity) {
               switch (options.overflow ?? 'error') {
-                case 'error': throw new RangeError('gate buffer capacity exceeded');
-                case 'drop-newest': continue;
-                case 'drop-oldest': pending.shift(); break;
+                case 'error':
+                  fail(new RangeError('gate buffer capacity exceeded'));
+                  break;
+                case 'drop-newest':
+                  break;
+                case 'drop-oldest':
+                  pending.shift();
+                  pending.push(value);
+                  break;
               }
+            } else {
+              pending.push(value);
             }
-            pending.push(item.value);
           }
+
+          if (!stopped) sourcePull = readSource();
         }
-        if (!stopped) { pending = []; close(); output.dispose(); }
-      } catch (error) { fail(error); }
+      } catch (error) {
+        finishControl('cancel');
+        fail(error);
+      }
     })();
     return {
       next: () => output.next(),
