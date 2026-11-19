@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Vue DevTools:** the panel is gated on the shared development flag, renders a listener-free placeholder during SSR, and no longer serializes write previews in production; `useStreamixDevtoolsEvents()` now requires an effect scope and `createStreamixDevtoolsEventsBridge()` provides manual ownership (#223). React's panel is gated the same way.
+
+- **Vue bridges:** a direct `useWritable` write notifies synchronous watchers once instead of twice, and rejected unsubscription/iterator-return teardowns are reported rather than becoming unhandled rejections (#224). React and Angular do not expose a Vue `customRef` or promise-returning teardown, so the equivalent defect does not exist there.
+
+- **Vue compiler:** template scanning now covers `v-memo`, custom directive values, and Vue 3.4 same-name `:foo` / `v-bind:foo` bindings (#225). React and Angular template syntax has no directive equivalent.
+
+- **Vue compiler:** generated composable names are reserved against authored bindings, and type-only imports no longer suppress the real bridge import; React and Angular import emission received the same type-only correction (#226).
+
+- **Vue builder:** `introspection` and `watch` are declared in the application schema, and the hosted Vite builder strips a repeated `sxVue()` from the delegate config with a warning (#227).
+
+- **Vue compiler:** v-model native input/select checks parse static attributes instead of substring regexes, and parse/unknown-member diagnostics carry real source spans (#228).
+
 - **Vue:** generated bridges, devtools subscriptions, and `useScope` instances now register with Vue's SSR render context, so `renderToString` and streaming renders release subscriptions, async iterators, and owned Streamix scopes instead of leaking one set per request (#212). React SSR never subscribes during rendering and Angular destroys the platform after rendering, so neither adapter had the equivalent leak.
 
 - **Vue compiler:** scope members are classified before a bridge is chosen: nested scope values resolve through `get('…').get('…')`, `method(...)` members stay ordinary calls and are never invoked as source factories, and members the compiler cannot classify are rejected with guidance (#213). React and Angular received equivalent nested-member and method classification for parity.

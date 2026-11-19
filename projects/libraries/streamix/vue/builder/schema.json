@@ -10,6 +10,14 @@
     "sourceRoot": {
       "type": "string",
       "description": "Vue source directory processed by Streamix, relative to the workspace root."
+    },
+    "introspection": {
+      "type": "boolean",
+      "description": "Instrument generated sources for the Streamix inspector. Off by default."
+    },
+    "watch": {
+      "type": "boolean",
+      "description": "Rebuild when application sources or Streamix libraries change. Serve and dev-server targets watch by default."
     }
   },
   "required": ["delegateTarget", "sourceRoot"],

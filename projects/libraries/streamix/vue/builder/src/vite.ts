@@ -2,8 +2,9 @@ import { createBuilder, type BuilderOutput } from '@angular-devkit/architect';
 import { Observable } from 'rxjs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, win32 } from 'node:path';
-import { build, createServer, loadConfigFromFile, type InlineConfig, type Plugin, type ViteDevServer } from 'vite';
+import { build, createServer, loadConfigFromFile, type InlineConfig, type Plugin, type PluginOption, type ViteDevServer } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { stripStreamixVuePlugins } from './options';
 
 /**
  * Chains the authored source maps the Streamix builder wrote beside each
@@ -124,7 +125,17 @@ export const viteBuilder = createBuilder((options, context) => new Observable<Bu
               },
             }),
       };
-      const plugins = Array.isArray(config.plugins) ? config.plugins : [];
+      const authoredPlugins = Array.isArray(config.plugins) ? config.plugins : [];
+      // The virtual tree is already Streamix-transformed. Re-running sxVue()
+      // from the authored config would transform generated bridges again.
+      const sanitized = stripStreamixVuePlugins(authoredPlugins);
+      if (sanitized.removed > 0) {
+        context.logger.warn(
+          'Streamix Vue builder removed sxVue() from the delegate Vite config: ' +
+          'the generated virtual tree is already transformed. Remove sxVue() from the hosted app config.',
+        );
+      }
+      const plugins = sanitized.plugins as PluginOption[];
       const hasVuePlugin = plugins.some(plugin => {
         if (!plugin) return false;
         const candidate: { name?: unknown } = Array.isArray(plugin) ? plugin[0] as { name?: unknown } : plugin as { name?: unknown };
