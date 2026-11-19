@@ -250,6 +250,9 @@ Use `createResource()` and preload before render for initial Suspense. Use
 `useResource(loader, dependencies)` for post-commit loading, including every
 loader input in `dependencies`. For SSR, render `renderAtomSnapshotScript()`
 on the server and call `hydrateAtomSnapshotFromDocument()` before hydration.
+Completed flows contribute their final cached emission, including an emitted
+`undefined`. Sources that are pending, failed, or completed without emitting
+are omitted.
 
 `useResource` survives Strict Mode's development effect replay. It is not a
 replacement for a route loader when the first render itself must suspend: use a

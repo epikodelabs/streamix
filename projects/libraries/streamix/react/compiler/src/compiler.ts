@@ -300,6 +300,7 @@ function unwrapCast(node: ts.Expression): ts.Expression {
     ts.isParenthesizedExpression(current) ||
     ts.isAsExpression(current) ||
     ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current) ||
     ts.isSatisfiesExpression(current)
   ) {
     current = current.expression;
@@ -603,8 +604,10 @@ export function transformReactJsx(
       reactiveMaps: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map(),
       hidden: (site: ts.Identifier) => boolean = () => false,
     ): ts.CallExpression => {
-      if (!call.arguments.length || !(ts.isArrowFunction(call.arguments[0]) || ts.isFunctionExpression(call.arguments[0]))) return call;
-      const callback = call.arguments[0];
+      const argument = call.arguments[0];
+      if (!argument) return call;
+      const callback = unwrapCast(argument);
+      if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return call;
       const callbackParameters = new Set<string>();
       for (const parameter of callback.parameters) boundNames(parameter.name, callbackParameters);
       const canRead = (id: ts.Identifier): boolean => reactiveNames.has(id.text) &&
@@ -653,7 +656,10 @@ export function transformReactJsx(
       const replacement = ts.isArrowFunction(callback)
         ? factory.updateArrowFunction(callback, callback.modifiers, callback.typeParameters, callback.parameters, callback.type, callback.equalsGreaterThanToken, body)
         : factory.updateFunctionExpression(callback, callback.modifiers, callback.asteriskToken, callback.name, callback.typeParameters, callback.parameters, callback.type, body as ts.Block);
-      return factory.updateCallExpression(call, call.expression, call.typeArguments, [replacement, ...call.arguments.slice(1)]);
+      const restoreWrappers: ts.Visitor = child =>
+        child === callback ? replacement : ts.visitEachChild(child, restoreWrappers, context);
+      const loweredArgument = ts.visitNode(argument, restoreWrappers, ts.isExpression)!;
+      return factory.updateCallExpression(call, call.expression, call.typeArguments, [loweredArgument, ...call.arguments.slice(1)]);
     };
     /**
      * `derived()` is evaluated synchronously; an async callback would hand the
@@ -661,8 +667,10 @@ export function transformReactJsx(
      * Reject it at build time instead, including async generators.
      */
     const reportAsyncDerived = (call: ts.CallExpression): void => {
-      const callback = call.arguments[0];
-      if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) return;
+      const argument = call.arguments[0];
+      if (!argument) return;
+      const callback = unwrapCast(argument);
+      if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return;
       const modifiers = ts.canHaveModifiers(callback) ? ts.getModifiers(callback) : undefined;
       if (!modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) return;
       diagnostics.push(diagnostic(callback, "error",
@@ -875,8 +883,24 @@ export function transformReactJsx(
       const isHidden = (site: ts.Identifier): boolean => plainShadowed.has(site.text) || isShadowed(site, node);
       const isHiddenTarget = (site: ts.Expression): boolean => {
         let base: ts.Expression = site;
-        while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) base = base.expression;
+        while (true) {
+          base = unwrapCast(base);
+          if (!ts.isPropertyAccessExpression(base) && !ts.isElementAccessExpression(base)) break;
+          base = base.expression;
+        }
         return ts.isIdentifier(base) && isHidden(base);
+      };
+      const rejectedWrites = new WeakSet<ts.Node>();
+      const reportUnsafeWrite = (site: ts.Node, target: ts.Expression, allowAtomTarget = false): boolean => {
+        const reactiveTarget = reactiveWriteTarget(target, atoms, atomMaps, scopes, expression =>
+          isHiddenTarget(expression) || (allowAtomTarget && !!atomReferenceName(expression, atoms, atomMaps)));
+        if (!reactiveTarget) return false;
+        if (!rejectedWrites.has(site)) {
+          diagnostics.push(diagnostic(reactiveTarget, "error",
+            `Unsupported reactive write to "${reactiveTarget.getText(sourceFile)}". Use the source's .next(value) or scope.set(key, value) API to publish the change.`));
+          rejectedWrites.add(site);
+        }
+        return true;
       };
       // Resolve aliases at their declaration site. Name-only sets cannot
       // distinguish an outer source from a block/catch/parameter shadow.
@@ -1051,39 +1075,31 @@ export function transformReactJsx(
        * nested assignment is a value position: its result is what the outer
        * assignment stores, so it must use the value-preserving form.
        */
-      const lowerNestedAssignmentValues = (expression: ts.Expression): ts.Expression => {
-        if (ts.isBinaryExpression(expression) && isAssignmentOperator(expression.operatorToken.kind)) {
-          return lowerAssignmentExpression(expression, true) ?? expression;
+      const lowerNestedAssignmentValues: ts.Visitor = child => {
+        if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind)) {
+          return lowerAssignmentExpression(child, true) ?? child;
         }
         // Nested functions/classes own their bindings. The main visitor handles
         // them separately; descending here could lower a shadowing local.
-        if (ts.isFunctionLike(expression) || ts.isClassExpression(expression)) return expression;
-        let changed = false;
-        const lowered = ts.visitEachChild(
-          expression,
-          child => {
-            if (!ts.isExpression(child)) return child;
-            const next = lowerNestedAssignmentValues(child);
-            if (next !== child) changed = true;
-            return next;
-          },
-          context,
-        );
-        return changed ? lowered as ts.Expression : expression;
+        if (ts.isFunctionLike(child) || ts.isClassLike(child)) return child;
+        const target = reactiveWriteOperand(child);
+        if (target && reportUnsafeWrite(child, target)) return child;
+        return ts.visitEachChild(child, lowerNestedAssignmentValues, context);
       };
 
       lowerAssignmentExpression = (node, valueUsed) => {
         const atomName = !isHiddenTarget(node.left)
           ? atomReferenceName(node.left, atoms, atomMaps)
           : undefined;
-        const loweredRight = lowerNestedAssignmentValues(node.right);
+        if (!atomName && !isScopeSetterWrite(node, node.left, scopeMembers) && reportUnsafeWrite(node, node.left)) return node;
+        const loweredRight = ts.visitNode(node.right, lowerNestedAssignmentValues, ts.isExpression)!;
         if (!atomName) {
           // An ordinary target still participates in chains; only its right
           // side can contain atom writes. The surrounding pass rewrites reads.
           if (loweredRight === node.right) return undefined;
           return factory.updateBinaryExpression(node, node.left, node.operatorToken, loweredRight);
         }
-        const right = rewriteAtomReads(loweredRight, atoms, atomMaps, context, node.right, isHidden);
+        const right = rewriteAtomReads(loweredRight, atoms, atomMaps, context, node.right, isHidden, rejectedWrites);
         if (!writableBindings.has(atomName)) {
           diagnostics.push(diagnostic(node, "error", `Cannot assign to read-only atom binding "${atomName}". Declare it with let or call ${atomName}.next(value).`));
           return undefined;
@@ -1105,7 +1121,10 @@ export function transformReactJsx(
             : writeAtom(factory, factory.createIdentifier(atomName), nextValue);
         }
         if (isLogicalAssignment(node.operatorToken.kind)) {
-          return writeLogicalAtom(factory, atomName, node.operatorToken.kind, right);
+          const write = valueUsed
+            ? writeAtomResult(atomName, right)
+            : writeAtom(factory, factory.createIdentifier(atomName), right);
+          return writeLogicalAtom(factory, atomName, node.operatorToken.kind, write);
         }
         // The operator table and the write-operator predicate disagree;
         // leaving the statement unrewritten would write the atom object itself.
@@ -1286,6 +1305,8 @@ export function transformReactJsx(
       };
       const rewriteJsxValue = (expression: ts.Expression): ts.Expression => {
         const jsxValueVisitor: ts.Visitor = (value) => {
+          const target = reactiveWriteOperand(value);
+          if (target && reportUnsafeWrite(value, target)) return value;
           // An explicit `.value` read is still a JSX read of the atom. Lower
           // the whole expression to the subscription binding rather than
           // descending into the base identifier, which would leave the
@@ -1721,6 +1742,7 @@ export function transformReactJsx(
           child.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
           (ts.isObjectLiteralExpression(child.left) || ts.isArrayLiteralExpression(child.left))
         ) {
+          if (reportUnsafeWrite(child, child.left, true)) return child;
           const targets = destructuredAtomTargets(child.left, atoms, atomMaps).filter(target => !plainShadowed.has(target.atomName) && !isShadowedName(target.atomName, child, node));
           if (targets.length > 0) {
             // Unknown (non-atom) targets carry no atom name; only resolved
@@ -1741,6 +1763,8 @@ export function transformReactJsx(
         if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind) &&
             !isHiddenTarget(child.left) && unresolvedAtomMapAccessBase(child.left, atomMaps)) {
           reportUnresolvedMapWrite(child.left);
+          rejectedWrites.add(child);
+          return child;
         }
         if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind) &&
             !isHiddenTarget(child.left) && atomReferenceName(child.left, atoms, atomMaps)) {
@@ -1762,8 +1786,12 @@ export function transformReactJsx(
           if ((isIncrement || isDecrement) && !isHiddenTarget(operand) &&
               unresolvedAtomMapAccessBase(operand, atomMaps)) {
             reportUnresolvedMapWrite(operand);
+            rejectedWrites.add(child);
+            return child;
           }
         }
+        const writeTarget = reactiveWriteOperand(child);
+        if (writeTarget && !isScopeSetterWrite(child, writeTarget, scopeMembers) && reportUnsafeWrite(child, writeTarget)) return child;
 
         if (ts.isJsxSpreadAttribute(child)) {
           // A spread places an object's properties on the element, so atom
@@ -1794,7 +1822,7 @@ export function transformReactJsx(
           }
           if (ts.isArrowFunction(child.expression) || ts.isFunctionExpression(child.expression)) {
             const lowered = ts.visitNode(child.expression, visit) as ts.Expression;
-            return factory.updateJsxExpression(child, rewriteAtomReads(lowered, atoms, atomMaps, context, child.expression, isHidden));
+            return factory.updateJsxExpression(child, rewriteAtomReads(lowered, atoms, atomMaps, context, child.expression, isHidden, rejectedWrites));
           }
           if (isSharedAtomComponentProp(child, atoms, atomMaps)) {
             return child;
@@ -1903,15 +1931,19 @@ export function transformReactJsx(
           : [writeSource(target)].filter((name): name is string => !!name);
         for (const name of new Set(names)) diagnostics.push(diagnostic(site, 'error',
           `Implicit atom writes inside class components are not supported. Use ${name}.next(value) to update the source.`));
+        if (names.length > 0 || isScopeSetterWrite(site, target, moduleScopeMembers)) return;
+        const unsupported = reactiveWriteTarget(target, moduleAtoms, moduleAtomMaps, moduleScopes, expression => {
+          let base = unwrapCast(expression);
+          while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) base = unwrapCast(base.expression);
+          return ts.isIdentifier(base) && isShadowedName(base.text, base, node);
+        });
+        if (unsupported) diagnostics.push(diagnostic(unsupported, 'error',
+          'Implicit reactive writes inside class components are not supported. Use the source\'s .next(value) or scope.set(key, value) API.'));
       };
       const inspectWrites = (child: ts.Node): void => {
         if (child !== node && ts.isClassLike(child)) return;
-        if (ts.isBinaryExpression(child) && isAssignmentOperator(child.operatorToken.kind)) reportWrite(child.left, child);
-        if ((ts.isPrefixUnaryExpression(child) || ts.isPostfixUnaryExpression(child)) &&
-            (child.operator === ts.SyntaxKind.PlusPlusToken || child.operator === ts.SyntaxKind.MinusMinusToken))
-          reportWrite(child.operand, child);
-        if ((ts.isForOfStatement(child) || ts.isForInStatement(child)) && !ts.isVariableDeclarationList(child.initializer))
-          reportWrite(child.initializer, child);
+        const target = reactiveWriteOperand(child);
+        if (target) reportWrite(target, child);
         ts.forEachChild(child, inspectWrites);
       };
       inspectWrites(node);
@@ -1942,6 +1974,7 @@ export function transformReactJsx(
           }
           if ((ts.isPrefixUnaryExpression(value) || ts.isPostfixUnaryExpression(value)) &&
               (value.operator === ts.SyntaxKind.PlusPlusToken || value.operator === ts.SyntaxKind.MinusMinusToken)) return value;
+          if (ts.isDeleteExpression(value)) return value;
           if (ts.isForOfStatement(value)) return factory.updateForOfStatement(value, value.awaitModifier, value.initializer,
             ts.visitNode(value.expression, visit) as ts.Expression, ts.visitNode(value.statement, visit) as ts.Statement);
           if (ts.isForInStatement(value)) return factory.updateForInStatement(value, value.initializer,
@@ -2644,6 +2677,90 @@ function atomReferenceName(
   return undefined;
 }
 
+function reactiveWriteOperand(node: ts.Node): ts.Expression | undefined {
+  if (ts.isBinaryExpression(node) && isAssignmentOperator(node.operatorToken.kind)) return node.left;
+  if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+      (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) return node.operand;
+  if (ts.isDeleteExpression(node)) return node.expression;
+  if ((ts.isForOfStatement(node) || ts.isForInStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) {
+    return node.initializer;
+  }
+  return undefined;
+}
+
+/** Ordinary assignments to scope leaves already publish through the runtime setter. */
+function isScopeSetterWrite(
+  site: ts.Node,
+  target: ts.Expression,
+  scopeMembers: ReadonlyMap<string, readonly ScopeMemberShape[]>,
+): boolean {
+  if (ts.isDeleteExpression(site)) return false;
+  const path: string[] = [];
+  let base = unwrapCast(target);
+  while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) {
+    const key = ts.isPropertyAccessExpression(base) ? base.name.text
+      : ts.isStringLiteralLike(base.argumentExpression) || ts.isNumericLiteral(base.argumentExpression)
+        ? base.argumentExpression.text
+        : undefined;
+    if (key === undefined) return false;
+    path.unshift(key);
+    base = unwrapCast(base.expression);
+  }
+  if (path.length === 0 || !ts.isIdentifier(base)) return false;
+  const member = resolveScopeMember(scopeMembers.get(base.text), path);
+  return member.kind === "source" && member.depth === path.length;
+}
+
+/** Finds an authored target on a known reactive binding without looking into computed keys or defaults. */
+function reactiveWriteTarget(
+  target: ts.Expression,
+  atoms: ReadonlySet<string>,
+  atomMaps: ReadonlyMap<string, ReadonlyMap<string, string>>,
+  scopes: ReadonlySet<string>,
+  isHidden: (target: ts.Expression) => boolean,
+): ts.Expression | undefined {
+  const find = (expression: ts.Expression): ts.Expression | undefined =>
+    reactiveWriteTarget(expression, atoms, atomMaps, scopes, isHidden);
+  const expression = unwrapCast(target);
+  if (ts.isObjectLiteralExpression(expression)) {
+    for (const property of expression.properties) {
+      const found = ts.isShorthandPropertyAssignment(property) ? find(property.name)
+        : ts.isPropertyAssignment(property) ? find(property.initializer)
+        : ts.isSpreadAssignment(property) ? find(property.expression) : undefined;
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (ts.isArrayLiteralExpression(expression)) {
+    for (const element of expression.elements) {
+      const found = find(ts.isSpreadElement(element) ? element.expression : element);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    return find(expression.left);
+  }
+  if (isHidden(expression)) return undefined;
+  let base = expression;
+  let firstAccess: ts.PropertyAccessExpression | ts.ElementAccessExpression | undefined;
+  while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) {
+    firstAccess = base;
+    base = unwrapCast(base.expression);
+  }
+  if (!ts.isIdentifier(base)) return undefined;
+  if (atoms.has(base.text) || scopes.has(base.text)) return expression;
+  const map = atomMaps.get(base.text);
+  if (map && firstAccess) {
+    const key = ts.isPropertyAccessExpression(firstAccess) ? firstAccess.name.text
+      : ts.isStringLiteralLike(firstAccess.argumentExpression) || ts.isNumericLiteral(firstAccess.argumentExpression)
+        ? firstAccess.argumentExpression.text
+        : undefined;
+    if (key === undefined || map.has(key)) return expression;
+  }
+  return undefined;
+}
+
 /**
  * The base identifier of an element access on a known atom map when the key
  * cannot be statically resolved to one of its known atom entries. Such a
@@ -2808,7 +2925,7 @@ function isLogicalAssignment(kind: ts.SyntaxKind): boolean {
  * Lowers `atom &&= right`, `atom ||= right`, and `atom ??= right` while
  * preserving JavaScript's short-circuit and result semantics: the right side
  * runs only when the operator's condition assigns, and the expression evaluates
- * to the atom's value afterwards. The conditional form keeps the right side in
+ * to the assigned value on a write. The short-circuit form keeps the right side in
  * the enclosing expression; a generated synchronous arrow would make `await`
  * and `yield` invalid in async and generator functions.
  */
@@ -2816,21 +2933,15 @@ function writeLogicalAtom(
   factory: ts.NodeFactory,
   atomName: string,
   kind: ts.SyntaxKind,
-  right: ts.Expression,
+  write: ts.Expression,
 ): ts.BinaryExpression {
-  const atom = factory.createIdentifier(atomName);
-  const value = () => factory.createPropertyAccessExpression(factory.createIdentifier(atomName), "value");
+  const value = factory.createPropertyAccessExpression(factory.createIdentifier(atomName), "value");
   const operator = kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken
     ? ts.SyntaxKind.AmpersandAmpersandToken
     : kind === ts.SyntaxKind.BarBarEqualsToken
       ? ts.SyntaxKind.BarBarToken
       : ts.SyntaxKind.QuestionQuestionToken;
-  const write = factory.createParenthesizedExpression(factory.createBinaryExpression(
-    writeAtom(factory, atom, right),
-    factory.createToken(ts.SyntaxKind.CommaToken),
-    value(),
-  ));
-  return factory.createBinaryExpression(value(), factory.createToken(operator), write);
+  return factory.createBinaryExpression(value, factory.createToken(operator), write);
 }
 
 function rewriteAtomReads(
@@ -2840,6 +2951,7 @@ function rewriteAtomReads(
   context: ts.TransformationContext,
   lexicalOrigin: ts.Node = expression,
   isHidden?: (id: ts.Identifier) => boolean,
+  rejectedWrites?: Readonly<WeakSet<ts.Node>>,
 ): ts.Expression {
   let boundary: ts.Node | undefined = lexicalOrigin.parent;
   while (boundary && !ts.isFunctionLike(boundary) && !ts.isSourceFile(boundary)) boundary = boundary.parent;
@@ -2849,6 +2961,7 @@ function rewriteAtomReads(
     ? isHidden(id)
     : isShadowedName(id.text, id, boundary ?? expression);
   const visitor: ts.Visitor = (node) => {
+    if (rejectedWrites?.has(node)) return node;
     // Keep invalid read-only lvalues intact; the original assignment has a
     // compiler diagnostic and must not be changed into a property write.
     if (ts.isBinaryExpression(node) && isAtomWriteOperator(node.operatorToken.kind) &&

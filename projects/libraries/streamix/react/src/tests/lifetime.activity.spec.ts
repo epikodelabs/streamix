@@ -126,6 +126,9 @@ idescribe("Streamix explicit lifetime across React Activity", () => {
       expect(current.disposed).toBe(false);
       await act(async () => { current.next("revived"); });
       expect(host.textContent).toBe("revived");
+      const revived = current;
+      await act(async () => render("hidden"));
+      expect(revived.disposed).toBe(true);
     } finally {
       await act(async () => root.unmount());
       host.remove();
@@ -162,6 +165,9 @@ idescribe("Streamix explicit lifetime across React Activity", () => {
       expect(current === before).toBe(false);
       expect(current._disposed).toBe(false);
       expect(host.textContent).toBe("1");
+      const revived = current;
+      await act(async () => render("hidden"));
+      expect(revived._disposed).toBe(true);
     } finally {
       await act(async () => root.unmount());
       host.remove();

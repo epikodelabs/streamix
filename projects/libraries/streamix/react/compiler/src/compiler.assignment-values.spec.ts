@@ -66,4 +66,43 @@ describe('React compiler assignment expression values', () => {
       module.other.dispose();
     });
   }
+
+  it("keeps an awaited logical RHS lazy and returns its assigned value after a reentrant write", async () => {
+    const module = compile('async () => count ||= await nextValue()');
+    const subscription = module.count.subscribe(value => {
+      if (value === 5) module.count.next(9);
+    });
+    try {
+      const handler = module.App().props.onClick;
+      expect(await handler()).toBe(5);
+      expect(module.count.value).toBe(9);
+      expect(await handler()).toBe(9);
+      expect(module.calls).toBe(1);
+    } finally {
+      subscription();
+      module.count.dispose();
+      module.other.dispose();
+    }
+  });
+
+  it("keeps a yielded logical RHS in the generator and skips it when the atom is non-nullish", () => {
+    const module = compile(`() => {
+      function* assign() { return count ??= yield nextValue(); }
+      return assign();
+    }`);
+    try {
+      const handler = module.App().props.onClick as () => Generator<unknown, unknown, unknown>;
+      expect(handler().next()).toEqual({ done: true, value: 0 });
+      expect(module.calls).toBe(0);
+      module.count.next(null);
+      const writing = handler();
+      expect(writing.next()).toEqual({ done: false, value: 5 });
+      expect(writing.next(7)).toEqual({ done: true, value: 7 });
+      expect(module.count.value).toBe(7);
+      expect(module.calls).toBe(1);
+    } finally {
+      module.count.dispose();
+      module.other.dispose();
+    }
+  });
 });

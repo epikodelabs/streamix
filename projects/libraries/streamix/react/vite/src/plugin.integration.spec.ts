@@ -6,7 +6,7 @@ import { sx } from "./plugin";
 
 describe("Streamix React Vite fixture", () => {
   it("builds authored TSX through Streamix before the React plugin", async () => {
-    const root = await mkdtemp(join(tmpdir(), "streamix-vite-"));
+    const root = await mkdtemp(join(tmpdir(), "streamix-vite#fixture-"));
     try {
       const entry = join(root, "src", "main.tsx");
       await mkdir(join(root, "src"), { recursive: true });
