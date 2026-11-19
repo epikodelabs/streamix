@@ -66,20 +66,20 @@ export interface HandoffOptions<T, R> {
  * ```
  *
  * A rejection from `prepare` or `ready` fails the output only while its value
- * is still the latest; stale failures are ignored. The output completes after
- * the source ends and the final replacement settles, disposing the active
- * resource at the end.
+ * is still the latest; stale failures are ignored. When the source ends, any
+ * replacement still being prepared is aborted and its eventual resource is
+ * disposed without being emitted; the output completes immediately and
+ * disposes the active resource.
  *
  * ## Cooperation requirements
  *
- * `prepare` and `ready` should settle promptly and honor their abort signal.
- * Completion waits only for the *latest* replacement; a superseded operation
- * that never settles no longer blocks the output, and its eventual resource
- * (if any) is disposed without being emitted. The latest operation has no
- * alternate completion path: if it ignores an abort signal and never settles,
- * the output cannot complete until `return()`/`throw()` or an upstream failure
- * stops it. `dispose` is invoked asynchronously at most once per resource;
- * its promise is not awaited and rejections are ignored.
+ * `prepare` and `ready` should honor their abort signal; they are advisory
+ * hooks whose promises never gate completion. Completion and cancellation
+ * abort pending work and finish regardless of whether it settles, so an
+ * operation that ignores its signal cannot hold the output open. A resource
+ * produced after completion is disposed. `dispose` is invoked asynchronously
+ * at most once per resource; its promise is not awaited and rejections are
+ * ignored, keeping completion independent of user cleanup.
  *
  * Typical scenarios:
  *
@@ -116,7 +116,7 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
   return createOperator<T, R>('handoff', function (this, source) {
     const operator = this;
     const output = createAsyncPushable<R>();
-    let stopped = false, sourceDone = false, latestPending = false, generation = 0, active: R | undefined;
+    let stopped = false, sourceDone = false, generation = 0, active: R | undefined;
     let hasActive = false;
     let controller: AbortController | undefined;
     const dispose = (value: R) => { void Promise.resolve().then(() => options.dispose(value)).catch(() => {}); };
@@ -129,12 +129,15 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
     };
     const fail = (error: unknown) => { if (!stopped) { stop(); output.fail(normalizeError(error)); } };
     const finish = () => {
-      if (!stopped && sourceDone && !latestPending) {
-        stopped = true;
-        if (hasActive) dispose(active as R);
-        hasActive = false;
-        output.dispose();
-      }
+      if (stopped || !sourceDone) return;
+      stopped = true;
+      // Completion never waits for user promises: abort the replacement that
+      // is still being prepared and dispose its resource if it ever arrives.
+      generation++;
+      controller?.abort();
+      if (hasActive) dispose(active as R);
+      hasActive = false;
+      output.dispose();
     };
     void (async () => {
       try {
@@ -144,9 +147,6 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
           controller?.abort();
           const signal = (controller = new AbortController()).signal;
           const version = ++generation;
-          // Only the latest replacement gates completion; superseded work is
-          // abandoned and may resolve later without holding the output open.
-          latestPending = true;
           const lifetime = __streamixBeginLifetime(operator);
           lifetime?.start();
           void (async () => {
@@ -164,7 +164,6 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
             lifetime?.finish('complete');
             if (hadOld) dispose(old as R);
           })().finally(() => {
-            if (version === generation) latestPending = false;
             finish();
           });
         }

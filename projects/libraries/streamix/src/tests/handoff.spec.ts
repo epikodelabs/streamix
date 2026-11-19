@@ -148,25 +148,51 @@ describe('handoff', () => {
     source.dispose();
   });
 
-  it('completes only after the source and the final replacement settle', async () => {
+  it('completes on source end without waiting for an unfinished replacement', async () => {
     const finalReady = deferred<void>();
+    const disposed: string[] = [];
     let completed = false;
-    const output = pipe(from([1]), handoff<number, number>({
-      prepare: value => value,
+    const output = pipe(from([1]), handoff<number, string>({
+      prepare: value => `r${value}`,
       ready: () => finalReady.promise,
-      dispose: () => {},
+      dispose: resource => { disposed.push(resource); },
     }));
     const reader = collect(iterate(output)).then(values => {
       completed = true;
       return values;
     });
 
+    // The source ends while `ready` is still pending. Completion must not wait
+    // for a user promise that may never settle.
     await wait(20);
-    expect(completed).toBeFalse();
+    expect(completed).toBeTrue();
+    expect(await reader).toEqual([]);
 
     finalReady.resolve();
-    expect(await reader).toEqual([1]);
-    expect(completed).toBeTrue();
+    await wait(5);
+    expect(disposed).toEqual(['r1']);
+  });
+
+  it('completes despite a latest preparation that ignores abort and never settles', async () => {
+    const source = atom<number>();
+    const never = deferred<string>();
+    const disposed: string[] = [];
+    const output = pipe(source, handoff<number, string>({
+      prepare: () => never.promise,
+      ready: () => undefined,
+      dispose: resource => { disposed.push(resource); },
+    }));
+    const reader = collect(iterate(output));
+
+    source.set(1);
+    await wait(5);
+    source.dispose();
+
+    expect(await reader).toEqual([]);
+
+    never.resolve('r1');
+    await wait(5);
+    expect(disposed).toEqual(['r1']);
   });
 
   it('does not let a superseded preparation that never settles block completion', async () => {

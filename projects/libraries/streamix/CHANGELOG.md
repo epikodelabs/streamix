@@ -8,7 +8,7 @@
 
 - **Correlate:** unmatched early responses are bounded by `earlyLimit` (default 1024) with `drop-oldest` or an `error` overflow policy. `timeout` and `earlyLimit` are validated when the operator is created, before the response iterator is acquired (#125).
 
-- **Handoff:** a superseded preparation that never settles no longer blocks completion; a late resource is disposed after the output completes, and the cooperation requirements for `prepare`/`ready`/`dispose` are documented (#126).
+- **Handoff:** completion and cancellation no longer wait for user promises. A replacement still being prepared when the source ends is aborted, its eventual resource is disposed without being emitted, and the output completes immediately; neither a stale nor a latest never-settling preparation can hold it open. `dispose` stays fire-and-forget (#126).
 
 - **Gate:** one coordinator observes both pulls so same-tick source values and control changes are admitted in resolution order; documented and tested in both orders for `drop` and `latest` policies (#127).
 
