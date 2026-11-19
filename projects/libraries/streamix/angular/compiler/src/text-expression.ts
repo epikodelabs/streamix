@@ -200,6 +200,7 @@ export function analyzeSxExpression(
   expressionSource: string,
   resolveReactiveSource?: SxReactiveSourceResolver,
   samplePlainState = false,
+  localNames?: ReadonlySet<string>,
 ): SxTextExpressionAnalysis | undefined {
   if (resolveReactiveSource) {
     const resolve = resolveReactiveSource;
@@ -211,12 +212,21 @@ export function analyzeSxExpression(
     return undefined;
   }
 
+  // Template-local bindings (loop aliases, `@let`) win over component
+  // sources with the same name: `item.name` inside `@for (item of items)`
+  // is the row, even when a source named `item` also exists.
+  const isLocal = (path: string): boolean => {
+    const root = /^[A-Za-z_$][\w$]*/.exec(path.trim())?.[0];
+    return !!root && !!localNames?.has(root);
+  };
+
   // Scope exposes value-facing getters (for example `model.count`) and a
   // public atom accessor. Bind to that atom without rewriting the authored
   // Angular expression.
   const transparentPath = extractComponentSourcePath(authoredExpression);
-  const transparentSource = transparentPath &&
-    resolveReactiveSource?.(transparentPath);
+  const transparentSource = transparentPath && !isLocal(transparentPath)
+    ? resolveReactiveSource?.(transparentPath)
+    : undefined;
   if (transparentSource && transparentSource.includes('.get(')) {
     return {
       expression: authoredExpression,
@@ -230,6 +240,8 @@ export function analyzeSxExpression(
   const normalized = normalizeSourceTransparentExpression(
     authoredExpression,
     resolveReactiveSource,
+    undefined,
+    localNames,
   );
   const expression = normalized.expression;
 
@@ -238,8 +250,10 @@ export function analyzeSxExpression(
   // resolver proves that the receiver is a Streamix source.  Treating every
   // object with a `value` member as subscribable made refs, forms and DTOs
   // crash setup.
-  const directSource = direct && resolveReactiveSource?.(direct[1]);
-  if (direct && (!resolveReactiveSource || directSource)) {
+  const directSource = direct && !isLocal(direct[1])
+    ? resolveReactiveSource?.(direct[1])
+    : undefined;
+  if (direct && !isLocal(direct[1]) && (!resolveReactiveSource || directSource)) {
     return {
       expression,
       dependencies: [directSource ?? direct[1]],
@@ -249,9 +263,9 @@ export function analyzeSxExpression(
     };
   }
 
-  const reads = findDependencyReads(expression).filter(read => !resolveReactiveSource ||
-    resolveReactiveSource(read.source) ||
-    resolveReactiveSource(read.source.replace(/\.get\(\s*['"]([^'"]+)['"]\s*\)/g, '.$1')));
+  const reads = findDependencyReads(expression).filter(read => !isLocal(read.source) &&
+    (!resolveReactiveSource || resolveReactiveSource(read.source) ||
+      resolveReactiveSource(read.source.replace(/\.get\(\s*['"]([^'"]+)['"]\s*\)/g, '.$1'))));
   if (reads.length === 0) {
     return undefined;
   }
@@ -374,10 +388,73 @@ export function rewriteSxTextExpression(
   return rewritten;
 }
 
+/**
+ * Members that belong to the source object itself. Normalizing a bare source
+ * read into `source.value` before one of them would read the wrong API
+ * (`source.value.set(...)`) or unwrap twice (`source.value.safeValue`).
+ */
+const SOURCE_API_MEMBERS = new Set([
+  'value', 'safeValue', 'previous', 'disposed', 'dirty', 'error',
+  'subscriberCount', 'subscribe', 'onError', 'dispose',
+  'next', 'set', 'fail', 'recover', 'clearError',
+]);
+
+/**
+ * Classifies the member access that follows a resolved source prefix.
+ * `api` means the source object itself is being used, `value` means the
+ * access reads the source's value, and `undefined` means no access follows.
+ */
+function sourceTrailingAccess(
+  expression: string,
+  offset: number,
+): 'api' | 'value' | undefined {
+  let index = offset;
+  while (index < expression.length && /\s/.test(expression[index])) index += 1;
+
+  if (expression[index] === '?' && expression[index + 1] === '.') {
+    index += 2;
+  } else if (expression[index] === '.') {
+    index += 1;
+  } else if (expression[index] === '[') {
+    return sourceElementAccessKind(expression, index);
+  } else {
+    return undefined;
+  }
+
+  const name = /^[A-Za-z_$][\w$]*/.exec(expression.slice(index))?.[0];
+  if (!name) return undefined;
+  return SOURCE_API_MEMBERS.has(name) ? 'api' : 'value';
+}
+
+/**
+ * A literal source-API key stays on the source. Everything else is an index
+ * into the value, including dynamic keys and ordinary literal keys.
+ */
+function sourceElementAccessKind(
+  expression: string,
+  open: number,
+): 'api' | 'value' {
+  let index = open + 1;
+  while (index < expression.length && /\s/.test(expression[index])) index += 1;
+
+  const quote = expression[index];
+
+  if (quote === '"' || quote === "'") {
+    const end = endOfString(expression, index);
+    const key = expression.slice(index + 1, end - 1);
+    let close = end;
+    while (close < expression.length && /\s/.test(expression[close])) close += 1;
+    if (expression[close] === ']' && SOURCE_API_MEMBERS.has(key)) return 'api';
+  }
+
+  return 'value';
+}
+
 function normalizeSourceTransparentExpression(
   expression: string,
   resolveReactiveSource?: SxReactiveSourceResolver,
   formatRead: (source: string) => string = source => `${source}.value`,
+  localNames?: ReadonlySet<string>,
 ): { expression: string; changed: boolean } {
   if (!resolveReactiveSource) {
     return { expression, changed: false };
@@ -422,8 +499,26 @@ function normalizeSourceTransparentExpression(
       const path = match?.[1];
 
       if (path) {
+        const root = /^[A-Za-z_$][\w$]*/.exec(path)?.[0];
+        // A loop alias shadows a component source of the same name.
+        if (root && localNames?.has(root)) {
+          index += path.length;
+          continue;
+        }
+
         const resolved = longestReactiveSourcePrefix(path, resolveReactiveSource);
         if (resolved) {
+          // `source.safeValue`, `source.set(...)`, `source[key]` and
+          // `source['value']` belong to the source API, not its value.
+          const trailing = sourceTrailingAccess(
+            expression,
+            index + resolved.valuePath.length,
+          );
+          if (trailing === 'api') {
+            index += path.length;
+            continue;
+          }
+
           replacements.push({
             start: index,
             end: index + resolved.valuePath.length,

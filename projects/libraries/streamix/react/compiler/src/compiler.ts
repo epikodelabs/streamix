@@ -2,6 +2,38 @@ import ts from 'typescript';
 import { createTokenSourceMap } from './source-map';
 import { hoistedVarDeclarations } from '@epikodelabs/streamix/compiler';
 
+/**
+ * Members that belong to the source object itself. Appending `.value` before
+ * one of them would read the wrong API (`source.value.set(...)`) or unwrap
+ * twice (`source.value.safeValue`).
+ */
+const SOURCE_API_MEMBERS = new Set([
+  "value", "safeValue", "previous", "disposed", "dirty", "error",
+  "subscriberCount", "subscribe", "onError", "dispose",
+  "next", "set", "fail", "recover", "clearError",
+]);
+
+/**
+ * True when the expression reads a source API member rather than the
+ * source's value. Ordinary value methods (`items.map(...)`) and literal
+ * indexes (`items[0]`) still read the value; a non-literal element access
+ * is ambiguous and stays raw.
+ */
+function isSourceApiMemberAccess(
+  node: ts.Node,
+  isReactiveReceiver: (expression: ts.Expression) => boolean,
+): boolean {
+  if (ts.isPropertyAccessExpression(node)) {
+    return SOURCE_API_MEMBERS.has(node.name.text) && isReactiveReceiver(node.expression);
+  }
+  if (ts.isElementAccessExpression(node)) {
+    const argument = node.argumentExpression;
+    return !!argument && ts.isStringLiteralLike(argument) &&
+      SOURCE_API_MEMBERS.has(argument.text) && isReactiveReceiver(node.expression);
+  }
+  return false;
+}
+
 export interface ReactJsxTransformResult {
   /** Transformed TypeScript/TSX source. */
   readonly code: string;
@@ -601,9 +633,11 @@ export function transformReactJsx(
           if (ts.isIdentifier(reader) && callbackParameters.has(reader.text) &&
               !isShadowedName(reader.text, reader, callback.body)) return child;
         }
-        if (ts.isPropertyAccessExpression(child) && child.name.text === "value" &&
-            (ts.isIdentifier(child.expression) && canRead(child.expression) ||
-             resolveReactiveMapRead(child.expression) !== undefined)) return child;
+        // Explicit value reads and source API members already act on the
+        // source object; lowering them would add a second `.value`.
+        if (isSourceApiMemberAccess(child, expression =>
+          (ts.isIdentifier(expression) && canRead(expression)) ||
+          resolveReactiveMapRead(expression) !== undefined)) return child;
         if (ts.isShorthandPropertyAssignment(child) && canRead(child.name)) {
           return factory.createPropertyAssignment(child.name, factory.createPropertyAccessExpression(child.name, "value"));
         }
@@ -1260,6 +1294,12 @@ export function transformReactJsx(
               return bindingForSource(value.expression, value.expression.getText(sourceFile), value);
             }
           }
+          // Source API members (`safeValue`, `error`, `subscribe`, ...) stay
+          // on the atom. Lowering the receiver to a value binding would read
+          // the same property on the value instead of the source.
+          if (isSourceApiMemberAccess(value, expression =>
+            atomReferenceName(expression, atoms, atomMaps) !== undefined &&
+            !isHiddenTarget(expression))) return value;
           if (ts.isShorthandPropertyAssignment(value) && atoms.has(value.name.text) && !isHidden(value.name)) {
             return factory.createPropertyAssignment(value.name, bindingForAtom(value.name.text, value));
           }
@@ -2824,14 +2864,12 @@ function rewriteAtomReads(
       const base = unresolvedAtomMapAccessBase(node.operand, atomMaps);
       if (base && !shadowed(base)) return node;
     }
-    // An explicit `.value` read already observes the atom's current value.
-    // Leave the whole expression untouched; descending would produce a
-    // nonsensical second `.value` on the resolved value.
-    if (
-      ts.isPropertyAccessExpression(node) &&
-      (node.name.text === "value" || node.name.text === "next" || node.name.text === "subscribe" || node.name.text === "dispose") &&
-      atomReferenceName(node.expression, atoms, atomMaps)
-    ) {
+    // An explicit value read already observes the atom's current value, and
+    // source API members (`safeValue`, `set`, `subscribe`, ...) must stay on
+    // the atom object. Leave the whole expression untouched; descending would
+    // produce a nonsensical second `.value` on the resolved value.
+    if (isSourceApiMemberAccess(node, expression =>
+      atomReferenceName(expression, atoms, atomMaps) !== undefined)) {
       return node;
     }
     // Object shorthand is both a value read and a property name. Expanding it

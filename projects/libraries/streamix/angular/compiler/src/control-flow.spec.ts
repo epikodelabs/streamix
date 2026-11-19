@@ -8,6 +8,8 @@ describe('standard Angular atom templates', () => {
     total: 'total',
     items: 'items',
     more: 'more',
+    // Also a loop alias in the shadowing tests below.
+    item: 'item',
     'model.ready': "model.get('ready')",
     'model.message': "model.get('message')",
     'model.items': "model.get('items')",
@@ -66,6 +68,38 @@ describe('standard Angular atom templates', () => {
       'inline.html',
       { resolveReactiveSource },
     )).toThrowError(/Angular-owned|Unknown loop-local|Unsupported/);
+  });
+
+  it('lets a loop alias shadow a component source of the same name', () => {
+    const result = transformAngularComponentTemplate(
+      '<li *ngFor="let item of items">{{ item.name }}</li>',
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.setup).toContain('ɵsxReadLocal(currentContext, "item.name")');
+    expect(result.setup).not.toContain('item.value.name');
+  });
+
+  it('keeps source API members raw and value methods reactive', () => {
+    const api = transformAngularComponentTemplate(
+      '<button (click)="count.set(1)">{{ count.safeValue }}</button>',
+      'inline.html',
+      { resolveReactiveSource },
+    );
+    // The native event is installed directly, calling the atom API as authored.
+    expect(api.setup).toContain('count.set(1)');
+    expect(api.setup).not.toContain('count.value.set');
+    expect(api.template).toContain('count.safeValue');
+    expect(api.template).not.toContain('count.value.safeValue');
+
+    const valueMethod = transformAngularComponentTemplate(
+      '<p>{{ items.length }}</p>',
+      'inline.html',
+      { resolveReactiveSource },
+    );
+    expect(valueMethod.template).toContain('items.value.length');
+    expect(valueMethod.template).not.toContain('items.value.value');
   });
 
   it('lowers a pure @switch block with literal cases and a default', () => {

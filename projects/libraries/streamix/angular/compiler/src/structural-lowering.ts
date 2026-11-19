@@ -786,6 +786,13 @@ function tryLowerCollectionBlock(
       localNames: [item, 'index', 'count', 'first', 'last', 'even', 'odd',
         '$index', '$count', '$first', '$last', '$even', '$odd',
         ...block.contextVariables.map(variable => variable.name)],
+      // Only authored bindings shadow component sources. The unprefixed
+      // `index`/`count`/... aliases exist in the generated context but are
+      // not Angular @for variables, so `count` still means the component
+      // field (or atom) of that name.
+      sourceShadowingNames: [item,
+        '$index', '$count', '$first', '$last', '$even', '$odd',
+        ...block.contextVariables.map(variable => variable.name)],
     });
   } catch {
     return undefined;

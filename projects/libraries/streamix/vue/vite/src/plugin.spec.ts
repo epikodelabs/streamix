@@ -62,6 +62,23 @@ describe('Streamix Vue Vite plugin', () => {
     )).toThrowError(/Editor\.vue:\d+:\d+/);
   });
 
+  it('rejects asynchronous derived formulas before Vue compiles the SFC', () => {
+    const plugin = sxVue();
+
+    expect(() => transformOf(plugin).call(
+      context(),
+      `
+        <script setup>
+        import { atom, derived } from '@epikodelabs/streamix';
+        const source = atom(1);
+        const doubled = derived(async () => source * 2);
+        </script>
+        <template><p>{{ doubled }}</p></template>
+      `,
+      '/workspace/src/AsyncFormula.vue',
+    )).toThrowError(/AsyncFormula\.vue:\d+:\d+[\s\S]*synchronously/);
+  });
+
   it('builds with the inspector when introspection is on and completely without otherwise', () => {
     const sfc = `<script setup lang="ts">import { atom } from '@epikodelabs/streamix'; const count = atom(0);</script><template><button @click="count++">{{ count }}</button></template>`;
     const entry = `import { createApp } from 'vue';\ncreateApp({}).mount('#app');\n`;

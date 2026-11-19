@@ -135,6 +135,25 @@ describe('Vue builder production safety', () => {
     }
   });
 
+  it('fails generation for an asynchronous derived formula with the authored path', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-async-derived-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    try {
+      const source = join(workspace, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'Async.vue'), `<script setup>import { atom, derived } from '@epikodelabs/streamix'; const source = atom(1); const doubled = derived(async () => source * 2);</script><template><p>{{ doubled }}</p></template>`);
+
+      const error = await generateVueProject(workspace, sourceRoot)
+        .then(() => { throw new Error('Expected generation to fail'); }, (reason: unknown) => reason as Error);
+
+      expect(error.message).toContain(`${relative(workspace, join(source, 'Async.vue'))}:`);
+      expect(error.message).toContain('synchronously');
+      expect(error.message).not.toContain('.angular/.streamix');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('reports every failing SFC in one failure', async () => {
     const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
     const { join, relative } = await import('node:path');

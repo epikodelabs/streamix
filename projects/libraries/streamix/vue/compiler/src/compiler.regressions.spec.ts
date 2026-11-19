@@ -297,6 +297,135 @@ describe('Vue compiler correctness regressions', () => {
     expect(result.code).toContain(' + __sx_increment)');
   });
 
+  it('does not rewrite a v-for alias that shadows a reactive binding', () => {
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const item = atom('outer');
+      const items = atom(['a', 'b']);
+    `, '<ul><li v-for="item in items">{{ item }}</li></ul>');
+    expectNoError(result);
+    expect(result.code).toContain('v-for="item in __sx_items"');
+    expect(result.code).toContain('{{ item }}');
+    expect(result.code).not.toContain('{{ __sx_item }}');
+  });
+
+  it('does not lower a v-for alias that shadows a scope name as scope usage', () => {
+    const result = compile(`
+      import { atom, scope } from '@epikodelabs/streamix';
+      const state = scope({ title: '' });
+      const rows = atom([{ title: 'a' }]);
+    `, '<div v-for="state in rows">{{ state.title }}</div>');
+    expectNoError(result);
+    expect(result.code).toContain('v-for="state in __sx_rows"');
+    expect(result.code).toContain('{{ state.title }}');
+    expect(result.bridgedScopes).toEqual({});
+  });
+
+  it('tracks aliases independently across nested v-for loops', () => {
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const row = atom('outer-row');
+      const group = atom('outer-group');
+      const groups = atom([{ name: 'g', rows: [{ name: 'r' }] }]);
+    `, '<section v-for="group in groups"><span v-for="row in group.rows">{{ group.name }} {{ row.name }}</span></section>');
+    expectNoError(result);
+    expect(result.code).toContain('v-for="group in __sx_groups"');
+    expect(result.code).toContain('v-for="row in group.rows"');
+    expect(result.code).toContain('{{ group.name }} {{ row.name }}');
+    expect(result.code).not.toContain('__sx_group.name');
+    expect(result.code).not.toContain('__sx_row.name');
+  });
+
+  it('tracks destructured v-for aliases through nested patterns', () => {
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const id = atom('outer-id');
+      const name = atom('outer-name');
+      const rows = atom([{ id: 1, name: 'a' }]);
+    `, '<li v-for="{ id, name: title } in rows">{{ id }} {{ title }}</li>');
+    expectNoError(result);
+    expect(result.code).toContain('v-for="{ id, name: title } in __sx_rows"');
+    expect(result.code).toContain('{{ id }} {{ title }}');
+    expect(result.code).not.toContain('{{ __sx_id }}');
+    expect(result.code).not.toContain('{{ __sx_name }}');
+  });
+
+  it('does not rewrite values bound by slot props', () => {
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(1);
+      const label = atom('ready');
+    `, '<Card v-slot="{ count }">{{ count }} {{ label }}</Card>');
+    expectNoError(result);
+    expect(result.code).toContain('v-slot="{ count }"');
+    expect(result.code).toContain('{{ count }}');
+    expect(result.code).toContain('{{ __sx_label }}');
+    expect(result.code).not.toContain('{{ __sx_count }}');
+  });
+
+  it('does not rewrite values bound by the v-slot shorthand', () => {
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(1);
+      const label = atom('ready');
+    `, '<Card #default="{ count }">{{ count }} {{ label }}</Card>');
+    expectNoError(result);
+    expect(result.code).toContain('#default="{ count }"');
+    expect(result.code).toContain('{{ count }}');
+    expect(result.code).toContain('{{ __sx_label }}');
+    expect(result.code).not.toContain('{{ __sx_count }}');
+  });
+
+  it('does not rewrite handler parameters or inline declarations', () => {
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(1);
+    `, '<div><button @click="(count) => log(count)">{{ count }}</button>' +
+      '<button @click="() => { const count = 2; return count; }">{{ count }}</button></div>');
+    expectNoError(result);
+    expect(result.code).toContain('@click="(count) => log(count)"');
+    expect(result.code).toContain('@click="() => { const count = 2; return count; }"');
+    expect((result.code.match(/\{\{ __sx_count \}\}/g) ?? []).length).toBe(2);
+    expect(result.code).not.toContain('log(__sx_count)');
+  });
+
+  it('keeps source member APIs raw inside derived callbacks', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(1);
+      const other = atom(0);
+      const items = atom([1, 2]);
+      const safe = derived(() => count.safeValue);
+      const events = derived(() => count.subscribe(() => other.set(count)));
+      const raw = derived(() => count['value'] + 1);
+      const mapped = derived(() => items.map(item => item * 2));
+      const indexed = derived(() => items[0] + 1);
+    `, '{{ safe }} {{ raw }}');
+    expectNoError(result);
+    expect(result.code).toContain('count.safeValue');
+    expect(result.code).toContain('count.subscribe(() => other.set(count.value))');
+    expect(result.code).toContain("count['value'] + 1");
+    // Value methods and literal indexes still read the atom's value.
+    expect(result.code).toContain('items.value.map(item => item * 2)');
+    expect(result.code).toContain('items.value[0] + 1');
+    expect(result.code).not.toContain('count.value.safeValue');
+    expect(result.code).not.toContain('count.value.subscribe');
+    expect(result.code).not.toContain("count.value['value']");
+    expect(result.code).not.toContain('items.value.value');
+  });
+
+  it('does not rewrite source member APIs in template expressions', () => {
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(1);
+    `, '<button @click="count.set(2)">{{ count.safeValue }} {{ count.value }}</button>');
+    expectNoError(result);
+    expect(result.code).toContain('@click="count.set(2)"');
+    expect(result.code).toContain('{{ count.safeValue }}');
+    expect(result.code).toContain('{{ count.value }}');
+    expect(result.code).not.toContain('__sx_count.set');
+  });
+
 });
 
 describe('Vue production regression gates', () => {

@@ -136,6 +136,13 @@ export interface SxBlockTemplateOptions {
   readonly allowLocals?: boolean;
   /** In production lowering, the visible @for variable and context aliases. */
   readonly localNames?: readonly string[];
+  /**
+   * Locals authored by the template (`@for` item and `let` aliases), which
+   * shadow component sources of the same name. Synthesized runtime context
+   * aliases (`index`, `count`, ...) stay out; Angular does not expose those
+   * unprefixed names. Defaults to `localNames` for direct block compilation.
+   */
+  readonly sourceShadowingNames?: readonly string[];
 }
 
 interface EmitState {
@@ -151,6 +158,7 @@ interface EmitState {
   readonly resolveReactiveSource?: SxReactiveSourceResolver;
   readonly allowLocals: boolean;
   readonly localNames?: ReadonlySet<string>;
+  readonly sourceShadowingNames?: ReadonlySet<string>;
   nextNode: number;
   bindingCount: number;
 }
@@ -171,6 +179,11 @@ function createEmitState(
     resolveReactiveSource: options.resolveReactiveSource,
     allowLocals: options.allowLocals === true,
     localNames: options.localNames ? new Set(options.localNames) : undefined,
+    sourceShadowingNames: options.sourceShadowingNames
+      ? new Set(options.sourceShadowingNames)
+      : options.localNames
+        ? new Set(options.localNames)
+        : undefined,
     nextNode: 0,
     bindingCount: 0,
   };
@@ -279,6 +292,9 @@ function compileNestedBody(
     allowLocals: parent.allowLocals || additionalLocals.length > 0,
     localNames: parent.localNames || additionalLocals.length > 0
       ? [...(parent.localNames ?? []), ...additionalLocals]
+      : undefined,
+    sourceShadowingNames: parent.sourceShadowingNames || additionalLocals.length > 0
+      ? [...(parent.sourceShadowingNames ?? []), ...additionalLocals]
       : undefined,
   });
 
@@ -693,7 +709,12 @@ function compileNestedValue(
   }
 
   if (state.resolveReactiveSource) {
-    const analysis = analyzeSxExpression(text, state.resolveReactiveSource);
+    const analysis = analyzeSxExpression(
+      text,
+      state.resolveReactiveSource,
+      false,
+      state.sourceShadowingNames,
+    );
 
     if (analysis?.mode === 'direct' && analysis.directSource) {
       return { kind: 'source', source: analysis.directSource };
@@ -964,7 +985,12 @@ function compileBlockInput(
 ): void {
   const { kind, name, expression } = boundInputKind(input, state);
   const expanded = substituteLets(expression, state);
-  const analysis = analyzeSxExpression(expanded, state.resolveReactiveSource);
+  const analysis = analyzeSxExpression(
+    expanded,
+    state.resolveReactiveSource,
+    false,
+    state.sourceShadowingNames,
+  );
   if (analysis?.mode === 'direct' && analysis.directSource) {
     state.bindings.push({ kind, node: variable, name, source: analysis.directSource });
   } else if (analysis?.mode === 'expression') {
@@ -1100,6 +1126,8 @@ function emitBoundText(
       const analysis = analyzeSxExpression(
         expression,
         state.resolveReactiveSource,
+        false,
+        state.sourceShadowingNames,
       );
 
       if (analysis?.mode === 'direct' && analysis.directSource) {
@@ -1250,9 +1278,21 @@ function parseInterpolation(
 
 /** Plain component state is sampled only when the reactive inputs emit. */
 function sampledBlockExpression(expression: string, state: EmitState) {
-  const analysis = analyzeSxExpression(expression, state.resolveReactiveSource, true);
+  const analysis = analyzeSxExpression(
+    expression,
+    state.resolveReactiveSource,
+    true,
+    state.sourceShadowingNames,
+  );
   if (analysis?.mode !== 'expression') return undefined;
-  const locals = new Set([...(state.localNames ?? [])].filter(name => !state.resolveReactiveSource?.(name)));
+  // Authored locals keep their currentContext meaning even when a source has
+  // the same name. A synthesized runtime alias that is not a source is local
+  // too; one that does resolve as a source is qualified through `ctx`.
+  const locals = new Set(
+    [...(state.localNames ?? [])].filter(name =>
+      state.sourceShadowingNames?.has(name) ||
+      !state.resolveReactiveSource?.(name)),
+  );
   const qualified = rewriteSxTextExpression(analysis.expression, 'ctx', true, locals);
   return { expression: state.localNames
     ? rewriteLocalReads(qualified, 'currentContext') : qualified,

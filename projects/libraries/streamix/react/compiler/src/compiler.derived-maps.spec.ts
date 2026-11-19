@@ -220,6 +220,17 @@ describe("React compiler atom-map reads inside derived", () => {
     expect(compiled.exports.totals.value).toBe(10);
   });
 
+  it("keeps destructured callback parameters shadowing atoms inside derived", () => {
+    const compiled = compileModule<MapModule>(`
+      import { atom, derived } from "@epikodelabs/streamix";
+      export const count = atom(2);
+      export const total = derived(({ count }) => count * 2);
+    `, "derived-destructured-shadow.tsx");
+    expect(errors(compiled.result)).toEqual([]);
+    expect(compiled.result.code).toContain("({ count }) => count * 2");
+    expect(compiled.result.code).not.toContain("count.value * 2");
+  });
+
   it("leaves members of unproven plain objects as ordinary JavaScript", () => {
     const compiled = compileModule<MapModule>(`
       import { atom, derived } from "@epikodelabs/streamix";
@@ -230,5 +241,55 @@ describe("React compiler atom-map reads inside derived", () => {
     expect(errors(compiled.result)).toEqual([]);
     expect(compiled.result.code).toContain("plain.count * 2");
     expect(compiled.exports.fromPlain.value).toBe(18);
+  });
+});
+
+describe("React compiler source API reads", () => {
+  it("keeps source API members raw inside derived callbacks", () => {
+    const compiled = compileModule<{
+      count: Writable<number>;
+      safe: Writable<number>;
+      raw: Writable<number>;
+      mapped: Writable<number[]>;
+      indexed: Writable<number>;
+    }>(`
+      import { atom, derived } from "@epikodelabs/streamix";
+      export const count = atom(1);
+      export const other = atom(0);
+      export const items = atom([1, 2]);
+      export const safe = derived(() => count.safeValue);
+      export const raw = derived(() => count['value']);
+      export const write = derived(() => { other.set(count); return count; });
+      export const mapped = derived(() => items.map(item => item * 2));
+      export const indexed = derived(() => items[0] + 1);
+    `, "derived-source-api.tsx");
+    expect(errors(compiled.result)).toEqual([]);
+    expect(compiled.result.code).toContain("count.safeValue");
+    expect(compiled.result.code).toContain("count['value']");
+    expect(compiled.result.code).toContain("other.set(count.value)");
+    expect(compiled.result.code).toContain("items.value.map(item => item * 2)");
+    expect(compiled.result.code).toContain("items.value[0] + 1");
+    expect(compiled.result.code).not.toContain("count.value.safeValue");
+    expect(compiled.result.code).not.toContain("count.value['value']");
+    expect(compiled.result.code).not.toContain("other.value.set");
+  });
+
+  it("keeps source API calls raw in component handlers and JSX", () => {
+    const compiled = compileComponent(`
+      import { atom } from "@epikodelabs/streamix";
+      export const count = atom(1);
+      export function App() {
+        return <button onClick={() => count.set(count.value + 1)}>{count.safeValue}</button>;
+      }
+    `, "component-source-api.tsx");
+    expect(errors(compiled.result)).toEqual([]);
+    expect(compiled.result.code).toContain("count.set(count.value + 1)");
+    expect(compiled.result.code).toContain("count.safeValue");
+    expect(compiled.result.code).not.toContain("count.value.set");
+    expect(compiled.result.code).not.toContain("count.value.safeValue");
+    const element = compiled.App();
+    expect(element.props.children).toBe(1);
+    // The handler stays a real atom write instead of `count.value.set(...)`.
+    expect(() => element.props.onClick()).not.toThrow();
   });
 });

@@ -91,6 +91,9 @@ interface ReactiveDeclaration {
   /** The function, not only its body, is needed for parameter shadowing. */
   readonly derivedCallbackStart?: number;
   readonly derivedCallbackEnd?: number;
+  /** Span of an `async` callback, which cannot be a synchronous formula. */
+  readonly asyncCallbackStart?: number;
+  readonly asyncCallbackEnd?: number;
   /** Classified scope members, for scope declarations. */
   readonly members: readonly ScopeMemberDeclaration[];
 }
@@ -225,12 +228,29 @@ export function transformVueSfc(
     return { code: source, bindingCount: 0, bridgedScopes: {}, diagnostics };
   }
 
-  diagnostics.push(...unsupportedTemplateDiagnostics(templateContent, templateOffset, declarations));
-  diagnostics.push(...readonlyTemplateDiagnostics(templateContent, templateOffset, declarations));
-  diagnostics.push(...generatedNameDiagnostics(scriptContent, scriptOffset, declarations));
+  const localScopes = collectTemplateLocalScopes(
+    (descriptor.template as { ast?: TemplateAstNode }).ast,
+    templateOffset,
+  );
+  const localsAt: TemplateLocalsAt = (offset: number) => templateLocalsAt(localScopes, offset);
 
-  const templateUsage = collectTemplateUsage(templateContent, declarations);
-  const vModelBindings = collectVModelScopeBindings(templateContent, declarations);
+  diagnostics.push(...unsupportedTemplateDiagnostics(templateContent, templateOffset, declarations, localsAt));
+  diagnostics.push(...readonlyTemplateDiagnostics(templateContent, templateOffset, declarations, localsAt));
+  diagnostics.push(...generatedNameDiagnostics(scriptContent, scriptOffset, declarations));
+  for (const declaration of declarations) {
+    if (declaration.asyncCallbackStart === undefined || declaration.asyncCallbackEnd === undefined) continue;
+    diagnostics.push({
+      category: 'error',
+      message:
+        `derived() for ${JSON.stringify(declaration.name)} uses an async callback, but formulas must return ` +
+        'synchronously. Use flow() for async work.',
+      start: scriptOffset + declaration.asyncCallbackStart,
+      length: declaration.asyncCallbackEnd - declaration.asyncCallbackStart,
+    });
+  }
+
+  const templateUsage = collectTemplateUsage(templateContent, declarations, localsAt);
+  const vModelBindings = collectVModelScopeBindings(templateContent, declarations, localsAt);
   const usage: TemplateUsage = {
     reads: [
       ...templateUsage.reads,
@@ -271,7 +291,7 @@ export function transformVueSfc(
   }
 
   const writeSpans = templateUsage.writes.map(write => ({ start: write.start, end: write.end }));
-  for (const read of collectTemplateReactiveReads(templateContent, reactive)) {
+  for (const read of collectTemplateReactiveReads(templateContent, reactive, localsAt)) {
     // A scope write replaces its complete expression. Its RHS is rewritten as
     // part of that replacement, so an independent nested edit would shift the
     // outer span and corrupt the SFC.
@@ -285,7 +305,7 @@ export function transformVueSfc(
 
   // Vue 3.4 same-name bindings carry no value text; expand them so the
   // authored prop name stays while the expression reads the bridge.
-  for (const edit of sameNameBindingEdits(templateContent, declarations)) {
+  for (const edit of sameNameBindingEdits(templateContent, declarations, localsAt)) {
     templateEdits.push(edit);
   }
 
@@ -544,6 +564,25 @@ export function transformVueSfc(
       continue;
     }
 
+    // Lowering writes a fresh `:value` / event pair. Emitting it next to an
+    // authored one produces duplicate attributes, which Vue's parser rejects.
+    const authoredValue = /(?:^|\s)(?::value|v-bind:value)(?:\.[\w-]+)*\s*=/.test(model.attributes);
+    const authoredEvent = new RegExp(
+      `(?:^|\\s)(?:@${mapping.event}|v-on:${mapping.event})(?:\\.[\\w-]+)*\\s*=`,
+    ).test(model.attributes);
+    if (authoredValue || authoredEvent) {
+      const attribute = authoredValue ? ':value' : `@${mapping.event}`;
+      diagnostics.push({
+        category: 'error',
+        message:
+          `v-model on ${JSON.stringify(scopeLabel(model.scope, model.path))} cannot be combined with an authored ` +
+          `${attribute} attribute on <${model.element}>. Use either v-model or explicit bindings, not both.`,
+        start: templateOffset + model.start,
+        length: model.end - model.start,
+      });
+      continue;
+    }
+
     templateEdits.push({
       start: model.start,
       end: model.end,
@@ -612,6 +651,7 @@ function unsupportedTemplateDiagnostics(
   template: string,
   templateOffset: number,
   declarations: readonly ReactiveDeclaration[],
+  localsAt: TemplateLocalsAt,
 ): readonly VueSfcDiagnostic[] {
   const scopes = new Set(declarations.filter(item => item.kind === 'scope').map(item => item.name));
   const reactiveNames = new Set(declarations.filter(item => item.kind !== 'scope').map(item => item.name));
@@ -623,10 +663,14 @@ function unsupportedTemplateDiagnostics(
   for (const span of templateExpressionSpans(template)) {
     const expression = template.slice(span.start, span.end);
     const { file, prefix } = parseTemplateExpression(expression);
+    const shadowed = (node: ts.Node, root: string): boolean =>
+      localsAt(span.start + node.getStart(file) - prefix).has(root) ||
+      isShadowedIn(node, file, root);
     const visit = (node: ts.Node): void => {
       if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
         const root = scopeRootName(node, scopes);
-        if (root && (ts.isElementAccessExpression(node) || node.questionDotToken)) {
+        if (root && !shadowed(node, root) &&
+            (ts.isElementAccessExpression(node) || node.questionDotToken)) {
           add(span.start + node.getStart(file) - prefix, node.end - node.getStart(file),
             `Unsupported dynamic scope access on ${root}. Use scope.get(...) in script and bind the returned ref.`);
         }
@@ -637,20 +681,24 @@ function unsupportedTemplateDiagnostics(
       if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
           (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) write = node.operand;
       const writeRoot = write && scopeRootName(write, scopes);
-      if (writeRoot) {
+      if (writeRoot && !shadowed(write!, writeRoot)) {
         add(span.start + write!.getStart(file) - prefix, write!.end - write!.getStart(file),
           `Unsupported compound scope write on ${writeRoot}. Use an explicit scope.set(...) handler.`);
       }
-      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-          scopeRootName(node.left, scopes)) {
-        const containsNestedWrite = (child: ts.Node): boolean => {
-          if (ts.isBinaryExpression(child) && isAssignmentKind(child.operatorToken.kind) &&
-              scopeRootName(child.left, scopes)) return true;
-          return ts.forEachChild(child, containsNestedWrite) ?? false;
-        };
-        if (containsNestedWrite(node.right)) {
-          add(span.start + node.getStart(file) - prefix, node.end - node.getStart(file),
-            'Nested scope assignments are unsupported. Use separate scope.set(...) statements.');
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const leftRoot = scopeRootName(node.left, scopes);
+        if (leftRoot && !shadowed(node.left, leftRoot)) {
+          const containsNestedWrite = (child: ts.Node): boolean => {
+            if (ts.isBinaryExpression(child) && isAssignmentKind(child.operatorToken.kind)) {
+              const childRoot = scopeRootName(child.left, scopes);
+              if (childRoot && !shadowed(child.left, childRoot)) return true;
+            }
+            return ts.forEachChild(child, containsNestedWrite) ?? false;
+          };
+          if (containsNestedWrite(node.right)) {
+            add(span.start + node.getStart(file) - prefix, node.end - node.getStart(file),
+              'Nested scope assignments are unsupported. Use separate scope.set(...) statements.');
+          }
         }
       }
       ts.forEachChild(node, visit);
@@ -663,16 +711,13 @@ function unsupportedTemplateDiagnostics(
       add(tag.attributesStart + match.index!, match[0].length,
         'v-model arguments and modifiers are not compiled. Use :value and an explicit scope.set(...) handler.');
     }
-    for (const match of tag.attributes.matchAll(/(?:^|\s)v-for\s*=\s*(["'])([A-Za-z_$][\w$]*)\s+(?:in|of)\b/g)) {
-      if (reactiveNames.has(match[2])) {
-        add(tag.attributesStart + match.index!, match[0].length,
-          `v-for alias ${JSON.stringify(match[2])} shadows a Streamix binding; rename the alias.`);
-      }
-    }
     for (const match of tag.attributes.matchAll(/(?:^|\s)v-model\s*=\s*(["'])(.*?)\1/g)) {
       const expression = match[2].trim();
       const root = /^([A-Za-z_$][\w$]*)\s*(?:\.|\[)/.exec(expression)?.[1];
       if (!root || !reactiveNames.has(root)) continue;
+      // A loop alias or slot prop can reuse a reactive name without touching
+      // the outer binding; only an actual outer read is a v-model error.
+      if (localsAt(tag.attributesStart + match.index!).has(root)) continue;
       add(tag.attributesStart + match.index!, match[0].length,
         `v-model cannot mutate a member of Streamix binding ${JSON.stringify(root)}. ` +
         'Store the member in a scope, or use an explicit atom.next(...) handler.');
@@ -686,6 +731,7 @@ function readonlyTemplateDiagnostics(
   template: string,
   templateOffset: number,
   declarations: readonly ReactiveDeclaration[],
+  localsAt: TemplateLocalsAt,
 ): readonly VueSfcDiagnostic[] {
   const readonlyNames = new Set(declarations.filter(item =>
     item.kind === 'derived' || item.kind === 'flow').map(item => item.name));
@@ -694,9 +740,12 @@ function readonlyTemplateDiagnostics(
 
   for (const tag of openingTags(template)) {
     for (const model of tag.attributes.matchAll(/(?:^|\s)v-model\s*=\s*(["'])(.*?)\1/g)) {
-      if (!readonlyNames.has(model[2].trim())) continue;
+      const name = model[2].trim();
+      if (!readonlyNames.has(name)) continue;
+      // A loop alias or slot prop with the same name is a different binding.
+      if (localsAt(tag.attributesStart + model.index!).has(name)) continue;
       diagnostics.push({ category: 'error', start: templateOffset + tag.attributesStart + model.index!,
-        length: model[0].length, message: `v-model cannot write to read-only Streamix binding ${JSON.stringify(model[2].trim())}.` });
+        length: model[0].length, message: `v-model cannot write to read-only Streamix binding ${JSON.stringify(name)}.` });
     }
   }
   for (const span of templateExpressionSpans(template)) {
@@ -707,7 +756,9 @@ function readonlyTemplateDiagnostics(
       if (ts.isBinaryExpression(node) && isAssignmentKind(node.operatorToken.kind)) target = node.left;
       else if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
           [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)) target = node.operand;
-      if (target && ts.isIdentifier(target) && readonlyNames.has(target.text)) {
+      if (target && ts.isIdentifier(target) && readonlyNames.has(target.text) &&
+          !localsAt(span.start + target.getStart(file) - prefix).has(target.text) &&
+          !isShadowedIn(target, file, target.text)) {
         diagnostics.push({ category: 'error', start: templateOffset + span.start + target.getStart(file) - prefix,
           length: target.text.length, message: `Cannot assign to read-only Streamix binding ${JSON.stringify(target.text)}.` });
       }
@@ -1010,6 +1061,7 @@ function collectReactiveDeclarations(
         callEnd: call.end,
         statementEnd: statement.end,
         ...(kind === 'derived' ? derivedCallbackSpan(call, file) : {}),
+        ...(kind === 'derived' ? asyncDerivedCallbackSpan(call, file) : {}),
         members: kind === 'scope' ? scopeMemberDeclarations(call, imports) : [],
       });
     }
@@ -1048,6 +1100,29 @@ function derivedCallbackSpan(
   };
 }
 
+/**
+ * `derived()` is evaluated synchronously; an `async` callback would hand the
+ * runtime a promise, which it rejects only when the formula first runs.
+ * Reject it at build time instead, including async generators.
+ */
+function asyncDerivedCallbackSpan(
+  call: ts.CallExpression,
+  file: ts.SourceFile,
+): Pick<ReactiveDeclaration, 'asyncCallbackStart' | 'asyncCallbackEnd'> {
+  const callback = call.arguments[0];
+  if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
+    return {};
+  }
+  const modifiers = ts.canHaveModifiers(callback) ? ts.getModifiers(callback) : undefined;
+  if (!modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) {
+    return {};
+  }
+  return {
+    asyncCallbackStart: callback.getStart(file),
+    asyncCallbackEnd: callback.end,
+  };
+}
+
 interface TemplateReactiveRead {
   readonly start: number;
   readonly end: number;
@@ -1060,6 +1135,7 @@ interface TemplateReactiveRead {
 function collectTemplateReactiveReads(
   template: string,
   declarations: readonly ReactiveDeclaration[],
+  localsAt: TemplateLocalsAt,
 ): readonly TemplateReactiveRead[] {
   const names = new Set(declarations.map(declaration => declaration.name));
   const reads: TemplateReactiveRead[] = [];
@@ -1070,7 +1146,9 @@ function collectTemplateReactiveReads(
     // comments, and object keys from being mistaken for reactive identifiers.
     const { file, prefix } = parseTemplateExpression(expression);
     const visit = (node: ts.Node): void => {
-      if (ts.isIdentifier(node) && names.has(node.text) && isValueIdentifier(node)) {
+      if (ts.isIdentifier(node) && names.has(node.text) && isValueIdentifier(node) &&
+          !localsAt(span.start + node.getStart(file) - prefix).has(node.text) &&
+          !isShadowedIn(node, file, node.text)) {
           const start = span.start + node.getStart(file) - prefix;
           const shorthand = ts.isShorthandPropertyAssignment(node.parent);
           reads.push({
@@ -1090,6 +1168,8 @@ function collectTemplateReactiveReads(
     for (const match of tag.attributes.matchAll(/(?:^|\s)v-model\s*=\s*(["'])([A-Za-z_$][\w$]*)\1/g)) {
       const name = match[2];
       if (!names.has(name)) continue;
+      // The model's root may be a loop alias or slot prop, not the binding.
+      if (localsAt(tag.attributesStart + match.index!).has(name)) continue;
       const start = tag.attributesStart + match.index! + match[0].lastIndexOf(name);
       reads.push({ start, end: start + name.length, name });
     }
@@ -1156,11 +1236,58 @@ function findNodeAt(root: ts.Node, start: number, end: number): ts.Node | undefi
   return found;
 }
 
+/**
+ * Members that belong to the source object itself. Appending `.value` before
+ * one of them would read the wrong API (`source.value.set(...)`), or unwrap
+ * twice (`source.value.safeValue`).
+ */
+const SOURCE_API_MEMBERS = new Set([
+  'value', 'safeValue', 'previous', 'disposed', 'dirty', 'error',
+  'subscriberCount', 'subscribe', 'onError', 'dispose',
+  'next', 'set', 'fail', 'recover', 'clearError',
+]);
+
+/**
+ * True when the identifier is the receiver of a member access that reads a
+ * source API rather than the source's value, including through parentheses
+ * or type-only wrappers.
+ *
+ * Ordinary value methods (`items.map(...)`) and literal indexes
+ * (`items[0]`) still count as plain value reads. A non-literal element
+ * access or a literal source-API member is left untouched: its meaning
+ * cannot be lowered safely.
+ */
+function isSourceApiReceiver(node: ts.Identifier): boolean {
+  let current: ts.Node = node;
+  for (;;) {
+    const parent = current.parent;
+    if (ts.isParenthesizedExpression(parent) || ts.isNonNullExpression(parent) ||
+        ts.isAsExpression(parent) || ts.isTypeAssertionExpression(parent)) {
+      current = parent;
+      continue;
+    }
+    if (ts.isPropertyAccessExpression(parent) && parent.expression === current) {
+      return SOURCE_API_MEMBERS.has(parent.name.text);
+    }
+    if (ts.isElementAccessExpression(parent) && parent.expression === current) {
+      const argument = parent.argumentExpression;
+      if (!argument) return true;
+      if (ts.isStringLiteralLike(argument)) return SOURCE_API_MEMBERS.has(argument.text);
+      // Numeric and other literal indexes read the value; a dynamic key is
+      // too ambiguous to lower safely.
+      return !ts.isLiteralExpression(argument);
+    }
+    return false;
+  }
+}
+
 /** Only value references are rewritten, never types, declarations or keys. */
 function isValueIdentifier(node: ts.Identifier): boolean {
   const parent = node.parent;
   if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
-  if (ts.isPropertyAccessExpression(parent) && parent.expression === node && parent.name.text === 'value') return false;
+  // Source API access is object access, not a plain value read. Authored
+  // `source.value` is already unwrapped and must not gain a second `.value`.
+  if (isSourceApiReceiver(node)) return false;
   if (ts.isPropertyAssignment(parent) && parent.name === node) return false;
   if (ts.isShorthandPropertyAssignment(parent)) return true;
   if (ts.isVariableDeclaration(parent) && parent.name === node) return false;
@@ -1334,6 +1461,7 @@ function scopeMemberChain(node: ts.Node, scopeNames: ReadonlySet<string>): Scope
 function collectTemplateUsage(
   template: string,
   declarations: readonly ReactiveDeclaration[],
+  localsAt: TemplateLocalsAt,
 ): TemplateUsage {
   const scopeNames = new Set(declarations.filter(item => item.kind === 'scope').map(item => item.name));
   const reactiveNames = new Set(declarations.filter(item => item.kind !== 'scope').map(item => item.name));
@@ -1343,14 +1471,22 @@ function collectTemplateUsage(
   for (const span of templateExpressionSpans(template)) {
     const expression = template.slice(span.start, span.end);
     const { file, prefix } = parseTemplateExpression(expression);
+    const shadowedName = (absoluteOffset: number, name: string): boolean =>
+      localsAt(absoluteOffset).has(name);
+    const shadowed = (node: ts.Node, name: string): boolean =>
+      shadowedName(span.start + node.getStart(file) - prefix, name) ||
+      isShadowedIn(node, file, name);
     const visit = (node: ts.Node): void => {
       if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
         const target = scopeMemberChain(node.left, scopeNames);
-        if (target) {
+        if (target && !shadowed(node.left, target.scope)) {
+          const rhsStart = span.start + node.right.getStart(file) - prefix;
           const rhs = expression.slice(node.right.getStart(file) - prefix, node.right.end - prefix);
           const rewritten = rewriteReactiveReadsInText(
-            rewriteReadsInText(rhs, declarations, reads, span.start + node.right.getStart(file) - prefix),
+            rewriteReadsInText(rhs, declarations, reads, rhsStart, shadowedName),
             reactiveNames,
+            rhsStart,
+            shadowedName,
           );
           writes.push({
             start: span.start + node.getStart(file) - prefix,
@@ -1364,7 +1500,7 @@ function collectTemplateUsage(
         }
       }
       const chain = scopeMemberChain(node, scopeNames);
-      if (chain) {
+      if (chain && !shadowed(node, chain.scope)) {
         reads.push({
           start: span.start + node.getStart(file) - prefix,
           end: span.start + node.end - prefix,
@@ -1392,12 +1528,19 @@ function parseTemplateExpression(expression: string): { file: ts.SourceFile; pre
 }
 
 /** Rewrites raw atom/derived/flow reads inside a replacement expression. */
-function rewriteReactiveReadsInText(fragment: string, reactiveNames: ReadonlySet<string>): string {
+function rewriteReactiveReadsInText(
+  fragment: string,
+  reactiveNames: ReadonlySet<string>,
+  absoluteStart: number,
+  shadowedName: (absoluteOffset: number, name: string) => boolean,
+): string {
   if (reactiveNames.size === 0) return fragment;
   const { file, prefix } = parseTemplateExpression(fragment);
   const edits: SpanEdit[] = [];
   const visit = (node: ts.Node): void => {
-    if (ts.isIdentifier(node) && reactiveNames.has(node.text) && isValueIdentifier(node)) {
+    if (ts.isIdentifier(node) && reactiveNames.has(node.text) && isValueIdentifier(node) &&
+        !shadowedName(absoluteStart + node.getStart(file) - prefix, node.text) &&
+        !isShadowedIn(node, file, node.text)) {
       const shorthand = ts.isShorthandPropertyAssignment(node.parent);
       edits.push({ start: node.getStart(file) - prefix, end: node.end - prefix,
         replacement: shorthand ? `${node.text}: ${reactiveBridgeName(node.text)}` : reactiveBridgeName(node.text) });
@@ -1416,6 +1559,7 @@ function rewriteReadsInText(
   declarations: readonly ReactiveDeclaration[],
   reads: ScopeMemberRead[],
   absoluteStart: number,
+  shadowedName: (absoluteOffset: number, name: string) => boolean,
 ): string {
   const scopes = new Map(
     declarations
@@ -1427,8 +1571,10 @@ function rewriteReadsInText(
   const edits: SpanEdit[] = [];
   const visit = (node: ts.Node): void => {
     const chain = scopeMemberChain(node, scopeNames);
-    if (chain) {
-      const start = node.getStart(file) - prefix;
+    const start = node.getStart(file) - prefix;
+    if (chain &&
+        !shadowedName(absoluteStart + start, chain.scope) &&
+        !isShadowedIn(node, file, chain.scope)) {
       const end = node.end - prefix;
       reads.push({ start: absoluteStart + start, end: absoluteStart + end,
         scope: chain.scope, path: chain.path });
@@ -1468,6 +1614,7 @@ interface VModelScopeBinding {
 function collectVModelScopeBindings(
   template: string,
   declarations: readonly ReactiveDeclaration[],
+  localsAt: TemplateLocalsAt,
 ): readonly VModelScopeBinding[] {
   const scopeNames = new Set(declarations.filter(item => item.kind === 'scope').map(item => item.name));
   const bindings: VModelScopeBinding[] = [];
@@ -1476,6 +1623,8 @@ function collectVModelScopeBindings(
     for (const model of tag.attributes.matchAll(/(?:^|\s)(v-model)\s*=\s*(["'])(.*?)\2/g)) {
       const match = /^([A-Za-z_$][\w$]*)((?:\.[A-Za-z_$][\w$]*)+)$/.exec(model[3].trim());
       if (!match || !scopeNames.has(match[1])) continue;
+      // A loop alias or slot prop with the same name is not the scope.
+      if (localsAt(tag.attributesStart + model.index!).has(match[1])) continue;
       const start = tag.attributesStart + model.index! + model[0].indexOf('v-model');
       bindings.push({
         element: tag.name,
@@ -1525,6 +1674,204 @@ interface TemplateExpressionSpan {
   readonly end: number;
 }
 
+/** Minimal structural view of Vue's parsed template AST. */
+interface TemplateAstNode {
+  readonly type: number;
+  readonly loc?: {
+    readonly start: { readonly offset: number };
+    readonly end: { readonly offset: number };
+  };
+  readonly props?: readonly TemplateAstProp[];
+  readonly children?: readonly TemplateAstNode[];
+}
+
+interface TemplateAstProp {
+  readonly type: number;
+  readonly name?: string;
+  readonly exp?: {
+    readonly content?: string;
+    readonly loc?: {
+      readonly start: { readonly offset: number };
+      readonly end: { readonly offset: number };
+    };
+  };
+}
+
+/** A template-local binding range (`v-for` aliases or slot props). */
+interface TemplateLocalScope {
+  /** Template-relative offsets. */
+  readonly start: number;
+  readonly end: number;
+  readonly names: ReadonlySet<string>;
+  /** The `v-for` expression where its own aliases are not in scope. */
+  readonly exclude?: { readonly start: number; readonly end: number };
+}
+
+const EMPTY_TEMPLATE_LOCALS: ReadonlySet<string> = new Set();
+
+/** Template-local names in scope at a template-relative offset. */
+type TemplateLocalsAt = (offset: number) => ReadonlySet<string>;
+
+function collectBindingIdentifiers(name: ts.BindingName, names: string[]): void {
+  if (ts.isIdentifier(name)) {
+    names.push(name.text);
+    return;
+  }
+  for (const element of name.elements) {
+    if (ts.isOmittedExpression(element)) continue;
+    collectBindingIdentifiers(element.name, names);
+  }
+}
+
+function bindingNamesFromPattern(pattern: string, prefix: string, suffix: string): ReadonlySet<string> {
+  const file = ts.createSourceFile(
+    'template-bindings.ts',
+    `${prefix}${pattern}${suffix}`,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const names: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node)) {
+      collectBindingIdentifiers(node.name, names);
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return new Set(names);
+}
+
+/** Finds the top-level `in`/`of` separating a v-for alias from its source. */
+function splitForExpression(
+  expression: string,
+): { aliasEnd: number; sourceStart: number } | undefined {
+  let depth = 0;
+  let quote: string | undefined;
+  let escaped = false;
+
+  for (let index = 0; index < expression.length; index++) {
+    const char = expression[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '(' || char === '[' || char === '{') {
+      depth++;
+      continue;
+    }
+    if (char === ')' || char === ']' || char === '}') {
+      depth--;
+      continue;
+    }
+    if (depth !== 0 || !/\s/.test(char)) continue;
+
+    const match = /^\s+(?:in|of)\s+/.exec(expression.slice(index));
+    if (match) {
+      return {
+        aliasEnd: index,
+        sourceStart: index + match[0].length,
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function forAliasNames(expression: string | undefined): ReadonlySet<string> {
+  if (!expression) return EMPTY_TEMPLATE_LOCALS;
+  const split = splitForExpression(expression);
+  if (!split) return EMPTY_TEMPLATE_LOCALS;
+
+  let pattern = expression.slice(0, split.aliasEnd).trim();
+  if (pattern.startsWith('(') && pattern.endsWith(')')) {
+    pattern = pattern.slice(1, -1);
+  }
+  if (!pattern) return EMPTY_TEMPLATE_LOCALS;
+  return bindingNamesFromPattern(pattern, 'const [', '] = [];');
+}
+
+function slotAliasNames(expression: string | undefined): ReadonlySet<string> {
+  if (!expression?.trim()) return EMPTY_TEMPLATE_LOCALS;
+  return bindingNamesFromPattern(expression.trim(), 'const ', ' = {};');
+}
+
+/**
+ * Collects the lexical ranges introduced by Vue template constructs.
+ *
+ * `v-for` aliases apply to the whole element (except the v-for expression
+ * itself); slot props apply to the slot's child content. Nested ranges are
+ * retained separately, so callers can union every scope containing an
+ * expression.
+ */
+function collectTemplateLocalScopes(
+  ast: TemplateAstNode | undefined,
+  templateOffset: number,
+): readonly TemplateLocalScope[] {
+  if (!ast) return [];
+  const scopes: TemplateLocalScope[] = [];
+
+  const visit = (node: TemplateAstNode): void => {
+    const forDirective = node.props?.find(prop => prop.type === 7 && prop.name === 'for');
+    const slotDirective = node.props?.find(prop => prop.type === 7 && prop.name === 'slot');
+
+    if (node.type === 1 && node.loc) {
+      const aliases = forAliasNames(forDirective?.exp?.content);
+      if (aliases.size > 0) {
+        scopes.push({
+          start: node.loc.start.offset - templateOffset,
+          end: node.loc.end.offset - templateOffset,
+          names: aliases,
+          exclude: forDirective?.exp?.loc
+            ? {
+              start: forDirective.exp.loc.start.offset - templateOffset,
+              end: forDirective.exp.loc.end.offset - templateOffset,
+            }
+            : undefined,
+        });
+      }
+
+      const slotNames = slotAliasNames(slotDirective?.exp?.content);
+      const firstChild = node.children?.[0];
+      if (slotNames.size > 0 && firstChild?.loc) {
+        scopes.push({
+          start: firstChild.loc.start.offset - templateOffset,
+          end: node.loc.end.offset - templateOffset,
+          names: slotNames,
+        });
+      }
+    }
+
+    for (const child of node.children ?? []) visit(child);
+  };
+
+  visit(ast);
+  return scopes;
+}
+
+/** Union of template-local names in scope at one template-relative offset. */
+function templateLocalsAt(
+  scopes: readonly TemplateLocalScope[],
+  offset: number,
+): ReadonlySet<string> {
+  let names: Set<string> | undefined;
+  for (const scope of scopes) {
+    if (offset < scope.start || offset >= scope.end) continue;
+    if (scope.exclude && offset >= scope.exclude.start && offset < scope.exclude.end) {
+      continue;
+    }
+    names ??= new Set();
+    for (const name of scope.names) names.add(name);
+  }
+  return names ?? EMPTY_TEMPLATE_LOCALS;
+}
+
 /**
  * Directive values that are not plain JS expressions, or whose expressions
  * are handled by dedicated passes. Every other directive value is scanned,
@@ -1553,10 +1900,23 @@ function templateExpressionSpans(template: string): TemplateExpressionSpan[] {
   for (const match of template.matchAll(
     /(?:[:@#][\w.:[\]-]+|v-([A-Za-z][\w-]*)(?::[\w.:[\]-]+)?(?:\.[\w-]+)*)\s*=\s*(["'])([\s\S]*?)\2/g,
   )) {
+    // `#default="{ item }"` is slot-props binding syntax, not an expression.
+    if (match[0].startsWith('#')) continue;
     if (match[1] && NON_EXPRESSION_DIRECTIVE_VALUES.has(match[1].toLowerCase())) {
       continue;
     }
     const valueStart = match.index! + match[0].length - match[3].length - 1;
+    if (match[1]?.toLowerCase() === 'for') {
+      // Only the iterated source is an expression; the alias part is a
+      // binding pattern and must never be rewritten as a read.
+      const split = splitForExpression(match[3]);
+      if (!split) continue;
+      spans.push({
+        start: valueStart + split.sourceStart,
+        end: valueStart + match[3].length,
+      });
+      continue;
+    }
     spans.push({ start: valueStart, end: valueStart + match[3].length });
   }
 
@@ -1572,6 +1932,7 @@ function templateExpressionSpans(template: string): TemplateExpressionSpan[] {
 function sameNameBindingEdits(
   template: string,
   declarations: readonly ReactiveDeclaration[],
+  localsAt: TemplateLocalsAt,
 ): readonly SpanEdit[] {
   const reactiveNames = new Set(
     declarations.filter(item => item.kind !== 'scope').map(item => item.name),
@@ -1584,6 +1945,9 @@ function sameNameBindingEdits(
     )) {
       const name = match[3];
       if (!reactiveNames.has(name)) continue;
+      // Inside a loop or slot, the shorthand reads the local alias rather
+      // than the outer Streamix binding.
+      if (localsAt(tag.attributesStart + match.index!).has(name)) continue;
       const start = tag.attributesStart + match.index! + match[0].indexOf(match[1]);
       edits.push({
         start,
