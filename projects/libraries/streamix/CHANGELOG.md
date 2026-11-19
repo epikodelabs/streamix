@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Angular:** keyed structural reorders no longer re-walk every moved subtree to reapply `_ngcontent-*` attributes; content scope is applied once when an instance is created. Added a deep-subtree reorder benchmark plus identity, DOM-order and scope regression coverage (#108). React and Vue use their framework reconcilers instead of this runtime.
+
+- **Builders:** Vue, React and Angular watch regeneration now skips writes when the generated text and map are unchanged, and all three restore a backup-only tree left by a crash between swap renames. Each watch batch already shares one semantic program (#123).
+
+- **Correlate:** unmatched early responses are bounded by `earlyLimit` (default 1024) with `drop-oldest` or an `error` overflow policy. `timeout` and `earlyLimit` are validated when the operator is created, before the response iterator is acquired (#125).
+
+- **Handoff:** a superseded preparation that never settles no longer blocks completion; a late resource is disposed after the output completes, and the cooperation requirements for `prepare`/`ready`/`dispose` are documented (#126).
+
+- **Gate:** one coordinator observes both pulls so same-tick source values and control changes are admitted in resolution order; documented and tested in both orders for `drop` and `latest` policies (#127).
+
 - **Vue DevTools:** the panel is gated on the shared development flag, renders a listener-free placeholder during SSR, and no longer serializes write previews in production; `useStreamixDevtoolsEvents()` now requires an effect scope and `createStreamixDevtoolsEventsBridge()` provides manual ownership (#223). React's panel is gated the same way, and Angular's panel now subscribes only after its production/server gate.
 
 - **Vue bridges:** a direct `useWritable` write notifies synchronous watchers once instead of twice, and rejected unsubscription/iterator-return teardowns are reported rather than becoming unhandled rejections (#224). React and Angular do not expose a Vue `customRef` or promise-returning teardown, so the equivalent defect does not exist there.
