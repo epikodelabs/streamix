@@ -17,6 +17,19 @@ export interface CorrelateOptions<Q, A, K> {
    * created.
    */
   timeout?: number;
+  /**
+   * Maximum number of unmatched early responses retained, keyed by their
+   * correlation key. Defaults to 1024; `0` retains none. Must be a
+   * nonnegative safe integer; validated when the operator is created.
+   */
+  earlyLimit?: number;
+  /**
+   * What to do when a new early response would exceed {@link earlyLimit}.
+   * `'drop-oldest'` (default) discards the oldest unmatched response;
+   * `'error'` fails the output with `RangeError`. Updating a key that is
+   * already retained never overflows.
+   */
+  earlyOverflow?: 'drop-oldest' | 'error';
 }
 
 /** A request paired with the response that shares its correlation key. */
@@ -31,9 +44,11 @@ export interface Correlated<Q, A> { request: Q; response: A }
  * output emits `{ request, response }` pairs.
  *
  * Responses that arrive before their request are retained by key (the latest
- * response per key wins) and matched when that request appears. A key may have
- * only one outstanding request at a time: emitting another request with the
- * same key before the first is matched fails the output.
+ * response per key wins) and matched when that request appears. Retained
+ * early responses are bounded by {@link CorrelateOptions.earlyLimit}; overflow
+ * drops the oldest unmatched key or fails the output, as configured. A key
+ * may have only one outstanding request at a time: emitting another request
+ * with the same key before the first is matched fails the output.
  *
  * The output completes when the request stream ends and every pending request
  * has been answered. If the response stream ends while requests are still
@@ -65,6 +80,18 @@ export interface Correlated<Q, A> { request: Q; response: A }
  * ```
  */
 export function correlate<Q, A, K>(responses: PipeInput<A>, options: CorrelateOptions<Q, A, K>) {
+  // Validate before creating the operator so an invalid configuration cannot
+  // acquire the response iterator or start a lifetime.
+  if (options.timeout !== undefined && (!Number.isFinite(options.timeout) || options.timeout < 0)) {
+    throw new RangeError('correlate timeout must be a nonnegative finite number');
+  }
+  if (options.earlyLimit !== undefined &&
+      (!Number.isSafeInteger(options.earlyLimit) || options.earlyLimit < 0)) {
+    throw new RangeError('correlate earlyLimit must be a nonnegative safe integer');
+  }
+  const earlyLimit = options.earlyLimit ?? 1024;
+  const earlyOverflow = options.earlyOverflow ?? 'drop-oldest';
+
   return createOperator<Q, Correlated<Q, A>>('correlate', function (this, source) {
     const responsesLifetime = __streamixBeginLifetime(this);
     responsesLifetime?.start();
@@ -79,12 +106,11 @@ export function correlate<Q, A, K>(responses: PipeInput<A>, options: CorrelateOp
       stopped = true;
       for (const entry of pending.values()) if (entry.timer) clearTimeout(entry.timer);
       pending.clear();
+      early.clear();
       void Promise.resolve(source.return?.()).catch(() => {});
       void Promise.resolve(responseIt.return?.()).catch(() => {});
     };
     const fail = (error: unknown) => { if (!stopped) { stop(); output.fail(normalizeError(error)); } };
-    if (options.timeout !== undefined && (!Number.isFinite(options.timeout) || options.timeout < 0))
-      throw new RangeError('correlate timeout must be a nonnegative finite number');
     void (async () => {
       try {
         while (!stopped) {
@@ -92,7 +118,18 @@ export function correlate<Q, A, K>(responses: PipeInput<A>, options: CorrelateOp
           if (stopped || result.done) break;
           const key = options.responseKey(result.value);
           const match = pending.get(key);
-          if (!match) { early.set(key, result.value); continue; }
+          if (!match) {
+            if (!early.has(key) && early.size >= earlyLimit) {
+              if (earlyOverflow === 'error') {
+                throw new RangeError('correlate early response capacity exceeded');
+              }
+              if (earlyLimit === 0) continue;
+              const oldest = early.keys().next().value as K | undefined;
+              if (oldest !== undefined) early.delete(oldest);
+            }
+            early.set(key, result.value);
+            continue;
+          }
           pending.delete(key);
           if (match.timer) clearTimeout(match.timer);
           output.push({ request: match.request, response: result.value });
