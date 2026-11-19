@@ -178,6 +178,45 @@ describe('useIterable', () => {
     expect(closed).toBe(true);
   });
 
+  it('reports a rejected unsubscription instead of leaving it unhandled', async () => {
+    const errorSpy = spyOn(console, 'error');
+    const source = {
+      value: 1,
+      disposed: false,
+      subscribe: () => () => Promise.reject(new Error('unsubscribe failed')),
+    } as unknown as import('@epikodelabs/streamix').DependencySource<number>;
+
+    vueScope.run(() => useIterable(source));
+    vueScope.stop();
+    await flushMicrotasks();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      jasmine.stringContaining('teardown rejected (unsubscribe)'),
+      jasmine.any(Error),
+    );
+  });
+
+  it('reports a rejected iterator return instead of leaving it unhandled', async () => {
+    const errorSpy = spyOn(console, 'error');
+    const source: AsyncIterable<number> = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => new Promise<IteratorResult<number>>(() => {}),
+          return: () => Promise.reject(new Error('return failed')),
+        };
+      },
+    };
+
+    vueScope.run(() => useIterable(source, 0));
+    vueScope.stop();
+    await flushMicrotasks();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      jasmine.stringContaining('teardown rejected (iterator.return)'),
+      jasmine.any(Error),
+    );
+  });
+
   it('closes a manually owned async iterator on dispose', async () => {
     let closed = false;
     const source: AsyncIterable<number> = {

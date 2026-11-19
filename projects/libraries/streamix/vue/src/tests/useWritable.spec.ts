@@ -1,6 +1,7 @@
 import { atom } from '@epikodelabs/streamix';
 import {
     effectScope,
+    watchEffect,
     type EffectScope,
 } from 'vue';
 import { useWritable } from '../lib/useWritable';
@@ -33,5 +34,26 @@ describe('useWritable', () => {
 
     source.next(5);
     expect(value.value).toBe(5);
+  });
+
+  it('notifies a synchronous watcher once per direct write', () => {
+    const source = atom(0);
+    const value = vueScope.run(() => useWritable(source))!;
+    let runs = 0;
+    const stop = vueScope.run(() => watchEffect(() => {
+      void value.value;
+      runs += 1;
+    }, { flush: 'sync' }))!;
+
+    const initial = runs;
+
+    value.value = 1;
+    expect(runs - initial).toBe(1);
+
+    source.next(2);
+    expect(runs - initial).toBe(2);
+
+    stop();
+    source.dispose();
   });
 });

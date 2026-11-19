@@ -16,6 +16,23 @@ interface SSRDisposalContext {
   __watcherHandles?: Array<() => void>;
 }
 
+function ssrRenderContext(): SSRDisposalContext | null {
+  if (!getCurrentInstance() || !hasInjectionContext()) {
+    return null;
+  }
+
+  // The Vue runtime exports the injection key but not its context type.
+  return inject<SSRDisposalContext | null>(
+    ssrContextKey as unknown as InjectionKey<SSRDisposalContext | null>,
+    null,
+  );
+}
+
+/** True while rendering inside Vue's server renderer. */
+export function isSSRContext(): boolean {
+  return ssrRenderContext() !== null;
+}
+
 /**
  * Registers a disposer with the active server render.
  *
@@ -26,16 +43,7 @@ interface SSRDisposalContext {
  * component setup leaves ownership with the Vue effect scope.
  */
 export function registerSSRDisposal(dispose: () => void): boolean {
-  if (!getCurrentInstance() || !hasInjectionContext()) {
-    return false;
-  }
-
-  // The Vue runtime exports the injection key but not its context type.
-  const context = inject<SSRDisposalContext | null>(
-    ssrContextKey as unknown as InjectionKey<SSRDisposalContext | null>,
-    null,
-  );
-
+  const context = ssrRenderContext();
   if (!context) {
     return false;
   }

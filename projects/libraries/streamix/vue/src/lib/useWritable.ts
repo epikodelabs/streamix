@@ -10,7 +10,9 @@ import { useIterable } from './useIterable';
  *
  * Reads stay synchronized through {@link useIterable}; writes go directly to
  * the Streamix source. This makes the result work naturally with `v-model`
- * without copying Streamix state into Vue state.
+ * without copying Streamix state into Vue state. The source subscription is
+ * the only invalidation path for direct writes, so a synchronous watcher runs
+ * once per emission.
  *
  * @example
  * ```ts
@@ -27,17 +29,17 @@ export function useWritable<T>(source: Writable<T>, sourceName?: string): Ref<T>
   // Do not wrap the bridge in `computed()`: computed refs only notify their
   // consumers when their returned value changes by Object.is. Streamix emits
   // are meaningful even when a mutable object is re-emitted by identity.
-  return customRef<T>((track, trigger) => {
+  return customRef<T>((track) => {
     return {
       get() {
         track();
         return current.value;
       },
       set(value: T) {
+        // The synchronous Streamix subscription invalidates `current` for
+        // every emission, including same-identity writes. Triggering this
+        // outer ref as well would notify sync watchers twice per write.
         source.next(value);
-        // The Streamix subscription invalidates `current`; forwarding a
-        // trigger here makes direct writes reliable even for same identities.
-        trigger();
       },
     };
   });

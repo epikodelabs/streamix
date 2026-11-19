@@ -202,7 +202,13 @@ import { StreamixDevtools } from '@epikodelabs/streamix/vue';
 ```
 
 It renders only in development builds (`import.meta.env.DEV`); production
-bundles stay clean.
+bundles render nothing and allocate no trace subscription. Server rendering
+keeps a stable empty panel and skips the per-request listener.
+
+Custom integrations can call `useStreamixDevtoolsEvents()` inside `setup()` or
+an active `effectScope()`. Outside Vue ownership, use
+`createStreamixDevtoolsEventsBridge()` and call `dispose()` when the owner
+ends.
 
 ## SSR, editor, and hosted builds
 
@@ -217,6 +223,12 @@ compiler remains authoritative.
 The Angular-hosted builder transforms `.vue` files into
 `.angular/.streamix/<app>/src` before delegating to a Vue-capable Architect
 target. Use it when an Angular workspace hosts the Vue application.
+
+The generated virtual tree is already transformed, so the hosted app's
+`vite.config.ts` must not include `sxVue()`; the plugin only compiles authored
+SFCs. The hosted builder removes it with a warning if present. Configure
+`introspection` and `watch` on the builder target rather than in the delegate
+config.
 
 ### Troubleshooting
 

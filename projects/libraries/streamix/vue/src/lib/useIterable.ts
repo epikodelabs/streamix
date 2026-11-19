@@ -9,7 +9,10 @@ import type {
   Subscription,
 } from '@epikodelabs/streamix';
 import { NO_INITIAL_VALUE } from '@epikodelabs/streamix';
-import { recordStreamixDevtoolsEvent } from './devtools';
+import {
+  ɵrecordStreamixDevtoolsWrite,
+  recordStreamixDevtoolsEvent,
+} from './devtools';
 import { registerSSRDisposal } from './ssr-disposal';
 
 type Disposable = { dispose(): void };
@@ -102,13 +105,27 @@ function readonlyBridgeRef<T>(read: () => T): {
   };
 }
 
-/** Bounded value preview for trace lines: what changed, not just where. */
-function traceValue(value: unknown): string {
+/**
+ * Runs a teardown callback and reports a synchronous throw or rejected
+ * promise instead of leaving an unhandled rejection. Teardown failures are
+ * surfaced to the host console rather than swallowed.
+ */
+function settleTeardown(run: () => unknown, action: string): void {
+  let result: unknown;
   try {
-    return (typeof value === 'string' ? value : JSON.stringify(value))?.slice(0, 240) ?? String(value);
-  } catch {
-    return String(value);
+    result = run();
+  } catch (error) {
+    console.error(`[streamix] Vue bridge teardown failed (${action}):`, error);
+    return;
   }
+
+  if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
+    return;
+  }
+
+  void Promise.resolve(result as PromiseLike<unknown>).catch(error => {
+    console.error(`[streamix] Vue bridge teardown rejected (${action}):`, error);
+  });
 }
 
 function isDisposed(source: DependencySource<unknown>): boolean {
@@ -183,11 +200,9 @@ function dependencyRef<T>(
     }
     if (!subscribing) {
       bridge.invalidate();
-      recordStreamixDevtoolsEvent({
-        type: 'write',
-        source: sourceName,
-        value: traceValue(readTraceValue()),
-      });
+      // The preview is serialized inside the enabled gate: production
+      // emissions must not pay a JSON.stringify per write.
+      ɵrecordStreamixDevtoolsWrite(sourceName, readTraceValue);
     }
   });
   subscribing = false;
@@ -206,8 +221,10 @@ function dependencyRef<T>(
     if (disposed) return;
     disposed = true;
     recordStreamixDevtoolsEvent({ type: 'unsubscribe', source: sourceName });
-    void subscription();
-    void errorSubscription?.();
+    settleTeardown(subscription, 'unsubscribe');
+    if (errorSubscription) {
+      settleTeardown(errorSubscription, 'unsubscribe');
+    }
 
     if (owned && isDisposable(source)) {
       source.dispose();
@@ -269,7 +286,7 @@ function asyncIterableRef<T>(
     active = false;
 
     if (typeof iterator.return === 'function') {
-      void iterator.return();
+      settleTeardown(() => iterator.return!(), 'iterator.return');
     }
 
     if (owned && isDisposable(source)) {

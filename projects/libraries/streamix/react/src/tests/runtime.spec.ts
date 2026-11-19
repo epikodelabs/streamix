@@ -22,7 +22,7 @@ import {
   write,
   __streamixTrace,
 } from "../lib/runtime";
-import { recordStreamixDevtoolsEvent, StreamixDevtools } from "../lib/devtools";
+import { recordStreamixDevtoolsEvent, StreamixDevtools, ɵsetStreamixDevtoolsEnabled } from "../lib/devtools";
 import { idescribe } from "./env.spec";
 
 idescribe("React runtime escape hatches", () => {
@@ -369,6 +369,16 @@ idescribe("React runtime escape hatches", () => {
       await Promise.resolve();
     });
     expect(container.textContent).toContain("write: title");
+  });
+
+  it("renders no DevTools panel in production builds", async () => {
+    ɵsetStreamixDevtoolsEnabled(false);
+    try {
+      act(() => root.render(createElement(StreamixDevtools)));
+      expect(container.querySelector("[data-streamix-devtools]")).toBeNull();
+    } finally {
+      ɵsetStreamixDevtoolsEnabled(true);
+    }
   });
 });
 
