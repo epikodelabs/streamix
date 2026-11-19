@@ -6,18 +6,22 @@ application build or dev server.
 
 ## How it works
 
-`app6` in the workspace `angular.json` shows the wiring:
+`app1` in the workspace `angular.json` shows the wiring:
 
 1. `application.mjs` runs the generator (`generate-project.ts` from source in
    this repository, bundled into the subpackage's FESM in a release), which
    copies the source tree into
-   `.angular/.streamix/<app>/src`, compiles every component with an inline
-   `template` through the Streamix compiler, and writes the transformed
-   component — with the compiled setup inlined — back into the virtual tree.
-2. The builder schedules `delegateTarget` (e.g. `app6:application` or
-   `app6:dev-server`). Application delegates receive the generated `browser`
+   `.angular/.streamix/<virtual-root>/src`, compiles every component with an
+   inline `template` or an in-`sourceRoot` `templateUrl` through the Streamix
+   compiler, and writes the transformed component — with the compiled setup
+   inlined — back into the virtual tree. `<virtual-root>` mirrors the
+   `sourceRoot` without a leading `projects/apps/` segment (when present) and
+   without a trailing `/src`, so `projects/my-app/src` generates
+   `.angular/.streamix/projects/my-app/src`.
+2. The builder schedules `delegateTarget` (e.g. `app1:application` or
+   `app1:dev-server`). Application delegates receive the generated `browser`
    and `tsConfig` roots. For dev-server delegates, configure the application
-   target referenced by `buildTarget` with those virtual roots, as app6 does;
+   target referenced by `buildTarget` with those virtual roots, as app1 does;
    application-only options are not forwarded to the dev-server schema.
 3. For `serve` or `watch: true` targets, the builder watches the source root and local library sources resolved through
    the application tsconfig (including inherited `paths` mappings)
@@ -36,7 +40,7 @@ application build or dev server.
 - `sourceRoot`: application source directory, relative to the workspace
   root. **Required.** No workspace-specific demo path is used as a fallback.
 
-A missing or invalid source root fails before delegation. Reactive components using `templateUrl` or dynamic templates, and files with multiple reactive `@Component` classes, fail with an actionable build diagnostic instead of being copied as if compiled. Ordinary Angular-only components remain unchanged.
+A missing or invalid source root fails before delegation. Reactive components compile from a static inline `template` or a `templateUrl` that resolves to an HTML file within `sourceRoot`. Dynamic templates, `templateUrl` targets outside `sourceRoot`, and files with multiple reactive `@Component` classes fail with an actionable build diagnostic instead of being copied as if compiled. Ordinary Angular-only components remain unchanged.
 
 All other options are forwarded to the delegate target. Keys that only this
 builder understands, plus empty placeholder values materialized by CLI

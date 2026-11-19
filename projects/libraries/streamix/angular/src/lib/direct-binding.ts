@@ -163,8 +163,9 @@ export function bindProperty<T>(
 /**
  * Directly binds a reactive source to an element attribute.
  *
- * null / undefined / false remove the attribute. `true` writes an empty
- * attribute; all other values are stringified.
+ * Mirrors Angular's `[attr.name]` binding: nullish values remove the
+ * attribute and every other value is stringified, including booleans. Use
+ * `bindClass` or a DOM property binding for presence semantics.
  */
 export function bindAttribute(
   source: DependencySource<unknown>,

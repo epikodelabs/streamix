@@ -63,9 +63,9 @@ Configure your editor and build tools, then create your first reactive counter i
 
 | Framework | Requirements | Source preprocessing |
 | --- | --- | --- |
-| [Angular](#angular) | Angular 20+, TypeScript 5.5+ compatible with your Angular version | Angular builder |
-| [React](#react) | React 18+, TypeScript 5.5+ | Vite plugin: `sx()` before `react()` |
-| [Vue](#vue) | Vue 3.4+, TypeScript 5.5+ | Vite plugin: `sxVue()` before `vue()` |
+| [Angular](#angular) | Angular 20+, TypeScript 5.9.3+ compatible with your Angular version | Angular builder |
+| [React](#react) | React 18+, TypeScript 5.9.3+ | Vite plugin: `sx()` before `react()` |
+| [Vue](#vue) | Vue 3.4+, TypeScript 5.9.3+ | Vite plugin: `sxVue()` before `vue()` |
 
 Install `@epikodelabs/streamix` once; no separate compiler, builder, or editor packages are needed. Configure both the build and editor before using the examples below.
 
@@ -90,11 +90,11 @@ In `angular.json`, keep your existing Angular build target as `application`, the
     "builder": "@angular/build:application",
     "options": {
       "browser": "projects/my-app/src/main.ts",
-      "tsConfig": ".angular/.streamix/my-app/tsconfig.app.json",
+      "tsConfig": ".angular/.streamix/projects/my-app/tsconfig.app.json",
       "fileReplacements": [
         {
           "replace": "projects/my-app/src/main.ts",
-          "with": ".angular/.streamix/my-app/src/main.ts"
+          "with": ".angular/.streamix/projects/my-app/src/main.ts"
         }
       ]
     }
@@ -124,7 +124,7 @@ In `angular.json`, keep your existing Angular build target as `application`, the
 
 Merge the `application.options` shown above into your existing Angular options, preserving `index`, assets, styles, output paths, and configurations. Move the original serve target to `dev-server` and make it delegate to `application`, so preprocessing runs once. For named development/production configurations, preserve those names on the wrappers and their delegates.
 
-Keep editing your source files. Use `.angular/.streamix/my-app/` only as generated build output, and point the delegate at its tsconfig and entry point.
+Keep editing your source files. Use `.angular/.streamix/projects/my-app/` only as generated build output, and point the delegate at its tsconfig and entry point. The virtual root mirrors the `sourceRoot` without a leading `projects/apps/` segment (when present) and without a trailing `/src`, so a standard `projects/my-app/src` source root generates `.angular/.streamix/projects/my-app/src`.
 
 ### 3. Configure the editor
 
