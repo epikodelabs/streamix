@@ -10,6 +10,13 @@ import {
 import { getSxRenderErrorSink } from './error-delivery';
 import { combineSubscriptions, readSourceState, readViewExpression, subscribeSourceError, viewValue } from './view-value';
 
+/**
+ * Content-scope attributes captured from a block's marker element, keyed by
+ * the anchor that replaced it. The marker is authored in the component
+ * template, so its `_ngcontent-*` attributes are the block's own scope.
+ */
+const markerContentAttributes = new WeakMap<Node, readonly string[]>();
+
 /** Wrapper avoids the `error === undefined` ambiguity for stored failures. */
 interface BlockFailure {
   error: unknown;
@@ -163,7 +170,7 @@ export class SxValueBlock<T> {
 
       try {
         this.instance = this.factory.create(value);
-        applyContentScope(this.instance, this.anchor.parentNode);
+        applyContentScope(this.instance, this.anchor);
         moveInstanceAfter(this.anchor, this.instance);
       } catch (error) {
         // The value was committed before the factory ran, so a failed factory
@@ -404,7 +411,7 @@ export class SxConditionalBlock {
 
     try {
       this.instance = this.branches[index].factory();
-      applyContentScope(this.instance, this.anchor.parentNode);
+      applyContentScope(this.instance, this.anchor);
       moveInstanceAfter(this.anchor, this.instance);
     } catch (error) {
       // The selection was committed before the branch factory ran, so a
@@ -582,7 +589,7 @@ export class SxKeyedBlock<T> {
 
       if (!this.emptyInstance) {
         this.emptyInstance = this.emptyFactory();
-        applyContentScope(this.emptyInstance, this.anchor.parentNode);
+        applyContentScope(this.emptyInstance, this.anchor);
         moveInstanceAfter(this.anchor, this.emptyInstance);
       }
 
@@ -626,7 +633,7 @@ export class SxKeyedBlock<T> {
           );
         } else {
           const instance = this.factory.create(item, index, items.length);
-          applyContentScope(instance, this.anchor.parentNode);
+          applyContentScope(instance, this.anchor);
           record = { key, item, instance };
           created.push(record);
         }
@@ -712,11 +719,21 @@ export function ɵsxBlockAnchor(
   label: string,
   server = false,
 ): Node {
+  // Capture the template's own content-scope attributes before the marker is
+  // replaced. Comments cannot carry attributes, and at a template root the
+  // anchor's parent is the component host, which carries `_nghost-*` (and a
+  // parent's `_ngcontent-*` when nested) instead of the block's own scope.
+  const contentAttributes = marker
+    .getAttributeNames()
+    .filter(name => name.startsWith('_ngcontent-'));
+
   if (server) {
+    markerContentAttributes.set(marker, contentAttributes);
     return marker;
   }
 
   const anchor = marker.ownerDocument!.createComment(label);
+  markerContentAttributes.set(anchor, contentAttributes);
   marker.parentNode!.replaceChild(anchor, marker);
   return anchor;
 }
@@ -810,22 +827,20 @@ function moveInstanceAfter(
  * freshly created block range.
  *
  * Direct DOM factories bypass Angular's renderer, so their elements need the
- * `_ngcontent-*` attributes for scoped styles to match. This runs once when an
- * instance is created: later reorders only move existing nodes, so a list
- * reorder no longer walks every descendant of every row.
+ * `_ngcontent-*` attributes for scoped styles to match. Attributes come from
+ * the block's captured marker first: at a template root the anchor's parent
+ * is the component host, whose attributes belong to a different scope.
+ * Anchors created without `ɵsxBlockAnchor` fall back to the enclosing
+ * element's scope attributes. This runs once when an instance is created:
+ * later reorders only move existing nodes, so a list reorder no longer walks
+ * every descendant of every row.
  */
 function applyContentScope(
   instance: SxBlockInstance,
-  parent: Node | null,
+  anchor: Node,
 ): void {
-  if (!parent || parent.nodeType !== 1) {
-    return;
-  }
-
-  const contentAttributes = (parent as Element)
-    .getAttributeNames()
-    .filter(name => name.startsWith('_ngcontent-'));
-  if (contentAttributes.length === 0) {
+  const contentAttributes = resolveContentAttributes(anchor);
+  if (!contentAttributes || contentAttributes.length === 0) {
     return;
   }
 
@@ -842,10 +857,29 @@ function applyContentScope(
   }
 }
 
+function resolveContentAttributes(
+  anchor: Node,
+): readonly string[] | undefined {
+  const captured = markerContentAttributes.get(anchor);
+
+  if (captured) {
+    return captured;
+  }
+
+  const parent = anchor.parentNode;
+
+  if (!parent || parent.nodeType !== 1) {
+    return undefined;
+  }
+
+  return (parent as Element)
+    .getAttributeNames()
+    .filter(name => name.startsWith('_ngcontent-'));
+}
+
 function removeInstance(
   instance: SxBlockInstance,
-): void {
-  for (const node of collectRemovalRange(
+): void {  for (const node of collectRemovalRange(
     instance.first,
     instance.last,
   )) {
