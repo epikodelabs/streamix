@@ -23,6 +23,11 @@ export interface SxComponentBuildInput {
   readonly template: string;
   readonly templatePath?: string;
   /**
+   * Mirrors the component's `preserveWhitespaces` decorator option so
+   * interpolation text addressing counts the same text nodes Angular renders.
+   */
+  readonly preserveWhitespaces?: boolean;
+  /**
    * TypeScript-checker-backed resolver for source-transparent template syntax.
    * Prefer this in real builder integrations.
    */
@@ -113,7 +118,11 @@ export function compileSxComponent(
   const transformed = transformAngularComponentTemplate(
     input.template,
     input.templatePath ?? input.componentPath,
-    { resolveReactiveSource, resolveReactiveWritable },
+    {
+      resolveReactiveSource,
+      resolveReactiveWritable,
+      preserveWhitespaces: input.preserveWhitespaces,
+    },
   );
 
   const ownedScopes = input.ownedScopeFields ?? [];

@@ -761,6 +761,7 @@ async function compileVirtualSource({
     componentPath: sourcePath,
     templatePath,
     template: templateText,
+    preserveWhitespaces: match.preserveWhitespaces,
     dependencySourcePaths: standaloneDependencySources(program, checker, sourcePath),
     scopeValuePaths,
     writableSourcePaths: standaloneWritableSources(program, checker, sourcePath),

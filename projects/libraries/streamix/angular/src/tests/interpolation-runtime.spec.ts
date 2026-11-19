@@ -1,7 +1,8 @@
 import ts from 'typescript';
-import { atom, scope } from '@epikodelabs/streamix';
+import { atom, scope, type Writable } from '@epikodelabs/streamix';
 import { transformAngularComponentTemplate } from '../../compiler/src/build-transform';
 import * as instructions from '../lib/binding-table';
+import * as blockInstructions from '../lib/structural-block';
 import { ɵsxInstallErrorDelivery } from '../lib/error-delivery';
 import { rendererScheduler } from '../lib/render-scheduler';
 import { idescribe } from '../../../src/tests/env.spec';
@@ -9,13 +10,18 @@ import { idescribe } from '../../../src/tests/env.spec';
 function install(template: string, host: Element, context: object) {
   const result = transformAngularComponentTemplate(template, 'test.html', {
     resolveReactiveSource: path => path === 'model.rate' ? "model.get('rate')"
+      : path === 'model.ready' ? "model.get('ready')"
       : ['count', 'other'].includes(path) ? path : undefined,
   });
   const javascript = ts.transpileModule(result.setup, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
   }).outputText;
-  const setup = new Function(...Object.keys(instructions), 'ɵsxInstallErrorDelivery', javascript + '\nreturn ɵsetupSxBindings;')(
-    ...Object.values(instructions),
+  const setup = new Function(
+    ...Object.keys(instructions), ...Object.keys(blockInstructions),
+    'ɵsxInstallErrorDelivery',
+    javascript + '\nreturn ɵsetupSxBindings;',
+  )(
+    ...Object.values(instructions), ...Object.values(blockInstructions),
     ɵsxInstallErrorDelivery,
   );
   return setup(host, context) as { destroy(): void };
@@ -115,4 +121,68 @@ idescribe('standalone/scoped/plain interpolation emissions', () => {
       model.dispose();
     }
   });
+
+
+  it('addresses interpolations across flattened ng-container text', () => {
+    const host = document.createElement('div');
+    // Angular flattens ng-container content into the parent: the rendered DOM
+    // carries the container's text node before the interpolation's own node.
+    host.innerHTML = '<p>prefix <!--anchor-->2</p>';
+    const paragraph = host.firstElementChild!;
+    const count = atom(2);
+    const binding = install(
+      '<p><ng-container>prefix </ng-container>{{ count }}</p>',
+      host, { count },
+    );
+    try {
+      expect(paragraph.textContent).toBe('prefix 2');
+      count.set(5);
+      rendererScheduler.flushNow();
+      expect(paragraph.textContent).toBe('prefix 5');
+      // The static prefix keeps its own text node identity.
+      expect(paragraph.firstChild!.textContent).toBe('prefix ');
+    } finally {
+      binding.destroy();
+      count.dispose();
+    }
+  });
+
+  it('addresses interpolations after dynamic siblings through compiler markers', () => {
+    const template = '<p>@if (model.ready) { <b>started</b> } {{ count }}</p>';
+    const result = transformAngularComponentTemplate(template, 'test.html', {
+      resolveReactiveSource: path => path === 'model.ready' ? "model.get('ready')"
+        : path === 'count' ? 'count' : undefined,
+    });
+    const host = document.createElement('div');
+    // The transformed template is what Angular renders, markers included.
+    host.innerHTML = result.template;
+    const paragraph = host.firstElementChild!;
+    const count = atom(2);
+    const model = scope(() => ({ ready: atom<boolean>(true) }));
+    const binding = install(template, host, { count, model });
+    try {
+      // Authored whitespace runs survive verbatim; normalize for clarity.
+      const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
+      expect(normalize(paragraph.textContent!)).toBe('started 2');
+      expect(normalize(paragraph.querySelector('b')!.textContent!)).toBe('started');
+      const interpolation = paragraph.querySelector('[data-sx-node]')!;
+      expect(normalize(interpolation.textContent!)).toBe('2');
+
+      count.set(9);
+      rendererScheduler.flushNow();
+      expect(normalize(interpolation.textContent!)).toBe('9');
+
+      // The dynamic sibling swaps its content while the interpolation keeps
+      // its own node: no text-node index shifts.
+      (model.get('ready') as Writable<boolean>).set(false);
+      rendererScheduler.flushNow();
+      expect(normalize(paragraph.textContent!)).toBe('9');
+      expect(normalize(interpolation.textContent!)).toBe('9');
+    } finally {
+      binding.destroy();
+      count.dispose();
+      model.dispose();
+    }
+  });
 });
+

@@ -75,6 +75,13 @@ export interface ParseSxTemplateOptions {
    * only when it is backed by an atom the generated code can write.
    */
   readonly resolveReactiveWritable?: SxReactiveWritableResolver;
+  /**
+   * Mirrors the component's `preserveWhitespaces` option. Whitespace-only
+   * text nodes survive Angular's compilation when it is enabled, so they must
+   * be counted when addressing interpolation text nodes positionally.
+   * @default false
+   */
+  readonly preserveWhitespaces?: boolean;
   /** @deprecated Prefer `resolveReactiveSource`. */
   readonly isDependencySource?: SxDependencySourceResolver;
 }
@@ -106,8 +113,18 @@ interface WalkState {
   readonly unstableTargets: Set<string>;
   readonly markers: Record<string, string>;
   readonly strict: boolean;
+  readonly preserveWhitespaces: boolean;
   readonly resolveReactiveSource?: SxReactiveSourceResolver;
   readonly resolveReactiveWritable?: SxReactiveWritableResolver;
+  /**
+   * Bound texts that follow a topology-shifting sibling are wrapped in a
+   * compiler-owned marker element instead of being addressed by a text-node
+   * index. The map assigns each wrapped text span start to the wrapper's node
+   * id; the sibling walk fills in the wrapper's element path.
+   */
+  readonly textWraps: Map<number, string>;
+  /** Marker elements created by the compiler: their tag already carries the data-sx-node attribute. */
+  readonly preMarkedNodes: Set<string>;
   nextNode: number;
 }
 
@@ -222,6 +239,9 @@ export function parseSxTemplate(
       template,
       resolveReactiveSource,
     ),
+    preserveWhitespaces: options.preserveWhitespaces ?? false,
+    textWraps: new Map(),
+    preMarkedNodes: new Set(),
     resolveReactiveSource,
     resolveReactiveWritable: options.resolveReactiveWritable,
     nextNode: 0,
@@ -256,6 +276,15 @@ function walkStaticChildren(
     const node = siblings[index];
     if (parentPath.length === 0 && (node instanceof TmplAstBoundText || node instanceof TmplAstText)) {
       if (node instanceof TmplAstBoundText) {
+        const wrapId = state.textWraps.get(node.sourceSpan.start.offset);
+        if (wrapId !== undefined) {
+          // The compiler wrapped this interpolation in its own marker
+          // element, which occupies an element slot of its own.
+          const path = [...parentPath, elementIndex++];
+          state.nodePaths[wrapId] = path;
+          state.nodeIdsByPath[path.join('/')] = wrapId;
+          continue;
+        }
         const hostId = 'hostNode';
         if (!state.nodePaths[hostId]) {
           state.nodes.push(hostId);
@@ -263,7 +292,19 @@ function walkStaticChildren(
         }
         bindTextInterpolation(node, state, hostId, rootTextIndex);
       }
-      if (node instanceof TmplAstBoundText || node.value.trim()) rootTextIndex++;
+      if (node instanceof TmplAstBoundText || node.value.trim() || state.preserveWhitespaces) {
+        rootTextIndex++;
+      }
+      continue;
+    }
+
+    const wrapId = node instanceof TmplAstBoundText
+      ? state.textWraps.get(node.sourceSpan.start.offset)
+      : undefined;
+    if (wrapId !== undefined) {
+      const path = [...parentPath, elementIndex++];
+      state.nodePaths[wrapId] = path;
+      state.nodeIdsByPath[path.join('/')] = wrapId;
       continue;
     }
 
@@ -580,12 +621,46 @@ function visitElement(
   // Keep sibling elements and their text nodes intact when updating a run.
   if (!hasExplicitTextBinding) {
     let textIndex = 0;
-    for (const child of element.children) {
-      if (!(child instanceof TmplAstBoundText) && !(child instanceof TmplAstText)) continue;
-      if (child instanceof TmplAstText && !child.value.trim()) continue;
-      const index = textIndex++;
-      if (!(child instanceof TmplAstBoundText)) continue;
-      bindTextInterpolation(child, state, nodeId, element.children.length === 1 ? undefined : index);
+    let dynamicSibling = false;
+    // Transparent containers render their children as siblings at this
+    // element level, so the DOM text order follows the flattened sequence -
+    // the same order the element path computation uses.
+    const textSiblings = flattenTransparentContainers(element.children);
+    for (const child of textSiblings) {
+      if (child instanceof TmplAstBoundText) {
+        const index = textIndex++;
+        // A topology-shifting sibling renders a runtime-decided number of
+        // text nodes (dynamic block content, lowered block ranges), so a
+        // positional text index would follow the shifts. Such interpolations
+        // are wrapped in a compiler-owned marker element and addressed as an
+        // element of their own instead.
+        const wrapId = dynamicSibling
+          ? `node${state.nextNode++}`
+          : undefined;
+        // A sole interpolation child keeps the nameless form: the runtime
+        // resolves the element's first text node, inserting it if missing.
+        const positional = !dynamicSibling && textSiblings.length > 1;
+
+        if (wrapId !== undefined) {
+          state.nodes.push(wrapId);
+          state.unstableTargets.add(wrapId);
+          state.preMarkedNodes.add(wrapId);
+          state.textWraps.set(child.sourceSpan.start.offset, wrapId);
+        }
+
+        bindTextInterpolation(child, state, nodeId, positional ? index : undefined, wrapId);
+        continue;
+      }
+      if (child instanceof TmplAstText) {
+        if (!child.value.trim() && !state.preserveWhitespaces) continue;
+        textIndex += 1;
+        continue;
+      }
+      if (shiftsElementTopology(child) ||
+          (child instanceof TmplAstElement &&
+            child.attributes.some(attribute => attribute.name === MARKER_ATTRIBUTE))) {
+        dynamicSibling = true;
+      }
     }
   }
 
@@ -608,20 +683,29 @@ function installStableTargetMarkers(state: WalkState): void {
     const segments: string[] = [];
     for (let length = 1; length <= path.length; length++) {
       const ancestor = state.nodeIdsByPath[path.slice(0, length).join('/')];
-      const element = ancestor && state.nodeElements[ancestor];
-      if (!ancestor || !element) {
+      if (!ancestor) {
         throw new Error(`Cannot locate static ancestor for Streamix target ${target}.`);
       }
       if (!marked.has(ancestor)) {
-        if (element.attributes.some(attribute => attribute.name === 'data-sx-node')) {
-          throw new Error('data-sx-node is reserved for compiler-owned DOM addressing.');
+        if (state.preMarkedNodes.has(ancestor)) {
+          // A compiler-created marker element: its tag already carries the
+          // data-sx-node attribute from the wrapping edit.
+          marked.add(ancestor);
+        } else {
+          const element = state.nodeElements[ancestor];
+          if (!element) {
+            throw new Error(`Cannot locate static ancestor for Streamix target ${target}.`);
+          }
+          if (element.attributes.some(attribute => attribute.name === 'data-sx-node')) {
+            throw new Error('data-sx-node is reserved for compiler-owned DOM addressing.');
+          }
+          const afterTag = element.sourceSpan.start.offset + 1 + element.name.length;
+          state.bindingEdits.push({
+            start: afterTag, end: afterTag,
+            replacement: ` data-sx-node="${ancestor}"`,
+          });
+          marked.add(ancestor);
         }
-        const afterTag = element.sourceSpan.start.offset + 1 + element.name.length;
-        state.bindingEdits.push({
-          start: afterTag, end: afterTag,
-          replacement: ` data-sx-node="${ancestor}"`,
-        });
-        marked.add(ancestor);
       }
       segments.push(`[data-sx-node="${ancestor}"]`);
     }
@@ -1093,19 +1177,37 @@ function analyzeInterpolation(
     sourceTransparent: true };
 }
 
-function bindTextInterpolation(child: TmplAstBoundText, state: WalkState, nodeId: string, index?: number): void {
+function bindTextInterpolation(
+  child: TmplAstBoundText,
+  state: WalkState,
+  nodeId: string,
+  index?: number,
+  wrapId?: string,
+): void {
   const analysis = analyzeInterpolation(child.value, state);
   if (!analysis) return;
   if (analysis.mode === 'unsupported') {
     throw new Error(angularOwnedReadError(analysis.dependencies[0], MIXED_STATE_REASON));
   }
   const span = { start: child.sourceSpan.start.offset, end: child.sourceSpan.end.offset };
-  if (analysis.dependencies.length > 0) {
-    state.bindingEdits.push({ ...span, replacement: '{{ ' + pendingSafeExpression(analysis.expression, analysis.dependencies) + ' }}' });
+  const pending = pendingSafeExpression(analysis.expression, analysis.dependencies);
+  if (wrapId !== undefined) {
+    // The wrapper element carries the stable-target marker itself, so the
+    // runtime addresses it like any other compiler-owned element and binds
+    // the single text node Angular renders inside it.
+    const inner = analysis.dependencies.length > 0
+      ? '{{ ' + pending + ' }}'
+      : state.template.slice(span.start, span.end);
+    state.bindingEdits.push({
+      ...span,
+      replacement: `<span data-sx-node="${wrapId}">${inner}</span>`,
+    });
+  } else if (analysis.dependencies.length > 0) {
+    state.bindingEdits.push({ ...span, replacement: '{{ ' + pending + ' }}' });
   }
   state.bindings.push({
     kind: analysis.mode === 'direct' ? 'text-node' : 'text-expression-node',
-    node: nodeId, name: index === undefined ? undefined : String(index),
+    node: wrapId ?? nodeId, name: wrapId !== undefined ? undefined : index === undefined ? undefined : String(index),
     source: analysis.directSource ?? analysis.expression,
     dependencies: analysis.dependencies, span,
   });

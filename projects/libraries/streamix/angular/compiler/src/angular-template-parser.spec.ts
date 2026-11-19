@@ -56,4 +56,65 @@ describe('parseSxTemplate static topology', () => {
       { resolveReactiveSource },
     )).toThrowError(/projection|static element topology/i);
   });
+
+
+  it('counts flattened ng-container text when addressing interpolations', () => {
+    const parsed = parseSxTemplate(
+      '<p><ng-container>prefix </ng-container>{{ count }}</p>',
+      'inline.html',
+      { resolveReactiveSource: path => path === 'count' ? 'count' : undefined },
+    );
+
+    const text = parsed.plan.bindings.find(binding => binding.kind.startsWith('text-') && binding.kind.includes('node'));
+    expect(text?.name).toBe('1');
+  });
+
+  it('wraps interpolations after lowered dynamic siblings in compiler-owned markers', () => {
+    const parsed = parseSxTemplate(
+      '<p><span data-sx-block="0"></span>{{ count }}</p>',
+      'inline.html',
+      { resolveReactiveSource: path => path === 'count' ? 'count' : undefined },
+    );
+
+    const edit = parsed.bindingEdits.find(edit =>
+      edit.replacement.includes('<span data-sx-node="node'));
+    expect(edit).toBeDefined();
+    expect(edit!.replacement).toContain('{{ '); expect(edit!.replacement).toContain('</span>');
+
+    const text = parsed.plan.bindings.find(binding => binding.kind.startsWith('text-') && binding.kind.includes('node'));
+    expect(text).toBeDefined();
+    expect(text!.name).toBeUndefined();
+    // The wrapper carries its own stable-target marker and is addressed
+    // through a selector instead of a shifting element path.
+    expect(
+      parsed.nodeSelectors[text!.node].includes('[data-sx-node="' + text!.node + '"'),
+    ).toBeTrue();
+  });
+
+  it('wraps interpolations after Angular-owned dynamic siblings too', () => {
+    const parsed = parseSxTemplate(
+      '<p>@if (plain) {started} {{ count }}</p>',
+      'inline.html',
+      { resolveReactiveSource: path => path === 'count' ? 'count' : undefined },
+    );
+
+    const text = parsed.plan.bindings.find(binding => binding.kind.startsWith('text-') && binding.kind.includes('node'));
+    expect(text?.name).toBeUndefined();
+    expect(
+      parsed.bindingEdits.some(edit =>
+        edit.replacement.includes('<span data-sx-node="'),
+      ),
+    ).toBeTrue();
+  });
+
+  it('counts whitespace-only text when preserveWhitespaces is enabled', () => {
+    const source = '<p> <span>x</span> {{ count }}</p>';
+    const resolveReactiveSource = (path: string) => path === 'count' ? 'count' : undefined;
+
+    const defaultRun = parseSxTemplate(source, 'inline.html', { resolveReactiveSource });
+    expect(defaultRun.plan.bindings.find(binding => binding.kind.startsWith('text-') && binding.kind.includes('node'))?.name).toBe('0');
+
+    const preserveRun = parseSxTemplate(source, 'inline.html', { resolveReactiveSource, preserveWhitespaces: true });
+    expect(preserveRun.plan.bindings.find(binding => binding.kind.startsWith('text-') && binding.kind.includes('node'))?.name).toBe('1');
+  });
 });
