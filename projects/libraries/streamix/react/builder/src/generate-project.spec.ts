@@ -383,3 +383,16 @@ describe("React Angular-hosted source generation", () => {
     }
   });
 });
+
+describe("Streamix React builder schema", () => {
+  it("declares the introspection and watch options", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const schema = JSON.parse(
+      await readFile("projects/libraries/streamix/react/builder/schema.json", "utf8"),
+    );
+
+    expect(schema.properties.introspection.type).toBe("boolean");
+    expect(schema.properties.watch.type).toBe("boolean");
+    expect(schema.required).toEqual(["delegateTarget", "sourceRoot"]);
+  });
+});

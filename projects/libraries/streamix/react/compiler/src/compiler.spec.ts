@@ -55,9 +55,14 @@ describe("React JSX compiler", () => {
       }
     `);
 
+    // The value import is emitted, and the duplicate binding is a clear error
+    // instead of generated calls silently binding to a type.
     expect(result.code).toMatch(
       /import \{[^}]*useStreamixSource[^}]*\} from "@epikodelabs\/streamix\/react";/,
     );
+    expect(result.diagnostics.some(item =>
+      item.message.includes('useStreamixSource') && item.message.includes('collides'),
+    )).toBeTrue();
   });
 
   it("emits the canonical runtime import for an aliased import", () => {
@@ -69,10 +74,71 @@ describe("React JSX compiler", () => {
       }
     `);
 
+    expect(result.diagnostics).toEqual([]);
     expect(result.code).toContain("useStreamixSource as readSource");
     expect(result.code).toMatch(
       /import \{[^}]*useStreamixSource[^}]*\} from "@epikodelabs\/streamix\/react";/,
     );
+  });
+
+  it("rejects a local helper shadowing a generated runtime name", () => {
+    const result = transformReactJsx(`
+      function useStreamixSource() {
+        return "local";
+      }
+      function Counter() {
+        const count = atom(0);
+        return <output>{count}</output>;
+      }
+    `);
+
+    expect(result.diagnostics.some(item =>
+      item.message.includes('useStreamixSource') && item.message.includes('collides'),
+    )).toBeTrue();
+  });
+
+  it("rejects a foreign import shadowing a generated runtime name", () => {
+    const result = transformReactJsx(`
+      import { useStreamixSource } from "./utils";
+      function Counter() {
+        const count = atom(0);
+        return <output>{count}</output>;
+      }
+    `);
+
+    expect(result.diagnostics.some(item =>
+      item.message.includes('useStreamixSource') && item.message.includes('collides'),
+    )).toBeTrue();
+  });
+
+  it("renames generated bindings past authored identifiers", () => {
+    const result = transformReactJsx(`
+      const __streamixBinding0 = "authored";
+      function Counter() {
+        const count = atom(0);
+        return <output>{count}</output>;
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain('const __streamixBinding0 = "authored"');
+    expect(result.code).toContain("const __streamixBinding1 =");
+  });
+
+  it("renames class component bindings past authored identifiers", () => {
+    const result = transformReactJsx(`
+      const __streamixClassBinding0 = "authored";
+      const state = scope({ title: "Ready" });
+      class Panel extends React.Component {
+        render() {
+          return <output>{state.title}</output>;
+        }
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain('const __streamixClassBinding0 = "authored"');
+    expect(result.code).toContain("const __streamixClassBinding1 =");
   });
 
   it("keeps local atoms raw inside derived shorthand formulas", () => {

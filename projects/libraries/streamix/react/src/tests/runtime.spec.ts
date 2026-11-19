@@ -1,6 +1,6 @@
 import { act, Component, createElement, StrictMode, Suspense, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { atom, subscribeStreamixDevtools, type Writable } from "@epikodelabs/streamix";
+import { atom, subscribeStreamixDevtools, ɵstreamixDevtoolsListenerCount, type Writable } from "@epikodelabs/streamix";
 import {
   atomRef,
   createAtomSnapshot,
@@ -371,11 +371,13 @@ idescribe("React runtime escape hatches", () => {
     expect(container.textContent).toContain("write: title");
   });
 
-  it("renders no DevTools panel in production builds", async () => {
+  it("renders no DevTools panel or listener in production builds", async () => {
     ɵsetStreamixDevtoolsEnabled(false);
     try {
+      const listenersBefore = ɵstreamixDevtoolsListenerCount();
       act(() => root.render(createElement(StreamixDevtools)));
       expect(container.querySelector("[data-streamix-devtools]")).toBeNull();
+      expect(ɵstreamixDevtoolsListenerCount()).toBe(listenersBefore);
     } finally {
       ɵsetStreamixDevtoolsEnabled(true);
     }

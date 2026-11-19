@@ -3,9 +3,22 @@
   "title": "Streamix React application builder",
   "type": "object",
   "properties": {
-    "delegateTarget": { "type": "string" },
-    "sourceRoot": { "type": "string" },
-    "watch": { "type": "boolean" }
+    "delegateTarget": {
+      "type": "string",
+      "description": "The project:target pair that builds the generated React project."
+    },
+    "sourceRoot": {
+      "type": "string",
+      "description": "React source directory processed by Streamix, relative to the workspace root."
+    },
+    "introspection": {
+      "type": "boolean",
+      "description": "Instrument generated sources for the Streamix inspector. Off by default."
+    },
+    "watch": {
+      "type": "boolean",
+      "description": "Rebuild when application sources or Streamix libraries change. Serve targets watch by default."
+    }
   },
   "required": ["delegateTarget", "sourceRoot"],
   "additionalProperties": true

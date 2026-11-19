@@ -532,6 +532,7 @@ export function transformReactJsx(
   let bindingCount = 0;
   let needsRuntimeImport = false;
   const diagnostics: ReactJsxDiagnostic[] = [];
+  const authoredIdentifiers = collectIdentifierTexts(sourceFile);
   const moduleAtoms = new Set([
     ...collectModuleBindings(sourceFile, "atom", imports, checker),
     ...collectModuleBindings(sourceFile, "derived", imports, checker),
@@ -548,6 +549,15 @@ export function transformReactJsx(
 
   const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
     const factory = context.factory;
+    // Authored names always win: skip any generated binding number the file
+    // already uses instead of producing a duplicate declaration.
+    const nextGeneratedName = (prefix: string): string => {
+      let name: string;
+      do {
+        name = `${prefix}${bindingCount++}`;
+      } while (authoredIdentifiers.has(name));
+      return name;
+    };
     const asAny = (expression: ts.Expression): ts.Expression => isJavaScript ? expression :
       factory.createAsExpression(expression, factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword));
 
@@ -1092,7 +1102,7 @@ export function transformReactJsx(
         traceSources.set(atomName, factory.createIdentifier(atomName));
         const existing = atomBindings.get(atomName);
         if (existing) return existing;
-        const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
+        const name = factory.createIdentifier(nextGeneratedName("__streamixBinding"));
         atomBindings.set(atomName, name);
         needsRuntimeImport = true;
         const statement = factory.createVariableStatement(
@@ -1119,7 +1129,7 @@ export function transformReactJsx(
         traceSources.set(key, atomSource);
         const existing = atomBindings.get(key);
         if (existing) return existing;
-        const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
+        const name = factory.createIdentifier(nextGeneratedName("__streamixBinding"));
         atomBindings.set(key, name);
         needsRuntimeImport = true;
         const statement = factory.createVariableStatement(
@@ -1159,7 +1169,7 @@ export function transformReactJsx(
         const bindingKey = `${scopeName}.${memberPath}`;
         const existing = scopeBindings.get(bindingKey);
         if (existing) return existing;
-        const name = factory.createIdentifier(`__streamixBinding${bindingCount++}`);
+        const name = factory.createIdentifier(nextGeneratedName("__streamixBinding"));
         scopeBindings.set(bindingKey, name);
         needsRuntimeImport = true;
         const sourceExpression = scopeSourceExpression(scopeName, path);
@@ -1955,7 +1965,7 @@ export function transformReactJsx(
       const hookStatements: ts.Statement[] = [];
       const snapshots: ts.ObjectLiteralElementLike[] = [];
       for (const atomName of atomSources) {
-        const binding = factory.createIdentifier(`__streamixClassBinding${bindingCount++}`);
+        const binding = factory.createIdentifier(nextGeneratedName("__streamixClassBinding"));
         needsRuntimeImport = true;
         hookStatements.push(factory.createVariableStatement(undefined, factory.createVariableDeclarationList([
           factory.createVariableDeclaration(binding, undefined, undefined, factory.createCallExpression(
@@ -1968,7 +1978,7 @@ export function transformReactJsx(
       for (const [scopeName, properties] of scopeSources) for (const memberPath of properties) {
         const path = memberPath.split('.');
         const key = `${scopeName}.${memberPath}`;
-        const binding = factory.createIdentifier(`__streamixClassBinding${bindingCount++}`);
+        const binding = factory.createIdentifier(nextGeneratedName("__streamixClassBinding"));
         needsRuntimeImport = true;
         hookStatements.push(factory.createVariableStatement(undefined, factory.createVariableDeclarationList([
           factory.createVariableDeclaration(binding, undefined, undefined, factory.createCallExpression(
@@ -2086,6 +2096,22 @@ export function transformReactJsx(
   const code = needsRuntimeImport && /\b(?:useStreamixSource|useStreamixLocal|useStreamixAfterCommit)\s*\(/.test(printed)
     ? `${head}${runtimePreludeFor(printed)}\n${printed.slice(head.length)}`
     : printed;
+
+  // A generated call cannot be rebound to an authored helper without changing
+  // behavior, so a conflicting authored binding is a build error rather than a
+  // silently shadowed import.
+  const usedRuntimeNames = new Set<string>(
+    REACT_RUNTIME_NAMES.filter(name => new RegExp(`\\b${name}\\s*\\(`).test(printed)),
+  );
+  for (const conflict of findRuntimeNameConflicts(sourceFile, usedRuntimeNames)) {
+    diagnostics.push(diagnostic(
+      conflict.node,
+      "error",
+      `Generated Streamix React runtime name "${conflict.name}" collides with an existing binding. ` +
+      "Rename the authored declaration or import.",
+    ));
+  }
+
   return {
     code,
     bindingCount,
@@ -2162,9 +2188,15 @@ function isAtomReferenceExpression(
     ts.isIdentifier(expression.arguments[0]) && atoms.has(expression.arguments[0].text);
 }
 
+const REACT_RUNTIME_NAMES = [
+  "useStreamixAfterCommit",
+  "useStreamixLocal",
+  "__streamixTrace",
+  "useStreamixSource",
+] as const;
+
 function runtimePreludeFor(code: string): string {
-  const names = ["useStreamixAfterCommit", "useStreamixLocal", "__streamixTrace", "useStreamixSource"]
-    .filter(name => code.includes(`${name}(`));
+  const names: string[] = REACT_RUNTIME_NAMES.filter(name => code.includes(`${name}(`));
   // An authored import already binds the identifier; injecting our own line
   // for the same name would be a duplicate declaration (TS2300).
   const authored = new Set<string>();
@@ -2187,6 +2219,86 @@ function runtimePreludeFor(code: string): string {
   return missing.length > 0
     ? `import { ${missing.join(", ")} } from "@epikodelabs/streamix/react";`
     : "";
+}
+
+/** Every authored identifier, used to keep generated binding names unique. */
+function collectIdentifierTexts(file: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) names.add(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return names;
+}
+
+function bindingIdentifiers(name: ts.BindingName, out: ts.Identifier[]): void {
+  if (ts.isIdentifier(name)) {
+    out.push(name);
+    return;
+  }
+  for (const element of name.elements) {
+    if (ts.isOmittedExpression(element)) continue;
+    bindingIdentifiers(element.name, out);
+  }
+}
+
+/**
+ * Authored bindings that would duplicate or shadow a generated runtime import.
+ * Unaliased value imports from the Streamix React module are reused and are
+ * not conflicts; type-only, aliased, and foreign bindings are.
+ */
+function findRuntimeNameConflicts(
+  file: ts.SourceFile,
+  names: ReadonlySet<string>,
+): Array<{ name: string; node: ts.Identifier }> {
+  const conflicts: Array<{ name: string; node: ts.Identifier }> = [];
+  const seen = new Set<string>();
+  const record = (identifier: ts.Identifier): void => {
+    if (!names.has(identifier.text) || seen.has(identifier.text)) return;
+    seen.add(identifier.text);
+    conflicts.push({ name: identifier.text, node: identifier });
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) {
+      const clause = node.importClause;
+      if (clause) {
+        const runtimeModule = ts.isStringLiteral(node.moduleSpecifier) &&
+          node.moduleSpecifier.text === "@epikodelabs/streamix/react";
+        if (clause.name) record(clause.name);
+        const bindings = clause.namedBindings;
+        if (bindings && ts.isNamespaceImport(bindings)) {
+          record(bindings.name);
+        } else if (bindings && ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements) {
+            const reusable = runtimeModule && !clause.isTypeOnly &&
+              !element.isTypeOnly && !element.propertyName;
+            if (!reusable) record(element.name);
+          }
+        }
+      }
+      return;
+    }
+
+    if (ts.isVariableDeclaration(node) || ts.isParameter(node)) {
+      const identifiers: ts.Identifier[] = [];
+      bindingIdentifiers(node.name, identifiers);
+      identifiers.forEach(record);
+    } else if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) ||
+                ts.isFunctionExpression(node) || ts.isClassExpression(node)) && node.name) {
+      record(node.name);
+    } else if (ts.isCatchClause(node) && node.variableDeclaration) {
+      const identifiers: ts.Identifier[] = [];
+      bindingIdentifiers(node.variableDeclaration.name, identifiers);
+      identifiers.forEach(record);
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(file);
+  return conflicts;
 }
 
 function collectImportedReactiveSources(file: ts.SourceFile, checker?: ts.TypeChecker): Set<string> {

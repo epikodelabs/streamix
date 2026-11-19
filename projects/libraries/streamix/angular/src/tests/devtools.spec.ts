@@ -1,12 +1,19 @@
 import { useAngularTestEnvironment } from './angular-test-environment';
+import { PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { atom, derived, __streamixDebug } from '@epikodelabs/streamix';
+import {
+  atom,
+  derived,
+  __streamixDebug,
+  ɵstreamixDevtoolsListenerCount,
+} from '@epikodelabs/streamix';
 import { enableStreamixIntrospection } from '@epikodelabs/streamix/introspection';
 import { SxBindingTable } from '../lib/binding-table';
 import {
   recordStreamixDevtoolsEvent,
   streamixDevtoolsSnapshot,
   StreamixDevtools,
+  ɵsetStreamixDevtoolsEnabled,
 } from '../lib/devtools';
 
 async function flushMicrotasks(): Promise<void> {
@@ -16,6 +23,36 @@ async function flushMicrotasks(): Promise<void> {
 
 describe('Angular devtools', () => {
   useAngularTestEnvironment();
+  afterEach(() => {
+    ɵsetStreamixDevtoolsEnabled(true);
+  });
+
+  it('does not subscribe or render in production builds', () => {
+    ɵsetStreamixDevtoolsEnabled(false);
+    const before = ɵstreamixDevtoolsListenerCount();
+
+    const fixture = TestBed.createComponent(StreamixDevtools);
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-streamix-devtools]')).toBeNull();
+    expect(ɵstreamixDevtoolsListenerCount()).toBe(before);
+    fixture.destroy();
+  });
+
+  it('does not subscribe on the server platform', () => {
+    TestBed.configureTestingModule({
+      providers: [{ provide: PLATFORM_ID, useValue: 'server' }],
+    });
+    const before = ɵstreamixDevtoolsListenerCount();
+
+    const fixture = TestBed.createComponent(StreamixDevtools);
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-streamix-devtools]')).toBeNull();
+    expect(ɵstreamixDevtoolsListenerCount()).toBe(before);
+    fixture.destroy();
+  });
+
   it('renders live introspection without evaluating unused formulas and updates on animation frames', async () => {
     enableStreamixIntrospection();
     let evaluations = 0;

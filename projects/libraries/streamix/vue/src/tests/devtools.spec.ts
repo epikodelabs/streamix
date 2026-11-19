@@ -7,6 +7,7 @@ import { renderToString } from '@vue/server-renderer';
 import {
   recordStreamixDevtoolsEvent,
   streamixDevtoolsSnapshot,
+  ɵstreamixDevtoolsListenerCount,
 } from '@epikodelabs/streamix';
 import {
   StreamixDevtools,
@@ -29,7 +30,9 @@ describe('Vue DevTools lifecycle', () => {
   it('requires an effect scope for the composable and offers a manual bridge', async () => {
     expect(() => useStreamixDevtoolsEvents()).toThrowError(/active effectScope/);
 
+    const listenersBefore = ɵstreamixDevtoolsListenerCount();
     const bridge = createStreamixDevtoolsEventsBridge();
+    expect(ɵstreamixDevtoolsListenerCount()).toBe(listenersBefore + 1);
     const source = `manual-${Date.now()}`;
     recordStreamixDevtoolsEvent({ type: 'write', source });
     await flushMicrotasks();
@@ -37,6 +40,7 @@ describe('Vue DevTools lifecycle', () => {
     expect(bridge.events.value.some(event => event.source === source)).toBeTrue();
 
     bridge.dispose();
+    expect(ɵstreamixDevtoolsListenerCount()).toBe(listenersBefore);
     const lengthAtDispose = bridge.events.value.length;
     recordStreamixDevtoolsEvent({ type: 'write', source: `${source}-after` });
     await flushMicrotasks();
@@ -59,23 +63,27 @@ describe('Vue DevTools lifecycle', () => {
 
   it('renders nothing in production builds', async () => {
     ɵsetStreamixDevtoolsEnabled(false);
+    const listenersBefore = ɵstreamixDevtoolsListenerCount();
     const app = createSSRApp({ render: () => h(StreamixDevtools) });
 
     const html = await renderToString(app);
 
     expect(html).not.toContain('data-streamix-devtools');
+    expect(ɵstreamixDevtoolsListenerCount()).toBe(listenersBefore);
   });
 
-  it('renders a stable empty panel during server rendering', async () => {
+  it('renders a stable empty panel without a server listener', async () => {
     recordStreamixDevtoolsEvent({ type: 'write', source: 'server-request-trace' });
+    const listenersBefore = ɵstreamixDevtoolsListenerCount();
     const app = createSSRApp({ render: () => h(StreamixDevtools) });
 
     const html = await renderToString(app);
 
     expect(html).toContain('data-streamix-devtools');
     // Server output must not read the process-wide snapshot: that would mix
-    // traces between requests.
+    // traces between requests, and no per-request listener may be allocated.
     expect(html).not.toContain('server-request-trace');
+    expect(ɵstreamixDevtoolsListenerCount()).toBe(listenersBefore);
   });
 
   it('does not serialize a write preview while recording is disabled', () => {

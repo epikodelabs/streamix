@@ -66,6 +66,16 @@ export function streamixDevtoolsSnapshot(): readonly StreamixDevtoolsEvent[] {
   return events;
 }
 
+/**
+ * Number of live trace listeners.
+ *
+ * @internal Used by framework lifecycle tests to prove panels and manual
+ * bridges do not subscribe in production or during server rendering.
+ */
+export function ɵstreamixDevtoolsListenerCount(): number {
+  return listeners.size;
+}
+
 const globalScope = globalThis as typeof globalThis & {
   __streamixDevtoolsRecord?: (event: Omit<StreamixDevtoolsEvent, "time">) => void;
 };

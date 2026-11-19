@@ -14,6 +14,18 @@ import {
 } from '@epikodelabs/streamix';
 import { mountStreamixInspector } from '@epikodelabs/streamix/introspection';
 
+/**
+ * Test-only override for the bundler-provided development flag. Production
+ * code never calls this; the test bundle always sees
+ * `import.meta.env.DEV === true`, so the production branch would otherwise be
+ * unreachable.
+ */
+let enabled = streamixDevtoolsEnabled;
+/** @internal */
+export function ɵsetStreamixDevtoolsEnabled(value: boolean): void {
+  enabled = value;
+}
+
 export {
   recordStreamixDevtoolsEvent,
   streamixDevtoolsEnabled,
@@ -30,20 +42,20 @@ export type { StreamixDevtoolsEvent };
  * server.
  */
 export class StreamixDevtools {
-  private readonly unsubscribe = subscribeStreamixDevtools(() => this.scheduleRender());
+  private unsubscribe: (() => void) | undefined;
   private panel: HTMLElement | undefined;
   private stopInspector: (() => void) | undefined;
   private renderQueued = false;
 
   constructor() {
     inject(DestroyRef).onDestroy(() => {
-      this.unsubscribe();
+      this.unsubscribe?.();
       this.stopInspector?.();
       this.panel?.remove();
       this.panel = undefined;
     });
 
-    if (!streamixDevtoolsEnabled || inject(PLATFORM_ID) === 'server') {
+    if (!enabled || inject(PLATFORM_ID) === 'server') {
       return;
     }
 
@@ -51,6 +63,11 @@ export class StreamixDevtools {
       this.stopInspector = mountStreamixInspector(inject<ElementRef<HTMLElement>>(ElementRef).nativeElement);
       return;
     }
+
+    // Subscribe only after the production/server gate: a disabled panel must
+    // not add a trace listener per instance or per SSR request.
+    this.unsubscribe = subscribeStreamixDevtools(() => this.scheduleRender());
+
     const panel = document.createElement('aside');
     panel.setAttribute('data-streamix-devtools', '');
     const style = panel.style;
