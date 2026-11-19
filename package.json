@@ -27,7 +27,8 @@
     "postbuild": "node scripts/finalize-dist.mjs",
     "test:infra": "node scripts/run-testify.mjs --config testify.infra.json --headless --browser node",
     "bench:angular": "node scripts/run-angular-benchmarks.mjs",
-    "bench:angular:serve": "vite projects/libraries/streamix/angular/benchmarks"
+    "bench:angular:serve": "vite projects/libraries/streamix/angular/benchmarks",
+    "bench:dom": "node scripts/run-dom-benchmarks.mjs"
   },
   "dependencies": {
     "@angular/animations": "^21.1.0",

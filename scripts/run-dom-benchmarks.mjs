@@ -1,0 +1,326 @@
+#!/usr/bin/env node
+/**
+ * Runs the DOM intersection-source benchmarks once, headlessly, and prints
+ * the table.
+ *
+ * The subject is MutationObserver fan-out in the browser, so the benchmark
+ * must run in a real browser. This runner starts Vite to transform and serve
+ * the modules, drives the installed Chrome (or Edge) in headless mode, and
+ * reads the results out of the dumped DOM.
+ *
+ * The measurement settles IntersectionObserver and MutationObserver
+ * callbacks asynchronously, which `--dump-dom` alone would not wait for.
+ * The page therefore holds the load event open with an `/benchmark-hold`
+ * image and releases it through `/benchmark-done` once the results are
+ * written; the barrier middleware below resolves both.
+ *
+ * Use `--targets`, `--batches`, `--nodesPerBatch` and `--samples` to tune the
+ * workload.
+ */
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createServer } from 'vite';
+
+const BENCHMARKS_ROOT = fileURLToPath(
+  new URL(
+    '../projects/libraries/streamix/dom/benchmarks/',
+    import.meta.url,
+  ),
+);
+const BROWSER_TIMEOUT_MS = 180_000;
+const WORKLOAD_PARAMS = new Set([
+  'targets',
+  'batches',
+  'nodesPerBatch',
+  'samples',
+]);
+
+/** Turns `--targets=500` / `--targets 500` into the page's query string. */
+function workloadQuery(argv) {
+  const params = new URLSearchParams();
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+
+    if (!argument.startsWith('--')) {
+      throw new Error(`Unexpected argument "${argument}".`);
+    }
+
+    const [name, inlineValue] = argument.slice(2).split('=');
+
+    if (!WORKLOAD_PARAMS.has(name)) {
+      throw new Error(
+        `Unknown option "--${name}". Valid: ` +
+          `${[...WORKLOAD_PARAMS].map(param => `--${param}`).join(', ')}.`,
+      );
+    }
+
+    const value = inlineValue ?? argv[(index += 1)];
+
+    if (value === undefined || !/^\d+$/.test(value)) {
+      throw new Error(`"--${name}" needs a whole number.`);
+    }
+
+    params.set(name, value);
+  }
+
+  const query = params.toString();
+
+  return query ? `?${query}` : '';
+}
+
+function resolveBrowser() {
+  const fromEnvironment =
+    process.env['CHROME_PATH'] ?? process.env['CHROME_BIN'];
+
+  if (fromEnvironment && existsSync(fromEnvironment)) {
+    return fromEnvironment;
+  }
+
+  const programFiles =
+    process.env['PROGRAMFILES'] ?? 'C:\\Program Files';
+  const programFilesX86 =
+    process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)';
+  const localAppData = process.env['LOCALAPPDATA'] ?? '';
+
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+          join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        ]
+      : process.platform === 'darwin'
+        ? [
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Chromium.app/Contents/MacOS/Chromium',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+          ]
+        : [
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/snap/bin/chromium',
+          ];
+
+  for (const candidate of candidates) {
+    if (candidate && existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const name of [
+    'google-chrome',
+    'google-chrome-stable',
+    'chromium',
+    'chromium-browser',
+    'chrome',
+  ]) {
+    if (!spawnSync(name, ['--version'], { stdio: 'ignore' }).error) {
+      return name;
+    }
+  }
+
+  throw new Error(
+    'No Chrome/Chromium found. Point CHROME_PATH at the browser executable.',
+  );
+}
+
+function benchmarkBarrier() {
+  let release;
+  const gate = new Promise(resolve => {
+    release = resolve;
+  });
+
+  return {
+    name: 'sx-benchmark-barrier',
+    configureServer(server) {
+      server.middlewares.use('/benchmark-done', (_req, res) => {
+        release();
+        res.end();
+      });
+      server.middlewares.use('/benchmark-hold', (_req, res) => {
+        void gate.then(() => {
+          res.end();
+        });
+      });
+    },
+  };
+}
+
+function runBrowser(browserPath, url) {
+  return new Promise((resolve, reject) => {
+    const profile = mkdtempSync(join(tmpdir(), 'sx-dom-benchmarks-'));
+    const child = spawn(
+      browserPath,
+      [
+        '--headless=new',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-default-browser-check',
+        `--user-data-dir=${profile}`,
+        '--dump-dom',
+        url,
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', chunk => (stdout += chunk));
+    child.stderr.on('data', chunk => (stderr += chunk));
+
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(
+        new Error(
+          `The browser did not finish within ${BROWSER_TIMEOUT_MS} ms.`,
+        ),
+      );
+    }, BROWSER_TIMEOUT_MS);
+
+    child.on('error', error => {
+      clearTimeout(timer);
+      reject(error);
+    });
+
+    child.on('close', code => {
+      clearTimeout(timer);
+
+      try {
+        // Windows may hold the profile open for a moment after exit.
+        rmSync(profile, { recursive: true, force: true });
+      } catch {
+        /* leave the temp profile behind */
+      }
+
+      if (code !== 0) {
+        reject(
+          new Error(
+            `The browser exited with code ${code}.\n${stderr.slice(-2000)}`,
+          ),
+        );
+        return;
+      }
+
+      resolve(stdout);
+    });
+  });
+}
+
+function parseResults(dom) {
+  const match = /<pre id="results">([\s\S]*?)<\/pre>/.exec(dom);
+
+  if (!match) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return undefined;
+  }
+}
+
+function printTable(run) {
+  if (run.error) {
+    throw new Error(`The benchmark failed inside the page: ${run.error}`);
+  }
+
+  console.log(`Browser: ${run.userAgent}`);
+  console.log(`Run at:  ${run.generatedAt}`);
+  console.log(
+    `Workload: ${run.params.targets} targets, ${run.params.batches} ` +
+      `batches x ${run.params.nodesPerBatch} nodes, ` +
+      `${run.params.samples} samples\n`,
+  );
+
+  console.table(
+    run.results.map(result => ({
+      case: result.name,
+      medianMs: Number(result.medianMs.toFixed(3)),
+      notes: result.notes,
+    })),
+  );
+}
+
+async function main() {
+  const query = workloadQuery(process.argv.slice(2));
+  const browserPath = resolveBrowser();
+  const server = await createServer({
+    root: BENCHMARKS_ROOT,
+    logLevel: 'warn',
+    resolve: {
+      alias: [
+        {
+          // Vite applies the workspace tsconfig paths, which land the bare
+          // specifier inside the source package whose exports map has no
+          // main entry, so resolution fails before the file is ever read.
+          // Alias it to the same core source the tsconfig path targets.
+          find: '@epikodelabs/streamix/dom',
+          replacement: fileURLToPath(
+            new URL(
+              '../projects/libraries/streamix/dom/src/lib/index.ts',
+              import.meta.url,
+            ),
+          ),
+        },
+        {
+          find: '@epikodelabs/streamix',
+          replacement: fileURLToPath(
+            new URL(
+              '../projects/libraries/streamix/src/lib/index.ts',
+              import.meta.url,
+            ),
+          ),
+        },
+      ],
+    },
+    plugins: [benchmarkBarrier()],
+  });
+
+  await server.listen();
+
+  try {
+    const address = server.httpServer?.address();
+    const port =
+      typeof address === 'object' && address ? address.port : undefined;
+
+    if (!port) {
+      throw new Error('Vite did not report a port.');
+    }
+
+    console.log(`Driving ${browserPath}`);
+    console.log(`Serving ${BENCHMARKS_ROOT}`);
+    console.log(`Workload ${query || '(defaults)'}\n`);
+
+    const dom = await runBrowser(
+      browserPath,
+      `http://localhost:${port}/${query}`,
+    );
+    const run = parseResults(dom);
+
+    if (!run) {
+      throw new Error(
+        'The page did not report benchmark results. ' +
+          'Increase the browser timeout if the workload is too heavy.',
+      );
+    }
+
+    printTable(run);
+  } finally {
+    await server.close();
+  }
+}
+
+main().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
