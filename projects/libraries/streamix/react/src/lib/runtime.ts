@@ -724,18 +724,23 @@ export function useResource<T>(
   return usePreloadedResource(resource);
 }
 
-/** Captures named atom values for an SSR payload. */
+/** Captures current values and the final emissions of completed atoms. */
 export function createAtomSnapshot(sources: Record<string, DependencySource<unknown>>): AtomSnapshot {
   const snapshot: AtomSnapshot = {};
   for (const [name, source] of Object.entries(sources)) {
     const state = readSourceState(source);
-    // Pending and failed sources have no hydratable value (the sentinel
-    // would vanish through JSON.stringify and break hydration key-matching,
-    // and a failed read would abort the whole payload); completed sources
-    // no longer expose their value. The key is omitted and hydration keeps
-    // the matching target pending.
-    if (state.status !== "value") continue;
-    snapshot[name] = viewValue(state.value);
+    let value: unknown;
+    if (state.status === "value") {
+      value = state.value;
+    } else if (state.status === "completed" && "safeValue" in source) {
+      // A completed Streamix flow no longer exposes .value. Its cached
+      // emission is still readable, including an explicitly emitted undefined.
+      value = source.safeValue;
+      if (value === NO_INITIAL_VALUE) continue;
+    } else {
+      continue;
+    }
+    Object.defineProperty(snapshot, name, { value, enumerable: true, configurable: true, writable: true });
   }
   return snapshot;
 }
@@ -849,9 +854,8 @@ export function hydrateAtomPayload(
   targets: Record<string, Writable<unknown>>,
   payload: AtomSnapshotPayload,
 ): void {
-  // The server omits keys for pending, failed, and completed sources: those
-  // targets simply stay pending on the client. Unknown payload keys remain a
-  // hard error because they indicate a server/client target mismatch.
+  // Sources without a capturable value leave their client targets pending.
+  // Unknown payload keys indicate a server/client target mismatch.
   const unknown = Object.keys(payload.atoms)
     .filter(name => !Object.prototype.hasOwnProperty.call(targets, name))
     .sort();

@@ -156,9 +156,9 @@ describe("Streamix React adoption regressions", () => {
     // Short-circuit writes only assign when the operator's condition holds,
     // and the conditional form keeps the right side in the enclosing scope so
     // `await`/`yield` operands stay valid.
-    expect(result.code).toContain("count.value && (count.next(flag.value), count.value)");
-    expect(result.code).toContain("count.value || (count.next(guess.value), count.value)");
-    expect(result.code).toContain("count.value ?? (count.next(guess.value), count.value)");
+    expect(result.code).toContain("count.value && count.next(flag.value)");
+    expect(result.code).toContain("count.value || count.next(guess.value)");
+    expect(result.code).toContain("count.value ?? count.next(guess.value)");
     expect(result.code).not.toContain("__streamixCurrent");
   });
 

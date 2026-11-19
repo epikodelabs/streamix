@@ -37,6 +37,35 @@ interface MapModule {
   fromPlain: Writable<number>;
 }
 
+describe("React derived formula wrappers", () => {
+  it("tracks an atom through a wrapped inline formula", () => {
+    const { result, exports } = compileModule<{ count: Writable<number>; total: { value: number; dispose(): void } }>(`
+      import { atom, derived } from "@epikodelabs/streamix";
+      export const count = atom(2);
+      export const total = derived((() => count * 2) as () => number);
+    `, "wrapped-derived.ts");
+    try {
+      expect(errors(result)).toEqual([]);
+      expect(exports.total.value).toBe(4);
+      exports.count.next(3);
+      expect(exports.total.value).toBe(6);
+    } finally {
+      exports.total.dispose();
+      exports.count.dispose();
+    }
+  });
+
+  it("rejects an asynchronous wrapped inline formula", () => {
+    const result = transformReactJsx(`
+      import { derived } from "@epikodelabs/streamix";
+      export const total = derived((async () => 2) as any);
+    `, "wrapped-async.ts");
+    expect(errors(result).map(error => error.message)).toEqual([
+      jasmine.stringMatching(/formulas must return synchronously/),
+    ]);
+  });
+});
+
 /** Compile a component and execute it; useStreamixLocal memoizes by factory text
  * so consecutive renders reuse the same atom and derived instances. */
 function compileComponent(source: string, fileName: string) {

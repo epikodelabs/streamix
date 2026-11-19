@@ -132,7 +132,7 @@ describe("Streamix React Vite plugin", () => {
   it("rebuilds a project after a dependency edit changes symbol identity", async () => {
     const root = await mkdtemp(join(tmpdir(), "streamix-react-vite-dependency-"));
     try {
-      const app = join(root, "app");
+      const app = join(root, "app#workspace");
       await mkdir(app, { recursive: true });
       await writeFile(join(app, "tsconfig.json"), JSON.stringify({
         compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
@@ -152,12 +152,12 @@ describe("Streamix React Vite plugin", () => {
       const transform = (source: string, path: string) => transformOf(plugin).call(context, source, path) as { code: string };
       const watchChange = watchChangeOf(plugin);
 
-      const adopted = transform(viewSource, view);
+      const adopted = transform(viewSource, `${view}?react-refresh`);
       expect(adopted.code).toContain('useStreamixSource(status, "status")');
 
       // The dependency is no longer structurally reactive.
       await writeFile(dependency, `export declare const status: string;`);
-      watchChange(dependency, { event: "update" });
+      watchChange(`${dependency}#watch`, { event: "update" });
       const plain = transform(viewSource, view);
       expect(plain.code).not.toContain("useStreamixSource");
       expect(plain.code).not.toContain("@epikodelabs/streamix/react");

@@ -57,7 +57,7 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
       ? { define: { "import.meta.env.DEV": "true" } }
       : undefined,
     transform(source, id) {
-      const fileName = id.replace(/[?#].*$/, "");
+      const fileName = sourceFileName(id);
       if (!/\.[jt]sx?$/i.test(fileName) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(fileName) ||
           fileName.replace(/\\/g, "/").includes("/node_modules/")) return null;
       if (options.include && !options.include(fileName)) return null;
@@ -99,7 +99,7 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
       };
     },
     watchChange(id, change) {
-      const fileName = id.replace(/[?#].*$/, "");
+      const fileName = sourceFileName(id);
       // Config and package edits can change options or module resolution for
       // every project, not only the one that lists the file.
       if (/\.json$/i.test(fileName)) {
@@ -123,6 +123,11 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
       if (!matched && change.event === "create" && /\.[cm]?[jt]sx?$/i.test(fileName)) programs.clear();
     },
   };
+}
+
+/** A hash in a directory or file name is valid on disk, including on Windows. */
+function sourceFileName(id: string): string {
+  return id.replace(/(\.(?:[cm]?[jt]sx?|json))[?#].*$/i, "$1");
 }
 
 /** Program file names and Vite ids differ by separators and, on Windows,

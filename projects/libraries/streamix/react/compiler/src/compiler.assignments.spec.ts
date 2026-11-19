@@ -1,5 +1,61 @@
 import { transformReactJsx } from "./compiler";
 
+describe("React compiler unsafe reactive writes", () => {
+  const source = (handler: string) => `
+    import { atom, derived, scope } from "@epikodelabs/streamix";
+    let count = atom(0);
+    const form = atom({ name: "before" });
+    const result = derived(() => ({ name: "before" }));
+    const state = scope({ name: "before" });
+    const map = { count };
+    export function App({ key }) {
+      return <button onClick={${handler}}>{count}</button>;
+    }
+  `;
+
+  for (const mutation of [
+    'form.name = "after"',
+    'form.value.name = "after"',
+    'count.value = 1',
+    'result.name++',
+    'delete state.name',
+    'state.name.length = 0',
+    'state[key] = "after"',
+    'map[key].value = 1',
+    'count = ({ write: (form.name = "after") }).write',
+    '({ value: form.name } = { value: "after" })',
+    'for (form.name of ["after"]) {}',
+  ]) {
+    it(`rejects ${mutation}`, () => {
+      const result = transformReactJsx(source(`() => { ${mutation}; }`), "unsafe-writes.tsx");
+      expect(result.diagnostics.filter(d => d.category === "error").map(d => d.message))
+        .toEqual([jasmine.stringMatching(/Unsupported reactive write/)]);
+    });
+  }
+
+  it("allows ordinary property writes on a shadowing local and explicit source updates", () => {
+    const result = transformReactJsx(source(`() => {
+      const form = { name: "local" };
+      form.name = "after";
+      state.set("name", form.name);
+      state["name"] = "through setter";
+      count.next(1);
+    }`), "unsafe-writes.tsx");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain('form.name = "after"');
+    expect(result.code).toContain('state.set("name", form.name)');
+    expect(result.code).toContain('state["name"] = "through setter"');
+    expect(result.code).toContain("count.next(1)");
+  });
+
+  it("rejects writes to reactive snapshots in JSX value positions", () => {
+    const input = source("() => {}").replace("{count}", '{delete form.value.name}');
+    const result = transformReactJsx(input, "unsafe-writes.tsx");
+    expect(result.diagnostics.some(d => d.category === "error" && /Unsupported reactive write/.test(d.message))).toBeTrue();
+    expect(result.code).toContain("delete form.value.name");
+  });
+});
+
 const compile = (source: string): string => transformReactJsx(source, "component.tsx").code;
 
 describe("React JSX compiler nested assignments", () => {
@@ -154,7 +210,7 @@ describe("React JSX compiler nested assignments", () => {
     `);
 
     expect(code).not.toContain("b ||= 4");
-    expect(code).toContain("b.next(4)");
+    expect(code).toContain("b.next(__streamixAssigned");
     expect(code).toContain("flag.next(");
   });
 
