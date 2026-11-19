@@ -323,8 +323,16 @@ function emitNode(
   }
 
   if (node instanceof TmplAstBoundText) {
+    // Angular decodes HTML entities before wrapping the text in an
+    // ASTWithSource, so its `source` is the decoded literal + interpolation
+    // text. The raw template slice would keep &amp; and friends encoded and
+    // render them verbatim. (`value` is typed as AST but is an
+    // ASTWithSource at runtime.)
+    const decodedSource = (node.value as { source?: unknown } | undefined)?.source;
     return emitBoundText(
-      sourceSlice(state.template, node.sourceSpan.start.offset, node.sourceSpan.end.offset),
+      typeof decodedSource === 'string' && decodedSource
+        ? decodedSource
+        : sourceSlice(state.template, node.sourceSpan.start.offset, node.sourceSpan.end.offset),
       state,
     );
   }
@@ -844,10 +852,20 @@ function boundInputKind(
   if (interpolations.length > 0) {
     // Compile all interpolated runs, keeping literal text intact and each
     // reactive read visible to the same dependency analyzer as normal inputs.
-    const value = /=[ \t\r\n]*(["'])([\s\S]*)\1\s*$/.exec(authored);
-    if (!value) throw new Error(`Unsupported interpolated attribute ${JSON.stringify(name)}.`);
+    // The attribute's decoded `source` (entities resolved, surrounding
+    // quotes stripped for plain interpolated attributes; typed as AST but an
+    // ASTWithSource at runtime) replaces the authored slice, which would
+    // keep &amp; encoded.
+    const decodedSource = (input.value as { source?: unknown } | undefined)?.source;
+    let inner = typeof decodedSource === 'string' ? decodedSource : '';
+
+    if (!inner) {
+      const legacy = /=[ \t\r\n]*(["'])([\s\S]*)\1\s*$/.exec(authored);
+      if (!legacy) throw new Error(`Unsupported interpolated attribute ${JSON.stringify(name)}.`);
+      inner = legacy[2];
+    }
+
     const pieces: string[] = [];
-    const inner = value[2];
     const pattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
     let cursor = 0, match: RegExpExecArray | null;
     while ((match = pattern.exec(inner))) {

@@ -103,4 +103,50 @@ describe('compileSxBlockTemplate', () => {
     )).toThrowError(/sanitizer-sensitive/);
   });
 
+  it('decodes HTML entities in interpolated block text literals', () => {
+    const result = compileSxBlockTemplate(
+      '<span>{{ x }} &amp; more</span>',
+      'fixture.html', { allowLocals: true },
+    );
+
+    expect(result.createBody).toContain('createTextNode(" & more")');
+    expect(result.createBody).not.toContain('&amp;');
+  });
+
+  it('decodes named and numeric entities in block text', () => {
+    const result = compileSxBlockTemplate(
+      '<span>{{ x }}&nbsp;! {{ y }} &lt;tag&gt;</span>',
+      'fixture.html', { allowLocals: true },
+    );
+
+    // &nbsp; decodes to U+00A0, which JSON.stringify keeps as a raw character.
+    expect(result.createBody).toContain('createTextNode("\u00a0! ")');
+    expect(result.createBody).toContain('createTextNode(" <tag>")');
+    expect(result.createBody).not.toContain('&nbsp;');
+    expect(result.createBody).not.toContain('&lt;');
+  });
+
+  it('decodes HTML entities in interpolated block attributes', () => {
+    const result = compileSxBlockTemplate(
+      '<i title="a &amp; {{ count }}"></i>',
+      'fixture.html', { allowLocals: true },
+    );
+
+    expect(result.createBody).not.toContain('&amp;');
+    expect(result.updateBody).toContain('"a & "');
+    expect(result.updateBody).not.toContain('&amp;');
+  });
+
+  it('decodes entities authored inside expression string literals like Angular does', () => {
+    // Angular entity-decodes the whole attribute value before expression
+    // parsing, so even string literals inside expressions arrive decoded.
+    const result = compileSxBlockTemplate(
+      '<i [title]="\'a &amp; \' + count"></i>',
+      'fixture.html', { allowLocals: true },
+    );
+
+    // The expression is emitted with its authored quoting.
+    expect(result.updateBody).toContain("'a & '");
+  });
+
 });
