@@ -8,6 +8,10 @@ import {
   type ScheduledBinding,
 } from './render-scheduler';
 import { ɵsxCurrentRenderErrorSink } from './error-delivery';
+import {
+  constructSxBlock,
+  registerSxConstruction,
+} from './block-construction';
 import { combineSubscriptions, readSourceState, readViewExpression, subscribeSourceError, viewValue } from './view-value';
 
 /**
@@ -85,33 +89,41 @@ export class SxValueBlock<T> {
 
     this.unbind();
     this.current = UNSET;
-    // Delivery contract (React/Vue parity): a failed source delivers at
-    // setup; pending and completed sources render like any pending read.
-    const state = readSourceState(source);
-    if (state.status === "failed") throw state.error;
-    this.render((state.status === "value" ? state.value : undefined) as T | undefined);
+    try {
+      // Delivery contract (React/Vue parity): a failed source delivers at
+      // setup; pending and completed sources render like any pending read.
+      const state = readSourceState(source);
+      if (state.status === "failed") throw state.error;
+      this.render((state.status === "value" ? state.value : undefined) as T | undefined);
 
-    const generation = ++this.generation;
+      const generation = ++this.generation;
 
-    let subscribing = true;
-    const valueSubscription = source.subscribe(value => {
-      if (generation !== this.generation || subscribing) return;
+      let subscribing = true;
+      const valueSubscription = source.subscribe(value => {
+        if (generation !== this.generation || subscribing) return;
 
-      // A successful emission clears a stored failure: the block recovers in
-      // place on the next frame.
-      this.failure = undefined;
-      this.pending = value;
-      this.ensureScheduled(generation);
-    });
-    subscribing = false;
-    // fail() never notifies value subscribers; failures reach the block only
-    // through onError.
-    const errorSubscription = subscribeSourceError(source, error => {
-      if (generation !== this.generation || this.destroyed) return;
-      this.failure = { error };
-      this.ensureScheduled(generation);
-    });
-    this.unsubscribe = combineSubscriptions(valueSubscription, errorSubscription);
+        // A successful emission clears a stored failure: the block recovers in
+        // place on the next frame.
+        this.failure = undefined;
+        this.pending = value;
+        this.ensureScheduled(generation);
+      });
+      subscribing = false;
+      // fail() never notifies value subscribers; failures reach the block only
+      // through onError.
+      const errorSubscription = subscribeSourceError(source, error => {
+        if (generation !== this.generation || this.destroyed) return;
+        this.failure = { error };
+        this.ensureScheduled(generation);
+      });
+      this.unsubscribe = combineSubscriptions(valueSubscription, errorSubscription);
+    } catch (error) {
+      // A failed initial render must not leave partial state behind: rebind
+      // retries recreate the block, and every resource the failed attempt
+      // built is destroyed before the error propagates.
+      this.unbind();
+      throw error;
+    }
   }
 
   destroy(): void {
@@ -171,9 +183,15 @@ export class SxValueBlock<T> {
       this.current = value;
 
       try {
-        this.instance = this.factory.create(value);
-        applyContentScope(this.instance, this.anchor);
-        moveInstanceAfter(this.anchor, this.instance);
+        // The construction frame destroys the built instance and every
+        // resource the factory registered when any step of the sequence
+        // throws: the failure path owns nothing that keeps subscribing.
+        this.instance = constructSxBlock(() => {
+          const instance = this.factory.create(value);
+          applyContentScope(instance, this.anchor);
+          moveInstanceAfter(this.anchor, instance);
+          return instance;
+        });
       } catch (error) {
         // The value was committed before the factory ran, so a failed factory
         // or move would leave `Object.is(current, value)` true with no
@@ -297,36 +315,44 @@ export class SxConditionalBlock {
 
     this.unbind();
 
-    const generation = ++this.generation;
-    let subscribing = true;
+    try {
+      const generation = ++this.generation;
+      let subscribing = true;
 
-    for (const branch of this.branches) {
-      if (!branch.source) {
-        continue;
+      for (const branch of this.branches) {
+        if (!branch.source) {
+          continue;
+        }
+
+        for (const source of sourcesOf(branch.source)) {
+          this.unsubscribes.push(source.subscribe(() => {
+            if (generation !== this.generation || subscribing) return;
+
+            // A successful emission clears a stored failure: the selection
+            // re-evaluates in place on the next frame.
+            this.failure = undefined;
+            this.ensureScheduled(generation);
+          }));
+          // fail() never notifies value subscribers; failures reach the block
+          // only through onError.
+          const errorSubscription = subscribeSourceError(source, error => {
+            if (generation !== this.generation || this.destroyed) return;
+            this.failure = { error };
+            this.ensureScheduled(generation);
+          });
+          if (errorSubscription) this.unsubscribes.push(errorSubscription);
+        }
       }
 
-      for (const source of sourcesOf(branch.source)) {
-        this.unsubscribes.push(source.subscribe(() => {
-          if (generation !== this.generation || subscribing) return;
-
-          // A successful emission clears a stored failure: the selection
-          // re-evaluates in place on the next frame.
-          this.failure = undefined;
-          this.ensureScheduled(generation);
-        }));
-        // fail() never notifies value subscribers; failures reach the block
-        // only through onError.
-        const errorSubscription = subscribeSourceError(source, error => {
-          if (generation !== this.generation || this.destroyed) return;
-          this.failure = { error };
-          this.ensureScheduled(generation);
-        });
-        if (errorSubscription) this.unsubscribes.push(errorSubscription);
-      }
+      subscribing = false;
+      this.render();
+    } catch (error) {
+      // A failed initial render - a failed branch source delivers its stored
+      // error at setup - must not leave the just-created subscriptions
+      // behind: rebind retries would compound them per attempt.
+      this.unbind();
+      throw error;
     }
-
-    subscribing = false;
-    this.render();
   }
 
   destroy(): void {
@@ -414,9 +440,14 @@ export class SxConditionalBlock {
     }
 
     try {
-      this.instance = this.branches[index].factory();
-      applyContentScope(this.instance, this.anchor);
-      moveInstanceAfter(this.anchor, this.instance);
+      // The construction frame destroys the built instance and every
+      // resource the branch factory registered when any step throws.
+      this.instance = constructSxBlock(() => {
+        const instance = this.branches[index].factory();
+        applyContentScope(instance, this.anchor);
+        moveInstanceAfter(this.anchor, instance);
+        return instance;
+      });
     } catch (error) {
       // The selection was committed before the branch factory ran, so a
       // failed factory or move would leave `index === current` with no
@@ -483,32 +514,40 @@ export class SxKeyedBlock<T> {
 
     this.unbind();
     this.bound = source;
-    // readSxValue delivers a failed dependency's stored error at setup.
-    this.render(toArray(readSxValue(source)));
+    try {
+      // readSxValue delivers a failed dependency's stored error at setup.
+      this.render(toArray(readSxValue(source)));
 
-    const generation = ++this.generation;
+      const generation = ++this.generation;
 
-    let subscribing = true;
-    for (const dependency of sourcesOf(source)) {
-      this.unsubscribes.push(dependency.subscribe(() => {
-        if (generation !== this.generation || subscribing) return;
+      let subscribing = true;
+      for (const dependency of sourcesOf(source)) {
+        this.unsubscribes.push(dependency.subscribe(() => {
+          if (generation !== this.generation || subscribing) return;
 
-        // A successful emission clears a stored failure: the collection
-        // re-renders in place on the next frame.
-        this.failure = undefined;
-        this.pending = source;
-        this.ensureScheduled(generation);
-      }));
-      // fail() never notifies value subscribers; failures reach the block
-      // only through onError.
-      const errorSubscription = subscribeSourceError(dependency, error => {
-        if (generation !== this.generation || this.destroyed) return;
-        this.failure = { error };
-        this.ensureScheduled(generation);
-      });
-      if (errorSubscription) this.unsubscribes.push(errorSubscription);
+          // A successful emission clears a stored failure: the collection
+          // re-renders in place on the next frame.
+          this.failure = undefined;
+          this.pending = source;
+          this.ensureScheduled(generation);
+        }));
+        // fail() never notifies value subscribers; failures reach the block
+        // only through onError.
+        const errorSubscription = subscribeSourceError(dependency, error => {
+          if (generation !== this.generation || this.destroyed) return;
+          this.failure = { error };
+          this.ensureScheduled(generation);
+        });
+        if (errorSubscription) this.unsubscribes.push(errorSubscription);
+      }
+      subscribing = false;
+    } catch (error) {
+      // A failed initial render must not leave partial state behind: rebind
+      // retries recreate the block, and every resource the failed attempt
+      // built is destroyed before the error propagates.
+      this.unbind();
+      throw error;
     }
-    subscribing = false;
   }
 
   destroy(): void {
@@ -594,9 +633,13 @@ export class SxKeyedBlock<T> {
       this.removeRecords();
 
       if (!this.emptyInstance) {
-        this.emptyInstance = this.emptyFactory();
-        applyContentScope(this.emptyInstance, this.anchor);
-        moveInstanceAfter(this.anchor, this.emptyInstance);
+        const emptyFactory = this.emptyFactory;
+        this.emptyInstance = constructSxBlock(() => {
+          const instance = emptyFactory();
+          applyContentScope(instance, this.anchor);
+          moveInstanceAfter(this.anchor, instance);
+          return instance;
+        });
       }
 
       return;
@@ -638,8 +681,11 @@ export class SxKeyedBlock<T> {
             items.length,
           );
         } else {
-          const instance = this.factory.create(item, index, items.length);
-          applyContentScope(instance, this.anchor);
+          const instance = constructSxBlock(() => {
+            const createdInstance = this.factory.create(item, index, items.length);
+            applyContentScope(createdInstance, this.anchor);
+            return createdInstance;
+          });
           record = { key, item, instance };
           created.push(record);
         }
@@ -696,6 +742,10 @@ export function ɵcreateSxValueBlock<T>(
   factory: SxValueBlockFactory<T>,
 ): SxValueBlock<T> {
   const block = new SxValueBlock(anchor, factory);
+  // A nested block created inside an enclosing factory body registers with
+  // the active construction frame, so a throw from the enclosing factory
+  // destroys it instead of leaving it subscribed to detached anchors.
+  registerSxConstruction(block);
   block.bind(source);
   return block;
 }
@@ -705,6 +755,7 @@ export function ɵcreateSxConditionalBlock(
   branches: readonly SxConditionalBranch[],
 ): SxConditionalBlock {
   const block = new SxConditionalBlock(anchor, branches);
+  registerSxConstruction(block);
   block.bind();
   return block;
 }
@@ -772,6 +823,7 @@ export function ɵcreateSxKeyedBlock<T>(
     trackBy,
     emptyFactory,
   );
+  registerSxConstruction(block);
   block.bind(source);
   return block;
 }

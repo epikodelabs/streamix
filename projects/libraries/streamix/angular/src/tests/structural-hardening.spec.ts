@@ -3,9 +3,11 @@ import {
 } from '@epikodelabs/streamix';
 
 import {
+  createBindingTable,
   rendererScheduler,
   ɵcreateSxCompiledBlock,
   type SxCompiledBlockInstance,
+  ɵcreateSxConditionalBlock,
   ɵcreateSxFragmentRange,
   ɵcreateSxKeyedBlock,
   ɵcreateSxValueBlock,
@@ -243,6 +245,136 @@ idescribe('sx structural hardening', () => {
     block.destroy();
 
     expect(destroyed.get(2)).toBe(1);
+  });
+
+  it('releases a failed conditional bind subscription before propagating', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const source = atom<string>('ok');
+    // A failed branch source delivers its stored error at setup.
+    source.fail(new Error('boom'));
+    const factory = () => {
+      const el = document.createElement('i');
+      return { first: el, last: el, destroy() { el.remove(); } };
+    };
+
+    // Rebind retries recreate the block per attempt; every failed attempt
+    // must release its own subscriptions exactly once.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const anchor = document.createComment('sx');
+      host.appendChild(anchor);
+      expect(() => ɵcreateSxConditionalBlock(anchor, [
+        { source, factory },
+        { source: null, factory },
+      ])).toThrowError('boom');
+      expect(source.subscriberCount).toBe(0);
+    }
+
+    source.dispose();
+  });
+
+  it('destroys the resources a throwing block factory built', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const outer = atom('outer');
+    const nestedSource = atom('nested');
+    const tableSource = atom('table');
+    const innerAnchor = document.createComment('sx-inner');
+    host.appendChild(innerAnchor);
+
+    let attempts = 0;
+    const createBlock = () => {
+      const anchor = document.createComment('sx');
+      host.appendChild(anchor);
+      return ɵcreateSxValueBlock(anchor, outer, {
+      create: () => {
+        attempts += 1;
+        // A nested block subscribes at creation, before the factory returns.
+        let nestedNodes: { first: Node; last: Node } | undefined;
+        const nested = ɵcreateSxValueBlock(innerAnchor, nestedSource, {
+          create: value => {
+            const el = document.createElement('i');
+            el.textContent = String(value);
+            nestedNodes = { first: el, last: el };
+            return { first: el, last: el, destroy() { el.remove(); } };
+          },
+        });
+        const table = createBindingTable(1);
+        table.bind(0, tableSource, () => {});
+
+        if (attempts === 1) {
+          throw new Error('mid-factory');
+        }
+
+        return {
+          first: nestedNodes!.first,
+          last: nestedNodes!.last,
+          destroy() { nested.destroy(); table.destroy(); },
+        };
+      },
+    });
+  };
+
+    // The first attempt throws: every resource it built was destroyed with it.
+    expect(createBlock).toThrowError('mid-factory');
+    expect(attempts).toBe(1);
+    expect(nestedSource.subscriberCount).toBe(0);
+    expect(tableSource.subscriberCount).toBe(0);
+    expect(host.querySelectorAll('i').length).toBe(0);
+
+    // A retry attempt succeeds and owns its resources again.
+    const block = createBlock();
+    expect(attempts).toBe(2);
+    expect(nestedSource.subscriberCount).toBe(1);
+    expect(tableSource.subscriberCount).toBe(1);
+
+    block.destroy();
+    expect(nestedSource.subscriberCount).toBe(0);
+    expect(tableSource.subscriberCount).toBe(0);
+    outer.dispose();
+    nestedSource.dispose();
+    tableSource.dispose();
+  });
+
+  it('destroys the compiled instance when its initial update throws', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const outer = atom('outer');
+    const tableSource = atom('x');
+    let updates = 0;
+
+    const createBlock = (throwing: boolean) => {
+      const anchor = document.createComment('sx');
+      host.appendChild(anchor);
+      return ɵcreateSxValueBlock(anchor, outer, {
+        create: () => {
+          const table = createBindingTable(1);
+          table.bind(0, tableSource, () => {});
+          const range = ɵcreateSxFragmentRange([document.createTextNode('')]);
+          // The update body runs last in a generated factory sequence.
+          return ɵcreateSxCompiledBlock(range.first, range.last, () => {
+            if (throwing) {
+              throw new Error('update-boom');
+            }
+            updates += 1;
+          }, {}, () => { table.destroy(); });
+        },
+      });
+    };
+
+    expect(() => createBlock(true)).toThrowError('update-boom');
+    // The compiled instance's destroy released the body's table.
+    expect(tableSource.subscriberCount).toBe(0);
+
+    // A retry whose update body succeeds owns its resources.
+    const block = createBlock(false);
+    expect(updates).toBe(1);
+    expect(tableSource.subscriberCount).toBe(1);
+
+    block.destroy();
+    expect(tableSource.subscriberCount).toBe(0);
+    outer.dispose();
+    tableSource.dispose();
   });
 });
 import { idescribe } from '../../../src/tests/env.spec';

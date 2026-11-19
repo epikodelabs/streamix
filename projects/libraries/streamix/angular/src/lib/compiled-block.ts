@@ -40,7 +40,15 @@ export function ɵcreateSxCompiledBlock<C extends object>(
     destroy,
   };
 
-  instance.update(initialContext);
+  try {
+    instance.update(initialContext);
+  } catch (error) {
+    // The update body runs last in the generated factory sequence: its
+    // failure would otherwise orphan the instance whose destroy callback
+    // owns the body's binding table and nested blocks.
+    instance.destroy();
+    throw error;
+  }
 
   return instance;
 }

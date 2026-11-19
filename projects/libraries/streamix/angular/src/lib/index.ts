@@ -4,6 +4,7 @@ export * from './devtools';
 export * from './error-delivery';
 export * from './structural-block';
 export * from './compiled-view';
+export * from './block-construction';
 export * from './source-reference';
 export * from './binding-table';
 export * from './direct-binding';

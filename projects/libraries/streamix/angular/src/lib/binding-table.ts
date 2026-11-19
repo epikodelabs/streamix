@@ -24,6 +24,7 @@ import {
 } from './render-scheduler';
 import { readSourceState, readViewExpression, subscribeSourceError, viewValue } from './view-value';
 import { ɵsxCurrentRenderErrorSink } from './error-delivery';
+import { registerSxConstruction } from './block-construction';
 
 export type BindingSlot = number;
 
@@ -90,6 +91,11 @@ export class SxBindingTable {
     this.subscriptions = new Array(size);
     this.teardowns = new Array(size);
     this.dirtyFlags = new Uint8Array(size);
+
+    // A binding table created inside a block factory registers with the
+    // active construction frame, so a throw from the enclosing factory
+    // destroys it instead of leaving its source subscriptions behind.
+    registerSxConstruction(this);
   }
 
   /**
