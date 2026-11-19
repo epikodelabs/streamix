@@ -46,6 +46,35 @@ describe("React JSX compiler", () => {
     expect(result.code).toContain('{__streamixBinding1 + 1}');
   });
 
+  it("emits the runtime import when the authored import is type-only", () => {
+    const result = transformReactJsx(`
+      import type { useStreamixSource } from "@epikodelabs/streamix/react";
+      function Counter() {
+        const count = atom(0);
+        return <output>{count}</output>;
+      }
+    `);
+
+    expect(result.code).toMatch(
+      /import \{[^}]*useStreamixSource[^}]*\} from "@epikodelabs\/streamix\/react";/,
+    );
+  });
+
+  it("emits the canonical runtime import for an aliased import", () => {
+    const result = transformReactJsx(`
+      import { useStreamixSource as readSource } from "@epikodelabs/streamix/react";
+      function Counter() {
+        const count = atom(0);
+        return <output>{count}</output>;
+      }
+    `);
+
+    expect(result.code).toContain("useStreamixSource as readSource");
+    expect(result.code).toMatch(
+      /import \{[^}]*useStreamixSource[^}]*\} from "@epikodelabs\/streamix\/react";/,
+    );
+  });
+
   it("keeps local atoms raw inside derived shorthand formulas", () => {
     const result = transformReactJsx(`
       function Counter() {

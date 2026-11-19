@@ -161,6 +161,18 @@ export class HostComponent { source = first; }`,
     expect(result.changed).toBeTrue();
     expect(result.source).toContain('ɵinstallSxCompiledView');
   });
+  it('does not treat a type-only runtime import as an available value', () => {
+    const result = installSxLifecycleIntoComponentSource(
+      `import type { ɵinstallSxCompiledView } from '@epikodelabs/streamix/angular';
+export class CounterComponent {}`,
+      { inlineSetup: 'function ɵsetupSxBindings() { ɵsxText; }' },
+    );
+
+    // The authored type-only import stays, and a real value import is added.
+    expect(result.source).toMatch(/import type \{[^}]*ɵinstallSxCompiledView/);
+    expect(result.source).toMatch(/import \{ ɵinstallSxCompiledView[^}]*\} from/);
+  });
+
   it('merges required symbols into an existing runtime import without duplicates', () => {
     const source = `import { ɵinstallSxCompiledView, ɵsxText as oldText } from '@epikodelabs/streamix/angular';
       export class CounterComponent {}`;

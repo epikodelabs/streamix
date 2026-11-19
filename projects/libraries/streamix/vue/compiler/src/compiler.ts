@@ -136,6 +136,31 @@ const V_MODEL_NATIVE: Readonly<Record<string, { prop: string; event: string; val
 };
 
 /**
+ * Reads one static (unbound) attribute from an opening tag's attribute
+ * source. Bound (`:type`), namespaced (`data-type`), and directive attributes
+ * never match, so they cannot spoof native attribute checks.
+ */
+function staticAttributeValue(attributes: string, name: string): string | undefined {
+  for (const match of attributes.matchAll(
+    /(?:^|\s)([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g,
+  )) {
+    if (match[1].toLowerCase() === name) {
+      return match[2] ?? match[3] ?? match[4] ?? '';
+    }
+  }
+  return undefined;
+}
+
+function hasStaticAttribute(attributes: string, name: string): boolean {
+  for (const match of attributes.matchAll(
+    /(?:^|\s)([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g,
+  )) {
+    if (match[1].toLowerCase() === name) return true;
+  }
+  return false;
+}
+
+/**
  * Compiles a Vue single-file component that declares raw Streamix atoms,
  * deriveds, flows, and scopes in `<script setup>`.
  *
@@ -165,12 +190,19 @@ export function transformVueSfc(
       code: source,
       bindingCount: 0,
       bridgedScopes: {},
-      diagnostics: parsed.errors.map(error => ({
-        category: 'error' as const,
-        message: error.message ?? String(error),
-        start: -1,
-        length: 0,
-      })),
+      diagnostics: parsed.errors.map(error => {
+        // Template compiler errors carry a source location; plain syntax
+        // errors do not.
+        const loc = (error as {
+          loc?: { start: { offset: number }; end: { offset: number } };
+        }).loc;
+        return {
+          category: 'error' as const,
+          message: error.message ?? String(error),
+          start: loc?.start.offset ?? -1,
+          length: loc ? Math.max(0, loc.end.offset - loc.start.offset) : 0,
+        };
+      }),
     };
   }
 
@@ -208,7 +240,7 @@ export function transformVueSfc(
     writes: templateUsage.writes,
   };
   const scopes = declarations.filter(
-    (declaration): declaration is ReactiveDeclaration & { members: readonly string[] } =>
+    (declaration): declaration is ReactiveDeclaration & { kind: 'scope' } =>
       declaration.kind === 'scope',
   );
   const reactive = declarations.filter(declaration => declaration.kind !== 'scope');
@@ -251,6 +283,12 @@ export function transformVueSfc(
     });
   }
 
+  // Vue 3.4 same-name bindings carry no value text; expand them so the
+  // authored prop name stays while the expression reads the bridge.
+  for (const edit of sameNameBindingEdits(templateContent, declarations)) {
+    templateEdits.push(edit);
+  }
+
   // A scope declared in setup is component-owned, so the compiler wraps the
   // authored call in `useScope(...)` rather than asking for it by hand: the
   // scope is disposed with the component's effect scope instead of outliving
@@ -271,12 +309,37 @@ export function transformVueSfc(
   const scopeByName = new Map(scopes.map(scope => [scope.name, scope]));
   const scopeLabel = (scopeName: string, path: readonly string[]): string =>
     `${scopeName}.${path.join('.')}`;
-  const scopeDiagnostic = (message: string): void => {
+
+  // First occurrence of each used member path, so diagnostics point at the
+  // offending expression instead of the whole template block.
+  const pathSpans = new Map<string, { start: number; end: number }>();
+  const rememberPathSpan = (
+    scopeName: string,
+    path: readonly string[],
+    span: { start: number; end: number },
+  ): void => {
+    const key = `${scopeName}.${path.join('.')}`;
+    if (!pathSpans.has(key)) pathSpans.set(key, span);
+  };
+  for (const read of usage.reads) rememberPathSpan(read.scope, read.path, read);
+  for (const write of usage.writes) rememberPathSpan(write.scope, write.path, write);
+  for (const model of vModelBindings) {
+    rememberPathSpan(model.scope, model.path, { start: model.start, end: model.end });
+  }
+
+  const scopeDiagnostic = (
+    message: string,
+    scopeName?: string,
+    path?: readonly string[],
+  ): void => {
+    const span = scopeName && path
+      ? pathSpans.get(`${scopeName}.${path.join('.')}`)
+      : undefined;
     diagnostics.push({
       category: 'error',
       message,
-      start: templateOffset,
-      length: templateContent.length,
+      start: span ? templateOffset + span.start : templateOffset,
+      length: span ? span.end - span.start : templateContent.length,
     });
   };
 
@@ -312,6 +375,8 @@ export function transformVueSfc(
         scopeDiagnostic(
           `Scope member ${JSON.stringify(scopeLabel(scopeName, path))} is not declared by the scope literal, ` +
           'so the compiler cannot bridge it.',
+          scopeName,
+          path,
         );
         continue;
       }
@@ -320,6 +385,8 @@ export function transformVueSfc(
         scopeDiagnostic(
           `Scope member ${JSON.stringify(scopeLabel(scopeName, path))} crosses a nested scope the compiler ` +
           'cannot inspect. Use scope.get(...) in script and bridge the atom explicitly.',
+          scopeName,
+          path,
         );
         continue;
       }
@@ -401,6 +468,8 @@ export function transformVueSfc(
       scopeDiagnostic(
         `Cannot assign to method member ${JSON.stringify(scopeLabel(write.scope, write.path))}. ` +
         'Mutate scope state inside the method instead.',
+        write.scope,
+        write.path,
       );
       continue;
     }
@@ -409,6 +478,8 @@ export function transformVueSfc(
       scopeDiagnostic(
         `Cannot assign to nested scope ${JSON.stringify(scopeLabel(write.scope, write.path))}. ` +
         'Assign one of its atom members instead.',
+        write.scope,
+        write.path,
       );
       continue;
     }
@@ -417,6 +488,8 @@ export function transformVueSfc(
       scopeDiagnostic(
         `Cannot assign through ${JSON.stringify(scopeLabel(write.scope, write.path.slice(0, resolution.depth)))}: ` +
         'it is an atom holding an object, so the assignment would not emit. Replace the whole value with scope.set(...) instead.',
+        write.scope,
+        write.path,
       );
       continue;
     }
@@ -453,10 +526,10 @@ export function transformVueSfc(
     }
 
     const bridge = bridgeName(model.scope, model.path);
-    const inputType = /\btype\s*=\s*(["']?)([^\s"'>]+)\1/i.exec(model.attributes)?.[2]?.toLowerCase();
+    const inputType = staticAttributeValue(model.attributes, 'type')?.toLowerCase();
     const unsupportedNative =
       (model.element === 'input' && inputType !== undefined && !['text', 'search', 'email', 'url', 'tel', 'password'].includes(inputType)) ||
-      (model.element === 'select' && /\bmultiple\b/i.test(model.attributes));
+      (model.element === 'select' && hasStaticAttribute(model.attributes, 'multiple'));
     const mapping = unsupportedNative ? undefined : V_MODEL_NATIVE[model.element];
 
     if (!mapping) {
@@ -653,6 +726,11 @@ function generatedNameDiagnostics(
 ): readonly VueSfcDiagnostic[] {
   const file = ts.createSourceFile('script.ts', script, ts.ScriptTarget.Latest, true);
   const existing = new Set<string>();
+  // Unaliased value imports from the bridge module are reused as-is; every
+  // other binding with a required name would shadow or duplicate the
+  // generated import.
+  const reusableRuntimeImports = new Set<string>();
+
   for (const statement of file.statements) {
     if (ts.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations) {
@@ -667,16 +745,31 @@ function generatedNameDiagnostics(
       const bindings = clause?.namedBindings;
       if (bindings && ts.isNamespaceImport(bindings)) existing.add(bindings.name.text);
       else if (bindings && ts.isNamedImports(bindings)) {
-        for (const item of bindings.elements) existing.add(item.name.text);
+        const runtimeModule = ts.isStringLiteral(statement.moduleSpecifier) &&
+          statement.moduleSpecifier.text === '@epikodelabs/streamix/vue';
+        for (const item of bindings.elements) {
+          existing.add(item.name.text);
+          if (runtimeModule && !clause?.isTypeOnly && !item.isTypeOnly && !item.propertyName) {
+            reusableRuntimeImports.add(item.name.text);
+          }
+        }
       }
     }
   }
+
+  for (const name of reusableRuntimeImports) existing.delete(name);
+
   const generated = declarations.filter(item => item.kind !== 'scope').map(item => reactiveBridgeName(item.name));
   for (const scope of declarations.filter(item => item.kind === 'scope')) {
     for (const path of bridgeableScopePaths(scope.members)) {
       generated.push(bridgeName(scope.name, path));
     }
   }
+  // The compiler emits these composable calls; a same-named local binding or
+  // non-bridge import would either duplicate the generated import or silently
+  // bind generated calls to authored code.
+  generated.push(...BRIDGE_COMPOSABLES);
+
   return [...new Set(generated)].filter(name => existing.has(name)).map(name => ({
     category: 'error' as const,
     message: `Generated Streamix Vue binding ${JSON.stringify(name)} collides with an existing setup declaration. Rename the authored declaration.`,
@@ -793,11 +886,14 @@ function withRuntimeImport(source: string, installed: boolean): { insertion?: { 
     if (!ts.isImportDeclaration(statement) ||
         !ts.isStringLiteral(statement.moduleSpecifier) ||
         statement.moduleSpecifier.text !== '@epikodelabs/streamix/vue') continue;
+    // `import type { useWritable }` supplies no runtime value, so it must not
+    // suppress the generated value import.
+    if (statement.importClause?.isTypeOnly) continue;
     const bindings = statement.importClause?.namedBindings;
     if (bindings && ts.isNamedImports(bindings)) {
       for (const binding of bindings.elements) {
         // An aliased import doesn't provide the generated unaliased binding.
-        if (!binding.propertyName) imported.add(binding.name.text);
+        if (!binding.propertyName && !binding.isTypeOnly) imported.add(binding.name.text);
       }
     }
   }
@@ -1430,9 +1526,19 @@ interface TemplateExpressionSpan {
 }
 
 /**
- * Expression positions Vue evaluates: interpolation contents and bound
- * directive/attribute values (including event handlers). Static attributes
- * and prose are never returned.
+ * Directive values that are not plain JS expressions, or whose expressions
+ * are handled by dedicated passes. Every other directive value is scanned,
+ * including custom directives (`v-tooltip="count"`) and `v-memo`.
+ */
+const NON_EXPRESSION_DIRECTIVE_VALUES = new Set([
+  'model', 'slot', 'pre', 'once', 'cloak', 'else',
+]);
+
+/**
+ * Expression positions Vue evaluates: interpolation contents and every
+ * value-bearing directive (including argument-less custom directives and
+ * `v-memo`). Same-name `:foo` / `v-bind:foo` shorthands have no value and are
+ * expanded separately. Static attributes and prose are never returned.
  */
 function templateExpressionSpans(template: string): TemplateExpressionSpan[] {
   const spans: TemplateExpressionSpan[] = [];
@@ -1445,11 +1551,47 @@ function templateExpressionSpans(template: string): TemplateExpressionSpan[] {
   }
 
   for (const match of template.matchAll(
-    /(?:[:@#][\w.:[\]-]+|v-(?:if|else-if|for|show|text|html)(?:\.[\w-]+)?|v-(?:bind|on)(?::[\w.:[\]-]+)?)\s*=\s*(["'])([\s\S]*?)\1/g,
+    /(?:[:@#][\w.:[\]-]+|v-([A-Za-z][\w-]*)(?::[\w.:[\]-]+)?(?:\.[\w-]+)*)\s*=\s*(["'])([\s\S]*?)\2/g,
   )) {
-    const valueStart = match.index! + match[0].length - match[2].length - 1;
-    spans.push({ start: valueStart, end: valueStart + match[2].length });
+    if (match[1] && NON_EXPRESSION_DIRECTIVE_VALUES.has(match[1].toLowerCase())) {
+      continue;
+    }
+    const valueStart = match.index! + match[0].length - match[3].length - 1;
+    spans.push({ start: valueStart, end: valueStart + match[3].length });
   }
 
   return spans;
+}
+
+/**
+ * Vue 3.4 same-name bindings (`:title`, `v-bind:title`) evaluate the
+ * identifier as their value. The attribute text must be expanded so the
+ * generated bridge keeps the authored prop name while binding the bridged
+ * value.
+ */
+function sameNameBindingEdits(
+  template: string,
+  declarations: readonly ReactiveDeclaration[],
+): readonly SpanEdit[] {
+  const reactiveNames = new Set(
+    declarations.filter(item => item.kind !== 'scope').map(item => item.name),
+  );
+  const edits: SpanEdit[] = [];
+
+  for (const tag of openingTags(template)) {
+    for (const match of tag.attributes.matchAll(
+      /(?:^|\s)((:|v-bind:)([A-Za-z_$][\w$]*))(?=\s|\/|$)/g,
+    )) {
+      const name = match[3];
+      if (!reactiveNames.has(name)) continue;
+      const start = tag.attributesStart + match.index! + match[0].indexOf(match[1]);
+      edits.push({
+        start,
+        end: start + match[1].length,
+        replacement: `${match[2]}${name}="${reactiveBridgeName(name)}"`,
+      });
+    }
+  }
+
+  return edits;
 }

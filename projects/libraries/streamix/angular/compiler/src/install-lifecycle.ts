@@ -403,6 +403,9 @@ function mergeRuntimeImports(
     const bindings = statement.importClause.namedBindings;
     if (!bindings || !ts.isNamedImports(bindings)) continue;
     if (mergeIndex < 0 && !statement.importClause.isTypeOnly) mergeIndex = index;
+    // A type-only import supplies no runtime value; the generated call still
+    // needs a real import.
+    if (statement.importClause.isTypeOnly) continue;
     for (const element of bindings.elements) {
       if (!element.isTypeOnly && !element.propertyName) required.delete(element.name.text);
     }

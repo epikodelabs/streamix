@@ -2170,10 +2170,17 @@ function runtimePreludeFor(code: string): string {
   const authored = new Set<string>();
   const file = ts.createSourceFile("prelude.ts", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   for (const statement of file.statements) {
-    if (!ts.isImportDeclaration(statement) || !statement.importClause?.namedBindings ||
+    if (!ts.isImportDeclaration(statement) || !statement.importClause ||
+        statement.importClause.isTypeOnly ||
+        !ts.isStringLiteral(statement.moduleSpecifier) ||
+        statement.moduleSpecifier.text !== "@epikodelabs/streamix/react" ||
+        !statement.importClause.namedBindings ||
         !ts.isNamedImports(statement.importClause.namedBindings)) continue;
     for (const element of statement.importClause.namedBindings.elements) {
-      if (names.includes(element.name.text)) authored.add(element.name.text);
+      // Type-only and aliased specifiers do not bind the canonical value.
+      if (!element.isTypeOnly && !element.propertyName && names.includes(element.name.text)) {
+        authored.add(element.name.text);
+      }
     }
   }
   const missing = names.filter(name => !authored.has(name));
