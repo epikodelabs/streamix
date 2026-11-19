@@ -1,4 +1,9 @@
-import { ErrorHandler } from '@angular/core';
+import {
+  createEnvironmentInjector,
+  EnvironmentInjector,
+  ErrorHandler,
+  runInInjectionContext,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { atom, flow } from '@epikodelabs/streamix';
 import {
@@ -12,6 +17,15 @@ import {
 } from '../lib';
 import type { CancelRender, RenderScheduler } from '../lib/render-scheduler';
 import { idescribe } from './env.spec';
+import {
+  ensureAngularTestEnvironment,
+  useAngularTestEnvironment,
+} from './angular-test-environment';
+
+// Testify bundles specs independently: without this init the TestBed tests
+// only pass when another spec bundle happens to initialize the platform
+// first, so a filtered run of this file fails.
+ensureAngularTestEnvironment();
 
 class ManualFrameScheduler implements RenderScheduler {
   callback?: () => void;
@@ -40,6 +54,7 @@ function frameScheduler(): RendererScheduler {
 }
 
 idescribe('Angular error delivery', () => {
+  useAngularTestEnvironment();
   let captured: unknown[];
 
   beforeEach(() => {
@@ -149,6 +164,8 @@ idescribe('Angular error delivery', () => {
 });
 
 idescribe('Angular error-delivery injection fallback', () => {
+  useAngularTestEnvironment();
+
   it('keeps the console sink outside an injection context', () => {
     expect(() => ɵsxInstallErrorDelivery()).not.toThrow();
     const errorSpy = spyOn(console, 'error');
@@ -161,5 +178,75 @@ idescribe('Angular error-delivery injection fallback', () => {
     expect(errorSpy).toHaveBeenCalled();
     table.destroy();
     source.dispose();
+  });
+
+  it('delivers each application\'s failures through its own ErrorHandler', () => {
+    const handledA: unknown[] = [];
+    const handledB: unknown[] = [];
+
+    class HandlerA implements ErrorHandler {
+      handleError(error: unknown): void { handledA.push(error); }
+    }
+    class HandlerB implements ErrorHandler {
+      handleError(error: unknown): void { handledB.push(error); }
+    }
+
+    const parent = TestBed.inject(EnvironmentInjector);
+    const injectorA = createEnvironmentInjector(
+      [{ provide: ErrorHandler, useClass: HandlerA }],
+      parent,
+    );
+    const injectorB = createEnvironmentInjector(
+      [{ provide: ErrorHandler, useClass: HandlerB }],
+      parent,
+    );
+
+    const tableIn = (injector: EnvironmentInjector) =>
+      runInInjectionContext(injector, () => createBindingTable(1, frameScheduler()));
+
+    const route = (table: ReturnType<typeof tableIn>, message: string): void => {
+      const source = atom('ok');
+      const target = document.createElement('span');
+      table.bind(0, source, value => { target.textContent = String(value); });
+      source.fail(new Error(message));
+      table.flushNow();
+      source.dispose();
+    };
+
+    let destroyedA = false;
+    let destroyedB = false;
+
+    try {
+      const tableA = tableIn(injectorA);
+      const tableB = tableIn(injectorB);
+
+      // The old module-global model routed A's failures through whichever
+      // application initialized a component last. Per-view capture keeps
+      // every application's routing intact, in both orders.
+      route(tableB, 'b-fail');
+      expect(handledB.map(error => (error as Error).message)).toEqual(['b-fail']);
+      expect(handledA).toEqual([]);
+
+      route(tableA, 'a-fail');
+      expect(handledA.map(error => (error as Error).message)).toEqual(['a-fail']);
+      expect(handledB.length).toBe(1);
+
+      // Destroying one injector cannot reroute a surviving application.
+      injectorB.destroy();
+      destroyedB = true;
+      route(tableA, 'a-still');
+      expect(handledA.map(error => (error as Error).message)).toEqual(['a-fail', 'a-still']);
+      expect(handledB.length).toBe(1);
+
+      tableA.destroy();
+      tableB.destroy();
+    } finally {
+      if (!destroyedA) {
+        injectorA.destroy();
+      }
+      if (!destroyedB) {
+        injectorB.destroy();
+      }
+    }
   });
 });

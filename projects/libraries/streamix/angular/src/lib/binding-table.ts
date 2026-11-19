@@ -23,7 +23,7 @@ import {
   type ScheduledBinding,
 } from './render-scheduler';
 import { readSourceState, readViewExpression, subscribeSourceError, viewValue } from './view-value';
-import { getSxRenderErrorSink } from './error-delivery';
+import { ɵsxCurrentRenderErrorSink } from './error-delivery';
 
 export type BindingSlot = number;
 
@@ -69,6 +69,8 @@ export class SxBindingTable {
 
   private scheduled?: ScheduledBinding;
   private destroyed = false;
+  /** Captured at creation so delivery always uses the owning application's handler. */
+  private readonly errorSink = ɵsxCurrentRenderErrorSink();
 
   constructor(
     readonly size: number,
@@ -366,7 +368,7 @@ export class SxBindingTable {
     // emission clears it.
     const slotError = this.slotErrors[slot];
     if (slotError) {
-      getSxRenderErrorSink()(slotError.error);
+      this.errorSink(slotError.error);
       return false;
     }
     try {
@@ -380,7 +382,7 @@ export class SxBindingTable {
     } catch (error) {
       // Preserve the previous successful value and isolate sibling slots for
       // unexpected reader or writer failures.
-      getSxRenderErrorSink()(error);
+      this.errorSink(error);
       return false;
     }
   }

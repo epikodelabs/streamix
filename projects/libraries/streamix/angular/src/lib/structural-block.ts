@@ -7,7 +7,7 @@ import {
   rendererScheduler,
   type ScheduledBinding,
 } from './render-scheduler';
-import { getSxRenderErrorSink } from './error-delivery';
+import { ɵsxCurrentRenderErrorSink } from './error-delivery';
 import { combineSubscriptions, readSourceState, readViewExpression, subscribeSourceError, viewValue } from './view-value';
 
 /**
@@ -62,6 +62,8 @@ interface CollectionRecord<T> {
 const UNSET = Symbol('sx.unset');
 
 export class SxValueBlock<T> {
+  /** Captured at creation so delivery always uses the owning application's handler. */
+  private readonly errorSink = ɵsxCurrentRenderErrorSink();
   private unsubscribe?: Subscription;
   private scheduled?: ScheduledBinding;
   private pending: T | undefined | typeof UNSET = UNSET;
@@ -135,7 +137,7 @@ export class SxValueBlock<T> {
         // Delivery contract: a stored source failure is delivered through the
         // error sink instead of rendering, until a successful emission clears it.
         if (this.failure) {
-          getSxRenderErrorSink()(this.failure.error);
+          this.errorSink(this.failure.error);
           return;
         }
 
@@ -273,6 +275,8 @@ export interface SxConditionalBranch {
  * branch is swapped in place.
  */
 export class SxConditionalBlock {
+  /** Captured at creation so delivery always uses the owning application's handler. */
+  private readonly errorSink = ɵsxCurrentRenderErrorSink();
   private unsubscribes: Subscription[] = [];
   private scheduled?: ScheduledBinding;
   private instance?: SxBlockInstance;
@@ -359,7 +363,7 @@ export class SxConditionalBlock {
         // error sink instead of re-selecting a branch, until a successful
         // emission clears it.
         if (this.failure) {
-          getSxRenderErrorSink()(this.failure.error);
+          this.errorSink(this.failure.error);
           return;
         }
 
@@ -448,6 +452,8 @@ export class SxConditionalBlock {
 }
 
 export class SxKeyedBlock<T> {
+  /** Captured at creation so delivery always uses the owning application's handler. */
+  private readonly errorSink = ɵsxCurrentRenderErrorSink();
   private unsubscribes: Subscription[] = [];
   private scheduled?: ScheduledBinding;
   /**
@@ -561,7 +567,7 @@ export class SxKeyedBlock<T> {
         // error sink instead of re-rendering the collection, until a
         // successful emission clears it.
         if (this.failure) {
-          getSxRenderErrorSink()(this.failure.error);
+          this.errorSink(this.failure.error);
           return;
         }
 

@@ -22,7 +22,7 @@ import {
   type ScheduledBinding,
 } from './render-scheduler';
 import { combineSubscriptions, readSourceState, subscribeSourceError, viewValue } from './view-value';
-import { getSxRenderErrorSink } from './error-delivery';
+import { ɵsxCurrentRenderErrorSink } from './error-delivery';
 
 /**
  * Handle returned by a direct renderer binding.
@@ -61,6 +61,9 @@ function bindDirect<T>(
 ): DirectBinding {
   const scheduler = options.scheduler ?? rendererScheduler;
   const equal = writer.equal ?? Object.is;
+  // Captured at creation so delivery always uses the owning application's
+  // handler instead of a process global that the last app overwrote.
+  const errorSink = ɵsxCurrentRenderErrorSink();
 
   // Delivery contract (React/Vue parity): a failed source delivers at setup;
   // pending and completed sources bind undefined.
@@ -82,7 +85,7 @@ function bindDirect<T>(
     }
 
     if (failure) {
-      getSxRenderErrorSink()(failure.error);
+      errorSink(failure.error);
       return;
     }
 
