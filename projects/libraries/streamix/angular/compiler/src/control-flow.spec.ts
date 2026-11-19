@@ -166,6 +166,43 @@ describe('standard Angular atom templates', () => {
     expect(result.setup).toContain('instance.update({ item, index,');
   });
 
+  it('qualifies bare nested track method names with the component receiver', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (batch of model.items; track batch.id) { <ul>@for (item of batch.entries; track trackById(item)) { <li>{{ item }}</li> }</ul> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    // The nested lambda lives in the module-level setup, where a bare
+    // `trackById` is a "Cannot find name" build failure. Angular evaluates
+    // track expressions with the component as implicit receiver.
+    expect(result.setup).toContain('(_index: any, item: any) => ctx.trackById(item)');
+  });
+
+  it('qualifies component members inside nested track expressions, not loop reads', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (batch of model.items; track batch.id) { <ul>@for (item of batch.entries; track item.id + versionOffset(item)) { <li>{{ item }}</li> }</ul> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(result.setup).toContain(
+      '(_index: any, item: any) => item.id + ctx.versionOffset(item)',
+    );
+  });
+
+  it('keeps the $index track form mapped to the lambda parameter', () => {
+    const result = transformAngularComponentTemplate(
+      `@for (batch of model.items; track batch.id) { <ul>@for (item of batch.entries; track $index) { <li>{{ item }}</li> }</ul> }`,
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    // Nested keyed block: the trackBy optimization recognizes the bare
+    // parameter form and emits a lambda without the item parameter.
+    expect(result.setup).toContain('(_index: any) => _index');
+  });
+
   it('lowers a @for body that reads the full loop context', () => {
     const result = transformAngularComponentTemplate(
       `@for (item of model.items; track item.id) { <li>{{ $index }}/{{ $count }}: {{ item.name }}</li> }`,

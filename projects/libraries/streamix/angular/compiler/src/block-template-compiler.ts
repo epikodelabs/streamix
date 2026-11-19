@@ -794,7 +794,94 @@ function trackByText(
   // `$any(...)` cast has to go the way of every other compiled expression.
   const text = stripAnyCasts(expressionSourceOf(trackBy, template));
 
-  return text === '$index' ? '_index' : text || item;
+  return text ? qualifyTrackReceiver(text, item) : item;
+}
+
+/** Implicit track names that do not read the component. */
+const TRACK_ITEM_INDEPENDENT = new Set(['$index']);
+
+/** Keywords that are literals or bind to no component member. */
+const TRACK_KEYWORDS = new Set([
+  'this',
+  'true',
+  'false',
+  'null',
+  'undefined',
+]);
+
+/**
+ * Qualifies every root identifier in a track expression with the component
+ * receiver.
+ *
+ * The generated lambda lives in the module-level setup function, so a bare
+ * `trackById` is a "Cannot find name" build failure (or silently resolves to
+ * an unrelated module-level function). Angular evaluates track expressions
+ * with the component as implicit receiver, so root reads that are not the
+ * loop item resolve against `ctx` - the component parameter, in scope at
+ * every emission site, for top-level and nested collection blocks alike.
+ * Member reads (`item.id`, `this.x`) and string literals are untouched.
+ */
+function qualifyTrackReceiver(text: string, item: string): string {
+  let result = '';
+  let index = 0;
+
+  while (index < text.length) {
+    const character = text[index]!;
+
+    if (character === "'" || character === '"' || character === '`') {
+      // String literals are copied verbatim: their content is not code.
+      const quote = character;
+      result += character;
+      index += 1;
+      while (index < text.length) {
+        if (text[index] === '\\') {
+          result += text.slice(index, index + 2);
+          index += 2;
+          continue;
+        }
+        result += text[index]!;
+        index += 1;
+        if (text[index - 1] === quote) {
+          break;
+        }
+      }
+      continue;
+    }
+
+    if (!/[A-Za-z_$]/.test(character)) {
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    let end = index + 1;
+    while (end < text.length && /[\w$]/.test(text[end]!)) {
+      end += 1;
+    }
+    const name = text.slice(index, end);
+
+    // A read that follows a dot is a member of the preceding expression,
+    // not a root reference.
+    let member = index - 1;
+    while (member >= 0 && /\s/.test(text[member]!)) {
+      member -= 1;
+    }
+    const precededByDot = member >= 0 && text[member] === '.';
+
+    if (precededByDot) {
+      result += name;
+    } else if (name === '$index') {
+      result += '_index';
+    } else if (name === item || TRACK_ITEM_INDEPENDENT.has(name) || TRACK_KEYWORDS.has(name)) {
+      result += name;
+    } else {
+      result += `ctx.${name}`;
+    }
+
+    index = end;
+  }
+
+  return result;
 }
 
 /** Accepts only the literals a generated comparison can evaluate directly. */
