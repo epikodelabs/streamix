@@ -163,6 +163,7 @@ export class SxValueBlock<T> {
 
       try {
         this.instance = this.factory.create(value);
+        applyContentScope(this.instance, this.anchor.parentNode);
         moveInstanceAfter(this.anchor, this.instance);
       } catch (error) {
         // The value was committed before the factory ran, so a failed factory
@@ -403,6 +404,7 @@ export class SxConditionalBlock {
 
     try {
       this.instance = this.branches[index].factory();
+      applyContentScope(this.instance, this.anchor.parentNode);
       moveInstanceAfter(this.anchor, this.instance);
     } catch (error) {
       // The selection was committed before the branch factory ran, so a
@@ -580,6 +582,7 @@ export class SxKeyedBlock<T> {
 
       if (!this.emptyInstance) {
         this.emptyInstance = this.emptyFactory();
+        applyContentScope(this.emptyInstance, this.anchor.parentNode);
         moveInstanceAfter(this.anchor, this.emptyInstance);
       }
 
@@ -622,11 +625,9 @@ export class SxKeyedBlock<T> {
             items.length,
           );
         } else {
-          record = {
-            key,
-            item,
-            instance: this.factory.create(item, index, items.length),
-          };
+          const instance = this.factory.create(item, index, items.length);
+          applyContentScope(instance, this.anchor.parentNode);
+          record = { key, item, instance };
           created.push(record);
         }
 
@@ -799,25 +800,45 @@ function moveInstanceAfter(
     return;
   }
 
-  const nodes = collectRange(
-    instance.first,
-    instance.last,
-  );
+  for (const node of collectRange(instance.first, instance.last)) {
+    parent.insertBefore(node, before);
+  }
+}
 
-  // Direct DOM factories bypass Angular's renderer, so inherit the content
-  // scope used by the surrounding template before mounting their elements.
-  const contentAttributes = parent.nodeType === 1
-    ? (parent as Element).getAttributeNames().filter(name => name.startsWith('_ngcontent-'))
-    : [];
+/**
+ * Applies the surrounding template's Angular content-scope attributes to a
+ * freshly created block range.
+ *
+ * Direct DOM factories bypass Angular's renderer, so their elements need the
+ * `_ngcontent-*` attributes for scoped styles to match. This runs once when an
+ * instance is created: later reorders only move existing nodes, so a list
+ * reorder no longer walks every descendant of every row.
+ */
+function applyContentScope(
+  instance: SxBlockInstance,
+  parent: Node | null,
+): void {
+  if (!parent || parent.nodeType !== 1) {
+    return;
+  }
 
-  for (const node of nodes) {
-    if (contentAttributes.length && node.nodeType === 1) {
-      const element = node as Element;
-      for (const target of [element, ...Array.from(element.querySelectorAll('*'))]) {
-        for (const attribute of contentAttributes) target.setAttribute(attribute, '');
+  const contentAttributes = (parent as Element)
+    .getAttributeNames()
+    .filter(name => name.startsWith('_ngcontent-'));
+  if (contentAttributes.length === 0) {
+    return;
+  }
+
+  for (const node of collectRange(instance.first, instance.last)) {
+    if (node.nodeType !== 1) continue;
+    const element = node as Element;
+    for (const target of [element, ...Array.from(element.querySelectorAll('*'))]) {
+      for (const attribute of contentAttributes) {
+        if (!target.hasAttribute(attribute)) {
+          target.setAttribute(attribute, '');
+        }
       }
     }
-    parent.insertBefore(node, before);
   }
 }
 

@@ -96,6 +96,44 @@ idescribe('sx structural runtime', () => {
     }
   });
 
+  it('keeps content scope attributes on reused rows through reorders', () => {
+    const host = document.createElement('div');
+    host.setAttribute('_ngcontent-test', '');
+    const anchor = document.createComment('sx');
+    host.appendChild(anchor);
+    const rows = atom<number[]>([1, 2]);
+
+    const block = ɵcreateSxKeyedBlock(anchor, rows, {
+      create(item) {
+        const row = document.createElement('div');
+        row.textContent = String(item);
+        row.appendChild(document.createElement('span'));
+        return { first: row, last: row, destroy() { row.remove(); } };
+      },
+    }, (_index, item) => item);
+
+    const initial = Array.from(host.querySelectorAll('div'));
+    expect(initial.map(row => row.textContent)).toEqual(['1', '2']);
+
+    rows.next([2, 1]);
+    rendererScheduler.flushNow();
+
+    const reordered = Array.from(host.querySelectorAll('div'));
+    expect(reordered.map(row => row.textContent)).toEqual(['2', '1']);
+    // Reused instances keep their identity, and their scope attributes are
+    // applied once at creation rather than re-walked on every move.
+    expect(reordered[0]).toBe(initial[1]);
+    expect(reordered[1]).toBe(initial[0]);
+    for (const row of reordered) {
+      expect(row.hasAttribute('_ngcontent-test')).toBeTrue();
+      expect(row.firstElementChild!.hasAttribute('_ngcontent-test')).toBeTrue();
+    }
+
+    block.destroy();
+    rows.dispose();
+    expect(host.querySelectorAll('div').length).toBe(0);
+  });
+
   it('creates and destroys a direct value block', () => {
     const host = document.createElement('div');
     const anchor = document.createComment('sx');

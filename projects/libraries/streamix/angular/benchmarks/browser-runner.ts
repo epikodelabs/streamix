@@ -47,12 +47,15 @@ export function runBrowserBenchmarks(
   const coalescedIterations = integerParam(params, 'coalesced', 5_000);
   const rows = integerParam(params, 'rows', 1_000);
   const reorders = integerParam(params, 'reorders', 500);
+  const deepRows = integerParam(params, 'deepRows', 300);
+  const deepDepth = integerParam(params, 'depth', 5);
 
   const results = [
     runBenchmark(rawDomTextCase, options(scalarIterations, samples, warmup)),
     runBenchmark(sxCompiledTextCase, options(scalarIterations, samples, warmup)),
     runBenchmark(sxCoalescedCase, options(coalescedIterations, samples, warmup)),
     runBenchmark(keyedReorderCase(rows), options(reorders, samples, warmup)),
+    runBenchmark(keyedReorderCase(deepRows, deepDepth), options(reorders, samples, warmup)),
   ];
 
   return {

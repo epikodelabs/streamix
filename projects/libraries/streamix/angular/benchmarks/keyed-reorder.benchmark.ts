@@ -43,9 +43,10 @@ function rotate<T>(
 
 export function keyedReorderCase(
   rowCount = 1_000,
+  depth = 0,
 ): BenchmarkCase {
   return {
-    name: `sx/keyed-reorder-${rowCount}`,
+    name: `sx/keyed-reorder-${rowCount}${depth > 0 ? `-depth-${depth}` : ''}`,
     setup() {
       const host = document.createElement('div');
       const anchor = document.createComment('sx');
@@ -63,10 +64,18 @@ export function keyedReorderCase(
           create(row) {
             const element =
               document.createElement('div');
+            // Deep rows expose per-move subtree work; shallow rows measure the
+            // reconciliation path itself.
+            let deepest = element;
+            for (let level = 0; level < depth; level += 1) {
+              const child = document.createElement('div');
+              deepest.appendChild(child);
+              deepest = child;
+            }
             const text =
               document.createTextNode('');
 
-            element.appendChild(text);
+            deepest.appendChild(text);
 
             const range =
               ɵcreateSxFragmentRange([element]);
