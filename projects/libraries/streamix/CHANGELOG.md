@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Vue compiler:** `v-for` aliases (including destructured patterns) and slot props now create template-local scopes, so reactive reads, scope members, same-name bindings, `v-model`, and assignment lowering never rewrite a shadowed name; the old "v-for alias shadows a Streamix binding" rejection is gone. React's JSX and derived lowering already resolve lexical shadowing; Angular's structural block compiler now lets authored loop aliases shadow same-named component sources (#104, #214).
+
+- **Vue compiler:** derived shorthand now rewrites only plain value reads. `source.safeValue`, `source.error`, `source.subscribe(...)`, `source.set(...)`, `source[key]`, and `source['value']` stay on the atom object instead of becoming `source.value…`; value methods such as `items.map(...)` and literal indexes still read the value. React's derived/JSX lowering and Angular's source-transparent normalization received the same correction (#215).
+
+- **Vue compiler:** lowering `v-model` on a scope member now reports an authored `:value` or mapped `@input`/`@change` on the same element instead of emitting duplicate attributes that Vue's parser rejects (#216).
+
+- **Vue compiler:** `derived(async () => ...)`, async function expressions, and async generators are rejected at build time with a positioned diagnostic across the compiler, Vite, and builder paths; synchronous and generator formulas stay supported (#120).
+
 - **Angular:** keyed structural reorders no longer re-walk every moved subtree to reapply `_ngcontent-*` attributes; content scope is applied once when an instance is created. Added a deep-subtree reorder benchmark plus identity, DOM-order and scope regression coverage (#108). React and Vue use their framework reconcilers instead of this runtime.
 
 - **Builders:** Vue, React and Angular watch regeneration now skips writes when the generated text and map are unchanged, and all three restore a backup-only tree left by a crash between swap renames. Each watch batch already shares one semantic program (#123).

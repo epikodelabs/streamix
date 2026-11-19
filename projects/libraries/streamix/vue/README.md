@@ -47,6 +47,7 @@ const profile = scope({ name: 'Ada' });
 ```
 
 Atom reads inside `derived` callbacks are transpiled as well — write `count`, not `count.value`.
+Source APIs stay on the atom: `count.safeValue`, `count.subscribe(...)`, and `count.set(...)` are never rewritten, and a non-literal index such as `count[key]` is left untouched because its meaning cannot be lowered safely. `derived()` formulas must be synchronous; an `async` callback is rejected at build time.
 
 The value is not copied into a second store. Vue reads and writes the same Streamix source.
 
