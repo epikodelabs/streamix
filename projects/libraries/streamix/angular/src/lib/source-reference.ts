@@ -50,7 +50,8 @@ interface InstalledFieldObserver {
 
 /**
  * Creates compiler-owned source-reference channels for selected component
- * fields and observes plain-field identity replacement.
+ * fields and observes field identity replacement for plain fields and for
+ * authored accessors.
  *
  * The helper is safe when emitted before authored class fields: fields that do
  * not exist yet are installed after the first browser render. A source bridge
@@ -71,7 +72,14 @@ export function ɵinstallSxSourceReferences<T extends object>(
   for (const field of uniqueFields(fields)) {
     cells[field] = new SourceReferenceCell();
 
-    if (Object.prototype.hasOwnProperty.call(context, field)) {
+    // Plain fields must exist before they can be observed: installing early
+    // would be overwritten by class-field initialization. Prototype
+    // accessors, in contrast, are installed when the class is defined, so
+    // they are observed eagerly like existing plain fields.
+    if (
+      Object.prototype.hasOwnProperty.call(context, field) ||
+      findInheritedAccessorDescriptor(context, field) !== undefined
+    ) {
       installed.set(
         field,
         installPlainFieldObserver(
@@ -85,7 +93,7 @@ export function ɵinstallSxSourceReferences<T extends object>(
 
   // A conservative string source transform may place the generated field
   // before authored component fields. Class-field initialization would then
-  // overwrite an eager accessor, so install any still-missing observers only
+  // overwrite an eager observer, so install any still-missing observers only
   // after construction/render has completed.
   if (installed.size < Object.keys(cells).length) {
     afterNextRender(() => {
@@ -148,23 +156,35 @@ function installPlainFieldObserver<T extends object>(
   onChange: (value: unknown) => void,
 ): InstalledFieldObserver {
   const target = context as unknown as Record<string, unknown>;
-  const descriptor = Object.getOwnPropertyDescriptor(target, field);
+  const ownDescriptor = Object.getOwnPropertyDescriptor(target, field);
 
-  if (descriptor && !descriptor.configurable) {
+  if (ownDescriptor && !ownDescriptor.configurable) {
     throw new Error(
       `Cannot observe sx source reference ${JSON.stringify(field)} because the component field is not configurable.`,
     );
   }
 
-  if (descriptor && (descriptor.get || descriptor.set)) {
-    // Compiler metadata is intended to identify fields. Preserve authored
-    // accessor semantics rather than wrapping them implicitly.
-    return { restore() {} };
+  // Authored `get x() {}` class bodies declare accessors on the prototype,
+  // while host code can define accessors as own properties. Either shape can
+  // carry a compiler-selected source reference, so both are wrapped with a
+  // delegating observer. Skipping accessors would leave the field unobserved
+  // and compiled views permanently bound to the initial source.
+  const accessorDescriptor =
+    ownDescriptor ?? findInheritedAccessorDescriptor(target, field);
+
+  if (accessorDescriptor && (accessorDescriptor.get || accessorDescriptor.set)) {
+    return installAccessorObserver(
+      context,
+      field,
+      accessorDescriptor,
+      ownDescriptor === undefined,
+      onChange,
+    );
   }
 
   let current = target[field];
-  const enumerable = descriptor?.enumerable ?? true;
-  const writable = descriptor?.writable ?? true;
+  const enumerable = ownDescriptor?.enumerable ?? true;
+  const writable = ownDescriptor?.writable ?? true;
 
   Object.defineProperty(target, field, {
     configurable: true,
@@ -191,11 +211,114 @@ function installPlainFieldObserver<T extends object>(
   return {
     restore(): void {
       Object.defineProperty(target, field, {
-        configurable: descriptor?.configurable ?? true,
+        configurable: ownDescriptor?.configurable ?? true,
         enumerable,
         writable,
         value: current,
       });
+    },
+  };
+}
+
+function findInheritedAccessorDescriptor(
+  target: object,
+  field: string,
+): PropertyDescriptor | undefined {
+  let prototype = Object.getPrototypeOf(target);
+
+  while (prototype && prototype !== Object.prototype) {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, field);
+
+    if (descriptor) {
+      return descriptor.get || descriptor.set ? descriptor : undefined;
+    }
+
+    prototype = Object.getPrototypeOf(prototype);
+  }
+
+  return undefined;
+}
+
+function installAccessorObserver<T extends object>(
+  context: T,
+  field: string,
+  descriptor: PropertyDescriptor,
+  inherited: boolean,
+  onChange: (value: unknown) => void,
+): InstalledFieldObserver {
+  const target = context as unknown as Record<string, unknown>;
+  const { get, set } = descriptor;
+
+  // Identity replacement is reported against the value the authored getter
+  // reports after the authored setter runs: the setter may normalize or
+  // ignore an assignment. An initial read establishes the baseline so only
+  // real identity changes are emitted; a getter that is not readable yet
+  // defers the baseline instead of throwing from installation.
+  let lastEmitted: unknown;
+  let hasEmitted = false;
+
+  try {
+    if (get) {
+      lastEmitted = get.call(target);
+      hasEmitted = true;
+    }
+  } catch {
+    hasEmitted = false;
+  }
+
+  const emitIdentityChange = (value: unknown): void => {
+    if (hasEmitted && Object.is(lastEmitted, value)) {
+      return;
+    }
+
+    hasEmitted = true;
+    lastEmitted = value;
+    onChange(value);
+  };
+
+  Object.defineProperty(target, field, {
+    configurable: true,
+    enumerable: descriptor.enumerable,
+    ...(get
+      ? {
+          get(this: unknown): unknown {
+            return get.call(this);
+          },
+        }
+      : {}),
+    ...(set
+      ? {
+          set(this: unknown, next: unknown): void {
+            set.call(this, next);
+
+            if (get) {
+              try {
+                emitIdentityChange(get.call(this));
+              } catch {
+                // The authored getter is temporarily unreadable. Skip the
+                // emission rather than turning the authored setter into a
+                // throwing one; the next readable assignment reports the
+                // identity change.
+                return;
+              }
+            } else {
+              emitIdentityChange(next);
+            }
+          },
+        }
+      : {}),
+  });
+
+  return {
+    restore(): void {
+      if (inherited) {
+        // The wrapper was the only own property for this field: removing it
+        // reveals the authored prototype accessor again.
+        delete target[field];
+        return;
+      }
+
+      Object.defineProperty(target, field, descriptor);
     },
   };
 }
