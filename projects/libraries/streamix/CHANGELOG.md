@@ -8,7 +8,7 @@
 
 - **Vue compiler:** lowering `v-model` on a scope member now reports an authored `:value` or mapped `@input`/`@change` on the same element instead of emitting duplicate attributes that Vue's parser rejects (#216).
 
-- **Vue compiler:** `derived(async () => ...)`, async function expressions, and async generators are rejected at build time with a positioned diagnostic across the compiler, Vite, and builder paths; synchronous and generator formulas stay supported (#120).
+- **Vue compiler:** `derived(async () => ...)`, async function expressions, and async generators are rejected at build time with a positioned diagnostic across the compiler, Vite, and builder paths; synchronous and generator formulas stay supported (#120). React's compiler reports the same async callbacks at build time. Angular has no compiler pass over `derived`, so its existing runtime guard remains the only check there.
 
 - **Angular:** keyed structural reorders no longer re-walk every moved subtree to reapply `_ngcontent-*` attributes; content scope is applied once when an instance is created. Added a deep-subtree reorder benchmark plus identity, DOM-order and scope regression coverage (#108). React and Vue use their framework reconcilers instead of this runtime.
 

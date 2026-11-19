@@ -655,9 +655,24 @@ export function transformReactJsx(
         : factory.updateFunctionExpression(callback, callback.modifiers, callback.asteriskToken, callback.name, callback.typeParameters, callback.parameters, callback.type, body as ts.Block);
       return factory.updateCallExpression(call, call.expression, call.typeArguments, [replacement, ...call.arguments.slice(1)]);
     };
+    /**
+     * `derived()` is evaluated synchronously; an async callback would hand the
+     * runtime a promise, which it rejects only when the formula first runs.
+     * Reject it at build time instead, including async generators.
+     */
+    const reportAsyncDerived = (call: ts.CallExpression): void => {
+      const callback = call.arguments[0];
+      if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) return;
+      const modifiers = ts.canHaveModifiers(callback) ? ts.getModifiers(callback) : undefined;
+      if (!modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) return;
+      diagnostics.push(diagnostic(callback, "error",
+        "derived() formulas must return synchronously. Use flow() for async work."));
+    };
     const lowerModuleFormulas: ts.Visitor = node => {
-      if (ts.isCallExpression(node) && factoryKind(node, imports, checker) === "derived")
+      if (ts.isCallExpression(node) && factoryKind(node, imports, checker) === "derived") {
+        reportAsyncDerived(node);
         return lowerDerivedCallback(node, moduleAtoms, sourceFile, moduleAtomMaps);
+      }
       return ts.visitEachChild(node, lowerModuleFormulas, context);
     };
 
@@ -1678,6 +1693,7 @@ export function transformReactJsx(
           }
         }
         if (ts.isCallExpression(child) && factoryKind(child, imports, checker) === "derived") {
+          reportAsyncDerived(child);
           return lowerDerivedCallback(child, atoms, node, atomMaps, isHidden);
         }
         if (isComponent && ts.isVariableDeclaration(child) && localReactiveDeclarations.has(child) && child.initializer) {

@@ -274,6 +274,32 @@ describe("React compiler source API reads", () => {
     expect(compiled.result.code).not.toContain("other.value.set");
   });
 
+  it("rejects asynchronous derived formulas at build time", () => {
+    for (const callback of [
+      "async () => count",
+      "async function () { return count; }",
+      "async function* () { yield count; return count; }",
+    ]) {
+      const result = transformReactJsx(`
+        import { atom, derived } from "@epikodelabs/streamix";
+        export const count = atom(1);
+        export const value = derived(${callback});
+      `, "async-derived.tsx");
+      expect(result.diagnostics.some(diagnostic =>
+        diagnostic.category === "error" && diagnostic.message.includes("synchronously"),
+      )).withContext(callback).toBeTrue();
+    }
+
+    const sync = transformReactJsx(`
+      import { atom, derived, flow } from "@epikodelabs/streamix";
+      export const count = atom(1);
+      export const doubled = derived(() => count * 2);
+      export const generated = derived(function* () { yield count; return count; });
+      export const updates = flow(async function* () { yield 1; });
+    `, "sync-derived.tsx");
+    expect(sync.diagnostics).toEqual([]);
+  });
+
   it("keeps source API calls raw in component handlers and JSX", () => {
     const compiled = compileComponent(`
       import { atom } from "@epikodelabs/streamix";
