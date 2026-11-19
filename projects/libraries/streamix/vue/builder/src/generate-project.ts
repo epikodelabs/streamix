@@ -302,28 +302,44 @@ async function regenerateVueFileInternal(
 
   await mkdir(dirname(destination), { recursive: true });
   // Write only after a successful transform: a watch failure never leaves a
-  // misleading, untransformed SFC in the delegated project.
-  // Rename a same-directory temporary into place, so the delegate cannot
-  // observe a partially written SFC while Vite recompiles a changed file.
-  const temporary = `${destination}.sx-tmp-${randomUUID()}`;
-  try {
-    await writeFile(temporary, output);
-    await rename(temporary, destination);
-  } finally {
-    await rm(temporary, { force: true });
-  }
+  // misleading, untransformed SFC in the delegated project. Identical output
+  // is left untouched so a no-content-change watch cycle does not wake the
+  // delegate's watcher.
+  await writeIfChanged(destination, output);
   if (map !== undefined) {
-    const mapTemporary = `${destination}.map.sx-tmp-${randomUUID()}`;
-    try {
-      await writeFile(mapTemporary, map);
-      await rename(mapTemporary, `${destination}.map`);
-    } finally {
-      await rm(mapTemporary, { force: true });
-    }
+    await writeIfChanged(`${destination}.map`, map);
   } else if (normalized.endsWith('.vue')) {
     // The transform produced no map (an unchanged passthrough), so a map from
     // an earlier generation would describe stale positions.
     await rm(`${destination}.map`, { force: true });
+  }
+}
+
+/**
+ * Atomically replaces a virtual file only when its bytes changed.
+ *
+ * Rename a same-directory temporary into place, so the delegate cannot observe
+ * a partially written file while Vite recompiles it.
+ */
+async function writeIfChanged(
+  path: string,
+  contents: string | Buffer,
+): Promise<void> {
+  try {
+    const current = await readFile(path);
+    if (typeof contents === 'string' ? current.toString('utf8') === contents : current.equals(contents)) {
+      return;
+    }
+  } catch {
+    // Missing or unreadable: write it.
+  }
+
+  const temporary = `${path}.sx-tmp-${randomUUID()}`;
+  try {
+    await writeFile(temporary, contents);
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
   }
 }
 

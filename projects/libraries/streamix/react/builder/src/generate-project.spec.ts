@@ -1,6 +1,7 @@
-import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { generateReactProject, regenerateReactFile } from "./generate-project";
 
 /** Content snapshot of every file under a tree, keyed by slash-relative path. */
@@ -380,6 +381,71 @@ describe("React Angular-hosted source generation", () => {
       expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).toContain("useStreamixSource");
     } finally {
       await rm(root, { force: true, recursive: true });
+    }
+  });
+});
+
+describe("React builder watch recovery and work", () => {
+  const writeTsconfig = async (root: string): Promise<void> => {
+    await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", jsx: "preserve" },
+      include: ["projects/apps/demo/src/**/*.ts", "projects/apps/demo/src/**/*.tsx"],
+    }));
+  };
+
+  it("restores a backup-only tree when the next generation fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-recovery-"));
+    const sourceRoot = "projects/apps/demo/src";
+    const source = join(root, sourceRoot);
+    try {
+      await mkdir(source, { recursive: true });
+      await writeTsconfig(root);
+      await writeFile(join(source, "main.tsx"), `
+        export function App() { return <output>ready</output>; }
+      `);
+      const output = await generateReactProject(root, sourceRoot);
+      const before = await snapshotTree(output);
+
+      const backup = join(dirname(output), `.${basename(output)}-sx-backup-${randomUUID()}`);
+      await rename(output, backup);
+      await writeFile(join(source, "broken.tsx"), `
+        import { atom } from "@epikodelabs/streamix";
+        export function Broken({ flag }: { flag: boolean }) {
+          if (flag) return null;
+          const count = atom(0);
+          return <output>{count}</output>;
+        }
+      `);
+
+      await expectAsync(generateReactProject(root, sourceRoot)).toBeRejected();
+      expect(await snapshotTree(output)).toEqual(before);
+      expect((await readdir(dirname(output))).some(name => name.includes("-sx-backup-"))).toBeFalse();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not rewrite an unchanged TypeScript file during a watch cycle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-unchanged-"));
+    const sourceRoot = "projects/apps/demo/src";
+    const source = join(root, sourceRoot);
+    try {
+      await mkdir(source, { recursive: true });
+      await writeTsconfig(root);
+      await writeFile(join(source, "plain.tsx"), `
+        export const value = 1;
+        export function Plain() { return <span />; }
+      `);
+      const output = await generateReactProject(root, sourceRoot);
+      const destination = join(output, "plain.tsx");
+      const past = new Date("2000-01-01T00:00:00Z");
+      await utimes(destination, past, past);
+
+      await regenerateReactFile(root, sourceRoot, "plain.tsx");
+
+      expect((await stat(destination)).mtimeMs).toBeLessThan(Date.parse("2001-01-01T00:00:00Z"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

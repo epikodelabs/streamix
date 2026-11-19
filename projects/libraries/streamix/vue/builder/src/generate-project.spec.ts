@@ -1,6 +1,7 @@
-import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { generateVueProject, regenerateVueFile, virtualRootOf } from './generate-project';
 
 /** Content snapshot of every file under a tree, keyed by slash-relative path. */
@@ -316,6 +317,65 @@ describe('Vue builder introspection injection', () => {
       const plain = await generateVueProject(workspace, sourceRoot, false);
       expect(await readFile(join(plain, 'store.ts'), 'utf8')).not.toContain('__sxDebug');
       expect(await readFile(join(plain, 'Counter.vue'), 'utf8')).not.toContain('__sxDebug');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Vue builder watch recovery and work', () => {
+  it('restores a backup-only tree when the next generation fails', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-recovery-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    const source = join(workspace, sourceRoot);
+    try {
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'Counter.vue'), `
+        <script setup lang="ts">
+        import { atom } from '@epikodelabs/streamix';
+        const count = atom(0);
+        </script>
+        <template><p>{{ count }}</p></template>
+      `);
+      const output = await generateVueProject(workspace, sourceRoot);
+      const before = await snapshotTree(output);
+
+      // Simulate a crash between the live-to-backup and staging-to-live
+      // renames: only the backup tree remains.
+      const backup = join(dirname(output), `.${basename(output)}-sx-backup-${randomUUID()}`);
+      await rename(output, backup);
+      await writeFile(join(source, 'Broken.vue'), `
+        <script setup lang="ts">
+        import { scope } from '@epikodelabs/streamix';
+        const state = scope({ title: '' });
+        </script>
+        <template><p>{{ state.missing }}</p></template>
+      `);
+
+      await expectAsync(generateVueProject(workspace, sourceRoot)).toBeRejected();
+      expect(await snapshotTree(output)).toEqual(before);
+      expect((await readdir(dirname(output))).some(name => name.includes('-sx-backup-'))).toBeFalse();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('does not rewrite an unchanged TypeScript file during a watch cycle', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'streamix-vue-unchanged-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    const source = join(workspace, sourceRoot);
+    try {
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, 'store.ts'), 'export const value = 1;\n');
+      const output = await generateVueProject(workspace, sourceRoot);
+      const destination = join(output, 'store.ts');
+      const past = new Date('2000-01-01T00:00:00Z');
+      await utimes(destination, past, past);
+
+      await regenerateVueFile(workspace, sourceRoot, 'store.ts');
+
+      expect((await stat(destination)).mtimeMs).toBeLessThan(Date.parse('2001-01-01T00:00:00Z'));
+      expect(await readFile(destination, 'utf8')).toBe('export const value = 1;\n');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

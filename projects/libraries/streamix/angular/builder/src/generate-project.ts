@@ -647,15 +647,34 @@ async function writeFileAtomic(path: string, contents: string): Promise<void> {
   }
 }
 
+/** Atomically replaces a virtual file only when its bytes changed. */
+async function writeIfChanged(path: string, contents: string): Promise<void> {
+  try {
+    if (await readFile(path, 'utf8') === contents) return;
+  } catch {
+    // Missing or unreadable: write it.
+  }
+  await writeFileAtomic(path, contents);
+}
+
 /** Writes the virtual text with an authored-position source map trailer, so
  * the esbuild delegate chains devtools back onto the authored file. Generated
  * bindings and instrumentation inserts stay unmapped, matching the React
  * builder's maps. */
 async function writeVirtualFile(path: string, text: string, authored: string, fileName: string): Promise<void> {
-  const map = createTokenSourceMap(authored, text, fileName.replace(/\\/g, '/'));
   await mkdir(dirname(path), { recursive: true });
-  await writeFileAtomic(path, `${text}\n//# sourceMappingURL=${basename(path)}.map\n`);
-  await writeFileAtomic(`${path}.map`, `${JSON.stringify(map)}\n`);
+  if (text === authored) {
+    // Identity compilations stay as the copied authored file, exactly like a
+    // staged generation; only a stale map from an earlier rewrite is removed.
+    await writeIfChanged(path, authored);
+    await rm(`${path}.map`, { force: true });
+    return;
+  }
+  const map = createTokenSourceMap(authored, text, fileName.replace(/\\/g, '/'));
+  // Unchanged watch output must not touch the delegated tree; the delegate's
+  // watcher would otherwise rebuild files whose generated text did not change.
+  await writeIfChanged(path, `${text}\n//# sourceMappingURL=${basename(path)}.map\n`);
+  await writeIfChanged(`${path}.map`, `${JSON.stringify(map)}\n`);
 }
 
 /** One authored file compiled into its virtual text. The staged pass and the
@@ -855,7 +874,7 @@ async function regenerateAngularFileInternal(workspaceRoot: string, sourceRoot: 
   if (!/\.[jt]sx?$/i.test(normalized) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(normalized)) {
     // Assets and spec files are mirrored verbatim, like the staged copy.
     await mkdir(dirname(destination), { recursive: true });
-    await writeFileAtomic(destination, authored);
+    await writeIfChanged(destination, authored);
     return;
   }
 

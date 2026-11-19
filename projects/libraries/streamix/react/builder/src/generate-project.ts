@@ -195,6 +195,19 @@ async function writeFileAtomic(path: string, contents: string | Buffer): Promise
   }
 }
 
+/** Atomically replaces a virtual file only when its bytes changed. */
+async function writeIfChanged(path: string, contents: string | Buffer): Promise<void> {
+  try {
+    const current = await readFile(path);
+    if (typeof contents === "string" ? current.toString("utf8") === contents : current.equals(contents)) {
+      return;
+    }
+  } catch {
+    // Missing or unreadable: write it.
+  }
+  await writeFileAtomic(path, contents);
+}
+
 export function virtualRootOf(sourceRoot: string): string {
   return sourceRoot
     .replace(/^projects[\\/]apps[\\/]/, "")
@@ -315,10 +328,12 @@ async function regenerateReactFileInternal(workspaceRoot: string, sourceRoot: st
     // A watch edit of the entry must keep the injected activation, or the
     // first save would silently drop introspection until the next full regen.
     if (introspection && ENTRY_NAMES.includes(basename(normalized).toLowerCase())) code = injectIntrospectionActivation(code);
-    await writeFileAtomic(destination, `${code}\n//# sourceMappingURL=${basename(destination)}.map\n`);
-    await writeFileAtomic(`${destination}.map`, JSON.stringify(transformed.sourceMap));
+    await writeIfChanged(destination, `${code}\n//# sourceMappingURL=${basename(destination)}.map\n`);
+    await writeIfChanged(`${destination}.map`, JSON.stringify(transformed.sourceMap));
   } else {
-    await writeFileAtomic(destination, await readFile(origin));
+    // Mirrored assets are compared before replacing, so an unchanged watch
+    // cycle does not touch the delegate tree.
+    await writeIfChanged(destination, await readFile(origin));
   }
 }
 

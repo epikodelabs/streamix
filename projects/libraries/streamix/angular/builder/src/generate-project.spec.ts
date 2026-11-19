@@ -702,3 +702,85 @@ describe('Angular diagnostic paths', () => {
     }
   });
 });
+
+describe('Angular builder watch recovery and work', () => {
+  async function workspace(): Promise<{
+    root: string;
+    sourceRoot: string;
+    source: string;
+    generateProject: typeof import('./generate-project').generateProject;
+    regenerateAngularFile: typeof import('./generate-project').regenerateAngularFile;
+    rm: typeof import('node:fs/promises').rm;
+  }> {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { generateProject, regenerateAngularFile } = await import('./generate-project');
+    const root = await mkdtemp(join(tmpdir(), 'streamix-angular-watch-'));
+    const sourceRoot = 'projects/apps/demo/src';
+    const source = join(root, sourceRoot);
+    await mkdir(source, { recursive: true });
+    await writeFile(join(root, 'projects/apps/demo/tsconfig.app.json'), JSON.stringify({
+      compilerOptions: { target: 'ES2022', experimentalDecorators: true }, include: ['src/**/*.ts'],
+    }));
+    await writeFile(join(source, 'globals.d.ts'), `
+      declare module '@epikodelabs/streamix' {
+        export function atom<T>(value: T): any;
+      }
+    `);
+    await writeFile(join(source, 'counter.ts'), `
+      import { atom } from '@epikodelabs/streamix';
+      declare function Component(meta: object): ClassDecorator;
+      @Component({ template: '<output>{{ count.value }}</output>' })
+      export class Counter {
+        count = atom(1);
+      }
+    `);
+    return { root, sourceRoot, source, generateProject, regenerateAngularFile, rm };
+  }
+
+  it('restores a backup-only tree when the next generation fails', async () => {
+    const { randomUUID } = await import('node:crypto');
+    const { readdir, readFile, rename, rm } = await import('node:fs/promises');
+    const { basename, dirname, join } = await import('node:path');
+    const { root, sourceRoot, source, generateProject } = await workspace();
+    try {
+      const output = join(root, '.angular/.streamix/demo/src');
+      await generateProject({ workspaceRoot: root, sourceRoot });
+      const before = await readFile(join(output, 'counter.ts'), 'utf8');
+
+      const backup = join(dirname(output), `.${basename(output)}-sx-backup-${randomUUID()}`);
+      await rename(output, backup);
+      await (await import('node:fs/promises')).writeFile(join(source, 'broken.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ template: '<p>{{ a }}</p>' }) export class A { a = atom(1); }
+        @Component({ template: '<p>{{ b }}</p>' }) export class B { b = atom(2); }
+      `);
+
+      await expectAsync(generateProject({ workspaceRoot: root, sourceRoot })).toBeRejected();
+      expect(await readFile(join(output, 'counter.ts'), 'utf8')).toBe(before);
+      expect((await readdir(dirname(output))).some(name => name.includes('-sx-backup-'))).toBeFalse();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not rewrite an unchanged TypeScript file during a watch cycle', async () => {
+    const { join } = await import('node:path');
+    const { stat, utimes, rm } = await import('node:fs/promises');
+    const { root, sourceRoot, generateProject, regenerateAngularFile } = await workspace();
+    try {
+      await generateProject({ workspaceRoot: root, sourceRoot });
+      const destination = join(root, '.angular/.streamix/demo/src/counter.ts');
+      const past = new Date('2000-01-01T00:00:00Z');
+      await utimes(destination, past, past);
+
+      await regenerateAngularFile(root, sourceRoot, 'counter.ts');
+
+      expect((await stat(destination)).mtimeMs).toBeLessThan(Date.parse('2001-01-01T00:00:00Z'));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
