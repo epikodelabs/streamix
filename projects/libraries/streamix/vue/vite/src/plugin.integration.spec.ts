@@ -7,7 +7,7 @@ import { sxVue } from './plugin';
 
 describe('Streamix Vue Vite fixture', () => {
   it('builds authored SFCs through Streamix before the Vue plugin', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'streamix-vite-'));
+    const root = await mkdtemp(join(tmpdir(), 'streamix-vite#fixture-'));
     try {
       const entry = join(root, 'src', 'main.ts');
       await mkdir(join(root, 'src'), { recursive: true });

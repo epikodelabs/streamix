@@ -102,7 +102,7 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
       ? { define: { 'import.meta.env.DEV': 'true' } }
       : undefined,
     transform(source, id) {
-      const fileName = id.replace(/[?#].*$/, '');
+      const fileName = sourceFileName(id);
 
       if (fileName.includes('/node_modules/')) {
         return null;
@@ -161,7 +161,7 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
       return { code: result.code, map: result.sourceMap ?? null };
     },
     watchChange(id, change) {
-      const fileName = id.replace(/[?#].*$/, '');
+      const fileName = sourceFileName(id);
       // Config and package edits can change options or module resolution for
       // every project, not only the one that lists the file.
       if (/\.json$/i.test(fileName)) {
@@ -193,6 +193,11 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
       }
     },
   };
+}
+
+/** A hash in a directory or file name is valid on disk, including on Windows. */
+function sourceFileName(id: string): string {
+  return id.replace(/(\.(?:vue|[cm]?[jt]sx?|json))[?#].*$/i, '$1');
 }
 
 /** Program file names and Vite ids differ by separators and, on Windows,

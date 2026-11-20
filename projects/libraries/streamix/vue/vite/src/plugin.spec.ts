@@ -103,8 +103,8 @@ describe('Streamix Vue Vite plugin', () => {
   it('reuses cached programs and invalidates only the project containing the edit', async () => {
     const root = await mkdtemp(join(tmpdir(), 'streamix-vue-vite-watch-'));
     try {
-      const projectA = join(root, 'a');
-      const projectB = join(root, 'b');
+      const projectA = join(root, 'a#workspace');
+      const projectB = join(root, 'b#workspace');
       await mkdir(projectA, { recursive: true });
       await mkdir(projectB, { recursive: true });
       const config = JSON.stringify({
@@ -125,13 +125,13 @@ describe('Streamix Vue Vite plugin', () => {
         transformOf(plugin).call(context(), source, path) as { code: string };
       const watchChange = watchChangeOf(plugin);
 
-      transform(originalA, fileA);
+      transform(originalA, `${fileA}?vue&type=script`);
       transform(sourceB, fileB);
 
       const readFileSpy = spyOn(ts.sys, 'readFile').and.callThrough();
       const editedA = `import { atom } from '@epikodelabs/streamix';\nexport const count = atom(1);`;
       await writeFile(fileA, editedA);
-      watchChange(fileA, { event: 'update' });
+      watchChange(`${fileA}#watch`, { event: 'update' });
 
       readFileSpy.calls.reset();
       const rebuilt = transform(editedA, fileA); // A rebuilds: config plus source reads
