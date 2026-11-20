@@ -196,6 +196,20 @@ describe('Atom System', () => {
       a.dispose();
     });
 
+    it('tracks safeValue in formulas while retaining the last successful value on error', () => {
+      const source = atom(2);
+      const doubled = derived(() => source.safeValue * 2);
+      expect(doubled.value).toBe(4);
+      source.next(3);
+      expect(doubled.value).toBe(6);
+      source.fail(new Error('source failed'));
+      expect(doubled.value).toBe(6);
+      source.next(4);
+      expect(doubled.value).toBe(8);
+      doubled.dispose();
+      source.dispose();
+    });
+
     it('should terminate on error when configured', async () => {
       const a = atom(0, { terminateOnError: true });
       a.subscribe(() => {});

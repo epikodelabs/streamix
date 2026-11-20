@@ -720,6 +720,7 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
     },
 
     get safeValue() {
+      getCurrentFormulaContext()?.dependencies.add(instance);
       if (config.getSafeValue) {
         return config.getSafeValue(instance);
       }
