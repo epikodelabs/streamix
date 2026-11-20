@@ -209,6 +209,7 @@ export { getScheduler, setScheduler, transaction } from "../runtime/scheduling";
 
 interface FormulaContext {
   dependencies: Set<DependencySource<any>>;
+  readonly trackSafeValue?: true;
 }
 
 const activeFormulaStack: FormulaContext[] = [];
@@ -288,7 +289,7 @@ class EvaluationOwner {
   /** Begin a new evaluation generation and return its context. */
   enter(): { context: FormulaContext; generation: number } {
     this.generation++;
-    const context: FormulaContext = { dependencies: new Set<Readable<any>>() };
+    const context: FormulaContext = { dependencies: new Set<Readable<any>>(), trackSafeValue: true };
     this.ctx = context;
     return { context, generation: this.generation };
   }
@@ -720,7 +721,10 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
     },
 
     get safeValue() {
-      getCurrentFormulaContext()?.dependencies.add(instance);
+      // Operator setup also probes dependencies. Its internal snapshot reads
+      // must stay untracked, while an authored derived formula can follow them.
+      const context = getCurrentFormulaContext();
+      if (context?.trackSafeValue) context.dependencies.add(instance);
       if (config.getSafeValue) {
         return config.getSafeValue(instance);
       }
