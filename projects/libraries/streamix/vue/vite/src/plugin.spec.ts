@@ -6,6 +6,18 @@ import ts from 'typescript';
 import { sxVue } from './plugin';
 
 describe('Streamix Vue Vite plugin', () => {
+  it('reports malformed tsconfigs before compiling authored modules', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'streamix-vue-bad-config-'));
+    try {
+      await writeFile(join(root, 'tsconfig.json'), '{"compilerOptions":{"module":"bogus"}}');
+      const transform = transformOf(sxVue({ introspection: true }));
+      const source = "import { atom } from '@epikodelabs/streamix'; export const count = atom(0);";
+      expect(() => transform.call(context(), source, join(root, 'store.ts')))
+        .toThrowError(/tsconfig\.json:[\s\S]*--module/);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
   it('transforms authored SFCs before Vue handles them', () => {
     const plugin = sxVue();
     const transformed = transformOf(plugin).call(

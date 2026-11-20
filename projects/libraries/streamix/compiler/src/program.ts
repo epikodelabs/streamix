@@ -1,5 +1,6 @@
 import ts from 'typescript';
 import { dirname } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 /**
  * Configuration prepared for a Streamix semantic pass. Builders and Vite
@@ -28,15 +29,29 @@ const standaloneOptions: ts.CompilerOptions = {
  */
 export function parseStreamixProgramConfig(configPath: string | undefined): StreamixProgramConfig {
   if (!configPath) return { fileNames: [], options: { ...standaloneOptions } };
-  const raw = ts.readConfigFile(configPath, ts.sys.readFile).config ?? {};
+  const raw = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (raw.error) throwConfigErrors(configPath, [raw.error]);
+  const compilerOptions: unknown = raw.config.compilerOptions;
+  if (compilerOptions !== undefined &&
+      (!compilerOptions || typeof compilerOptions !== 'object' || Array.isArray(compilerOptions))) {
+    throw new Error(`Streamix could not read TypeScript configuration ${configPath}: "compilerOptions" must be an object.`);
+  }
   const parsed = ts.parseJsonConfigFileContent(
-    { ...raw, compilerOptions: { ...(raw.compilerOptions ?? {}), allowJs: true } },
+    raw.config,
     ts.sys,
     dirname(configPath),
-    { jsx: ts.JsxEmit.Preserve },
+    { jsx: ts.JsxEmit.Preserve, allowJs: true },
     configPath,
   );
+  // A config with no disk inputs can still supply options for virtual roots.
+  const errors = parsed.errors.filter(diagnostic => diagnostic.code !== 18003);
+  if (errors.length) throwConfigErrors(configPath, errors);
   return { configPath, fileNames: parsed.fileNames, options: parsed.options };
+}
+
+function throwConfigErrors(configPath: string, diagnostics: readonly ts.Diagnostic[]): never {
+  const errors = diagnostics.map(item => ts.flattenDiagnosticMessageText(item.messageText, '\n'));
+  throw new Error(`Streamix could not read TypeScript configuration ${configPath}:\n${errors.join('\n')}`);
 }
 
 /**
@@ -57,15 +72,17 @@ export function findStreamixProgramConfig(searchFrom: string, fallbackFrom?: str
 export function streamixScriptKind(fileName: string): ts.ScriptKind {
   if (/\.tsx$/i.test(fileName)) return ts.ScriptKind.TSX;
   if (/\.jsx$/i.test(fileName)) return ts.ScriptKind.JSX;
-  if (/\.js$/i.test(fileName)) return ts.ScriptKind.JS;
+  if (/\.[cm]?js$/i.test(fileName)) return ts.ScriptKind.JS;
+  if (/\.json$/i.test(fileName)) return ts.ScriptKind.JSON;
   return ts.ScriptKind.TS;
 }
 
 /** Overlay keys arrive from `join()` with platform separators, while the
  * program canonicalizes host paths to forward slashes (and Windows drive
  * casing varies). Index normalized paths once per program. */
-function overlayKey(path: string): string {
-  return path.replace(/\\/g, '/').toLowerCase();
+export function streamixPathKey(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  return ts.sys.useCaseSensitiveFileNames ? normalized : normalized.toLowerCase();
 }
 
 /**
@@ -79,25 +96,54 @@ export function createStreamixProgram(
   overlays: ReadonlyMap<string, string> = new Map(),
   oldProgram?: ts.Program,
 ): ts.Program {
-  const options = { ...config.options, allowJs: true };
-  const rootNames = [...new Set([...config.fileNames, ...overlays.keys()])];
+  const options = config.options;
+  // Prefer the config's spelling when an overlay only differs by separators
+  // or the casing of a path on a case-insensitive host.
+  const roots = new Map<string, string>();
+  for (const path of [...config.fileNames, ...overlays.keys()]) {
+    const key = streamixPathKey(path);
+    if (!roots.has(key)) roots.set(key, path);
+  }
+  const rootNames = [...roots.values()];
   if (overlays.size === 0 && oldProgram === undefined) return ts.createProgram({ rootNames, options });
-  const normalizedOverlays = new Map([...overlays].map(([path, text]) => [overlayKey(path), text]));
-  const overlayFor = (fileName: string): string | undefined => normalizedOverlays.get(overlayKey(fileName));
-  const host = ts.createCompilerHost(options);
-  const getSourceFile = host.getSourceFile.bind(host);
+  const normalizedOverlays = new Map([...overlays].map(([path, text]) => [streamixPathKey(path), text]));
+  const overlayFor = (fileName: string): string | undefined => normalizedOverlays.get(streamixPathKey(fileName));
+  const host = ts.createCompilerHost(options, true);
   const readFile = host.readFile?.bind(host);
   const fileExists = host.fileExists.bind(host);
-  const overlaySources = new Map<string, ts.SourceFile>();
+  const reusable = oldProgram && isDeepStrictEqual(oldProgram.getCompilerOptions(), options)
+    ? new Map(oldProgram.getSourceFiles().map(file => {
+        // TypeScript installs package redirects itself. Its host must return
+        // the underlying parsed file during a rebuild, never the redirect.
+        const redirect = (file as ts.SourceFile & {
+          redirectInfo?: { unredirected: ts.SourceFile };
+        }).redirectInfo;
+        return [streamixPathKey(file.fileName), redirect?.unredirected ?? file];
+      }))
+    : undefined;
+  const sources = new Map<string, ts.SourceFile>();
   host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
-    const text = overlayFor(fileName);
-    if (text === undefined) return getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
-    const key = overlayKey(fileName);
-    let source = overlaySources.get(key);
-    if (!source) {
-      source = ts.createSourceFile(fileName, text, languageVersion, true, streamixScriptKind(fileName));
-      overlaySources.set(key, source);
+    const key = streamixPathKey(fileName);
+    const cached = !shouldCreateNewSourceFile && sources.get(key);
+    if (cached) return cached;
+    const overlay = overlayFor(fileName);
+    let text: string | undefined;
+    try {
+      text = overlay ?? readFile?.(fileName);
+    } catch (error) {
+      onError?.(error instanceof Error ? error.message : String(error));
+      text = '';
     }
+    if (text === undefined) return undefined;
+    const previous = !shouldCreateNewSourceFile && reusable?.get(key);
+    const target = typeof languageVersion === 'number' ? languageVersion : languageVersion.languageVersion;
+    const format = typeof languageVersion === 'number' ? undefined : languageVersion.impliedNodeFormat;
+    const source = previous && previous.text === text && previous.languageVersion === target &&
+      previous.impliedNodeFormat === format
+      ? previous
+      : ts.createSourceFile(fileName, text, languageVersion, true,
+          overlay === undefined ? undefined : streamixScriptKind(fileName));
+    sources.set(key, source);
     return source;
   };
   host.readFile = fileName => overlayFor(fileName) ?? readFile?.(fileName);

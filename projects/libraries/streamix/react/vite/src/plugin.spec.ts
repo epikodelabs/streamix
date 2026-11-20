@@ -6,6 +6,18 @@ import ts from "typescript";
 import { sx } from "./plugin";
 
 describe("Streamix React Vite plugin", () => {
+  it('reports malformed tsconfigs before compiling authored modules', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'streamix-react-bad-config-'));
+    try {
+      await writeFile(join(root, 'tsconfig.json'), '{"compilerOptions":{"module":"bogus"}}');
+      const transform = transformOf(sx({ introspection: true }));
+      const source = "import { atom } from '@epikodelabs/streamix'; export const count = atom(0);";
+      expect(() => transform.call({}, source, join(root, 'store.ts')))
+        .toThrowError(/tsconfig\.json:[\s\S]*--module/);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
   it("transforms authored TSX before Vite's React plugin and returns a source map", () => {
     const plugin = sx();
     const transformed = transformOf(plugin).call(

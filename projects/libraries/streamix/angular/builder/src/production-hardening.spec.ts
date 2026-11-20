@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateProject } from './generate-project';
+import { generateProject, regenerateAngularFile } from './generate-project';
 
 async function fixture(component: string): Promise<{
   root: string;
@@ -65,5 +65,20 @@ describe('Angular production compiler fail-closed boundaries', () => {
       await expectAsync(generateProject({ workspaceRoot: f.root, sourceRoot: f.sourceRoot }))
         .toBeRejectedWithError(/could not read.*tsconfig.app.json/);
     } finally { await f.dispose(); }
+  });
+
+  it('reports invalid compiler options in full and watch builds', async () => {
+    const f = await fixture('@Component({template:`<p>static</p>`}) export class App {}');
+    try {
+      await generateProject({ workspaceRoot: f.root, sourceRoot: f.sourceRoot });
+      await writeFile(join(f.appRoot, 'tsconfig.app.json'), '{"compilerOptions":{"module":"bogus"}}');
+      const error = /tsconfig\.app\.json:[\s\S]*--module/;
+      await expectAsync(generateProject({ workspaceRoot: f.root, sourceRoot: f.sourceRoot }))
+        .toBeRejectedWithError(error);
+      await expectAsync(regenerateAngularFile(f.root, f.sourceRoot, 'component.ts'))
+        .toBeRejectedWithError(error);
+    } finally {
+      await f.dispose();
+    }
   });
 });

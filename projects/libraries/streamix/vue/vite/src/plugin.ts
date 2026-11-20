@@ -3,6 +3,7 @@ import { basename, dirname } from 'node:path';
 import ts from 'typescript';
 import { parse as parseSfc } from '@vue/compiler-sfc';
 import {
+  streamixPathKey,
   createStreamixProgram,
   createTokenSourceMap,
   findStreamixProgramConfig,
@@ -127,7 +128,7 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
         if (sourceFile) {
           let code = instrumentStreamixSource({ file: sourceFile, checker: program.getTypeChecker(),
             sourcePath: fileName, enabled: true });
-          if (ENTRY_NAMES.includes(basename(fileName).toLowerCase())) code = injectIntrospectionActivation(code);
+          if (ENTRY_NAMES.includes(basename(fileName).toLowerCase())) code = injectIntrospectionActivation(code, fileName);
           if (code !== source) return { code, map: createTokenSourceMap(authored, code, fileName) };
         }
         return null;
@@ -165,20 +166,20 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
         programs.clear();
         return;
       }
-      const normalized = normalizePath(fileName);
+      const normalized = streamixPathKey(fileName);
       // An SFC's semantic program holds the virtual `<name>.vue.ts` script
       // overlay, never the authored `<name>.vue` file itself.
       const virtualVueName = /\.vue$/i.test(fileName)
-        ? normalizePath(fileName.replace(/\.vue$/i, '.vue.ts'))
+        ? streamixPathKey(fileName.replace(/\.vue$/i, '.vue.ts'))
         : undefined;
       let matched = false;
       for (const [key, program] of programs) {
         // A source edit changes symbol identity for every project that has
         // already resolved that file; unrelated projects keep their graph.
         const configFilePath = program.getCompilerOptions()['configFilePath'];
-        if ((typeof configFilePath === 'string' && normalizePath(configFilePath) === normalized) ||
-            program.getSourceFiles().some(file => normalizePath(file.fileName) === normalized ||
-              (virtualVueName !== undefined && normalizePath(file.fileName) === virtualVueName))) {
+        if ((typeof configFilePath === 'string' && streamixPathKey(configFilePath) === normalized) ||
+            program.getSourceFiles().some(file => streamixPathKey(file.fileName) === normalized ||
+              (virtualVueName !== undefined && streamixPathKey(file.fileName) === virtualVueName))) {
           programs.delete(key);
           matched = true;
         }
@@ -195,10 +196,4 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
 /** A hash in a directory or file name is valid on disk, including on Windows. */
 function sourceFileName(id: string): string {
   return id.replace(/(\.(?:vue|[cm]?[jt]sx?|json))[?#].*$/i, '$1');
-}
-
-/** Program file names and Vite ids differ by separators and, on Windows,
- * drive casing. */
-function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/').toLowerCase();
 }

@@ -6,6 +6,7 @@ import {
   transformReactJsx,
 } from "@epikodelabs/streamix/react/compiler";
 import {
+  streamixPathKey,
   createStreamixProgram,
   createTokenSourceMap,
   findStreamixProgramConfig,
@@ -70,7 +71,7 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
       const isEntry = options.introspection && ENTRY_NAMES.includes(basename(fileName).toLowerCase());
       if (!source.includes("@epikodelabs/streamix") && !containsJsx(source, fileName)) {
         if (!isEntry) return null;
-        const code = injectIntrospectionActivation(source);
+        const code = injectIntrospectionActivation(source, fileName);
         return { code, map: createTokenSourceMap(source, code, fileName) };
       }
 
@@ -92,7 +93,7 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
           code = instrumentStreamixSource({ file: sourceFile, checker: program.getTypeChecker(),
             sourcePath: fileName, enabled: true });
         }
-        if (isEntry) code = injectIntrospectionActivation(code);
+        if (isEntry) code = injectIntrospectionActivation(code, fileName);
       }
       const map = code === result.code ? result.sourceMap : createTokenSourceMap(source, code, fileName);
       return {
@@ -113,14 +114,14 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
         programs.clear();
         return;
       }
-      const normalized = normalizePath(fileName);
+      const normalized = streamixPathKey(fileName);
       let matched = false;
       for (const [key, program] of programs) {
         // A source edit changes symbol identity for every project that has
         // already resolved that file; unrelated projects keep their graph.
         const configFilePath = program.getCompilerOptions()["configFilePath"];
-        if ((typeof configFilePath === "string" && normalizePath(configFilePath) === normalized) ||
-            program.getSourceFiles().some(file => normalizePath(file.fileName) === normalized)) {
+        if ((typeof configFilePath === "string" && streamixPathKey(configFilePath) === normalized) ||
+            program.getSourceFiles().some(file => streamixPathKey(file.fileName) === normalized)) {
           programs.delete(key);
           matched = true;
         }
@@ -137,11 +138,6 @@ function sourceFileName(id: string): string {
   return id.replace(/(\.(?:[cm]?[jt]sx?|json))[?#].*$/i, "$1");
 }
 
-/** Program file names and Vite ids differ by separators and, on Windows,
- * drive casing. */
-function normalizePath(path: string): string {
-  return path.replace(/\\/g, "/").toLowerCase();
-}
 
 /** True only when the source parses to a real JSX node in a JSX-capable file. */
 function containsJsx(source: string, fileName: string): boolean {

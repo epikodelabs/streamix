@@ -7,7 +7,7 @@ import ts from 'typescript';
 // published subpath so ng-packagr treats it as an external dependency rather
 // than folding its sources into this entry.
 import { instrumentStreamixSource } from '@epikodelabs/streamix/angular/compiler';
-import { createTokenSourceMap, injectIntrospectionActivation } from '@epikodelabs/streamix/compiler';
+import { createStreamixProgram, createTokenSourceMap, injectIntrospectionActivation } from '@epikodelabs/streamix/compiler';
 import { compileSxComponent } from '@epikodelabs/streamix/angular/compiler';
 import { installSxLifecycleIntoComponentSource } from '@epikodelabs/streamix/angular/compiler';
 import { findSxComponentTemplate, installSxComponentTemplate, resolveSourceRoot, virtualRootOf } from './options';
@@ -709,7 +709,7 @@ async function compileVirtualSource({
   let source = rewriteDerivedAtomReads(instrumented, relative(workspaceRoot, sourcePath));
   if (introspection && activateEntry) {
     // Enable before bootstrapApplication constructs any component instances.
-    source = injectIntrospectionActivation(source);
+    source = injectIntrospectionActivation(source, sourcePath);
   }
   const relativePath = relative(sourceDirectory, sourcePath).replace(/\\/g, '/');
 
@@ -796,39 +796,6 @@ async function compileVirtualSource({
   }
 }
 
-/** Semantic program over the app tsconfig with edited files overlaid, so a
- * watch edit is analyzed exactly as authored rather than from a stale disk
- * read. TypeScript may ask for the same file more than once; returning a
- * fresh SourceFile each time splits the nodes and symbols across instances
- * and corrupts the checker, so overlay texts are cached by normalized path. */
-function createOverlayProgram(
-  rootNames: readonly string[],
-  options: ts.CompilerOptions,
-  overlays: ReadonlyMap<string, string>,
-): ts.Program {
-  const host = ts.createCompilerHost(options);
-  const getSourceFile = host.getSourceFile.bind(host);
-  const readFile = host.readFile?.bind(host);
-  const fileExists = host.fileExists.bind(host);
-  const normalizedOverlays = new Map([...overlays].map(([path, text]) => [path.replace(/\\/g, '/').toLowerCase(), text]));
-  const overlayFor = (fileName: string): string | undefined =>
-    normalizedOverlays.get(fileName.replace(/\\/g, '/').toLowerCase());
-  const overlaySources = new Map<string, ts.SourceFile>();
-  host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
-    const text = overlayFor(fileName);
-    if (text === undefined) return getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
-    const key = fileName.replace(/\\/g, '/').toLowerCase();
-    let source = overlaySources.get(key);
-    if (!source) {
-      source = ts.createSourceFile(fileName, text, languageVersion, true);
-      overlaySources.set(key, source);
-    }
-    return source;
-  };
-  host.readFile = fileName => overlayFor(fileName) ?? readFile?.(fileName);
-  host.fileExists = fileName => overlayFor(fileName) !== undefined || fileExists(fileName);
-  return ts.createProgram({ rootNames: [...rootNames], options, host });
-}
 
 /** A fresh semantic graph is shared by all files in this watch batch. */
 export async function regenerateAngularFiles(workspaceRoot: string, sourceRoot: string, changedPaths: readonly string[], introspection = false): Promise<void> {
@@ -907,7 +874,7 @@ async function regenerateAngularFileInternal(workspaceRoot: string, sourceRoot: 
       ...parsedConfig.fileNames,
       ...(introspection ? await listFiles(sourceDirectory, false) : []),
     ])];
-    return createOverlayProgram([...new Set([...programRoots, ...overlays.keys()])], parsedConfig.options, overlays);
+    return createStreamixProgram({ fileNames: programRoots, options: parsedConfig.options }, overlays);
   });
   const checker = program.getTypeChecker();
   const compiled = await compileVirtualSource({
