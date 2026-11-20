@@ -136,10 +136,22 @@ const V_MODEL_NATIVE: Readonly<Record<string, { prop: string; event: string; val
  * source. Bound (`:type`), namespaced (`data-type`), and directive attributes
  * never match, so they cannot spoof native attribute checks.
  */
+function attributeTokens(attributes: string): IterableIterator<RegExpMatchArray> {
+  return attributes.matchAll(/(?:^|\s)([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g);
+}
+
+function* matchAttributes(attributes: string, pattern: RegExp): IterableIterator<RegExpMatchArray> {
+  for (const token of attributeTokens(attributes)) {
+    const match = token[0].matchAll(pattern).next().value;
+    if (match) {
+      match.index = token.index! + match.index!;
+      yield match;
+    }
+  }
+}
+
 function staticAttributeValue(attributes: string, name: string): string | undefined {
-  for (const match of attributes.matchAll(
-    /(?:^|\s)([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g,
-  )) {
+  for (const match of attributeTokens(attributes)) {
     if (match[1].toLowerCase() === name) {
       return match[2] ?? match[3] ?? match[4] ?? '';
     }
@@ -148,9 +160,7 @@ function staticAttributeValue(attributes: string, name: string): string | undefi
 }
 
 function hasStaticAttribute(attributes: string, name: string): boolean {
-  for (const match of attributes.matchAll(
-    /(?:^|\s)([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g,
-  )) {
+  for (const match of attributeTokens(attributes)) {
     if (match[1].toLowerCase() === name) return true;
   }
   return false;
@@ -549,10 +559,10 @@ export function transformVueSfc(
 
     // Lowering writes a fresh `:value` / event pair. Emitting it next to an
     // authored one produces duplicate attributes, which Vue's parser rejects.
-    const authoredValue = /(?:^|\s)(?::value|v-bind:value)(?:\.[\w-]+)*\s*=/.test(model.attributes);
-    const authoredEvent = new RegExp(
-      `(?:^|\\s)(?:@${mapping.event}|v-on:${mapping.event})(?:\\.[\\w-]+)*\\s*=`,
-    ).test(model.attributes);
+    const authoredValue = !matchAttributes(model.attributes, /^\s*(?::value|v-bind:value)(?:\.[\w-]+)*\s*=/g).next().done;
+    const authoredEvent = !matchAttributes(model.attributes, new RegExp(
+      `^\\s*(?:@${mapping.event}|v-on:${mapping.event})(?:\\.[\\w-]+)*\\s*=`, 'g',
+    )).next().done;
     if (authoredValue || authoredEvent) {
       const attribute = authoredValue ? ':value' : `@${mapping.event}`;
       diagnostics.push({
@@ -690,11 +700,11 @@ function unsupportedTemplateDiagnostics(
   }
 
   for (const tag of openingTags(template)) {
-    for (const match of tag.attributes.matchAll(/(?:^|\s)(v-model(?:[:.][\w-]+)+)\s*=\s*(["'])(.*?)\2/g)) {
+    for (const match of matchAttributes(tag.attributes, /^\s*(v-model(?:[:.][\w-]+)+)\s*=\s*(["'])([\s\S]*?)\2/g)) {
       add(tag.attributesStart + match.index!, match[0].length,
         'v-model arguments and modifiers are not compiled. Use :value and an explicit scope.set(...) handler.');
     }
-    for (const match of tag.attributes.matchAll(/(?:^|\s)v-model\s*=\s*(["'])(.*?)\1/g)) {
+    for (const match of matchAttributes(tag.attributes, /^\s*v-model\s*=\s*(["'])([\s\S]*?)\1/g)) {
       const expression = match[2].trim();
       const root = /^([A-Za-z_$][\w$]*)\s*(?:\.|\[)/.exec(expression)?.[1];
       if (!root || !reactiveNames.has(root)) continue;
@@ -722,7 +732,7 @@ function readonlyTemplateDiagnostics(
   if (readonlyNames.size === 0) return diagnostics;
 
   for (const tag of openingTags(template)) {
-    for (const model of tag.attributes.matchAll(/(?:^|\s)v-model\s*=\s*(["'])(.*?)\1/g)) {
+    for (const model of matchAttributes(tag.attributes, /^\s*v-model\s*=\s*(["'])([\s\S]*?)\1/g)) {
       const name = model[2].trim();
       if (!readonlyNames.has(name)) continue;
       // A loop alias or slot prop with the same name is a different binding.
@@ -1108,7 +1118,7 @@ function collectTemplateReactiveReads(
   }
 
   for (const tag of openingTags(template)) {
-    for (const match of tag.attributes.matchAll(/(?:^|\s)v-model\s*=\s*(["'])([A-Za-z_$][\w$]*)\1/g)) {
+    for (const match of matchAttributes(tag.attributes, /^\s*v-model\s*=\s*(["'])([A-Za-z_$][\w$]*)\1/g)) {
       const name = match[2];
       if (!names.has(name)) continue;
       // The model's root may be a loop alias or slot prop, not the binding.
@@ -1221,11 +1231,7 @@ function isSourceApiReceiver(node: ts.Identifier): boolean {
     }
     if (ts.isElementAccessExpression(parent) && parent.expression === current) {
       const argument = parent.argumentExpression;
-      if (!argument) return true;
-      if (ts.isStringLiteralLike(argument)) return SOURCE_API_MEMBERS.has(argument.text);
-      // Numeric and other literal indexes read the value; a dynamic key is
-      // too ambiguous to lower safely.
-      return !ts.isLiteralExpression(argument);
+      return !!argument && ts.isStringLiteralLike(argument) && SOURCE_API_MEMBERS.has(argument.text);
     }
     return false;
   }
@@ -1571,7 +1577,7 @@ function collectVModelScopeBindings(
   const bindings: VModelScopeBinding[] = [];
 
   for (const tag of openingTags(template)) {
-    for (const model of tag.attributes.matchAll(/(?:^|\s)(v-model)\s*=\s*(["'])(.*?)\2/g)) {
+    for (const model of matchAttributes(tag.attributes, /^\s*(v-model)\s*=\s*(["'])([\s\S]*?)\2/g)) {
       const match = /^([A-Za-z_$][\w$]*)((?:\.[A-Za-z_$][\w$]*)+)$/.exec(model[3].trim());
       if (!match || !scopeNames.has(match[1])) continue;
       // A loop alias or slot prop with the same name is not the scope.
@@ -1848,27 +1854,22 @@ function templateExpressionSpans(template: string): TemplateExpressionSpan[] {
     });
   }
 
-  for (const match of template.matchAll(
-    /(?:[:@#][\w.:[\]-]+|v-([A-Za-z][\w-]*)(?::[\w.:[\]-]+)?(?:\.[\w-]+)*)\s*=\s*(["'])([\s\S]*?)\2/g,
-  )) {
-    // `#default="{ item }"` is slot-props binding syntax, not an expression.
-    if (match[0].startsWith('#')) continue;
-    if (match[1] && NON_EXPRESSION_DIRECTIVE_VALUES.has(match[1].toLowerCase())) {
-      continue;
+  for (const tag of openingTags(template)) {
+    for (const match of matchAttributes(tag.attributes,
+      /^\s*(?:[:@][\w.:[\]-]+|v-([A-Za-z][\w-]*)(?::[\w.:[\]-]+)?(?:\.[\w-]+)*)\s*=\s*(["'])([\s\S]*?)\2$/g,
+    )) {
+      const directive = match[1]?.toLowerCase();
+      if (directive && NON_EXPRESSION_DIRECTIVE_VALUES.has(directive)) continue;
+      const valueStart = tag.attributesStart + match.index! + match[0].length - match[3].length - 1;
+      if (directive === 'for') {
+        // The aliases are binding patterns. Only rewrite the iterated source.
+        const split = splitForExpression(match[3]);
+        if (!split) continue;
+        spans.push({ start: valueStart + split.sourceStart, end: valueStart + match[3].length });
+      } else {
+        spans.push({ start: valueStart, end: valueStart + match[3].length });
+      }
     }
-    const valueStart = match.index! + match[0].length - match[3].length - 1;
-    if (match[1]?.toLowerCase() === 'for') {
-      // Only the iterated source is an expression; the alias part is a
-      // binding pattern and must never be rewritten as a read.
-      const split = splitForExpression(match[3]);
-      if (!split) continue;
-      spans.push({
-        start: valueStart + split.sourceStart,
-        end: valueStart + match[3].length,
-      });
-      continue;
-    }
-    spans.push({ start: valueStart, end: valueStart + match[3].length });
   }
 
   return spans;
@@ -1891,8 +1892,8 @@ function sameNameBindingEdits(
   const edits: SpanEdit[] = [];
 
   for (const tag of openingTags(template)) {
-    for (const match of tag.attributes.matchAll(
-      /(?:^|\s)((:|v-bind:)([A-Za-z_$][\w$]*))(?=\s|\/|$)/g,
+    for (const match of matchAttributes(tag.attributes,
+      /^\s*((:|v-bind:)([A-Za-z_$][\w$]*))$/g,
     )) {
       const name = match[3];
       if (!reactiveNames.has(name)) continue;

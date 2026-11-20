@@ -9,6 +9,29 @@ function expectNoError(result: ReturnType<typeof compile>): void {
 }
 
 describe('Vue compiler correctness regressions', () => {
+  it('bridges dynamic indexes in formulas and templates', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const items = atom(['first', 'second']);
+      const index = atom(0);
+      const selected = derived(() => items[index]);
+    `, '{{ items[index] }}');
+    expectNoError(result);
+    expect(result.code).toContain('items.value[index.value]');
+    expect(result.code).toContain('__sx_items[__sx_index]');
+  });
+
+  it('scans directive attributes without interpreting strings inside other attributes', () => {
+    const result = compile(`
+      import { atom, scope } from '@epikodelabs/streamix';
+      const count = atom(1);
+      const state = scope({ count: 0 });
+    `, `<input title="keep :count here and :value='literal'" v-model="state.count"><button @click="state.count = 'x :count y'" :count>x</button>`);
+    expectNoError(result);
+    expect(result.code).toContain(`title="keep :count here and :value='literal'"`);
+    expect(result.code).toContain("'x :count y'");
+    expect(result.code).toContain(':count="__sx_count"');
+  });
   it('never rewrites derived string literals, comments, or object keys', () => {
     const result = compile(`
       import { atom, derived } from '@epikodelabs/streamix';
