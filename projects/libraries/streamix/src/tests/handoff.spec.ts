@@ -148,12 +148,13 @@ describe('handoff', () => {
     source.dispose();
   });
 
-  it('completes on source end without waiting for an unfinished replacement', async () => {
+  it('emits the final replacement before a finite source completes', async () => {
+    const finalPrepared = deferred<string>();
     const finalReady = deferred<void>();
     const disposed: string[] = [];
     let completed = false;
     const output = pipe(from([1]), handoff<number, string>({
-      prepare: value => `r${value}`,
+      prepare: () => finalPrepared.promise,
       ready: () => finalReady.promise,
       dispose: resource => { disposed.push(resource); },
     }));
@@ -162,36 +163,47 @@ describe('handoff', () => {
       return values;
     });
 
-    // The source ends while `ready` is still pending. Completion must not wait
-    // for a user promise that may never settle.
-    await wait(20);
-    expect(completed).toBeTrue();
-    expect(await reader).toEqual([]);
-
+    await wait(0);
+    expect(completed).toBeFalse();
+    finalPrepared.resolve('r1');
+    await wait(0);
+    expect(completed).toBeFalse();
     finalReady.resolve();
+    expect(await reader).toEqual(['r1']);
+    expect(disposed).toEqual(['r1']);
+  });
+
+  it('cancels immediately while waiting for the final preparation after source completion', async () => {
+    const never = deferred<string>();
+    const signals: AbortSignal[] = [];
+    const disposed: string[] = [];
+    const iterator = handoff<number, string>({
+      prepare: (_value, signal) => { signals.push(signal); return never.promise; },
+      ready: () => undefined,
+      dispose: resource => { disposed.push(resource); },
+    }).apply(from([1])[Symbol.asyncIterator]());
+    const pending = iterator.next();
+    await wait(0);
+    await iterator.return?.();
+    expect(signals[0].aborted).toBeTrue();
+    expect((await pending).done).toBeTrue();
+
+    never.resolve('r1');
     await wait(5);
     expect(disposed).toEqual(['r1']);
   });
 
-  it('completes despite a latest preparation that ignores abort and never settles', async () => {
-    const source = atom<number>();
-    const never = deferred<string>();
+  it('delivers final readiness failures after the finite source ends', async () => {
+    const ready = deferred<void>();
     const disposed: string[] = [];
-    const output = pipe(source, handoff<number, string>({
-      prepare: () => never.promise,
-      ready: () => undefined,
+    const reader = collect(pipe(from([1]), handoff<number, string>({
+      prepare: value => `r${value}`,
+      ready: () => ready.promise,
       dispose: resource => { disposed.push(resource); },
-    }));
-    const reader = collect(iterate(output));
-
-    source.set(1);
-    await wait(5);
-    source.dispose();
-
-    expect(await reader).toEqual([]);
-
-    never.resolve('r1');
-    await wait(5);
+    })));
+    await wait(0);
+    ready.reject(new Error('final readiness failed'));
+    await expectAsync(reader).toBeRejectedWithError('final readiness failed');
     expect(disposed).toEqual(['r1']);
   });
 
