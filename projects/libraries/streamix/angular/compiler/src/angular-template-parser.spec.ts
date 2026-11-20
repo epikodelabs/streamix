@@ -117,4 +117,26 @@ describe('parseSxTemplate static topology', () => {
     const preserveRun = parseSxTemplate(source, 'inline.html', { resolveReactiveSource, preserveWhitespaces: true });
     expect(preserveRun.plan.bindings.find(binding => binding.kind.startsWith('text-') && binding.kind.includes('node'))?.name).toBe('1');
   });
+
+  it('does not reserve an element slot for an Angular-owned text interpolation', () => {
+    const parsed = parseSxTemplate(
+      '<section>@if (plain) { started } {{ label }} <span [title]="model.msg"></span></section>',
+      'inline.html', { resolveReactiveSource },
+    );
+    const binding = parsed.plan.bindings.find(item => item.source === "model.get('msg')");
+    expect(binding).toBeDefined();
+    expect(parsed.nodePaths[binding!.node]).toEqual([0, 0]);
+  });
+
+  it('marks root interpolations after dynamic siblings and preserves whitespace in preformatted elements', () => {
+    const parsed = parseSxTemplate(
+      '@if (plain) { started } {{ model.msg }}',
+      'inline.html', { resolveReactiveSource },
+    );
+    const [root] = parsed.plan.bindings;
+    expect(root.dependencies).toEqual(["model.get('msg')"]);
+    expect(parsed.bindingEdits.some(edit => edit.replacement.includes(`data-sx-node="${root.node}"`))).toBeTrue();
+    const pre = parseSxTemplate('<pre> <span>x</span> {{ model.msg }}</pre>', 'inline.html', { resolveReactiveSource });
+    expect(pre.plan.bindings[0]?.name).toBe('1');
+  });
 });

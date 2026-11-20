@@ -135,6 +135,13 @@ describe('streamix builder options', () => {
     expect(updated).toContain('changeDetection: 0');
   });
 
+  it('finds preserveWhitespaces after either kind of template metadata', () => {
+    for (const template of ['template: "<p> </p>"', 'templateUrl: "./counter.html"']) {
+      const source = `@Component({ ${template}, preserveWhitespaces: true }) export class Counter {}`;
+      expect(findSxComponentTemplate(source)?.preserveWhitespaces).toBeTrue();
+    }
+  });
+
   it('reads external component templates and installs compiled content in the virtual source', () => {
     const input = '@Component({ selector: "demo", templateUrl: "./counter.html", styleUrls: ["./counter.css"] }) export class Counter {}';
     const found = findSxComponentTemplate(input);

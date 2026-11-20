@@ -266,6 +266,7 @@ function walkStaticChildren(
   state: WalkState,
   parentPath: readonly number[],
   parentUnstable = false,
+  preserveWhitespaces = state.preserveWhitespaces,
 ): void {
   let elementIndex = 0;
   let rootTextIndex = 0;
@@ -286,13 +287,23 @@ function walkStaticChildren(
           continue;
         }
         const hostId = 'hostNode';
+        if (precedingDynamic) {
+          const id = `node${state.nextNode++}`;
+          bindTextInterpolation(node, state, hostId, undefined, id);
+          if (state.textWraps.has(node.sourceSpan.start.offset)) {
+            const path = [elementIndex++];
+            state.nodePaths[id] = path;
+            state.nodeIdsByPath[path.join('/')] = id;
+          }
+          continue;
+        }
         if (!state.nodePaths[hostId]) {
           state.nodes.push(hostId);
           state.nodePaths[hostId] = [];
         }
         bindTextInterpolation(node, state, hostId, rootTextIndex);
       }
-      if (node instanceof TmplAstBoundText || node.value.trim() || state.preserveWhitespaces) {
+      if (node instanceof TmplAstBoundText || node.value.trim() || preserveWhitespaces) {
         rootTextIndex++;
       }
       continue;
@@ -328,8 +339,10 @@ function walkStaticChildren(
       }
 
       const path = [...parentPath, elementIndex++];
-      visitElement(node, state, path, precedingDynamic);
-      walkStaticChildren(node.children, state, path, precedingDynamic);
+      const preserveChildren = preserveWhitespaces || node.name === 'pre' || node.name === 'textarea' ||
+        node.attributes.some(attribute => attribute.name === 'ngPreserveWhitespaces');
+      visitElement(node, state, path, precedingDynamic, preserveChildren);
+      walkStaticChildren(node.children, state, path, precedingDynamic, preserveChildren);
       continue;
     }
 
@@ -398,6 +411,7 @@ function visitElement(
   state: WalkState,
   path: readonly number[],
   unstable: boolean,
+  preserveWhitespaces: boolean,
 ): void {
   const nodeId = `node${state.nextNode++}`;
   const bindingsBefore = state.bindings.length;
@@ -641,18 +655,11 @@ function visitElement(
         // resolves the element's first text node, inserting it if missing.
         const positional = !dynamicSibling && textSiblings.length > 1;
 
-        if (wrapId !== undefined) {
-          state.nodes.push(wrapId);
-          state.unstableTargets.add(wrapId);
-          state.preMarkedNodes.add(wrapId);
-          state.textWraps.set(child.sourceSpan.start.offset, wrapId);
-        }
-
         bindTextInterpolation(child, state, nodeId, positional ? index : undefined, wrapId);
         continue;
       }
       if (child instanceof TmplAstText) {
-        if (!child.value.trim() && !state.preserveWhitespaces) continue;
+        if (!child.value.trim() && !preserveWhitespaces) continue;
         textIndex += 1;
         continue;
       }
@@ -1192,6 +1199,10 @@ function bindTextInterpolation(
   const span = { start: child.sourceSpan.start.offset, end: child.sourceSpan.end.offset };
   const pending = pendingSafeExpression(analysis.expression, analysis.dependencies);
   if (wrapId !== undefined) {
+    state.nodes.push(wrapId);
+    state.unstableTargets.add(wrapId);
+    state.preMarkedNodes.add(wrapId);
+    state.textWraps.set(span.start, wrapId);
     // The wrapper element carries the stable-target marker itself, so the
     // runtime addresses it like any other compiler-owned element and binds
     // the single text node Angular renders inside it.

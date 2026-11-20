@@ -202,7 +202,6 @@ export type SxComponentTemplate =
 export function findSxComponentTemplate(source: string): SxComponentTemplate | undefined {
   const file = ts.createSourceFile('sx-component.ts', source, ts.ScriptTarget.Latest, true);
   let result: SxComponentTemplate | undefined;
-  let preserveWhitespaces = false;
   const visit = (node: ts.Node): void => {
     if (result) return;
     if (ts.isClassDeclaration(node)) {
@@ -212,16 +211,16 @@ export function findSxComponentTemplate(source: string): SxComponentTemplate | u
             call.expression.text !== 'Component') continue;
         const metadata = call.arguments[0];
         if (!metadata || !ts.isObjectLiteralExpression(metadata)) continue;
-        preserveWhitespaces = false;
+        const preserveWhitespaces = metadata.properties.some(property =>
+          ts.isPropertyAssignment(property) &&
+          (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) &&
+          property.name.text === 'preserveWhitespaces' &&
+          property.initializer.kind === ts.SyntaxKind.TrueKeyword);
         for (const property of metadata.properties) {
           if (!ts.isPropertyAssignment(property)) continue;
           const name = ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)
             ? property.name.text : '';
           const initializer = property.initializer;
-          if (name === 'preserveWhitespaces' && initializer.getText(file) === 'true') {
-            preserveWhitespaces = true;
-            continue;
-          }
           if (name === 'template' &&
               (ts.isStringLiteral(initializer) || ts.isNoSubstitutionTemplateLiteral(initializer))) {
             result = { kind: 'inline', template: initializer.text,
