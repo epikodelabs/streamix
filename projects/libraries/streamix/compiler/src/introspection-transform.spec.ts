@@ -135,6 +135,43 @@ const value = atom(sideEffect());`;
 });
 
 describe('introspection entry activation', () => {
+  it('preserves the entry prologue through both instrumentation passes', () => {
+    const input = `#!/usr/bin/env node
+'use client';
+import { atom } from '@epikodelabs/streamix';
+const __sxDebug = 'authored';
+const value = atom(1);`;
+    const instrumented = transform(input);
+    expect(instrumented).toContain('__streamixDebug as __sxDebug_');
+    const code = injectIntrospectionActivation(instrumented, 'entry.ts');
+    expect(code.startsWith("#!/usr/bin/env node\n'use client';\n")).toBeTrue();
+    expect(code.indexOf('introspection/activate')).toBeLessThan(code.indexOf('__streamixDebug as'));
+  });
+  it('keeps a shebang and directives in place and chooses an unbound mount alias', () => {
+    const entry = '#!/usr/bin/env node\n"use client";\nconst __sxMount = 1;\nconst __sxMount_ = 2;';
+    const code = injectIntrospectionActivation(entry, 'entry.ts');
+    expect(code.startsWith('#!/usr/bin/env node\n"use client";\n')).toBeTrue();
+    expect(code).toContain('mountStreamixInspector as __sxMount__');
+    expect(code.trimEnd().endsWith('__sxMount__();')).toBeTrue();
+    expect(injectIntrospectionActivation(code, 'entry.ts')).toBe(code);
+  });
+
+  it('deduplicates an authored activation import and reuses the authored mount alias', () => {
+    const entry = `import { mountStreamixInspector as mount } from "@epikodelabs/streamix/introspection"
+import "@epikodelabs/streamix/introspection/activate"
+bootstrap();`;
+    const code = injectIntrospectionActivation(entry);
+    expect(code.match(/introspection\/activate/g)?.length).toBe(1);
+    expect(code.indexOf('introspection/activate')).toBeLessThan(code.indexOf('bootstrap'));
+    expect(code.trimEnd().endsWith('mount();')).toBeTrue();
+    expect(injectIntrospectionActivation(code)).toBe(code);
+  });
+
+  it('ignores activation import text in comments', () => {
+    const code = injectIntrospectionActivation("// import '@epikodelabs/streamix/introspection/activate';\nbootstrap();");
+    const file = ts.createSourceFile('entry.ts', code, ts.ScriptTarget.Latest);
+    expect(file.statements.filter(ts.isImportDeclaration).length).toBe(2);
+  });
   it('uses a side-effect activation dependency before application imports', () => {
     const input = `import { createApp } from 'vue';\ncreateApp({}).mount('#app');`;
     const code = injectIntrospectionActivation(input);

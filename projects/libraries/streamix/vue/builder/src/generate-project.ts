@@ -50,7 +50,7 @@ export async function generateVueProject(workspaceRoot: string, sourceRoot: stri
         // mirroring the Angular builder: authored source stays clean and the
         // gate stays `import.meta.env.DEV`, so production builds carry inert
         // definitions.
-        await writeFile(entry, injectIntrospectionActivation(await readFile(entry, 'utf8')));
+        await writeFile(entry, injectIntrospectionActivation(await readFile(entry, 'utf8'), entry));
       }
     }
     try {
@@ -299,7 +299,7 @@ async function regenerateVueFileInternal(
   // A watch edit of the entry must keep the injected activation, or the
   // first save would silently drop introspection until the next full regen.
   if (introspection && origin === await findEntry(originalRoot)) {
-    output = Buffer.from(injectIntrospectionActivation(output.toString('utf8')));
+    output = Buffer.from(injectIntrospectionActivation(output.toString('utf8'), origin));
   }
 
   await mkdir(dirname(destination), { recursive: true });

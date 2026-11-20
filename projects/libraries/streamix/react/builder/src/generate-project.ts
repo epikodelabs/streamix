@@ -68,7 +68,7 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
         code = instrumentStreamixSource({ file: sourceFile, checker: registrationProgram.getTypeChecker(),
           sourcePath: relative(workspaceRoot, original), enabled: true });
       }
-      if (introspection && file === entry) code = injectIntrospectionActivation(code);
+      if (introspection && file === entry) code = injectIntrospectionActivation(code, original);
       outputs.push({ file, code, mapName: `${basename(file)}.map`,
         map: serializeSourceMap(workspaceRoot, original, input, transformed, code) });
     }
@@ -317,7 +317,7 @@ async function regenerateReactFileInternal(workspaceRoot: string, sourceRoot: st
     }
     // A watch edit of the entry must keep the injected activation, or the
     // first save would silently drop introspection until the next full regen.
-    if (introspection && origin === await findEntry(originalRoot)) code = injectIntrospectionActivation(code);
+    if (introspection && origin === await findEntry(originalRoot)) code = injectIntrospectionActivation(code, origin);
     await writeIfChanged(destination, `${code}\n//# sourceMappingURL=${basename(destination)}.map\n`);
     await writeIfChanged(`${destination}.map`, serializeSourceMap(workspaceRoot, origin, batch.overlays.get(origin)!, transformed, code));
   } else {

@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import { firstStatementAfterPrologue } from './introspection-activation';
 
 export interface SxIntrospectionTransformOptions {
   readonly file: ts.SourceFile;
@@ -164,5 +165,6 @@ export function instrumentStreamixSource({ file, checker, sourcePath, enabled }:
     result = result.slice(0, offset) + text + result.slice(offset + (removals.get(offset) ?? 0));
   }
   const imports = [usesDebug ? `__streamixDebug as ${helper}` : '', usesSubscribe ? `__streamixSubscribe as ${subscribeHelper}` : ''].filter(Boolean);
-  return `import { ${imports.join(', ')} } from '@epikodelabs/streamix';\n` + result;
+  const offset = firstStatementAfterPrologue(file)?.getStart(file) ?? 0;
+  return result.slice(0, offset) + `import { ${imports.join(', ')} } from '@epikodelabs/streamix';\n` + result.slice(offset);
 }
