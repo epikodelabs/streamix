@@ -92,28 +92,20 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
     }
   };
 
-  const broadcastCompletion = () => {
+  const broadcastTerminal = () => {
     for (const subscriber of subscribers) {
-      if (subscriber.done || subscriber.queue.length > 0 || !subscriber.pendingResolve) {
-        continue;
-      }
-
       const resolve = subscriber.pendingResolve;
-      subscriber.pendingResolve = subscriber.pendingReject = null;
-      resolve(DONE);
-    }
-  };
-
-  const broadcastError = (error: any) => {
-    for (const subscriber of subscribers) {
-      if (subscriber.done || !subscriber.pendingReject) {
-        continue;
-      }
-
       const reject = subscriber.pendingReject;
+      if (!resolve) continue;
+
+      subscriber.done = true;
       subscriber.pendingResolve = subscriber.pendingReject = null;
-      reject(error);
+      if (errorValue !== undefined) reject?.(errorValue);
+      else resolve(DONE);
     }
+    // Readers without pending pulls can still drain their private queues.
+    // The terminal connection will never broadcast to them again.
+    subscribers.clear();
   };
 
   const disconnect = () => {
@@ -143,8 +135,6 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
       } catch (err) {
         if (activeConnection !== connection) return;
         errorValue = normalizeError(err);
-        broadcastError(errorValue);
-        return;
       } finally {
         if (activeConnection !== connection) {
           return;
@@ -154,7 +144,7 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
         completed = true;
         isConnected = false;
         activeConnection = null;
-        broadcastCompletion();
+        broadcastTerminal();
       }
     })();
   };
@@ -176,7 +166,7 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
       }
 
       subscriber.queue.push(...snapshotReplay());
-      subscribers.add(subscriber);
+      if (!completed) subscribers.add(subscriber);
 
       if (!completed && errorValue === undefined && !isConnected) {
         connectSource(source);
@@ -190,6 +180,7 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
 
       subscriber.done = true;
       subscribers.delete(subscriber);
+      subscriber.queue.length = 0;
 
       if (subscribers.size === 0 && isConnected) {
         disconnect();
@@ -206,6 +197,7 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
         if (subscriber.done) return DONE;
 
         await ensureConnected();
+        if (subscriber.done) return DONE;
 
         if (subscriber.queue.length > 0) {
           return { value: subscriber.queue.shift()!, done: false };

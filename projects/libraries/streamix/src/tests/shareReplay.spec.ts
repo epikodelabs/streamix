@@ -17,6 +17,55 @@ const emptySource = <T>(): AsyncIterator<T> => ({
 });
 
 describe('shareReplay', () => {
+  // Observe operator-owned subscriber sets without exposing them publicly.
+  function subscriberRegistries(): Set<unknown>[] {
+    const registries: Set<unknown>[] = [];
+    const add = Set.prototype.add;
+    spyOn(Set.prototype, 'add').and.callFake(function (this: Set<unknown>, value: unknown) {
+      if (value && typeof value === 'object' && 'pendingResolve' in value && 'pendingReject' in value &&
+          !registries.includes(this)) registries.push(this);
+      return add.call(this, value);
+    });
+    return registries;
+  }
+
+  for (const fails of [false, true]) {
+    it(`releases terminal subscribers on ${fails ? 'failure' : 'completion'} and preserves queued values`, async () => {
+      const registries = subscriberRegistries();
+      const op = shareReplay<number>(2);
+      const error = new Error('source failed');
+      let resolveSecond!: (result: IteratorResult<number>) => void;
+      const second = new Promise<IteratorResult<number>>(resolve => { resolveSecond = resolve; });
+      let resolveTerminal!: (result: IteratorResult<number>) => void;
+      let rejectTerminal!: (error: Error) => void;
+      const terminal = new Promise<IteratorResult<number>>((resolve, reject) => {
+        resolveTerminal = resolve;
+        rejectTerminal = reject;
+      });
+      const pulls = [Promise.resolve(NEXT(1)), second, terminal];
+      const reader = op.apply({ next: () => pulls.shift()! });
+      expect(await reader.next()).toEqual(NEXT(1));
+      const queued = op.apply(emptySource<number>());
+      expect(await queued.next()).toEqual(NEXT(1));
+      resolveSecond(NEXT(2));
+      expect(await reader.next()).toEqual(NEXT(2));
+      const pending = reader.next();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(registries.map(set => set.size)).toEqual([2]);
+      const terminalResult = fails ? expectAsync(pending).toBeRejectedWith(error) : expectAsync(pending).toBeResolvedTo(DONE);
+      if (fails) rejectTerminal(error);
+      else resolveTerminal(DONE);
+      await terminalResult;
+      expect(registries.map(set => set.size)).toEqual([0]);
+      // The slower reader can drain its private queue after detachment.
+      expect(await queued.next()).toEqual(NEXT(2));
+      if (fails) await expectAsync(queued.next()).toBeRejectedWith(error);
+      else expect(await queued.next()).toEqual(DONE);
+      expect(registries.map(set => set.size)).toEqual([0]);
+    });
+  }
+
   it('rejects invalid replay sizes at creation', () => {
     for (const size of [2.5, -1, NaN, -Infinity, Number.MAX_SAFE_INTEGER + 1]) {
       expect(() => shareReplay(size)).toThrowError(RangeError,
@@ -36,9 +85,13 @@ describe('shareReplay', () => {
   });
 
   it('preserves the completed bounded cache through public pipe iteration', async () => {
+    const registries = subscriberRegistries();
     const shared = pipe([1, 2, 3], shareReplay<number>(2));
     expect(await collect(iterate(shared))).toEqual([1, 2, 3]);
-    expect(await collect(iterate(shared))).toEqual([2, 3]);
+    for (let run = 0; run < 5; run++) {
+      expect(await collect(iterate(shared))).toEqual([2, 3]);
+      expect(registries.map(set => set.size)).toEqual([0]);
+    }
     expect(await collect(shared[Symbol.asyncIterator]())).toEqual([2, 3]);
   });
 
