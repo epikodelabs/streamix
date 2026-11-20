@@ -882,7 +882,7 @@ export function renderAtomSnapshotScript(
   sources: Record<string, DependencySource<unknown>>,
   id = "__streamix_snapshot",
 ): string {
-  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) {
+  if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(id)) {
     throw new Error("Streamix snapshot element id must contain only letters, numbers, underscores, or hyphens");
   }
   return `<script id="${id}" type="application/json">${serializeAtomSnapshot(sources)}</script>`;
