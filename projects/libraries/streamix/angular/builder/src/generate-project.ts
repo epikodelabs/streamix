@@ -17,7 +17,8 @@ function unwrapReactiveInitializer(expression: ts.Expression): ts.Expression {
   let current = expression;
   for (;;) {
     if (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
-        ts.isTypeAssertionExpression(current) || ts.isSatisfiesExpression(current)) {
+        ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) ||
+        ts.isSatisfiesExpression(current)) {
       current = current.expression;
     } else if (ts.isCallExpression(current) && ts.isIdentifier(current.expression) &&
         /^__sxDebug_*$/.test(current.expression.text) && current.arguments.length > 0) {
@@ -1014,7 +1015,7 @@ export function rewriteDerivedAtomReads(source: string): string {
       factoryKind(node.expression) === 'derived' &&
       node.arguments.length > 0
     ) {
-      const callback = node.arguments[0];
+      const callback = unwrapReactiveInitializer(node.arguments[0]);
       if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
         const trackers = new Set(callback.parameters.flatMap(parameter =>
           ts.isIdentifier(parameter.name) ? [checker.getSymbolAtLocation(parameter.name)] : []));

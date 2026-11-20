@@ -124,6 +124,27 @@ describe('Vue compiler correctness regressions', () => {
     expect(result.code).toContain("const __sx_rate = useWritable(rate, 'rate');");
   });
 
+  it('lowers atom reads through cast-wrapped derived callbacks', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(2);
+      const total = derived((() => count * 2) as () => number);
+      const other = derived((() => count * 3)!);
+    `, '{{ total }} {{ other }}');
+    expectNoError(result);
+    expect(result.code).toContain('derived((() => count.value * 2) as () => number)');
+    expect(result.code).toContain('derived((() => count.value * 3)!)');
+  });
+
+  it('rejects an asynchronous cast-wrapped derived callback', () => {
+    const result = compile(`
+      import { derived } from '@epikodelabs/streamix';
+      const total = derived((async () => 2) as any);
+    `, '{{ total }}');
+    expect(result.diagnostics.some(item =>
+      item.category === 'error' && /synchronously/.test(item.message))).toBeTrue();
+  });
+
   it('adopts a cast around the introspection wrapper in either nesting order', () => {
     const result = compile(`
       import { atom, derived } from '@epikodelabs/streamix';

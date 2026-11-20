@@ -1003,10 +1003,10 @@ function factoryImports(script: string): FactoryImports {
 
 /**
  * Strips value-transparent wrappers (parentheses, `as`/angle-bracket
- * assertions, `satisfies`) so cast-wrapped factory initializers such as
- * `atom(0) as Writable<number>` adopt like the bare call they contain.
- * React parity: the React compiler applies the same unwrap to declaration
- * initializers.
+ * assertions, non-null assertions, `satisfies`) so cast-wrapped factory
+ * initializers such as `atom(0) as Writable<number>` adopt like the bare call
+ * they contain. React parity: the React compiler applies the same unwrap to
+ * declaration initializers and factory callbacks.
  */
 function unwrapCast(node: ts.Expression): ts.Expression {
   let current = node;
@@ -1014,6 +1014,7 @@ function unwrapCast(node: ts.Expression): ts.Expression {
     ts.isParenthesizedExpression(current) ||
     ts.isAsExpression(current) ||
     ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current) ||
     ts.isSatisfiesExpression(current)
   ) {
     current = current.expression;
@@ -1088,7 +1089,8 @@ function derivedCallbackSpan(
   call: ts.CallExpression,
   file: ts.SourceFile,
 ): Pick<ReactiveDeclaration, 'derivedCallbackStart' | 'derivedCallbackEnd'> {
-  const callback = call.arguments[0];
+  const argument = call.arguments[0];
+  const callback = argument === undefined ? undefined : unwrapCast(argument);
 
   if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
     return {};
@@ -1109,7 +1111,8 @@ function asyncDerivedCallbackSpan(
   call: ts.CallExpression,
   file: ts.SourceFile,
 ): Pick<ReactiveDeclaration, 'asyncCallbackStart' | 'asyncCallbackEnd'> {
-  const callback = call.arguments[0];
+  const argument = call.arguments[0];
+  const callback = argument === undefined ? undefined : unwrapCast(argument);
   if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
     return {};
   }

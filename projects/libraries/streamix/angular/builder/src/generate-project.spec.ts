@@ -13,6 +13,16 @@ describe('Angular derived shorthand', () => {
     expect(transformed).toContain('derived(() => this.count.value + this.other.value)');
   });
 
+  it('lowers reads through cast- and non-null-wrapped derived callbacks', () => {
+    const transformed = rewriteDerivedAtomReads(`
+      const count = atom(2);
+      const total = derived((() => count * 2) as () => number);
+      const other = derived((() => count * 3)!);
+    `);
+    expect(transformed).toContain('derived((() => count.value * 2) as () => number)');
+    expect(transformed).toContain('derived((() => count.value * 3)!)');
+  });
+
   it('lowers chained derived and flow inputs, object members, and shorthand keys', () => {
     const transformed = rewriteDerivedAtomReads(`
       const count = atom(2);
