@@ -1,17 +1,18 @@
 import ts from 'typescript';
 import { atom, scope, type Writable } from '@epikodelabs/streamix';
 import { transformAngularComponentTemplate } from '../../compiler/src/build-transform';
+import type { SxReactiveSourceResolver } from '../../compiler/src/source-resolution';
 import * as instructions from '../lib/binding-table';
 import * as blockInstructions from '../lib/structural-block';
 import { ɵsxInstallErrorDelivery } from '../lib/error-delivery';
 import { rendererScheduler } from '../lib/render-scheduler';
 import { idescribe } from '../../../src/tests/env.spec';
 
-function install(template: string, host: Element, context: object) {
+function install(template: string, host: Element, context: object, resolve?: SxReactiveSourceResolver) {
   const result = transformAngularComponentTemplate(template, 'test.html', {
-    resolveReactiveSource: path => path === 'model.rate' ? "model.get('rate')"
+    resolveReactiveSource: resolve ?? (path => path === 'model.rate' ? "model.get('rate')"
       : path === 'model.ready' ? "model.get('ready')"
-      : ['count', 'other'].includes(path) ? path : undefined,
+      : ['count', 'other'].includes(path) ? path : undefined),
   });
   const javascript = ts.transpileModule(result.setup, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
@@ -28,6 +29,23 @@ function install(template: string, host: Element, context: object) {
 }
 
 idescribe('compiled interpolation DOM updates', () => {
+  it('updates object value fields that share names with source APIs', () => {
+    const form = atom({ error: 'bad' });
+    const host = document.createElement('div');
+    host.innerHTML = '<p>server</p>';
+    const resolver: SxReactiveSourceResolver = path => path === 'form' ? path : undefined;
+    resolver.hasValueMember = (path, name) => path === 'form' && name === 'error';
+    const binding = install('<p>{{ form.error }}</p>', host, { form }, resolver);
+    try {
+      expect(host.textContent).toBe('bad');
+      form.next({ error: 'fixed' });
+      rendererScheduler.flushNow();
+      expect(host.textContent).toBe('fixed');
+    } finally {
+      binding.destroy();
+      form.dispose();
+    }
+  });
   it('samples plain state on emissions and preserves sibling DOM identities', () => {
     const host = document.createElement('div');
     host.innerHTML = '<p>initial<strong>fixed</strong>initial</p>';

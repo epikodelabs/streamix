@@ -12,7 +12,11 @@ export type SxDependencySourceResolver = (path: string) => boolean;
  * - `count` -> `count` for a standalone atom/readable.
  * - `model.count` -> `model.count` for an atom-first Scope member.
  */
-export type SxReactiveSourceResolver = (path: string) => string | undefined;
+export type SxReactiveSourceResolver = {
+  (path: string): string | undefined;
+  /** Tests whether a source's wrapped value declares a conflicting member. */
+  hasValueMember?(path: string, member: string): boolean;
+};
 
 /**
  * Adapts the legacy boolean source classifier to the richer path resolver.
@@ -169,7 +173,7 @@ export function combineReactiveSourceResolvers(
     return undefined;
   }
 
-  return path => {
+  const combined: SxReactiveSourceResolver = path => {
     for (const resolver of active) {
       const source = resolver(path);
       if (source) {
@@ -178,4 +182,7 @@ export function combineReactiveSourceResolvers(
     }
     return undefined;
   };
+  combined.hasValueMember = (path, member) =>
+    active.find(resolve => resolve(path) !== undefined)?.hasValueMember?.(path, member) ?? false;
+  return combined;
 }

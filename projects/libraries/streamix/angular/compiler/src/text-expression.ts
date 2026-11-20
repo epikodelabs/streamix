@@ -205,6 +205,8 @@ export function analyzeSxExpression(
   if (resolveReactiveSource) {
     const resolve = resolveReactiveSource;
     resolveReactiveSource = path => resolve(path.replace(/^this\./, ''));
+    resolveReactiveSource.hasValueMember = (path, member) =>
+      resolve.hasValueMember?.(path.replace(/^this\./, ''), member) ?? false;
   }
   const authoredExpression = stripAnyCasts(expressionSource.trim());
 
@@ -407,6 +409,7 @@ const SOURCE_API_MEMBERS = new Set([
 function sourceTrailingAccess(
   expression: string,
   offset: number,
+  hasValueMember: (member: string) => boolean,
 ): 'api' | 'value' | undefined {
   let index = offset;
   while (index < expression.length && /\s/.test(expression[index])) index += 1;
@@ -416,14 +419,14 @@ function sourceTrailingAccess(
   } else if (expression[index] === '.') {
     index += 1;
   } else if (expression[index] === '[') {
-    return sourceElementAccessKind(expression, index);
+    return sourceElementAccessKind(expression, index, hasValueMember);
   } else {
     return undefined;
   }
 
   const name = /^[A-Za-z_$][\w$]*/.exec(expression.slice(index))?.[0];
   if (!name) return undefined;
-  return SOURCE_API_MEMBERS.has(name) ? 'api' : 'value';
+  return SOURCE_API_MEMBERS.has(name) && (name === 'value' || !hasValueMember(name)) ? 'api' : 'value';
 }
 
 /**
@@ -433,6 +436,7 @@ function sourceTrailingAccess(
 function sourceElementAccessKind(
   expression: string,
   open: number,
+  hasValueMember: (member: string) => boolean,
 ): 'api' | 'value' {
   let index = open + 1;
   while (index < expression.length && /\s/.test(expression[index])) index += 1;
@@ -444,7 +448,8 @@ function sourceElementAccessKind(
     const key = expression.slice(index + 1, end - 1);
     let close = end;
     while (close < expression.length && /\s/.test(expression[close])) close += 1;
-    if (expression[close] === ']' && SOURCE_API_MEMBERS.has(key)) return 'api';
+    if (expression[close] === ']' && SOURCE_API_MEMBERS.has(key) &&
+        (key === 'value' || !hasValueMember(key))) return 'api';
   }
 
   return 'value';
@@ -513,6 +518,7 @@ function normalizeSourceTransparentExpression(
           const trailing = sourceTrailingAccess(
             expression,
             index + resolved.valuePath.length,
+            member => resolveReactiveSource.hasValueMember?.(resolved.valuePath, member) ?? false,
           );
           if (trailing === 'api') {
             index += path.length;

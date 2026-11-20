@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { createTokenSourceMap, hoistedVarDeclarations } from '@epikodelabs/streamix/compiler';
+import { createTokenSourceMap, hoistedVarDeclarations, objectValueMembers } from '@epikodelabs/streamix/compiler';
 
 /**
  * Members that belong to the source object itself. Appending `.value` before
@@ -21,14 +21,18 @@ const SOURCE_API_MEMBERS = new Set([
 function isSourceApiMemberAccess(
   node: ts.Node,
   isReactiveReceiver: (expression: ts.Expression) => boolean,
+  hasValueMember?: (expression: ts.Expression, name: string) => boolean,
 ): boolean {
+  const isSourceMember = (receiver: ts.Expression, name: string): boolean =>
+    SOURCE_API_MEMBERS.has(name) && isReactiveReceiver(receiver) &&
+    (name === 'value' || !hasValueMember?.(receiver, name));
   if (ts.isPropertyAccessExpression(node)) {
-    return SOURCE_API_MEMBERS.has(node.name.text) && isReactiveReceiver(node.expression);
+    return isSourceMember(node.expression, node.name.text);
   }
   if (ts.isElementAccessExpression(node)) {
     const argument = node.argumentExpression;
     return !!argument && ts.isStringLiteralLike(argument) &&
-      SOURCE_API_MEMBERS.has(argument.text) && isReactiveReceiver(node.expression);
+      isSourceMember(node.expression, argument.text);
   }
   return false;
 }
@@ -578,6 +582,38 @@ export function transformReactJsx(
   const moduleWritableAtoms = collectModuleWritableBindings(sourceFile, imports, checker);
   const moduleAtomMaps = collectModuleAtomMaps(sourceFile, moduleAtoms, moduleWritableAtoms);
   const moduleScopeMembers = collectModuleScopeMembers(sourceFile, imports, checker);
+  let valueDeclarations: Map<string, ts.VariableDeclaration | undefined> | undefined;
+  const hasValueMember = (receiver: ts.Expression, name: string): boolean => {
+    const original = unwrapCast(receiver);
+    if (checker) {
+      const type = checker.getTypeAtLocation(original);
+      const wrappedValue = type.getProperty('value');
+      if (wrappedValue && checker.getTypeOfSymbolAtLocation(wrappedValue, original).getProperty(name)) return true;
+    }
+    if (!ts.isIdentifier(original)) return false;
+    let declaration: ts.VariableDeclaration | undefined;
+    if (checker) {
+      const valueDeclaration = checker.getSymbolAtLocation(original)?.valueDeclaration;
+      if (valueDeclaration && ts.isVariableDeclaration(valueDeclaration)) declaration = valueDeclaration;
+    } else {
+      if (!valueDeclarations) {
+        const declarations = valueDeclarations = new Map();
+        const collect = (node: ts.Node): void => {
+          if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+            const key = node.name.text;
+            declarations.set(key, declarations.has(key) ? undefined : node);
+          }
+          ts.forEachChild(node, collect);
+        };
+        collect(sourceFile);
+      }
+      declaration = valueDeclarations.get(original.text);
+    }
+    const initializer = declaration?.initializer && unwrapCast(declaration.initializer);
+    return !!initializer && ts.isCallExpression(initializer) &&
+      factoryKind(initializer, imports, checker) === 'atom' &&
+      !!objectValueMembers(initializer.arguments[0])?.has(name);
+  };
   const isDerivedCall = (node: ts.Node): node is ts.CallExpression => {
     if (!ts.isCallExpression(node) || factoryKind(node, imports, checker) !== "derived") return false;
     const receiver = ts.isPropertyAccessExpression(node.expression) ? node.expression.expression : node.expression;
@@ -645,7 +681,7 @@ export function transformReactJsx(
         // source object; lowering them would add a second `.value`.
         if (isSourceApiMemberAccess(child, expression =>
           (ts.isIdentifier(expression) && canRead(expression)) ||
-          resolveReactiveMapRead(expression) !== undefined)) return child;
+          resolveReactiveMapRead(expression) !== undefined, hasValueMember)) return child;
         if (ts.isShorthandPropertyAssignment(child) && canRead(child.name)) {
           return factory.createPropertyAssignment(child.name, factory.createPropertyAccessExpression(child.name, "value"));
         }
@@ -1088,7 +1124,7 @@ export function transformReactJsx(
           if (loweredRight === node.right) return undefined;
           return factory.updateBinaryExpression(node, node.left, node.operatorToken, loweredRight);
         }
-        const right = rewriteAtomReads(loweredRight, atoms, atomMaps, context, node.right, isHidden, rejectedWrites);
+        const right = rewriteAtomReads(loweredRight, atoms, atomMaps, context, node.right, isHidden, rejectedWrites, hasValueMember);
         if (!writableBindings.has(atomName)) {
           diagnostics.push(diagnostic(node, "error", `Cannot assign to read-only atom binding "${atomName}". Declare it with let or call ${atomName}.next(value).`));
           return undefined;
@@ -1324,7 +1360,7 @@ export function transformReactJsx(
           // the same property on the value instead of the source.
           if (isSourceApiMemberAccess(value, expression =>
             atomReferenceName(expression, atoms, atomMaps) !== undefined &&
-            !isHiddenTarget(expression))) return value;
+            !isHiddenTarget(expression), hasValueMember)) return value;
           if (ts.isShorthandPropertyAssignment(value) && atoms.has(value.name.text) && !isHidden(value.name)) {
             return factory.createPropertyAssignment(value.name, bindingForAtom(value.name.text, value));
           }
@@ -1810,7 +1846,7 @@ export function transformReactJsx(
           }
           if (ts.isArrowFunction(child.expression) || ts.isFunctionExpression(child.expression)) {
             const lowered = ts.visitNode(child.expression, visit) as ts.Expression;
-            return factory.updateJsxExpression(child, rewriteAtomReads(lowered, atoms, atomMaps, context, child.expression, isHidden, rejectedWrites));
+            return factory.updateJsxExpression(child, rewriteAtomReads(lowered, atoms, atomMaps, context, child.expression, isHidden, rejectedWrites, hasValueMember));
           }
           if (isSharedAtomComponentProp(child, atoms, atomMaps)) {
             return child;
@@ -2953,6 +2989,7 @@ function rewriteAtomReads(
   lexicalOrigin: ts.Node = expression,
   isHidden?: (id: ts.Identifier) => boolean,
   rejectedWrites?: Readonly<WeakSet<ts.Node>>,
+  hasValueMember?: (expression: ts.Expression, name: string) => boolean,
 ): ts.Expression {
   let boundary: ts.Node | undefined = lexicalOrigin.parent;
   while (boundary && !ts.isFunctionLike(boundary) && !ts.isSourceFile(boundary)) boundary = boundary.parent;
@@ -2999,7 +3036,7 @@ function rewriteAtomReads(
     // the atom object. Leave the whole expression untouched; descending would
     // produce a nonsensical second `.value` on the resolved value.
     if (isSourceApiMemberAccess(node, expression =>
-      atomReferenceName(expression, atoms, atomMaps) !== undefined)) {
+      atomReferenceName(expression, atoms, atomMaps) !== undefined, hasValueMember)) {
       return node;
     }
     // Object shorthand is both a value read and a property name. Expanding it

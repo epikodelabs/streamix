@@ -30,6 +30,16 @@ const total = derived(((async () => 2) as () => Promise<number>)!);`;
       .toThrowError(/counter\.ts:2:\d+.*formulas must return synchronously/);
   });
 
+  it('preserves explicit safeValue reads in derived formulas', () => {
+    const output = rewriteDerivedAtomReads(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(1);
+      const doubled = derived(() => count.safeValue * 2);
+    `);
+    expect(output).toContain('count.safeValue * 2');
+    expect(output).not.toContain('count.value.safeValue');
+  });
+
   it('lowers chained derived and flow inputs, object members, and shorthand keys', () => {
     const transformed = rewriteDerivedAtomReads(`
       const count = atom(2);
@@ -796,6 +806,48 @@ describe('Angular builder watch recovery and work', () => {
       await regenerateAngularFile(root, sourceRoot, 'counter.ts');
 
       expect((await stat(destination)).mtimeMs).toBeLessThan(Date.parse('2001-01-01T00:00:00Z'));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('mirrors binary assets byte for byte during watch regeneration', async () => {
+    const { join } = await import('node:path');
+    const { writeFile, readFile, rm } = await import('node:fs/promises');
+    const { root, sourceRoot, generateProject, regenerateAngularFile } = await workspace();
+    try {
+      const source = join(root, sourceRoot, 'pixel.png');
+      await writeFile(source, Buffer.from([137, 80, 78, 71, 0]));
+      await generateProject({ workspaceRoot: root, sourceRoot });
+      const changed = Buffer.from([137, 80, 78, 71, 255, 0]);
+      await writeFile(source, changed);
+      await regenerateAngularFile(root, sourceRoot, 'pixel.png');
+      expect(await readFile(join(root, '.angular/.streamix/demo/src/pixel.png'))).toEqual(changed);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the checked atom value type to resolve source member collisions', async () => {
+    const { join } = await import('node:path');
+    const { writeFile, readFile, rm } = await import('node:fs/promises');
+    const { root, sourceRoot, source, generateProject } = await workspace();
+    try {
+      await writeFile(join(source, 'globals.d.ts'), `
+        declare module '@epikodelabs/streamix' {
+          export function atom<T>(value: T): { type: 'atom'; value: T; subscribe(): void };
+        }
+      `);
+      await writeFile(join(source, 'counter.ts'), `
+        import { atom } from '@epikodelabs/streamix';
+        declare function Component(meta: object): ClassDecorator;
+        @Component({ template: '<output>{{ form.error }}</output>' })
+        export class Counter { form = atom({ error: 'bad' }); }
+      `);
+      await generateProject({ workspaceRoot: root, sourceRoot });
+      const emitted = await readFile(join(root, '.angular/.streamix/demo/src/counter.ts'), 'utf8');
+      expect(emitted).toContain('form.value.error');
+      expect(emitted).toContain('ɵinstallSxCompiledView');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

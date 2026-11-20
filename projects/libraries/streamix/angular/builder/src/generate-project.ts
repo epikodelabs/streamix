@@ -286,10 +286,10 @@ function componentHasReactiveFields(checker: ts.TypeChecker, component: ts.Class
   });
 }
 
-function standaloneDependencySources(program: ts.Program, checker: ts.TypeChecker, sourcePath: string): string[] {
+function standaloneDependencySources(program: ts.Program, checker: ts.TypeChecker, sourcePath: string) {
   const file = program.getSourceFile(sourcePath);
-  if (!file) return [];
-  const fields: string[] = [];
+  if (!file) return undefined;
+  const fields = new Map<string, ts.Type>();
   const visit = (node: ts.Node): void => {
     if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name)) {
       const type = checker.getTypeAtLocation(node.initializer ?? node.name);
@@ -297,18 +297,21 @@ function standaloneDependencySources(program: ts.Program, checker: ts.TypeChecke
       // `BehaviorSubject` happens to have `value` and `subscribe`, but its
       // subscription teardown and write API are incompatible with the
       // generated binding table.
+      const valueProperty = type.getProperty('value');
       if (
         type.getProperty('type') &&
-        type.getProperty('value') &&
+        valueProperty &&
         type.getProperty('subscribe')
       ) {
-        fields.push(node.name.text);
+        fields.set(node.name.text, checker.getTypeOfSymbolAtLocation(valueProperty, node));
       }
     }
     ts.forEachChild(node, visit);
   };
   ts.forEachChild(file, visit);
-  return fields;
+  return Object.assign((path: string) => fields.has(path) ? path : undefined, {
+    hasValueMember: (path: string, member: string) => fields.get(path)?.getProperty(member) !== undefined,
+  });
 }
 
 /**
@@ -638,7 +641,7 @@ function scopeValuePathsFor(
  * Writes via a same-directory temporary so the watching bundler always reads
  * either the previous or the new file, never a partial write.
  */
-async function writeFileAtomic(path: string, contents: string): Promise<void> {
+async function writeFileAtomic(path: string, contents: string | Buffer): Promise<void> {
   const temporary = `${path}.sx-tmp-${randomUUID()}`;
   try {
     await writeFile(temporary, contents);
@@ -649,9 +652,10 @@ async function writeFileAtomic(path: string, contents: string): Promise<void> {
 }
 
 /** Atomically replaces a virtual file only when its bytes changed. */
-async function writeIfChanged(path: string, contents: string): Promise<void> {
+async function writeIfChanged(path: string, contents: string | Buffer): Promise<void> {
   try {
-    if (await readFile(path, 'utf8') === contents) return;
+    const current = await readFile(path);
+    if (current.equals(typeof contents === 'string' ? Buffer.from(contents) : contents)) return;
   } catch {
     // Missing or unreadable: write it.
   }
@@ -763,7 +767,7 @@ async function compileVirtualSource({
     templatePath,
     template: templateText,
     preserveWhitespaces: match.preserveWhitespaces,
-    dependencySourcePaths: standaloneDependencySources(program, checker, sourcePath),
+    resolveReactiveSource: standaloneDependencySources(program, checker, sourcePath),
     scopeValuePaths,
     writableSourcePaths: standaloneWritableSources(program, checker, sourcePath),
     scopeWritablePaths: scopeWritablePathsFor(program, sourcePath),
@@ -856,9 +860,10 @@ async function regenerateAngularFileInternal(workspaceRoot: string, sourceRoot: 
       normalized.split('/').some(part => part === '..' || part === '.')) return;
   const origin = join(sourceDirectory, normalized);
   const destination = join(outputDirectory, normalized);
-  let authored: string;
+  let content: Buffer;
   try {
-    authored = overlays.get(origin) ?? await readFile(origin, 'utf8');
+    const overlay = overlays.get(origin);
+    content = overlay !== undefined ? Buffer.from(overlay) : await readFile(origin);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'EISDIR') return;
@@ -876,9 +881,10 @@ async function regenerateAngularFileInternal(workspaceRoot: string, sourceRoot: 
   if (!/\.[jt]sx?$/i.test(normalized) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(normalized)) {
     // Assets and spec files are mirrored verbatim, like the staged copy.
     await mkdir(dirname(destination), { recursive: true });
-    await writeIfChanged(destination, authored);
+    await writeIfChanged(destination, content);
     return;
   }
+  const authored = content.toString('utf8');
 
   const program = await semanticProgram(async () => {
     const tsconfigPath = resolve(sourceDirectory, '..', 'tsconfig.app.json');
@@ -965,6 +971,14 @@ export function rewriteDerivedAtomReads(source: string, fileName = 'component.ts
   const factories = new Map<ts.Symbol, string>();
   const namespaces = new Set<ts.Symbol>();
   const factoryNames = new Set(['atom', 'derived', 'flow']);
+  const explicitValueMembers = new Set(['value', 'safeValue']);
+  const isExplicitValueRead = (node: ts.Expression): boolean => {
+    const parent = node.parent;
+    return (ts.isPropertyAccessExpression(parent) && parent.expression === node &&
+      explicitValueMembers.has(parent.name.text)) ||
+      (ts.isElementAccessExpression(parent) && parent.expression === node &&
+        ts.isStringLiteralLike(parent.argumentExpression) && explicitValueMembers.has(parent.argumentExpression.text));
+  };
   for (const statement of file.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
         !/^@epikodelabs\/streamix(?:\/|$)/.test(statement.moduleSpecifier.text) ||
@@ -1041,11 +1055,7 @@ export function rewriteDerivedAtomReads(source: string, fileName = 'component.ts
           ) {
             // `this.price.value` is already explicit. Rewriting the inner
             // access would produce `this.price.value.value`.
-            if (
-              ts.isPropertyAccessExpression(child.parent) &&
-              child.parent.expression === child &&
-              child.parent.name.text === 'value'
-            ) {
+            if (isExplicitValueRead(child)) {
               return;
             }
             edits.push({
@@ -1061,10 +1071,9 @@ export function rewriteDerivedAtomReads(source: string, fileName = 'component.ts
             const symbol = isShorthand ? checker.getShorthandAssignmentValueSymbol(parent) : checker.getSymbolAtLocation(child);
             if (!symbol || !atoms.has(symbol)) return;
             const isPropertyName = ts.isPropertyAccessExpression(parent) && parent.name === child;
-            const isExplicitValue = ts.isPropertyAccessExpression(parent) && parent.expression === child && parent.name.text === 'value';
             const isDeclaration = (ts.isVariableDeclaration(parent) || ts.isParameter(parent) ||
               ts.isBindingElement(parent) || ts.isPropertyAssignment(parent)) && parent.name === child;
-            if (!isPropertyName && !isExplicitValue && !isDeclaration) {
+            if (!isPropertyName && !isExplicitValueRead(child) && !isDeclaration) {
               edits.push({
                 start: child.getStart(file),
                 end: child.end,

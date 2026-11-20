@@ -97,6 +97,20 @@ idescribe("React JSX compiler client lifecycle", () => {
     container.remove();
   });
 
+  it("updates object value fields that share names with source APIs", async () => {
+    const form = atom({ error: "bad" });
+    const module = compileGeneratedModule(`
+      import { atom } from '@epikodelabs/streamix';
+      const form = atom({ error: "bad" });
+      export function App() { return <output>{form.error}</output>; }
+    `, () => form as Writable<unknown>);
+    await act(async () => { root = createRoot(container); root.render(createElement(module.App)); });
+    expect(container.textContent).toBe("bad");
+    await act(async () => { form.next({ error: "fixed" }); });
+    expect(container.textContent).toBe("fixed");
+    form.dispose();
+  });
+
   it("keeps assignment callback results while updating the rendered atom", async () => {
     const module = compileGeneratedModule(`
       import { atom } from '@epikodelabs/streamix';

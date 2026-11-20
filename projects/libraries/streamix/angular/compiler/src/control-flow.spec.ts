@@ -70,6 +70,16 @@ describe('standard Angular atom templates', () => {
     )).toThrowError(/Angular-owned|Unknown loop-local|Unsupported/);
   });
 
+  it('lowers legacy loop aliases from the row context', () => {
+    const result = transformAngularComponentTemplate(
+      '<li *ngFor="let item of model.items; index as row; let start = first">{{ row }} {{ start }} {{ item.name }}</li>',
+      'inline.html', { resolveReactiveSource },
+    );
+    expect(result.setup).toContain('row: index');
+    expect(result.setup).toContain('start: index === 0');
+    expect(result.setup).toContain('ɵsxReadLocal(currentContext, "row")');
+  });
+
   it('lets a loop alias shadow a component source of the same name', () => {
     const result = transformAngularComponentTemplate(
       '<li *ngFor="let item of items">{{ item.name }}</li>',
@@ -100,6 +110,20 @@ describe('standard Angular atom templates', () => {
     );
     expect(valueMethod.template).toContain('items.value.length');
     expect(valueMethod.template).not.toContain('items.value.value');
+  });
+
+  it('compiles known object value fields that share names with source APIs', () => {
+    const result = transformAngularComponentTemplate(
+      '<p>{{ form.error }} {{ form["previous"] }}</p>',
+      'inline.html', {
+        resolveReactiveSource: Object.assign((path: string) => path === 'form' ? path : undefined, {
+          hasValueMember: (path: string, name: string) => path === 'form' && ['error', 'previous'].includes(name),
+        }),
+      },
+    );
+    expect(result.bindingCount).toBe(1);
+    expect(result.template).toContain('form.value.error');
+    expect(result.template).toContain('form.value["previous"]');
   });
 
   it('lowers a pure @switch block with literal cases and a default', () => {
@@ -201,6 +225,24 @@ describe('standard Angular atom templates', () => {
     // Nested keyed block: the trackBy optimization recognizes the bare
     // parameter form and emits a lambda without the item parameter.
     expect(result.setup).toContain('(_index: any) => _index');
+  });
+
+  it('qualifies enclosing locals, object values, and template substitutions in nested track keys', () => {
+    const result = transformAngularComponentTemplate(
+      '@for (batch of model.items; track batch.id) { @for (item of batch.entries; track key({ type: typeof item, label: `x${batch.id}` })) { <li>{{ item }}</li> } }',
+      'inline.html', { resolveReactiveSource },
+    );
+    expect(result.setup).toContain('ctx.key({ type: typeof item, label: `x${currentContext.batch.id}` })');
+  });
+
+  it('gives bare loop item reads and event arguments priority over component sources', () => {
+    const result = transformAngularComponentTemplate(
+      '@for (item of model.items; track item.id) { <button (click)="pick(item)">{{ item }}</button> }',
+      'inline.html',
+      { resolveReactiveSource: name => name === 'item' ? 'item' : resolveReactiveSource(name) },
+    );
+    expect(result.setup).toContain('ctx.pick(ɵsxReadLocal(currentContext, "item"))');
+    expect(result.setup).not.toContain('ctx.item.value');
   });
 
   it('lowers a @for body that reads the full loop context', () => {

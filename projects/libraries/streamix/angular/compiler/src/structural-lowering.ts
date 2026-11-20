@@ -383,9 +383,8 @@ function collectStaticBlocks(nodes: readonly TmplAstNode[]): SxLowerableBlock[] 
 }
 
 /**
- * Only the simple structural forms are lowerable: a single element child, one
- * bound input, and — for `*ngFor` — a single loop variable with no `as`
- * aliases. Anything richer keeps Angular's own rendering.
+ * Only single-element structural forms are lowerable. Legacy loops support
+ * aliases for the row index, count, and first/last/even/odd flags.
  *
  * `*ngIf`/`*ngFor` desugar to `<ng-template [ngIf]>`/`[ngForOf]`, so the
  * expression lives on a bound input rather than a template attribute.
@@ -402,7 +401,9 @@ function isLowerableTemplate(node: TmplAstTemplate): boolean {
   }
 
   return (
-    node.variables.length === 1 &&
+    node.variables.filter(variable => variable.value === '$implicit').length === 1 &&
+    node.variables.every(variable => variable.value === '$implicit' ||
+      ['index', 'count', 'first', 'last', 'even', 'odd'].includes(variable.value)) &&
     names.includes('ngForOf') &&
     names.every(name =>
       name === 'ngFor' || name === 'ngForOf' || name === 'ngForTrackBy',
@@ -481,7 +482,7 @@ function tryLowerTemplateBlock(
     return undefined;
   }
 
-  const item = node.variables[0]?.name;
+  const item = node.variables.find(variable => variable.value === '$implicit')?.name;
   const trackBy = templateAttribute(node, 'ngForTrackBy');
 
   if (!item) {
@@ -497,7 +498,11 @@ function tryLowerTemplateBlock(
   // Unlike block syntax, microsyntax aliases are not carried by the body AST.
   // Pass the declared row local explicitly so arbitrary identifiers cannot be
   // mistaken for locals and silently render as undefined.
-  const compiled = compileBody(body, resolveReactiveSource, true, [item]);
+  const aliases = node.variables.filter(variable => variable.value !== '$implicit').map(variable => ({
+    name: variable.name,
+    value: `$${variable.value}`,
+  }));
+  const compiled = compileBody(body, resolveReactiveSource, true, [item, ...aliases.map(alias => alias.name)]);
 
   if (!compiled) {
     return undefined;
@@ -515,10 +520,7 @@ function tryLowerTemplateBlock(
       ? `(_index: any, ${item}: any) => ctx.${trackBy}(_index, ${item})`
       : `(_index: any, ${item}: any) => ${item}`,
     item,
-    aliases: node.variables.slice(1).map(variable => ({
-      name: variable.name,
-      value: variable.value,
-    })),
+    aliases,
     compiled,
     fields: loweredValueFields(source),
   };

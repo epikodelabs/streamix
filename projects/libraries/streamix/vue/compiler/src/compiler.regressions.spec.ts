@@ -1,5 +1,10 @@
 import ts from 'typescript';
+import { compileScript, parse } from '@vue/compiler-sfc';
+import { atom } from '@epikodelabs/streamix';
+import * as streamixVue from '@epikodelabs/streamix/vue';
+import * as Vue from 'vue';
 import { transformVueSfc } from './compiler';
+import { idescribe } from '../../src/tests/env.spec';
 
 const compile = (script: string, template: string) =>
   transformVueSfc(`<script setup lang="ts">\n${script}\n</script>\n<template>${template}</template>`);
@@ -8,7 +13,52 @@ function expectNoError(result: ReturnType<typeof compile>): void {
   expect(result.diagnostics.filter(item => item.category === 'error')).toEqual([]);
 }
 
+idescribe('Vue compiled object value fields', () => {
+  it('updates object value fields that share names with source APIs', async () => {
+    const form = atom({ error: 'bad' });
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const form = atom({ error: 'bad' });
+    `, '<output>{{ form.error }}</output>');
+    expectNoError(result);
+    const script = compileScript(parse(result.code).descriptor, { id: 'value-fields', inlineTemplate: true });
+    const javascript = ts.transpileModule(script.content, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    const exports = {} as { default: Vue.Component };
+    const require = (name: string) => {
+      if (name === 'vue') return Vue;
+      if (name === '@epikodelabs/streamix/vue') return streamixVue;
+      if (name === '@epikodelabs/streamix') return { atom: () => form };
+      throw new Error(`Unexpected generated import: ${name}`);
+    };
+    new Function('require', 'exports', javascript)(require, exports);
+    const app = Vue.createApp(exports.default);
+    const host = document.createElement('div');
+    app.mount(host);
+    try {
+      expect(host.textContent).toBe('bad');
+      form.next({ error: 'fixed' });
+      await Vue.nextTick();
+      expect(host.textContent).toBe('fixed');
+    } finally {
+      app.unmount();
+      form.dispose();
+    }
+  });
+});
+
 describe('Vue compiler correctness regressions', () => {
+  it('bridges object value fields when they share names with source APIs', () => {
+    const result = compile(`
+      import { atom, derived } from '@epikodelabs/streamix';
+      const form = atom({ error: 'bad', previous: 'old' });
+      const status = derived(() => form.error);
+    `, '{{ form.previous }}{{ status }}');
+    expectNoError(result);
+    expect(result.code).toContain('derived(() => form.value.error)');
+    expect(result.code).toContain('{{ __sx_form.previous }}{{ __sx_status }}');
+  });
   it('bridges dynamic indexes in formulas and templates', () => {
     const result = compile(`
       import { atom, derived } from '@epikodelabs/streamix';

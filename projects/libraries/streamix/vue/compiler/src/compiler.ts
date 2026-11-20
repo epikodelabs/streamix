@@ -1,7 +1,7 @@
 import ts from 'typescript';
 import { parse as parseSfc } from '@vue/compiler-sfc';
 import { applyMappedEdits, insertMappedText, createVueSourceMap, type VueSourceMap } from './source-map';
-import { hoistedVarDeclarations } from '@epikodelabs/streamix/compiler';
+import { hoistedVarDeclarations, objectValueMembers } from '@epikodelabs/streamix/compiler';
 
 export interface VueSfcDiagnostic {
   readonly category: 'error' | 'warning';
@@ -81,6 +81,7 @@ interface ReactiveDeclaration {
   /** Declared binding name. */
   readonly name: string;
   readonly kind: FactoryKind;
+  readonly valueMembers?: ReadonlySet<string>;
   /** Declaration offsets within the script-setup content. */
   readonly callExpressionStart: number;
   /** Offset just past the factory call (the scope-bridge insertion point). */
@@ -1051,6 +1052,7 @@ function collectReactiveDeclarations(
       declarations.push({
         name: declaration.name.text,
         kind,
+        valueMembers: kind === 'atom' ? objectValueMembers(call.arguments[0]) : undefined,
         callExpressionStart: call.expression.getStart(file),
         callEnd: call.end,
         statementEnd: statement.end,
@@ -1090,7 +1092,7 @@ function collectTemplateReactiveReads(
   declarations: readonly ReactiveDeclaration[],
   localsAt: TemplateLocalsAt,
 ): readonly TemplateReactiveRead[] {
-  const names = new Set(declarations.map(declaration => declaration.name));
+  const names = new Map(declarations.map(declaration => [declaration.name, declaration.valueMembers]));
   const reads: TemplateReactiveRead[] = [];
 
   for (const span of templateExpressionSpans(template)) {
@@ -1099,7 +1101,7 @@ function collectTemplateReactiveReads(
     // comments, and object keys from being mistaken for reactive identifiers.
     const { file, prefix } = parseTemplateExpression(expression);
     const visit = (node: ts.Node): void => {
-      if (ts.isIdentifier(node) && names.has(node.text) && isValueIdentifier(node) &&
+      if (ts.isIdentifier(node) && names.has(node.text) && isValueIdentifier(node, names.get(node.text)) &&
           !localsAt(span.start + node.getStart(file) - prefix).has(node.text) &&
           !isShadowedIn(node, file, node.text)) {
           const start = span.start + node.getStart(file) - prefix;
@@ -1143,7 +1145,7 @@ function derivedAtomValueReadEdits(
   scriptOffset: number,
   diagnostics: VueSfcDiagnostic[],
 ): readonly SpanEdit[] {
-  const atoms = new Set(declarations.filter(item => item.kind !== 'scope').map(item => item.name));
+  const atoms = new Map(declarations.filter(item => item.kind !== 'scope').map(item => [item.name, item.valueMembers]));
   if (![...imports.aliases.values()].includes('derived')) return [];
   const file = ts.createSourceFile('script.ts', script, ts.ScriptTarget.Latest, true);
   const edits: SpanEdit[] = [];
@@ -1174,7 +1176,7 @@ function derivedAtomValueReadEdits(
             !isShadowedIn(reader, callback.body, reader.text)) return;
       }
       if (ts.isIdentifier(node) && atoms.has(node.text) &&
-          isValueIdentifier(node) && !isShadowedIn(node, file, node.text, false)) {
+          isValueIdentifier(node, atoms.get(node.text)) && !isShadowedIn(node, file, node.text, false)) {
         const start = node.getStart(file);
         const shorthand = ts.isShorthandPropertyAssignment(node.parent);
         edits.push({ start, end: node.end,
@@ -1217,7 +1219,9 @@ const SOURCE_API_MEMBERS = new Set([
  * access or a literal source-API member is left untouched: its meaning
  * cannot be lowered safely.
  */
-function isSourceApiReceiver(node: ts.Identifier): boolean {
+function isSourceApiReceiver(node: ts.Identifier, valueMembers?: ReadonlySet<string>): boolean {
+  const isSourceMember = (name: string): boolean =>
+    SOURCE_API_MEMBERS.has(name) && (name === 'value' || !valueMembers?.has(name));
   let current: ts.Node = node;
   for (;;) {
     const parent = current.parent;
@@ -1227,23 +1231,23 @@ function isSourceApiReceiver(node: ts.Identifier): boolean {
       continue;
     }
     if (ts.isPropertyAccessExpression(parent) && parent.expression === current) {
-      return SOURCE_API_MEMBERS.has(parent.name.text);
+      return isSourceMember(parent.name.text);
     }
     if (ts.isElementAccessExpression(parent) && parent.expression === current) {
       const argument = parent.argumentExpression;
-      return !!argument && ts.isStringLiteralLike(argument) && SOURCE_API_MEMBERS.has(argument.text);
+      return !!argument && ts.isStringLiteralLike(argument) && isSourceMember(argument.text);
     }
     return false;
   }
 }
 
 /** Only value references are rewritten, never types, declarations or keys. */
-function isValueIdentifier(node: ts.Identifier): boolean {
+function isValueIdentifier(node: ts.Identifier, valueMembers?: ReadonlySet<string>): boolean {
   const parent = node.parent;
   if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
   // Source API access is object access, not a plain value read. Authored
   // `source.value` is already unwrapped and must not gain a second `.value`.
-  if (isSourceApiReceiver(node)) return false;
+  if (isSourceApiReceiver(node, valueMembers)) return false;
   if (ts.isPropertyAssignment(parent) && parent.name === node) return false;
   if (ts.isShorthandPropertyAssignment(parent)) return true;
   if (ts.isVariableDeclaration(parent) && parent.name === node) return false;
@@ -1421,7 +1425,7 @@ function collectTemplateUsage(
   localsAt: TemplateLocalsAt,
 ): TemplateUsage {
   const scopeNames = new Set(declarations.filter(item => item.kind === 'scope').map(item => item.name));
-  const reactiveNames = new Set(declarations.filter(item => item.kind !== 'scope').map(item => item.name));
+  const reactiveNames = new Map(declarations.filter(item => item.kind !== 'scope').map(item => [item.name, item.valueMembers]));
   const reads: ScopeMemberRead[] = [];
   const writes: ScopeMemberWrite[] = [];
 
@@ -1487,7 +1491,7 @@ function parseTemplateExpression(expression: string): { file: ts.SourceFile; pre
 /** Rewrites raw atom/derived/flow reads inside a replacement expression. */
 function rewriteReactiveReadsInText(
   fragment: string,
-  reactiveNames: ReadonlySet<string>,
+  reactiveNames: ReadonlyMap<string, ReadonlySet<string> | undefined>,
   absoluteStart: number,
   shadowedName: (absoluteOffset: number, name: string) => boolean,
 ): string {
@@ -1495,7 +1499,7 @@ function rewriteReactiveReadsInText(
   const { file, prefix } = parseTemplateExpression(fragment);
   const edits: SpanEdit[] = [];
   const visit = (node: ts.Node): void => {
-    if (ts.isIdentifier(node) && reactiveNames.has(node.text) && isValueIdentifier(node) &&
+    if (ts.isIdentifier(node) && reactiveNames.has(node.text) && isValueIdentifier(node, reactiveNames.get(node.text)) &&
         !shadowedName(absoluteStart + node.getStart(file) - prefix, node.text) &&
         !isShadowedIn(node, file, node.text)) {
       const shorthand = ts.isShorthandPropertyAssignment(node.parent);

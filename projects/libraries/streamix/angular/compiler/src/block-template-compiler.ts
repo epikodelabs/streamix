@@ -433,7 +433,7 @@ function rewriteEventArguments(argumentText: string, state: EmitState): string {
         return part;
       }
 
-      const source = state.resolveReactiveSource?.(part);
+      const source = state.sourceShadowingNames?.has(part) ? undefined : state.resolveReactiveSource?.(part);
 
       if (source) {
         return `ctx.${source}.value`;
@@ -663,7 +663,7 @@ function emitNestedCollection(
   );
   const item = block.item.name;
   const trackBy = block.trackBy
-    ? trackByText(block.trackBy, state.template, item)
+    ? trackByText(block.trackBy, state.template, item, state.localNames)
     : item;
 
   const body = compileNestedBody(block.children, state, [
@@ -789,99 +789,50 @@ function trackByText(
   trackBy: unknown,
   template: string,
   item: string,
+  locals?: ReadonlySet<string>,
 ): string {
   // The track expression is spliced into a generated JavaScript lambda, so a
   // `$any(...)` cast has to go the way of every other compiled expression.
   const text = stripAnyCasts(expressionSourceOf(trackBy, template));
 
-  return text ? qualifyTrackReceiver(text, item) : item;
+  return text ? qualifyTrackReceiver(text, item, locals) : item;
 }
 
-/** Implicit track names that do not read the component. */
-const TRACK_ITEM_INDEPENDENT = new Set(['$index']);
-
-/** Keywords that are literals or bind to no component member. */
-const TRACK_KEYWORDS = new Set([
-  'this',
-  'true',
-  'false',
-  'null',
-  'undefined',
-]);
-
-/**
- * Qualifies every root identifier in a track expression with the component
- * receiver.
- *
- * The generated lambda lives in the module-level setup function, so a bare
- * `trackById` is a "Cannot find name" build failure (or silently resolves to
- * an unrelated module-level function). Angular evaluates track expressions
- * with the component as implicit receiver, so root reads that are not the
- * loop item resolve against `ctx` - the component parameter, in scope at
- * every emission site, for top-level and nested collection blocks alike.
- * Member reads (`item.id`, `this.x`) and string literals are untouched.
- */
-function qualifyTrackReceiver(text: string, item: string): string {
-  let result = '';
-  let index = 0;
-
-  while (index < text.length) {
-    const character = text[index]!;
-
-    if (character === "'" || character === '"' || character === '`') {
-      // String literals are copied verbatim: their content is not code.
-      const quote = character;
-      result += character;
-      index += 1;
-      while (index < text.length) {
-        if (text[index] === '\\') {
-          result += text.slice(index, index + 2);
-          index += 2;
-          continue;
-        }
-        result += text[index]!;
-        index += 1;
-        if (text[index - 1] === quote) {
-          break;
-        }
+/** Qualifies component and enclosing-loop reads in a nested track expression. */
+function qualifyTrackReceiver(text: string, item: string, locals?: ReadonlySet<string>): string {
+  const file = ts.createSourceFile('track.ts', `(${text})`, ts.ScriptTarget.Latest, true);
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+  const qualify = (name: string): string => {
+    if (name === '$index') return '_index';
+    if (name === item || ['undefined', 'NaN', 'Infinity'].includes(name)) return name;
+    return locals?.has(name) ? `currentContext.${name}` : `ctx.${name}`;
+  };
+  const visit = (node: ts.Node): void => {
+    let replacement: string | undefined;
+    if (node.kind === ts.SyntaxKind.ThisKeyword) {
+      replacement = 'ctx';
+    } else if (ts.isShorthandPropertyAssignment(node)) {
+      const name = node.name.text;
+      const value = qualify(name);
+      if (value !== name) replacement = `${name}: ${value}`;
+    } else if (ts.isIdentifier(node)) {
+      const parent = node.parent;
+      if (!((ts.isPropertyAccessExpression(parent) || ts.isPropertyAssignment(parent)) && parent.name === node)) {
+        const value = qualify(node.text);
+        if (value !== node.text) replacement = value;
       }
-      continue;
     }
-
-    if (!/[A-Za-z_$]/.test(character)) {
-      result += character;
-      index += 1;
-      continue;
+    if (replacement !== undefined) {
+      edits.push({ start: node.getStart(file) - 1, end: node.end - 1, text: replacement });
+      return;
     }
-
-    let end = index + 1;
-    while (end < text.length && /[\w$]/.test(text[end]!)) {
-      end += 1;
-    }
-    const name = text.slice(index, end);
-
-    // A read that follows a dot is a member of the preceding expression,
-    // not a root reference.
-    let member = index - 1;
-    while (member >= 0 && /\s/.test(text[member]!)) {
-      member -= 1;
-    }
-    const precededByDot = member >= 0 && text[member] === '.';
-
-    if (precededByDot) {
-      result += name;
-    } else if (name === '$index') {
-      result += '_index';
-    } else if (name === item || TRACK_ITEM_INDEPENDENT.has(name) || TRACK_KEYWORDS.has(name)) {
-      result += name;
-    } else {
-      result += `ctx.${name}`;
-    }
-
-    index = end;
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  for (const edit of edits.reverse()) {
+    text = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
   }
-
-  return result;
+  return text;
 }
 
 /** Accepts only the literals a generated comparison can evaluate directly. */
@@ -1216,7 +1167,7 @@ function emitBoundText(
     variables.push(variable);
 
     const expression = substituteLets(part.value, state);
-    const source = state.resolveReactiveSource?.(expression);
+    const source = state.sourceShadowingNames?.has(expression) ? undefined : state.resolveReactiveSource?.(expression);
 
     if (source && state.resolveReactiveSource) {
       state.bindings.push({ kind: 'text', node: variable, source });

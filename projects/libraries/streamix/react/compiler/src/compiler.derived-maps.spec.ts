@@ -295,6 +295,16 @@ describe("React compiler atom-map reads inside derived", () => {
 });
 
 describe("React compiler source API reads", () => {
+  it("reads object value fields when they share names with source APIs", () => {
+    const { result, App } = compileComponent(`
+      import { atom, derived } from "@epikodelabs/streamix";
+      const form = atom({ error: "bad", previous: "old" });
+      const status = derived(() => form.error);
+      export function App() { return <p>{form.previous}{status}</p>; }
+    `, "colliding-source-members.tsx");
+    expect(errors(result)).toEqual([]);
+    expect(App().props.children).toEqual(["old", "bad"]);
+  });
   it("keeps source API members raw inside derived callbacks", () => {
     const compiled = compileModule<{
       count: Writable<number>;
