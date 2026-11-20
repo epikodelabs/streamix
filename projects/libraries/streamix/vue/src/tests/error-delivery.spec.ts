@@ -75,6 +75,40 @@ idescribe('Vue error delivery', () => {
     source.dispose();
   });
 
+  it('round-trips final emissions from completed flows, including undefined', async () => {
+    const status = flow(async function* () { yield 'loading'; yield 'done'; });
+    const explicit = flow<undefined>(async function* () { yield undefined; });
+    const empty = flow<never>(async function* () {});
+    const collect = async (source: AsyncIterable<unknown>) => {
+      for await (const _ of source) { /* Activate the flow and wait for completion. */ }
+    };
+    const targetStatus = atom<string>();
+    const targetExplicit = atom<undefined>();
+    try {
+      await Promise.all([collect(status), collect(explicit), collect(empty)]);
+      // Natural completion preserves live reads in the current core. Also
+      // verify the disposed-source path used by server-owned teardown.
+      expect(parseAtomSnapshot(serializeAtomSnapshot({ status, explicit, empty })).atoms)
+        .toEqual({ status: 'done', explicit: undefined });
+      status.dispose();
+      explicit.dispose();
+      empty.dispose();
+      expect([status.disposed, explicit.disposed, empty.disposed]).toEqual([true, true, true]);
+
+      const payload = parseAtomSnapshot(serializeAtomSnapshot({ status, explicit, empty }));
+      expect(Object.keys(payload.atoms)).toEqual(['status', 'explicit']);
+      hydrateAtomPayload({ status: targetStatus, explicit: targetExplicit }, payload);
+      expect(targetStatus.value).toBe('done');
+      expect(targetExplicit.value).toBeUndefined();
+    } finally {
+      status.dispose();
+      explicit.dispose();
+      empty.dispose();
+      targetStatus.dispose();
+      targetExplicit.dispose();
+    }
+  });
+
   it('omits pending and failed sources from SSR snapshots and hydrates the rest', () => {
     const good = atom('kept');
     const pending = atom<string>();

@@ -21,16 +21,24 @@ export interface AtomSnapshotPayload {
 }
 
 /**
- * Reads one source for snapshot capture. Pending, failed, and completed
- * sources report the sentinel so the key is omitted: the sentinel would
- * vanish through JSON.stringify and break hydration key-matching, and a
- * failed read would abort the whole payload. Parity with the React adapter.
+ * Reads one source for snapshot capture. Pending and failed sources report
+ * the sentinel so the key is omitted: the sentinel would vanish through
+ * JSON.stringify and break hydration key-matching, and a failed read would
+ * abort the whole payload. Completed sources contribute their final cached
+ * emission, including an explicitly emitted `undefined`. Parity with the
+ * React adapter.
  */
 function captureSourceValue(source: DependencySource<unknown>): unknown {
   const disposed = (source as { disposed?: unknown }).disposed === true;
   const storedError = (source as { error?: unknown }).error;
   if (disposed && storedError !== undefined) return NO_INITIAL_VALUE;
-  if (disposed) return NO_INITIAL_VALUE;
+  if (disposed) {
+    // A disposed source without an error completed normally. Its cached
+    // emission is still readable through safeValue; a flow that completed
+    // without emitting keeps the sentinel and stays omitted.
+    if (!('safeValue' in source)) return NO_INITIAL_VALUE;
+    return (source as { readonly safeValue: unknown }).safeValue;
+  }
   try {
     return source.value;
   } catch {
@@ -38,7 +46,7 @@ function captureSourceValue(source: DependencySource<unknown>): unknown {
   }
 }
 
-/** Captures named atom values for an SSR payload. */
+/** Captures current values and the final emissions of completed atoms. */
 export function createAtomSnapshot(
   sources: Record<string, DependencySource<unknown>>,
 ): AtomSnapshot {
@@ -182,9 +190,8 @@ export function hydrateAtomPayload(
   targets: Record<string, Writable<unknown>>,
   payload: AtomSnapshotPayload,
 ): void {
-  // The server omits keys for pending, failed, and completed sources: those
-  // targets simply stay pending on the client. Unknown payload keys remain a
-  // hard error because they indicate a server/client target mismatch.
+  // Sources without a capturable value leave their client targets pending.
+  // Unknown payload keys indicate a server/client target mismatch.
   const unknown = Object.keys(payload.atoms)
     .filter(name => !Object.hasOwn(targets, name))
     .sort();
