@@ -13,6 +13,26 @@ function expectNoError(result: ReturnType<typeof compile>): void {
   expect(result.diagnostics.filter(item => item.category === 'error')).toEqual([]);
 }
 
+function mountCompiled(result: ReturnType<typeof compile>, source: ReturnType<typeof atom>) {
+  expectNoError(result);
+  const script = compileScript(parse(result.code).descriptor, { id: 'fixture', inlineTemplate: true });
+  const javascript = ts.transpileModule(script.content, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const exports = {} as { default: Vue.Component };
+  const require = (name: string) => {
+    if (name === 'vue') return Vue;
+    if (name === '@epikodelabs/streamix/vue') return streamixVue;
+    if (name === '@epikodelabs/streamix') return { atom: () => source };
+    throw new Error(`Unexpected generated import: ${name}`);
+  };
+  new Function('require', 'exports', javascript)(require, exports);
+  const app = Vue.createApp(exports.default);
+  const host = document.createElement('div');
+  app.mount(host);
+  return { app, host };
+}
+
 idescribe('Vue compiled object value fields', () => {
   it('updates object value fields that share names with source APIs', async () => {
     const form = atom({ error: 'bad' });
@@ -20,22 +40,7 @@ idescribe('Vue compiled object value fields', () => {
       import { atom } from '@epikodelabs/streamix';
       const form = atom({ error: 'bad' });
     `, '<output>{{ form.error }}</output>');
-    expectNoError(result);
-    const script = compileScript(parse(result.code).descriptor, { id: 'value-fields', inlineTemplate: true });
-    const javascript = ts.transpileModule(script.content, {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-    }).outputText;
-    const exports = {} as { default: Vue.Component };
-    const require = (name: string) => {
-      if (name === 'vue') return Vue;
-      if (name === '@epikodelabs/streamix/vue') return streamixVue;
-      if (name === '@epikodelabs/streamix') return { atom: () => form };
-      throw new Error(`Unexpected generated import: ${name}`);
-    };
-    new Function('require', 'exports', javascript)(require, exports);
-    const app = Vue.createApp(exports.default);
-    const host = document.createElement('div');
-    app.mount(host);
+    const { app, host } = mountCompiled(result, form);
     try {
       expect(host.textContent).toBe('bad');
       form.next({ error: 'fixed' });
@@ -48,7 +53,58 @@ idescribe('Vue compiled object value fields', () => {
   });
 });
 
+idescribe('Vue compiled destructuring assignments', () => {
+  for (const [shape, assignment, value] of [
+    ['array', '[count, plain] = load()', '[2, 3]'],
+    ['object', '({ count, plain } = load())', '{ count: 2, plain: 3 }'],
+  ]) {
+    it(`writes through the writable bridge in mixed ${shape} destructuring`, async () => {
+      const source = atom(1);
+      const result = compile(`
+        import { atom } from '@epikodelabs/streamix';
+        const count = atom(1);
+        let plain = 0, calls = 0;
+        function load() { calls++; return ${value}; }
+      `, `<button @click="${assignment}">{{ count }} {{ plain }} {{ calls }}</button>`);
+      const { app, host } = mountCompiled(result, source);
+      try {
+        expect(host.textContent).toBe('1 0 0');
+        host.querySelector('button')!.click();
+        await Vue.nextTick();
+        expect(source.value).toBe(2);
+        expect(host.textContent).toBe('2 3 1');
+        source.next(4);
+        await Vue.nextTick();
+        expect(host.textContent).toBe('4 3 1');
+      } finally {
+        app.unmount();
+        source.dispose();
+      }
+    });
+  }
+});
+
 describe('Vue compiler correctness regressions', () => {
+  for (const target of ['total', 'state.count']) {
+    for (const assignment of [
+      `[${target}, plain] = [2, 3]`,
+      `({ value: ${target}, plain } = { value: 2, plain: 3 })`,
+    ]) {
+      it(`rejects mixed destructuring into ${target}: ${assignment}`, () => {
+        const result = compile(`
+          import { atom, derived, scope } from '@epikodelabs/streamix';
+          const count = atom(1);
+          const total = derived(() => count * 2);
+          const state = scope({ count: 1 });
+          let plain = 0;
+        `, `<button @click="${assignment}"></button>`);
+        expect(result.diagnostics.map(item => [item.category, item.message])).toEqual([
+          ['error', jasmine.stringMatching(/Cannot destructure into a read-only Streamix binding or a scope member/)],
+        ]);
+      });
+    }
+  }
+
   it('bridges object value fields when they share names with source APIs', () => {
     const result = compile(`
       import { atom, derived } from '@epikodelabs/streamix';

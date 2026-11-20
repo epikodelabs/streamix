@@ -55,7 +55,7 @@ describe("Streamix React Vite plugin", () => {
     expect(readFile).not.toHaveBeenCalled();
   });
 
-  it("reports warnings and contract errors for the same module", () => {
+  it("reports mixed destructuring and read-only writes together as build errors", () => {
     const plugin = sx();
     const warnings: string[] = [];
     const errors: string[] = [];
@@ -77,9 +77,9 @@ describe("Streamix React Vite plugin", () => {
 
     expect(() => transformOf(plugin).call(context, source, "/workspace/src/Mixed.tsx"))
       .toThrowError(/read-only atom binding/);
-    expect(warnings.length).toBe(1);
-    expect(warnings[0]).toContain("Mixed destructured");
+    expect(warnings).toEqual([]);
     expect(errors.length).toBe(1);
+    expect(errors[0]).toContain("Mixed destructured");
     expect(errors[0]).toContain("read-only atom binding");
   });
 

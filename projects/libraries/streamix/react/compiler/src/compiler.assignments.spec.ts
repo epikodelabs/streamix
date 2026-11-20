@@ -229,22 +229,44 @@ describe("React JSX compiler nested assignments", () => {
     expect(code).not.toContain("a.next(b =");
   });
 
-  it("warns on mixed destructuring instead of inventing a read-only target", () => {
+  for (const [shape, assignment] of [
+    ["array", "[count, plain] = [2, 3]"],
+    ["object", "({ count, plain } = { count: 2, plain: 3 })"],
+    ["nested", "[[count], plain] = [[2], 3]"],
+  ]) {
+    it(`rejects mixed ${shape} targets and preserves the authored handler lvalue`, () => {
+      const result = transformReactJsx(`
+        import { atom } from "@epikodelabs/streamix";
+        let count = atom(1);
+        export function C() {
+          let plain = 0;
+          return <button onClick={() => { ${assignment}; }}>{count}{plain}</button>;
+        }
+      `);
+
+      expect(result.diagnostics.map(item => [item.category, item.message])).toEqual([
+        ["error", jasmine.stringMatching(/Mixed destructured atom assignment/)],
+      ]);
+      expect(result.code).toContain(assignment);
+      expect(result.code).not.toContain("count.value");
+    });
+  }
+
+  it("preserves ordinary destructuring, including an atom name shadowed in a handler", () => {
     const result = transformReactJsx(`
       import { atom } from "@epikodelabs/streamix";
-      let a = atom(0);
-      let plain = 0;
+      let count = atom(1);
       export function C() {
-        ({ a, plain } = { a: 1, plain: 2 });
-        return <output>{a}{plain}</output>;
+        return <button onClick={() => {
+          let count = 0, plain = 0;
+          [count, plain] = [2, 3];
+          ({ count, plain } = { count: 4, plain: 5 });
+        }}>{count}</button>;
       }
     `);
-
-    expect(result.diagnostics.filter(diagnostic => diagnostic.category === "error")).toEqual([]);
-    const warnings = result.diagnostics.filter(diagnostic => diagnostic.category === "warning");
-    expect(warnings.length).toBe(1);
-    expect(warnings[0].message).toContain("Mixed destructured atom assignment");
-    expect(result.code).toContain("{ a, plain } = { a: 1, plain: 2 }");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("[count, plain] = [2, 3]");
+    expect(result.code).toContain("({ count, plain } = { count: 4, plain: 5 })");
   });
 
   it("still lowers JSX assigned to an ordinary local", () => {

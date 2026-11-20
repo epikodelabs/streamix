@@ -150,7 +150,7 @@ describe("React Angular-hosted source generation", () => {
     }
   });
 
-  it("reports every failing file and keeps warnings beside contract errors", async () => {
+  it("reports every failing file, including a handler with only mixed destructuring", async () => {
     const root = await mkdtemp(join(tmpdir(), "streamix-react-aggregate-"));
     const sourceRoot = "projects/apps/demo/src";
     try {
@@ -171,11 +171,8 @@ describe("React Angular-hosted source generation", () => {
         import { atom } from '@epikodelabs/streamix';
         let a = atom(0);
         let plain = 0;
-        const locked = atom(0);
         export function Mixed() {
-          ({ a, plain } = { a: 1, plain: 2 });
-          locked = 3;
-          return <output>{a}{plain}{locked}</output>;
+          return <button onClick={() => { ({ a, plain } = { a: 1, plain: 2 }); }}>{a}{plain}</button>;
         }
       `);
 

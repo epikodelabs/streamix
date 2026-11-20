@@ -1,7 +1,7 @@
 import ts from 'typescript';
 import { parse as parseSfc } from '@vue/compiler-sfc';
 import { applyMappedEdits, insertMappedText, createVueSourceMap, type VueSourceMap } from './source-map';
-import { hoistedVarDeclarations, objectValueMembers } from '@epikodelabs/streamix/compiler';
+import { findAssignmentTarget, hoistedVarDeclarations, objectValueMembers } from '@epikodelabs/streamix/compiler';
 
 export interface VueSfcDiagnostic {
   readonly category: 'error' | 'warning';
@@ -649,6 +649,7 @@ function unsupportedTemplateDiagnostics(
 ): readonly VueSfcDiagnostic[] {
   const scopes = new Set(declarations.filter(item => item.kind === 'scope').map(item => item.name));
   const reactiveNames = new Set(declarations.filter(item => item.kind !== 'scope').map(item => item.name));
+  const readonlyTargets = new Set(declarations.filter(item => item.kind !== 'atom').map(item => item.name));
   const diagnostics: VueSfcDiagnostic[] = [];
   const add = (start: number, length: number, message: string): void => {
     diagnostics.push({ category: 'error', message, start: templateOffset + start, length });
@@ -680,6 +681,17 @@ function unsupportedTemplateDiagnostics(
           `Unsupported compound scope write on ${writeRoot}. Use an explicit scope.set(...) handler.`);
       }
       if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const left = unwrapCast(node.left);
+        if (ts.isArrayLiteralExpression(left) || ts.isObjectLiteralExpression(left)) {
+          const target = findAssignmentTarget(left, target => {
+            const root = scopeRootName(target, readonlyTargets);
+            return root !== undefined && !shadowed(target, root);
+          }, unwrapCast);
+          if (target) {
+            add(span.start + target.getStart(file) - prefix, target.end - target.getStart(file),
+              'Cannot destructure into a read-only Streamix binding or a scope member. Use an explicit handler for writable scope members.');
+          }
+        }
         const leftRoot = scopeRootName(node.left, scopes);
         if (leftRoot && !shadowed(node.left, leftRoot)) {
           const containsNestedWrite = (child: ts.Node): boolean => {

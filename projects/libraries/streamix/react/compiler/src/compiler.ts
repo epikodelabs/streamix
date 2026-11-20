@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { createTokenSourceMap, hoistedVarDeclarations, objectValueMembers } from '@epikodelabs/streamix/compiler';
+import { createTokenSourceMap, findAssignmentTarget, hoistedVarDeclarations, objectValueMembers } from '@epikodelabs/streamix/compiler';
 
 /**
  * Members that belong to the source object itself. Appending `.value` before
@@ -1767,20 +1767,18 @@ export function transformReactJsx(
           (ts.isObjectLiteralExpression(child.left) || ts.isArrayLiteralExpression(child.left))
         ) {
           if (reportUnsafeWrite(child, child.left, true)) return child;
-          const targets = destructuredAtomTargets(child.left, atoms, atomMaps).filter(target => !plainShadowed.has(target.atomName) && !isShadowedName(target.atomName, child, node));
-          if (targets.length > 0) {
-            // Unknown (non-atom) targets carry no atom name; only resolved
-            // atom targets can be read-only. Treating the rest as read-only
-            // made the mixed-destructuring warning unreachable.
+          if (reactiveWriteTarget(child.left, atoms, atomMaps, scopes, isHiddenTarget)) {
+            const targets = destructuredAtomTargets(child.left, atoms, atomMaps, isHiddenTarget);
             const readOnly = targets.find(target => target.known && !writableBindings.has(target.atomName));
             if (readOnly) {
               diagnostics.push(diagnostic(child, "error", `Cannot assign to read-only atom binding \"${readOnly.atomName}\" through destructuring.`));
-              return child;
-            }
-            if (targets.every(target => target.known)) {
+            } else if (targets.length > 0 && targets.every(target => target.known)) {
               return writeDestructuredAtoms(factory, child.right, targets, atoms, atomMaps, context);
+            } else {
+              diagnostics.push(diagnostic(child, "error", "Mixed destructured atom assignment or unsupported atom target pattern. Use separate .next(value) calls for atom targets."));
             }
-            diagnostics.push(diagnostic(child, "warning", "Mixed destructured atom assignment is not rewritten. Write each atom explicitly to preserve JavaScript assignment semantics."));
+            // The JSX handler read pass must preserve the rejected lvalue.
+            rejectedWrites.add(child);
             return child;
           }
         }
@@ -1951,7 +1949,7 @@ export function transformReactJsx(
       const reportWrite = (target: ts.Expression, site: ts.Node): void => {
         const names = ts.isObjectLiteralExpression(target) || ts.isArrayLiteralExpression(target)
           ? destructuredAtomTargets(target, moduleAtoms, moduleAtomMaps)
-              .filter(target => !isShadowedName(target.atomName, site, node)).map(target => target.atomName)
+              .filter(target => target.known && !isShadowedName(target.atomName, site, node)).map(target => target.atomName)
           : [writeSource(target)].filter((name): name is string => !!name);
         for (const name of new Set(names)) diagnostics.push(diagnostic(site, 'error',
           `Implicit atom writes inside class components are not supported. Use ${name}.next(value) to update the source.`));
@@ -2756,46 +2754,24 @@ function reactiveWriteTarget(
   scopes: ReadonlySet<string>,
   isHidden: (target: ts.Expression) => boolean,
 ): ts.Expression | undefined {
-  const find = (expression: ts.Expression): ts.Expression | undefined =>
-    reactiveWriteTarget(expression, atoms, atomMaps, scopes, isHidden);
-  const expression = unwrapCast(target);
-  if (ts.isObjectLiteralExpression(expression)) {
-    for (const property of expression.properties) {
-      const found = ts.isShorthandPropertyAssignment(property) ? find(property.name)
-        : ts.isPropertyAssignment(property) ? find(property.initializer)
-        : ts.isSpreadAssignment(property) ? find(property.expression) : undefined;
-      if (found) return found;
+  return findAssignmentTarget(target, expression => {
+    if (isHidden(expression)) return false;
+    let base = expression;
+    let firstAccess: ts.PropertyAccessExpression | ts.ElementAccessExpression | undefined;
+    while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) {
+      firstAccess = base;
+      base = unwrapCast(base.expression);
     }
-    return undefined;
-  }
-  if (ts.isArrayLiteralExpression(expression)) {
-    for (const element of expression.elements) {
-      const found = find(ts.isSpreadElement(element) ? element.expression : element);
-      if (found) return found;
-    }
-    return undefined;
-  }
-  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-    return find(expression.left);
-  }
-  if (isHidden(expression)) return undefined;
-  let base = expression;
-  let firstAccess: ts.PropertyAccessExpression | ts.ElementAccessExpression | undefined;
-  while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) {
-    firstAccess = base;
-    base = unwrapCast(base.expression);
-  }
-  if (!ts.isIdentifier(base)) return undefined;
-  if (atoms.has(base.text) || scopes.has(base.text)) return expression;
-  const map = atomMaps.get(base.text);
-  if (map && firstAccess) {
+    if (!ts.isIdentifier(base)) return false;
+    if (atoms.has(base.text) || scopes.has(base.text)) return true;
+    const map = atomMaps.get(base.text);
+    if (!map || !firstAccess) return false;
     const key = ts.isPropertyAccessExpression(firstAccess) ? firstAccess.name.text
       : ts.isStringLiteralLike(firstAccess.argumentExpression) || ts.isNumericLiteral(firstAccess.argumentExpression)
         ? firstAccess.argumentExpression.text
         : undefined;
-    if (key === undefined || map.has(key)) return expression;
-  }
-  return undefined;
+    return key === undefined || map.has(key);
+  }, unwrapCast);
 }
 
 /**
@@ -2825,12 +2801,13 @@ function destructuredAtomTargets(
   pattern: ts.ObjectLiteralExpression | ts.ArrayLiteralExpression,
   atoms: ReadonlySet<string>,
   atomMaps: ReadonlyMap<string, ReadonlyMap<string, string>>,
+  isHidden: (target: ts.Expression) => boolean = () => false,
 ): DestructuredAtomTarget[] {
   const targets: DestructuredAtomTarget[] = [];
   if (ts.isArrayLiteralExpression(pattern)) {
     pattern.elements.forEach((element, index) => {
       if (ts.isOmittedExpression(element)) return;
-      const atomName = ts.isExpression(element) ? atomReferenceName(element, atoms, atomMaps) : undefined;
+      const atomName = ts.isExpression(element) && !isHidden(element) ? atomReferenceName(element, atoms, atomMaps) : undefined;
       targets.push(atomName ? { atomName, key: index, known: true } : { atomName: "", key: index, known: false });
     });
     return targets;
@@ -2844,7 +2821,7 @@ function destructuredAtomTargets(
       : ts.isPropertyAssignment(property) && ts.isExpression(property.initializer)
         ? property.initializer
         : undefined;
-    const atomName = key && target ? atomReferenceName(target, atoms, atomMaps) : undefined;
+    const atomName = key && target && !isHidden(target) ? atomReferenceName(target, atoms, atomMaps) : undefined;
     targets.push(atomName && key !== undefined
       ? { atomName, key, known: true }
       : { atomName: "", key: key ?? "", known: false });

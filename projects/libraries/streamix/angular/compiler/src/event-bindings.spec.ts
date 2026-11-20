@@ -6,6 +6,18 @@ import {
 } from './block-template-compiler';
 
 describe('compiled event bindings', () => {
+  for (const assignment of [
+    '[count, plain] = [2, 3]',
+    '({ count, plain } = { count: 2, plain: 3 })',
+  ]) {
+    it(`rejects unsupported Angular event destructuring: ${assignment}`, () => {
+      expect(() => transformAngularComponentTemplate(
+        `<button (click)="${assignment}"></button>`,
+        'inline.html',
+      )).toThrowError(/Parser Error/);
+    });
+  }
+
   it('lowers a native event and removes the Angular binding', () => {
     const result = transformAngularComponentTemplate(
       '<button type="button" (click)="add($event)">Add</button>',
