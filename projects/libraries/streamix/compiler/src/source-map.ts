@@ -132,7 +132,14 @@ function locations(text: string, offsets: readonly number[]): Array<{ line: numb
   const result: Array<{ line: number; column: number }> = [];
   let line = 0, lastNewline = -1, from = 0;
   for (const offset of offsets) {
-    for (let i = from; i < offset; i++) if (text.charCodeAt(i) === 10) { line++; lastNewline = i; }
+    for (let i = from; i < offset; i++) {
+      const character = text.charCodeAt(i);
+      if (character === 13 && text.charCodeAt(i + 1) === 10) continue;
+      if (character === 10 || character === 13 || character === 0x2028 || character === 0x2029) {
+        line++;
+        lastNewline = i;
+      }
+    }
     result.push({ line, column: offset - lastNewline - 1 });
     from = offset;
   }
