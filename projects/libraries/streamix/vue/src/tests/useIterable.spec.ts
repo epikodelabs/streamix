@@ -1,5 +1,6 @@
 import {
   atom,
+  createSubscription,
   flow,
   type Atom,
 } from '@epikodelabs/streamix';
@@ -33,6 +34,22 @@ describe('useIterable', () => {
 
     count.next(1);
     expect(value.value).toBe(1);
+  });
+
+  it('reports a rejected subscription teardown when its scope stops', async () => {
+    const failure = new Error('unsubscribe failed');
+    const report = spyOn(console, 'error');
+    const source = atom('ok');
+    const subscribe = source.subscribe.bind(source);
+    spyOn(source, 'subscribe').and.callFake(callback => {
+      const stop = subscribe(callback);
+      return createSubscription(async () => { await stop(); throw failure; });
+    });
+    vueScope.run(() => useIterable(source));
+    vueScope.stop();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(report).toHaveBeenCalledWith(jasmine.stringMatching(/teardown rejected/), failure);
+    source.dispose();
   });
 
   it('invalidates even when the source emits the same object identity', () => {

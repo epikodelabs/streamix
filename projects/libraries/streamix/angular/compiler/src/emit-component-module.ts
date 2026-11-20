@@ -11,7 +11,6 @@ export const SX_SETUP_RUNTIME_SYMBOLS = [
   'ɵcreateSxCompiledBlock',
   'ɵcreateSxKeyedBlock',
   'ɵsxBlockAnchor',
-  'ɵsxInstallErrorDelivery',
   'ɵsxReadLocal',
   'ɵsxRestoreBlockMarker',
   'ɵsxString',

@@ -1,6 +1,6 @@
 import { act, createElement, Component, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { atom, flow, NO_INITIAL_VALUE, type Writable } from '@epikodelabs/streamix';
+import { atom, createSubscription, flow, NO_INITIAL_VALUE, type Writable } from '@epikodelabs/streamix';
 import { hydrateAtomPayload, parseAtomSnapshot, read, serializeAtomSnapshot, useStreamixSource, useWritable } from '../lib/runtime';
 import { idescribe } from './env.spec';
 
@@ -55,6 +55,25 @@ idescribe('React error delivery', () => {
     // The stale successful value is no longer displayed.
     expect(host.querySelector('#view')).toBeNull();
     teardown();
+    source.dispose();
+  });
+
+  it('reports a rejected subscription teardown when the view unmounts', async () => {
+    const failure = new Error('unsubscribe failed');
+    const report = spyOn(console, 'error');
+    const source = atom('ok');
+    const subscribe = source.subscribe.bind(source);
+    spyOn(source, 'subscribe').and.callFake(callback => {
+      const stop = subscribe(callback);
+      return createSubscription(async () => { await stop(); throw failure; });
+    });
+    function View() {
+      return createElement('output', null, useStreamixSource(source));
+    }
+    render(createElement(View));
+    teardown();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(report).toHaveBeenCalledWith(jasmine.stringMatching(/teardown failed/), failure);
     source.dispose();
   });
 

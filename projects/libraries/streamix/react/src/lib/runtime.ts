@@ -26,6 +26,14 @@ export interface AtomSnapshotPayload {
 type Disposable = { dispose(): void };
 type Listener = () => void;
 
+async function settleSubscriptionTeardown(stop: () => unknown): Promise<void> {
+  try {
+    await stop();
+  } catch (error) {
+    console.error("[streamix] React subscription teardown failed:", error);
+  }
+}
+
 type CompilerSubscriptionEntry = {
   listeners: Set<Listener>;
   stop: (() => void) | null;
@@ -391,8 +399,8 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
           : null;
         const valueStop = entry.stop;
         entry.stop = () => {
-          valueStop();
-          void stopError?.();
+          void settleSubscriptionTeardown(valueStop);
+          if (stopError) void settleSubscriptionTeardown(stopError);
         };
       }
       entry.listeners.add(notify);

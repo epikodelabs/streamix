@@ -1,9 +1,11 @@
 import {
   DestroyRef,
   ElementRef,
+  Injector,
   PLATFORM_ID,
   afterNextRender,
   inject,
+  runInInjectionContext,
 } from '@angular/core';
 import type {
   Subscription,
@@ -94,6 +96,7 @@ export function ɵinstallSxCompiledView<T extends object>(
   options: SxCompiledViewOptions = {},
 ): SxCompiledViewHandle {
   const host = inject<ElementRef<Element>>(ElementRef).nativeElement;
+  const injector = inject(Injector);
   const destroyRef = inject(DestroyRef);
   const server = inject(PLATFORM_ID) === 'server';
 
@@ -107,11 +110,7 @@ export function ɵinstallSxCompiledView<T extends object>(
       return;
     }
 
-    teardown = setup(
-      host,
-      context,
-      server,
-    );
+    teardown = runInInjectionContext(injector, () => setup(host, context, server));
     mounted = true;
   };
 
@@ -158,7 +157,7 @@ export function ɵinstallSxCompiledView<T extends object>(
     destroyed = true;
 
     for (const unsubscribe of referenceSubscriptions) {
-      unsubscribe();
+      void settleReferenceTeardown(unsubscribe);
     }
     referenceSubscriptions = [];
 
@@ -178,6 +177,14 @@ export function ɵinstallSxCompiledView<T extends object>(
       }
     },
   };
+}
+
+async function settleReferenceTeardown(unsubscribe: Subscription): Promise<void> {
+  try {
+    await unsubscribe();
+  } catch (error) {
+    console.error('[streamix] Angular source-reference teardown failed:', error);
+  }
 }
 
 /**

@@ -118,7 +118,6 @@ export function emitComponentSetup(
     `) {`,
     // Runs inside the component's injection context: reactive source failures
     // in compiled views deliver through the application's ErrorHandler.
-    `  ɵsxInstallErrorDelivery();`,
     `  const table = createBindingTable(${parsed.plan.size});`,
   ];
 

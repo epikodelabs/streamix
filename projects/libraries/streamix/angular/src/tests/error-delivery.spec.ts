@@ -1,4 +1,5 @@
 import {
+  Component,
   createEnvironmentInjector,
   EnvironmentInjector,
   ErrorHandler,
@@ -11,6 +12,7 @@ import {
   RendererScheduler,
   rendererScheduler,
   setSxRenderErrorSink,
+  ɵinstallSxCompiledView,
   ɵcreateSxValueBlock,
   ɵsxBlockAnchor,
   ɵsxInstallErrorDelivery,
@@ -90,26 +92,35 @@ idescribe('Angular error delivery', () => {
     source.dispose();
   });
 
-  it('routes delivered failures through the application ErrorHandler', () => {
+  it('routes failures from a mounted compiled view through its ErrorHandler', async () => {
+    setSxRenderErrorSink(undefined);
     const handled: unknown[] = [];
     class CapturingErrorHandler implements ErrorHandler {
       handleError(error: unknown): void { handled.push(error); }
     }
     TestBed.configureTestingModule({ providers: [{ provide: ErrorHandler, useClass: CapturingErrorHandler }] });
-    // The compiler emits this call inside the component's injection context.
-    TestBed.runInInjectionContext(() => ɵsxInstallErrorDelivery());
-
-    const table = createBindingTable(1, frameScheduler());
-    const source = atom('ok');
-    const target = document.createElement('span');
-    table.bind(0, source, value => { target.textContent = String(value); });
-
-    source.fail(new Error('via error handler'));
-    table.flushNow();
+    const scheduler = frameScheduler();
+    @Component({ template: '<span></span>' })
+    class Host {
+      readonly source = atom('ok');
+      constructor() {
+        ɵinstallSxCompiledView(this, (host, ctx) => {
+          const table = createBindingTable(1, scheduler);
+          table.bind(0, ctx.source, value => { host.querySelector('span')!.textContent = value; });
+          return table;
+        });
+      }
+    }
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent).toBe('ok');
+    fixture.componentInstance.source.fail(new Error('via error handler'));
+    scheduler.flushNow();
     expect(handled.length).toBe(1);
     expect((handled[0] as Error).message).toBe('via error handler');
-    table.destroy();
-    source.dispose();
+    fixture.destroy();
+    fixture.componentInstance.source.dispose();
   });
 
   it('keeps a completed flow readable without delivering a failure', async () => {

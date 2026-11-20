@@ -4,9 +4,7 @@ import { ErrorHandler, inject } from '@angular/core';
  * Angular delivery contract for reactive source failures (React/Vue parity):
  * a failed source read reaches Angular's ErrorHandler instead of being
  * reported only to the console. Compiled component setup installs an
- * ErrorHandler-backed sink through {@link ɵsxInstallErrorDelivery}; every
- * other caller keeps the default console report, so raw instruction rigs
- * behave exactly as before.
+ * ErrorHandler-backed sink in the component's injection context.
  */
 export type SxRenderErrorSink = (error: unknown) => void;
 
@@ -39,8 +37,7 @@ export function getSxRenderErrorSink(): SxRenderErrorSink {
  * never share a handler and destroying one application cannot reroute
  * another's. An explicit sink set through setSxRenderErrorSink (tests, raw
  * rigs) overrides everything; outside an injection context the configured
- * global sink applies, which {@link ɵsxInstallErrorDelivery} may have pointed
- * at an application's ErrorHandler.
+ * global sink applies.
  * @internal
  */
 export function ɵsxCurrentRenderErrorSink(): SxRenderErrorSink {
@@ -61,27 +58,8 @@ export function ɵsxCurrentRenderErrorSink(): SxRenderErrorSink {
 }
 
 /**
- * Compiler instruction: capture the application's ErrorHandler as the
- * delivery sink for reactive source failures. Must run inside an injection
- * context — generated component setup qualifies. Raw instruction rigs that
- * invoke setup outside Angular keep the default console report.
- *
- * The installed handler becomes the global sink for consumers created
- * outside an injection context. It deliberately does not mark the sink
- * explicit: consumers created inside an injection context capture their own
- * application's handler through {@link ɵsxCurrentRenderErrorSink}, so
- * concurrently bootstrapped applications never share a handler.
+ * Compatibility instruction for existing generated setup. Compiled views
+ * now run setup inside the owning injector so each consumer captures its sink.
  * @internal
  */
-export function ɵsxInstallErrorDelivery(): void {
-  let errorHandler: ErrorHandler | undefined;
-  try {
-    errorHandler = inject(ErrorHandler, { optional: true }) ?? undefined;
-  } catch {
-    // NG0203: no injection context (raw rigs) — keep the console sink.
-    return;
-  }
-  if (errorHandler) {
-    renderErrorSink = error => errorHandler!.handleError(error);
-  }
-}
+export function ɵsxInstallErrorDelivery(): void {}

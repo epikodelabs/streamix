@@ -4,7 +4,7 @@ import {
 import {
   TestBed,
 } from '@angular/core/testing';
-import { atom, scope } from '@epikodelabs/streamix';
+import { atom, createSubscription, scope } from '@epikodelabs/streamix';
 
 import {
   createBindingTable,
@@ -24,6 +24,26 @@ ensureAngularTestEnvironment();
 
 idescribe('ɵinstallSxCompiledView', () => {
   useAngularTestEnvironment();
+  it('reports a rejected source-reference teardown when the view is destroyed', async () => {
+    const failure = new Error('unsubscribe failed');
+    const report = spyOn(console, 'error');
+    @Component({ template: '<span></span>' })
+    class Host {
+      constructor() {
+        ɵinstallSxCompiledView(this, () => createBindingTable(0), {
+          sourceReferences: {
+            source: { subscribe: () => createSubscription(async () => { throw failure; }) },
+          },
+        });
+      }
+    }
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.destroy();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(report).toHaveBeenCalledWith(jasmine.stringMatching(/teardown failed/), failure);
+  });
   it('can be invoked from a component injection context', async () => {
     let setups = 0;
 
