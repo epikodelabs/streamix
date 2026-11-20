@@ -139,6 +139,45 @@ describe('shareReplay', () => {
     expect(pulls).toBe(4);
   });
 
+  for (const reconnectFirst of [false, true]) {
+    for (const staleFailure of [false, true]) {
+      it(`ignores a stale ${staleFailure ? 'error' : 'value'} ${reconnectFirst ? 'after' : 'before'} reconnecting`, async () => {
+        let settleOld!: () => void;
+        let settleNew!: () => void;
+        const op = shareReplay<number>(2);
+        const oldNext = jasmine.createSpy('old next').and.callFake(() =>
+          new Promise<IteratorResult<number>>((resolve, reject) => {
+            settleOld = () => staleFailure ? reject(new Error('stale')) : resolve(NEXT(99));
+          }));
+        const first = op.apply({ next: oldNext, return: async () => DONE });
+        const oldRead = first.next();
+        await first.return?.();
+        expect(await oldRead).toEqual(DONE);
+
+        let newPulls = 0;
+        const second = op.apply({
+          next: () => ++newPulls === 1
+            ? new Promise<IteratorResult<number>>(resolve => { settleNew = () => resolve(NEXT(2)); })
+            : Promise.resolve(DONE),
+        });
+        if (!reconnectFirst) {
+          settleOld();
+          await Promise.resolve();
+        }
+        const newRead = second.next();
+        if (reconnectFirst) {
+          settleOld();
+          await Promise.resolve();
+        }
+        settleNew();
+        expect(await newRead).toEqual(NEXT(2));
+        expect(await second.next()).toEqual(DONE);
+        expect(oldNext).toHaveBeenCalledTimes(1);
+        expect(await collect(op.apply(emptySource()))).toEqual([2]);
+      });
+    }
+  }
+
   it('replays only the last buffered values in source order', async () => {
     const op = shareReplay<number>(2);
     let next = 0;
