@@ -52,6 +52,13 @@ module.exports = function init(modules) {
     });
   }
 
+  function unwrapExpression(expression) {
+    while (expression && (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) ||
+        ts.isTypeAssertionExpression(expression) || ts.isNonNullExpression(expression) ||
+        ts.isSatisfiesExpression(expression))) expression = expression.expression;
+    return expression;
+  }
+
   function virtualize(fileName, source, program) {
     if (!/\.tsx?$/i.test(fileName)) return undefined;
     const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
@@ -74,17 +81,27 @@ module.exports = function init(modules) {
       }
       const atoms = new Set();
       for (const member of declaration.members) {
-        if (ts.isPropertyDeclaration(member) && ts.isIdentifier(member.name) && member.initializer &&
-            ts.isCallExpression(member.initializer) && ts.isIdentifier(member.initializer.expression) &&
-            isFactoryCall(member.initializer.expression, factories, file, program)) atoms.add(member.name.text);
+        if (!ts.isPropertyDeclaration(member) || !ts.isIdentifier(member.name)) continue;
+        const initializer = unwrapExpression(member.initializer);
+        if (initializer && ts.isCallExpression(initializer) && ts.isIdentifier(initializer.expression) &&
+            isFactoryCall(initializer.expression, factories, file, program)) atoms.add(member.name.text);
       }
       if (atoms.size === 0) { ts.forEachChild(declaration, visitClass); return; }
+      const isDerivedCall = node => ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+        isFactoryCall(node.expression, derivedFactories, file, program);
       const rewriteDerivedCallbacks = node => {
-        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
-            isFactoryCall(node.expression, derivedFactories, file, program) && node.arguments.length > 0 &&
-            (ts.isArrowFunction(node.arguments[0]) || ts.isFunctionExpression(node.arguments[0]))) {
-          const callback = node.arguments[0];
+        const callback = isDerivedCall(node) && unwrapExpression(node.arguments[0]);
+        if (callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) {
+          const trackers = new Set(callback.parameters.filter(parameter => ts.isIdentifier(parameter.name))
+            .map(parameter => parameter.name.text));
           const visitCallback = child => {
+            if (ts.isTypeNode(child) || isDerivedCall(child)) return;
+            if (ts.isCallExpression(child)) {
+              const callee = child.expression;
+              const reader = ts.isPropertyAccessExpression(callee) && ["read", "use"].includes(callee.name.text)
+                ? callee.expression : callee;
+              if (ts.isIdentifier(reader) && trackers.has(reader.text)) return;
+            }
             if (ts.isPropertyAccessExpression(child) && child.expression.kind === ts.SyntaxKind.ThisKeyword &&
                 atoms.has(child.name.text)) {
               if (ts.isPropertyAccessExpression(child.parent) && child.parent.expression === child &&

@@ -73,6 +73,23 @@ describe("Streamix Angular tsserver plugin", () => {
     const document = plugin.__streamixVirtualize("counter.ts", source);
     expect(document.code).toContain('derived(() => this.price.value * this.quantity.value)');
   });
+  it("lowers wrapped formulas while preserving explicit tracker arguments", () => {
+    const plugin = createPlugin({ typescript: ts }) as ts.server.PluginModule & {
+      __streamixVirtualize(fileName: string, source: string): { code: string };
+    };
+    const source = `
+      import { atom, derived } from "@epikodelabs/streamix";
+      class Counter {
+        count = (atom(2) as ReturnType<typeof atom<number>>)!;
+        doubled = derived(((() => this.count * 2) as () => number)!);
+        tracked = derived(reader => reader.read(this.count) + this.count);
+      }
+    `;
+    const { code } = plugin.__streamixVirtualize("counter.ts", source);
+    expect(code).toContain("(() => this.count.value * 2) as () => number");
+    expect(code).toContain("reader.read(this.count) + this.count.value");
+  });
+
   it('never rewrites strings, comments, keys, or shadowed callback parameters', () => {
     const plugin = createPlugin({ typescript: ts }) as ts.server.PluginModule & {
       __streamixVirtualize(fileName: string, source: string): { code: string };

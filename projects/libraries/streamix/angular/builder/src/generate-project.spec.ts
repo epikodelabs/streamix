@@ -23,6 +23,13 @@ describe('Angular derived shorthand', () => {
     expect(transformed).toContain('derived((() => count.value * 3)!)');
   });
 
+  it('rejects an asynchronous wrapped inline formula with its authored location', () => {
+    const source = `import { derived } from '@epikodelabs/streamix';
+const total = derived(((async () => 2) as () => Promise<number>)!);`;
+    expect(() => rewriteDerivedAtomReads(source, 'counter.ts'))
+      .toThrowError(/counter\.ts:2:\d+.*formulas must return synchronously/);
+  });
+
   it('lowers chained derived and flow inputs, object members, and shorthand keys', () => {
     const transformed = rewriteDerivedAtomReads(`
       const count = atom(2);

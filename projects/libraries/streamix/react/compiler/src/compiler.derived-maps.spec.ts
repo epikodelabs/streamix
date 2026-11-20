@@ -63,6 +63,27 @@ describe("React derived formula wrappers", () => {
     expect(errors(result).map(error => error.message)).toEqual([
       jasmine.stringMatching(/formulas must return synchronously/),
     ]);
+    expect(errors(transformReactJsx(`
+      function derived(read: () => unknown) { return read(); }
+      derived(async () => 2);
+    `, "local-derived.ts"))).toEqual([]);
+  });
+
+  it("lowers standalone formulas and validates nested formulas without adopting shadowed factories", () => {
+    const result = transformReactJsx(`
+      import { atom, derived } from "@epikodelabs/streamix";
+      const count = atom(1);
+      derived(() => count);
+      derived(() => derived(async () => count));
+      function local(derived: (read: () => unknown) => unknown) {
+        return derived(async () => count);
+      }
+    `, "standalone-derived.ts");
+    expect(result.code).toContain("derived(() => count.value);");
+    expect(result.code).toContain("return derived(async () => count);");
+    expect(errors(result).map(error => error.message)).toEqual([
+      jasmine.stringMatching(/formulas must return synchronously/),
+    ]);
   });
 });
 

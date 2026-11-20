@@ -78,6 +78,19 @@ describe('Vue editor production compatibility', () => {
     expect(transformed).toContain('derived(() => count.value * 2)');
   });
 
+  it('lowers wrapped formulas while preserving explicit tracker arguments', () => {
+    const plugin = createPlugin({ modules: { typescript: ts } });
+    const source = `
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = (atom(2) as ReturnType<typeof atom<number>>)!;
+      const doubled = derived(((() => count * 2) as () => number)!);
+      const tracked = derived(reader => reader.read(count) + count);
+    `;
+    const transformed = plugin.compileSFCScript('ts', source)?.text;
+    expect(transformed).toContain('(() => count.value * 2) as () => number');
+    expect(transformed).toContain('reader.read(count) + count.value');
+  });
+
   it('rewrites standalone and nested derived callbacks once', () => {
     const plugin = createPlugin({ modules: { typescript: ts } });
     const source = `

@@ -702,7 +702,7 @@ async function compileVirtualSource({
   const original = program.getSourceFile(sourcePath) ?? ts.createSourceFile(sourcePath, authored, ts.ScriptTarget.Latest, true);
   const instrumented = instrumentStreamixSource({ file: original, checker,
     sourcePath: relative(workspaceRoot, sourcePath), enabled: introspection });
-  let source = rewriteDerivedAtomReads(instrumented);
+  let source = rewriteDerivedAtomReads(instrumented, relative(workspaceRoot, sourcePath));
   if (introspection && activateEntry) {
     // Enable before bootstrapApplication constructs any component instances.
     source = injectIntrospectionActivation(source);
@@ -906,7 +906,7 @@ async function regenerateAngularFileInternal(workspaceRoot: string, sourceRoot: 
   const checker = program.getTypeChecker();
   const compiled = await compileVirtualSource({
     workspaceRoot, sourceDirectory, sourcePath: origin, authored, program, checker, introspection,
-    activateEntry: ENTRY_NAMES.includes(basename(normalized).toLowerCase()),
+    activateEntry: introspection && origin === await findEntry(sourceDirectory),
   });
   await writeVirtualFile(destination, compiled.text, authored, relative(workspaceRoot, origin));
 }
@@ -954,7 +954,7 @@ async function findEntry(root: string): Promise<string | undefined> {
  * Lets authored formulas use local atoms as values (`price * quantity`) while
  * preserving raw Streamix atoms as the actual derived dependencies.
  */
-export function rewriteDerivedAtomReads(source: string): string {
+export function rewriteDerivedAtomReads(source: string, fileName = 'component.ts'): string {
   const file = ts.createSourceFile('component.ts', source, ts.ScriptTarget.Latest, true);
   // Bind the authored file so lexical locals and each class's fields have
   // distinct identities. No module or library resolution is needed here.
@@ -1017,6 +1017,10 @@ export function rewriteDerivedAtomReads(source: string): string {
     ) {
       const callback = unwrapReactiveInitializer(node.arguments[0]);
       if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
+        if (ts.getModifiers(callback)?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) {
+          const { line, character } = file.getLineAndCharacterOfPosition(callback.getStart(file));
+          throw new Error(`[streamix] ${fileName}:${line + 1}:${character + 1}: derived() formulas must return synchronously. Use flow() for async work.`);
+        }
         const trackers = new Set(callback.parameters.flatMap(parameter =>
           ts.isIdentifier(parameter.name) ? [checker.getSymbolAtLocation(parameter.name)] : []));
         const read = (child: ts.Node): void => {

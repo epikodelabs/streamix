@@ -87,13 +87,6 @@ interface ReactiveDeclaration {
   readonly callEnd: number;
   /** Offset just past the containing variable statement. */
   readonly statementEnd: number;
-  /** Body span of a `derived` callback, when statically available. */
-  /** The function, not only its body, is needed for parameter shadowing. */
-  readonly derivedCallbackStart?: number;
-  readonly derivedCallbackEnd?: number;
-  /** Span of an `async` callback, which cannot be a synchronous formula. */
-  readonly asyncCallbackStart?: number;
-  readonly asyncCallbackEnd?: number;
   /** Classified scope members, for scope declarations. */
   readonly members: readonly ScopeMemberDeclaration[];
 }
@@ -223,8 +216,9 @@ export function transformVueSfc(
 
   const imports = factoryImports(scriptContent);
   const declarations = collectReactiveDeclarations(scriptContent, imports);
+  const formulaEdits = derivedAtomValueReadEdits(scriptContent, declarations, imports, scriptOffset, diagnostics);
 
-  if (declarations.length === 0) {
+  if (declarations.length === 0 && formulaEdits.length === 0) {
     return { code: source, bindingCount: 0, bridgedScopes: {}, diagnostics };
   }
 
@@ -237,17 +231,6 @@ export function transformVueSfc(
   diagnostics.push(...unsupportedTemplateDiagnostics(templateContent, templateOffset, declarations, localsAt));
   diagnostics.push(...readonlyTemplateDiagnostics(templateContent, templateOffset, declarations, localsAt));
   diagnostics.push(...generatedNameDiagnostics(scriptContent, scriptOffset, declarations));
-  for (const declaration of declarations) {
-    if (declaration.asyncCallbackStart === undefined || declaration.asyncCallbackEnd === undefined) continue;
-    diagnostics.push({
-      category: 'error',
-      message:
-        `derived() for ${JSON.stringify(declaration.name)} uses an async callback, but formulas must return ` +
-        'synchronously. Use flow() for async work.',
-      start: scriptOffset + declaration.asyncCallbackStart,
-      length: declaration.asyncCallbackEnd - declaration.asyncCallbackStart,
-    });
-  }
 
   const templateUsage = collectTemplateUsage(templateContent, declarations, localsAt);
   const vModelBindings = collectVModelScopeBindings(templateContent, declarations, localsAt);
@@ -286,7 +269,7 @@ export function transformVueSfc(
     });
   }
 
-  for (const edit of derivedAtomValueReadEdits(scriptContent, reactive)) {
+  for (const edit of formulaEdits) {
     scriptEdits.push(edit);
   }
 
@@ -1061,8 +1044,6 @@ function collectReactiveDeclarations(
         callExpressionStart: call.expression.getStart(file),
         callEnd: call.end,
         statementEnd: statement.end,
-        ...(kind === 'derived' ? derivedCallbackSpan(call, file) : {}),
-        ...(kind === 'derived' ? asyncDerivedCallbackSpan(call, file) : {}),
         members: kind === 'scope' ? scopeMemberDeclarations(call, imports) : [],
       });
     }
@@ -1083,47 +1064,6 @@ function unwrapIntrospectionWrapper(call: ts.CallExpression): ts.Expression {
     return unwrapCast(inner);
   }
   return call;
-}
-
-function derivedCallbackSpan(
-  call: ts.CallExpression,
-  file: ts.SourceFile,
-): Pick<ReactiveDeclaration, 'derivedCallbackStart' | 'derivedCallbackEnd'> {
-  const argument = call.arguments[0];
-  const callback = argument === undefined ? undefined : unwrapCast(argument);
-
-  if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
-    return {};
-  }
-
-  return {
-    derivedCallbackStart: callback.getStart(file),
-    derivedCallbackEnd: callback.end,
-  };
-}
-
-/**
- * `derived()` is evaluated synchronously; an `async` callback would hand the
- * runtime a promise, which it rejects only when the formula first runs.
- * Reject it at build time instead, including async generators.
- */
-function asyncDerivedCallbackSpan(
-  call: ts.CallExpression,
-  file: ts.SourceFile,
-): Pick<ReactiveDeclaration, 'asyncCallbackStart' | 'asyncCallbackEnd'> {
-  const argument = call.arguments[0];
-  const callback = argument === undefined ? undefined : unwrapCast(argument);
-  if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
-    return {};
-  }
-  const modifiers = ts.canHaveModifiers(callback) ? ts.getModifiers(callback) : undefined;
-  if (!modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) {
-    return {};
-  }
-  return {
-    asyncCallbackStart: callback.getStart(file),
-    asyncCallbackEnd: callback.end,
-  };
 }
 
 interface TemplateReactiveRead {
@@ -1189,21 +1129,32 @@ function collectTemplateReactiveReads(
 function derivedAtomValueReadEdits(
   script: string,
   declarations: readonly ReactiveDeclaration[],
+  imports: FactoryImports,
+  scriptOffset: number,
+  diagnostics: VueSfcDiagnostic[],
 ): readonly SpanEdit[] {
   const atoms = new Set(declarations.filter(item => item.kind !== 'scope').map(item => item.name));
-  if (atoms.size === 0) return [];
+  if (![...imports.aliases.values()].includes('derived')) return [];
   const file = ts.createSourceFile('script.ts', script, ts.ScriptTarget.Latest, true);
   const edits: SpanEdit[] = [];
-  const bodies = declarations.filter(item => item.kind === 'derived' &&
-    item.derivedCallbackStart !== undefined && item.derivedCallbackEnd !== undefined);
-
-  for (const derived of bodies) {
-    const callback = findNodeAt(file, derived.derivedCallbackStart!, derived.derivedCallbackEnd!);
-    if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) continue;
+  const isDerivedCall = (node: ts.Node): node is ts.CallExpression =>
+    ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+    imports.aliases.get(node.expression.text) === 'derived' &&
+    !isShadowedIn(node.expression, file, node.expression.text, false);
+  const lowerFormula = (callback: ts.ArrowFunction | ts.FunctionExpression): void => {
+    if (ts.getModifiers(callback)?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) {
+      diagnostics.push({
+        category: 'error',
+        message: 'derived() formulas must return synchronously. Use flow() for async work.',
+        start: scriptOffset + callback.getStart(file),
+        length: callback.getWidth(file),
+      });
+    }
     const body = callback.body;
     const trackerNames = new Set(callback.parameters.flatMap(parameter =>
       ts.isIdentifier(parameter.name) ? [parameter.name.text] : []));
     const visit = (node: ts.Node): void => {
+      if (ts.isTypeNode(node) || isDerivedCall(node)) return;
       // DerivedScope readers receive source references, whatever their name.
       if (ts.isCallExpression(node)) {
         const callee = node.expression;
@@ -1213,7 +1164,7 @@ function derivedAtomValueReadEdits(
             !isShadowedIn(reader, callback.body, reader.text)) return;
       }
       if (ts.isIdentifier(node) && atoms.has(node.text) &&
-          isValueIdentifier(node) && !isShadowedIn(node, callback, node.text)) {
+          isValueIdentifier(node) && !isShadowedIn(node, file, node.text, false)) {
         const start = node.getStart(file);
         const shorthand = ts.isShorthandPropertyAssignment(node.parent);
         edits.push({ start, end: node.end,
@@ -1223,20 +1174,16 @@ function derivedAtomValueReadEdits(
       ts.forEachChild(node, visit);
     };
     visit(body);
-  }
-  return edits;
-}
-
-/** Locate a callback body by its source span; its TS nodes retain original offsets. */
-function findNodeAt(root: ts.Node, start: number, end: number): ts.Node | undefined {
-  if (root.getStart() === start && root.end === end) return root;
-  let found: ts.Node | undefined;
-  ts.forEachChild(root, node => {
-    if (!found && node.getStart() <= start && node.end >= end) {
-      found = findNodeAt(node, start, end);
+  };
+  const scan = (node: ts.Node): void => {
+    if (isDerivedCall(node) && node.arguments[0]) {
+      const callback = unwrapCast(node.arguments[0]);
+      if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) lowerFormula(callback);
     }
-  });
-  return found;
+    ts.forEachChild(node, scan);
+  };
+  scan(file);
+  return edits;
 }
 
 /**
@@ -1309,8 +1256,9 @@ function containsBinding(name: ts.BindingName, text: string): boolean {
 }
 
 /** Reject local declarations that shadow a top-level atom inside a callback. */
-function isShadowedIn(node: ts.Node, body: ts.Node, name: string): boolean {
+function isShadowedIn(node: ts.Node, body: ts.Node, name: string, includeBoundary = true): boolean {
   for (let scope = node.parent; scope; scope = scope.parent) {
+    if (scope === body && !includeBoundary) break;
     if (hoistedVarDeclarations(scope).some(declaration => containsBinding(declaration.name, name))) return true;
     if ((ts.isFunctionExpression(scope) || ts.isFunctionDeclaration(scope) || ts.isClassLike(scope)) && scope.name?.text === name) return true;
     if (ts.isFunctionLike(scope) && scope.parameters?.some(param => containsBinding(param.name, name))) return true;

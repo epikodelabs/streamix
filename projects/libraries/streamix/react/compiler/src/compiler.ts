@@ -1,6 +1,5 @@
 import ts from 'typescript';
-import { createTokenSourceMap } from './source-map';
-import { hoistedVarDeclarations } from '@epikodelabs/streamix/compiler';
+import { createTokenSourceMap, hoistedVarDeclarations } from '@epikodelabs/streamix/compiler';
 
 /**
  * Members that belong to the source object itself. Appending `.value` before
@@ -579,6 +578,12 @@ export function transformReactJsx(
   const moduleWritableAtoms = collectModuleWritableBindings(sourceFile, imports, checker);
   const moduleAtomMaps = collectModuleAtomMaps(sourceFile, moduleAtoms, moduleWritableAtoms);
   const moduleScopeMembers = collectModuleScopeMembers(sourceFile, imports, checker);
+  const isDerivedCall = (node: ts.Node): node is ts.CallExpression => {
+    if (!ts.isCallExpression(node) || factoryKind(node, imports, checker) !== "derived") return false;
+    const receiver = ts.isPropertyAccessExpression(node.expression) ? node.expression.expression : node.expression;
+    return !!checker || !ts.isIdentifier(receiver) ||
+      (!scopeBinds(sourceFile, receiver.text) && !isShadowedName(receiver.text, receiver, sourceFile));
+  };
 
   const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
     const factory = context.factory;
@@ -661,24 +666,8 @@ export function transformReactJsx(
       const loweredArgument = ts.visitNode(argument, restoreWrappers, ts.isExpression)!;
       return factory.updateCallExpression(call, call.expression, call.typeArguments, [loweredArgument, ...call.arguments.slice(1)]);
     };
-    /**
-     * `derived()` is evaluated synchronously; an async callback would hand the
-     * runtime a promise, which it rejects only when the formula first runs.
-     * Reject it at build time instead, including async generators.
-     */
-    const reportAsyncDerived = (call: ts.CallExpression): void => {
-      const argument = call.arguments[0];
-      if (!argument) return;
-      const callback = unwrapCast(argument);
-      if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return;
-      const modifiers = ts.canHaveModifiers(callback) ? ts.getModifiers(callback) : undefined;
-      if (!modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) return;
-      diagnostics.push(diagnostic(callback, "error",
-        "derived() formulas must return synchronously. Use flow() for async work."));
-    };
     const lowerModuleFormulas: ts.Visitor = node => {
-      if (ts.isCallExpression(node) && factoryKind(node, imports, checker) === "derived") {
-        reportAsyncDerived(node);
+      if (isDerivedCall(node)) {
         return lowerDerivedCallback(node, moduleAtoms, sourceFile, moduleAtomMaps);
       }
       return ts.visitEachChild(node, lowerModuleFormulas, context);
@@ -1713,8 +1702,7 @@ export function transformReactJsx(
             if (callback) reportHookCallbackReads(callback, hook);
           }
         }
-        if (ts.isCallExpression(child) && factoryKind(child, imports, checker) === "derived") {
-          reportAsyncDerived(child);
+        if (isDerivedCall(child)) {
           return lowerDerivedCallback(child, atoms, node, atomMaps, isHidden);
         }
         if (isComponent && ts.isVariableDeclaration(child) && localReactiveDeclarations.has(child) && child.initializer) {
@@ -2120,11 +2108,14 @@ export function transformReactJsx(
           continue;
         }
         if (ts.isExportAssignment(statement)) {
-          const expr = transformInitializer(statement.expression, statement.isExportEquals ? undefined : "DefaultExport");
+          const init = ts.visitNode(statement.expression, lowerModuleFormulas) as ts.Expression;
+          const expr = transformInitializer(init, statement.isExportEquals ? undefined : "DefaultExport");
           statements.push(expr === statement.expression ? statement : factory.updateExportAssignment(statement, statement.modifiers, expr));
           continue;
         }
-        statements.push(statement);
+        statements.push(ts.isExpressionStatement(statement)
+          ? ts.visitNode(statement, lowerModuleFormulas, ts.isStatement)!
+          : statement);
       }
       return factory.updateSourceFile(file, statements);
     };
@@ -2133,6 +2124,16 @@ export function transformReactJsx(
   // Nested components need an independent hook lifetime. The top-level class
   // adapter above provides that lifetime through its generated wrapper.
   const inspectSkipped = (node: ts.Node): void => {
+    // Validate authored calls independently of adoption, including standalone
+    // calls, nested formulas, and classes that need no JSX adapter.
+    if (isDerivedCall(node) && node.arguments[0]) {
+      const callback = unwrapCast(node.arguments[0]);
+      if ((ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) &&
+          ts.getModifiers(callback)?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) {
+        diagnostics.push(diagnostic(callback, "error",
+          "derived() formulas must return synchronously. Use flow() for async work."));
+      }
+    }
     // Nested components have their own hook lifetime. Transforming only the
     // outer component would leave their implicit reads unbound, while blindly
     // lifting hooks into the parent would violate React's Rules of Hooks.

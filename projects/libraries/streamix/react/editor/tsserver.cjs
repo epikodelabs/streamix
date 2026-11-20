@@ -34,6 +34,13 @@ module.exports = function init(modules) {
     return /\.[jt]sx$/i.test(fileName) || source.includes("@epikodelabs/streamix");
   }
 
+  function unwrapExpression(expression) {
+    while (expression && (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) ||
+        ts.isTypeAssertionExpression(expression) || ts.isNonNullExpression(expression) ||
+        ts.isSatisfiesExpression(expression))) expression = expression.expression;
+    return expression;
+  }
+
   function virtualize(fileName, source) {
     const kind = /\.tsx$/i.test(fileName) ? ts.ScriptKind.TSX :
       /\.jsx$/i.test(fileName) ? ts.ScriptKind.JSX :
@@ -86,11 +93,13 @@ module.exports = function init(modules) {
     const atoms = new Set();
     const edits = [];
     const visit = node => {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
-          ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) &&
-          (factories.has(node.initializer.expression.text) || derivedFactories.has(node.initializer.expression.text) ||
-           flowFactories.has(node.initializer.expression.text)) &&
-          !factoryIsShadowed(node.initializer.expression)) atoms.add(node.name.text);
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+        const initializer = unwrapExpression(node.initializer);
+        if (initializer && ts.isCallExpression(initializer) && ts.isIdentifier(initializer.expression) &&
+            (factories.has(initializer.expression.text) || derivedFactories.has(initializer.expression.text) ||
+             flowFactories.has(initializer.expression.text)) &&
+            !factoryIsShadowed(initializer.expression)) atoms.add(node.name.text);
+      }
       ts.forEachChild(node, visit);
     };
     visit(file);
@@ -127,6 +136,9 @@ module.exports = function init(modules) {
     };
     const isRead = node => atoms.has(node.text) && !isValueRead(node) &&
       !isNamePosition(node) && !shadowed(node);
+    const isUpdate = node => (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+      (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) &&
+      ts.isIdentifier(node.operand) && atoms.has(node.operand.text) && !shadowed(node.operand);
     const isComponentTransport = node => {
       if (!ts.isIdentifier(node) || !atoms.has(node.text) || !ts.isJsxExpression(node.parent) ||
           !ts.isJsxAttribute(node.parent.parent)) return false;
@@ -140,12 +152,21 @@ module.exports = function init(modules) {
     // The production compiler accepts `derived(() => price * quantity)` and
     // lowers the raw atom reads to `.value`. Give TypeScript that same value
     // shape so editor diagnostics do not disagree with the build.
+    const isDerivedCall = node => ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+      derivedFactories.has(node.expression.text) && !factoryIsShadowed(node.expression);
     const rewriteDerivedCallbacks = node => {
-      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
-          derivedFactories.has(node.expression.text) && node.arguments.length > 0 &&
-          (ts.isArrowFunction(node.arguments[0]) || ts.isFunctionExpression(node.arguments[0]))) {
-        const callback = node.arguments[0];
+      const callback = isDerivedCall(node) && unwrapExpression(node.arguments[0]);
+      if (callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) {
+        const trackers = new Set(callback.parameters.filter(parameter => ts.isIdentifier(parameter.name))
+          .map(parameter => parameter.name.text));
         const visitCallback = child => {
+          if (ts.isTypeNode(child) || isDerivedCall(child)) return;
+          if (ts.isCallExpression(child)) {
+            const callee = child.expression;
+            const reader = ts.isPropertyAccessExpression(callee) && ["read", "use"].includes(callee.name.text)
+              ? callee.expression : callee;
+            if (ts.isIdentifier(reader) && trackers.has(reader.text)) return;
+          }
           if (ts.isShorthandPropertyAssignment(child) && atoms.has(child.name.text) && !shadowed(child.name)) {
             edits.push({ start: child.getStart(file), end: child.end, text: `${child.name.text}: ${child.name.text}.value` });
             return;
@@ -182,8 +203,7 @@ module.exports = function init(modules) {
           WRITE_OPERATORS.has(node.operatorToken.kind)) {
         return;
       }
-      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
-          ts.isIdentifier(node.operand) && atoms.has(node.operand.text)) return;
+      if (isUpdate(node)) return;
       ts.forEachChild(node, rewriteReads);
     };
 
@@ -203,8 +223,7 @@ module.exports = function init(modules) {
           WRITE_OPERATORS.has(node.operatorToken.kind)) {
         return;
       }
-      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
-          ts.isIdentifier(node.operand) && atoms.has(node.operand.text)) return;
+      if (isUpdate(node)) return;
       ts.forEachChild(node, n => collectReadEdits(n, out));
     };
 
@@ -250,11 +269,10 @@ module.exports = function init(modules) {
         } else {
           text = `${atom}.next(${atom}.value ${operator} (${rightText}))`;
         }
-        edits.push({ start: node.getStart(file), end: node.end, text });
+        edits.push({ start: node.getStart(file), end: node.end, text: `(${text}, ${atom}.value)` });
         return;
       }
-      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
-          ts.isIdentifier(node.operand) && atoms.has(node.operand.text)) {
+      if (isUpdate(node)) {
         const name = node.operand.text;
         const delta = node.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
         const previous = "__streamixEditorValue";

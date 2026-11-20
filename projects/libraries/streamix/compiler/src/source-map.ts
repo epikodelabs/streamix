@@ -4,9 +4,9 @@ import ts from "typescript";
 export interface TokenSourceMap {
   readonly version: 3;
   readonly file: string;
-  readonly sources: readonly string[];
-  readonly sourcesContent: readonly string[];
-  readonly names: readonly string[];
+  readonly sources: string[];
+  readonly sourcesContent: string[];
+  readonly names: string[];
   readonly mappings: string;
 }
 

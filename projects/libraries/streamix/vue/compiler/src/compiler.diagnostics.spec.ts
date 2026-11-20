@@ -193,6 +193,15 @@ describe('Vue SFC compiler async derived formulas', () => {
     expect(generatorResult.diagnostics.some(item => isAsyncFormula(item.message))).toBeTrue();
   });
 
+  it('rejects an asynchronous wrapped inline formula without a reactive declaration', () => {
+    const source = sourceOf(`
+      import { derived } from '@epikodelabs/streamix';
+      derived(((async () => 2) as () => Promise<number>)!);
+    `);
+    const diagnostic = transformVueSfc(source).diagnostics.find(item => isAsyncFormula(item.message));
+    expect(diagnostic?.start).toBe(source.indexOf('async () => 2'));
+  });
+
   it('keeps synchronous and generator formulas supported', () => {
     const sync = transformVueSfc(sourceOf(`
       import { atom, derived, flow } from '@epikodelabs/streamix';

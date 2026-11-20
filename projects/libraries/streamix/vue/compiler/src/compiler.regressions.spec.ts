@@ -555,4 +555,20 @@ function originalPosition(mappings: string, generated: string, offset: number): 
     expect(result.code).toContain('void piped.value');
     expect(result.code).toContain('return doubled.value + source.value');
   });
+  it('lowers standalone and nested derived calls without adopting shadowed factories', () => {
+    const result = transformVueSfc(`
+      <script setup lang="ts">
+      import { atom, derived } from '@epikodelabs/streamix';
+      const count = atom(1);
+      derived(() => derived(() => count));
+      function local(derived: (read: () => unknown) => unknown) {
+        return derived(() => count);
+      }
+      </script>
+      <template><p>{{ count }}</p></template>
+    `);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain('derived(() => derived(() => count.value))');
+    expect(result.code).toContain('return derived(() => count);');
+  });
 });

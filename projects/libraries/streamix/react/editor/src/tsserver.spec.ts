@@ -50,6 +50,16 @@ describe("Streamix React tsserver plugin", () => {
   const messageOf = (diagnostic: ts.Diagnostic): string =>
     ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
 
+  it("lowers wrapped formulas while preserving explicit tracker arguments", () => {
+    const diagnostics = diagnose(`
+      import { atom, derived } from "@epikodelabs/streamix";
+      const count = (atom(2) as ReturnType<typeof atom<number>>)!;
+      const doubled = derived(((() => count * 2) as () => number)!);
+      const tracked = derived(reader => reader.read(count) + count);
+    `);
+    expect(diagnostics.map(messageOf)).toEqual([]);
+  });
+
   it("exposes implicit JSX atom reads as their value type and retains writable atom checks", () => {
     const source = `
       import { atom } from "@epikodelabs/streamix";
@@ -108,6 +118,17 @@ describe("Streamix React tsserver plugin", () => {
 
     const diagnostics = diagnose(source);
     expect(diagnostics.filter(diagnostic => /Operator '\*'/.test(messageOf(diagnostic)))).toEqual([]);
+  });
+
+  it("checks value-returning writes and keeps unary JSX reads as reads", () => {
+    const source = `
+      import { atom } from "@epikodelabs/streamix";
+      let count = atom(1);
+      const assign = (): number => (count = 3);
+      const add = (): number => (count += 2);
+      export const App = () => <span>{-count} {~count} {!count}</span>;
+    `;
+    expect(diagnose(source).map(messageOf)).toEqual([]);
   });
   it("keeps derived and JSX object shorthand keys valid while rewriting their values", () => {
     const source = `

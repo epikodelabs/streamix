@@ -7,6 +7,13 @@
 module.exports = function streamixVueLanguagePlugin(ctx) {
   const ts = ctx.modules.typescript;
 
+  function unwrapExpression(expression) {
+    while (expression && (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) ||
+        ts.isTypeAssertionExpression(expression) || ts.isNonNullExpression(expression) ||
+        ts.isSatisfiesExpression(expression))) expression = expression.expression;
+    return expression;
+  }
+
   function transformedScript(lang, source) {
     if (!/^(?:ts|tsx|js|jsx)$/i.test(lang || "ts")) return undefined;
     const kind = /tsx|jsx/i.test(lang || "") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
@@ -28,9 +35,11 @@ module.exports = function streamixVueLanguagePlugin(ctx) {
 
     const atoms = new Set();
     const findAtoms = node => {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
-          ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) &&
-          atomFactories.has(node.initializer.expression.text)) atoms.add(node.name.text);
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+        const initializer = unwrapExpression(node.initializer);
+        if (initializer && ts.isCallExpression(initializer) && ts.isIdentifier(initializer.expression) &&
+            atomFactories.has(initializer.expression.text)) atoms.add(node.name.text);
+      }
       ts.forEachChild(node, findAtoms);
     };
     findAtoms(file);
@@ -65,12 +74,14 @@ module.exports = function streamixVueLanguagePlugin(ctx) {
       // descend here or their atom reads receive the same edit twice.
       if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
           derivedFactories.has(node.expression.text)) return;
-      // DerivedScope's `$` receives raw atom references, not their values.
-      // Keep this aligned with the production compiler: `$(count)` must never
-      // become `$(count.value)`.
-      const hasTrackerParameter = callback.parameters.some(parameter => hasBinding(parameter.name, '$'));
-      if (hasTrackerParameter && ts.isCallExpression(node) &&
-          ts.isIdentifier(node.expression) && node.expression.text === '$') return;
+      if (ts.isTypeNode(node)) return;
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const reader = ts.isPropertyAccessExpression(callee) && ["read", "use"].includes(callee.name.text)
+          ? callee.expression : callee;
+        if (ts.isIdentifier(reader) && callback.parameters.some(parameter =>
+          ts.isIdentifier(parameter.name) && parameter.name.text === reader.text)) return;
+      }
       if (ts.isIdentifier(node) && atoms.has(node.text) &&
           isValueRead(node) && !shadowed(node, callback, node.text)) {
         const shorthand = ts.isShorthandPropertyAssignment(node.parent);
@@ -81,10 +92,9 @@ module.exports = function streamixVueLanguagePlugin(ctx) {
       ts.forEachChild(node, child => rewriteCallback(callback, child));
     };
     const visit = node => {
-      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
-          derivedFactories.has(node.expression.text) && node.arguments.length > 0 &&
-          (ts.isArrowFunction(node.arguments[0]) || ts.isFunctionExpression(node.arguments[0]))) {
-        rewriteCallback(node.arguments[0]);
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && derivedFactories.has(node.expression.text)) {
+        const callback = unwrapExpression(node.arguments[0]);
+        if (callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) rewriteCallback(callback);
       }
       ts.forEachChild(node, visit);
     };
