@@ -130,11 +130,11 @@ export function gate<T = any>(control: PipeInput<boolean>, options: GateOptions 
     );
 
     void (async () => {
-      let controlPull: Promise<StreamEvent> | undefined = readControl();
-      let sourcePull: Promise<StreamEvent> | undefined = readSource();
       const never = new Promise<never>(() => {});
 
       try {
+        let controlPull: Promise<StreamEvent> | undefined = readControl();
+        let sourcePull: Promise<StreamEvent> | undefined = readSource();
         while (!stopped) {
           // One coordinator observes both pulls. Whichever resolves first is
           // applied first, which makes same-tick admission deterministic.

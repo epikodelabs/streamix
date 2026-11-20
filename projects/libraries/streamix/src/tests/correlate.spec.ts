@@ -166,25 +166,25 @@ describe('correlate', () => {
   });
 
   it('bounds unmatched early responses with drop-oldest', async () => {
-    const requests = createAsyncPushable<{ id: number }>();
-    const responses = createAsyncPushable<{ id: number; body: string }>();
+    const requests = createAsyncPushable<{ id: number | undefined }>();
+    const responses = createAsyncPushable<{ id: number | undefined; body: string }>();
     const values = collect(pipe(requests, correlate(responses, {
       requestKey: value => value.id,
       responseKey: value => value.id,
       earlyLimit: 2,
     })));
-    responses.push({ id: 1, body: 'one' });
+    responses.push({ id: undefined, body: 'oldest' });
     responses.push({ id: 2, body: 'two' });
     responses.push({ id: 3, body: 'three' });
     await sleep(5);
 
-    // Keys 2 and 3 are retained; key 1 was the oldest and was dropped.
+    // Keys 2 and 3 are retained; undefined was the oldest and was dropped.
     requests.push({ id: 2 });
     requests.push({ id: 3 });
     await sleep(5);
-    requests.push({ id: 1 });
+    requests.push({ id: undefined });
     await sleep(5);
-    responses.push({ id: 1, body: 'late' });
+    responses.push({ id: undefined, body: 'late' });
     await sleep(5);
     requests.dispose();
     responses.dispose();
@@ -192,7 +192,7 @@ describe('correlate', () => {
     expect(await values).toEqual([
       { request: { id: 2 }, response: { id: 2, body: 'two' } },
       { request: { id: 3 }, response: { id: 3, body: 'three' } },
-      { request: { id: 1 }, response: { id: 1, body: 'late' } },
+      { request: { id: undefined }, response: { id: undefined, body: 'late' } },
     ]);
   });
 

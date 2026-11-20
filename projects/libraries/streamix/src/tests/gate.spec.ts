@@ -2,6 +2,17 @@ import { atom, createAsyncPushable, from, gate, pipe } from '@epikodelabs/stream
 import { collect, sleep } from './helpers/operator';
 
 describe('gate', () => {
+  it('fails the output and closes the source when the initial pull throws synchronously', async () => {
+    const failure = new Error('initial pull failed');
+    const close = jasmine.createSpy('return').and.resolveTo({ done: true, value: undefined });
+    const output = gate<number>(from([true])).apply({
+      next() { throw failure; },
+      return: close,
+    });
+
+    await expectAsync(output.next()).toBeRejectedWith(failure);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
   it('drops values while closed and resumes without reconnecting upstream', async () => {
     const control = atom(false);
     const source = createAsyncPushable<number>();

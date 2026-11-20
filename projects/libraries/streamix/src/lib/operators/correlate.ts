@@ -124,8 +124,8 @@ export function correlate<Q, A, K>(responses: PipeInput<A>, options: CorrelateOp
                 throw new RangeError('correlate early response capacity exceeded');
               }
               if (earlyLimit === 0) continue;
-              const oldest = early.keys().next().value as K | undefined;
-              if (oldest !== undefined) early.delete(oldest);
+              const oldest = early.keys().next();
+              if (!oldest.done) early.delete(oldest.value);
             }
             early.set(key, result.value);
             continue;
