@@ -101,7 +101,11 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
       join(dirname(output), "tsconfig.app.json"),
       `${JSON.stringify({
         extends: toConfigPath(relative(dirname(output), join(workspaceRoot, "tsconfig.json"))),
-        compilerOptions: { outDir: "../../out-tsc/app", types: [], jsx: "react-jsx", allowJs: true },
+        compilerOptions: {
+          // The program can combine generated files and authored workspace imports.
+          rootDir: toConfigPath(relative(dirname(output), workspaceRoot)),
+          outDir: "../../out-tsc/app", types: [], jsx: "react-jsx", allowJs: true,
+        },
         files: entryPath ? [`src/${entryPath}`] : [],
         include: ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx"],
         exclude: ["src/**/*.spec.*", "src/**/*.test.*", "src/**/*.d.ts"],

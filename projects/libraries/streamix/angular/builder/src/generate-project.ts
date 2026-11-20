@@ -112,6 +112,9 @@ export async function generateProject({
       resolve(outputDirectory, '..', 'tsconfig.app.json'),
       `${JSON.stringify({
         extends: configPath(relative(resolve(outputDirectory, '..'), tsconfigPath)),
+        // Both the virtual app and imported workspace sources belong to the program.
+        compilerOptions: { rootDir: configPath(relative(dirname(outputDirectory), workspaceRoot)) },
+        files: [],
         include: ['src/**/*.ts'],
         exclude: ['src/**/*.spec.ts'],
       }, null, 2)}\n`,
