@@ -5,7 +5,8 @@ import { fromPush, type Readable } from "@epikodelabs/streamix";
  * consecutive animation frames.
  *
  * This stream is driven by `requestAnimationFrame` when available, with a
- * timer-based fallback for non-browser environments.
+ * timer-based fallback in browsers that lack RAF. Non-browser hosts can opt
+ * in by providing a global RAF implementation.
  *
  * **Behavior:**
  * - A shared RAF loop starts when the first subscriber subscribes.
@@ -35,17 +36,17 @@ export function animationFrame(): Readable<number> {
       cancelFrame = null;
     };
 
-    // SSR / non-browser guard
-    if (typeof globalThis.performance === "undefined") {
+    const hasRaf = typeof globalThis.requestAnimationFrame === "function";
+    if (typeof globalThis.performance === "undefined" ||
+        (!hasRaf && typeof window === "undefined")) {
       return cleanup;
     }
 
     let lastTime = 0;
 
-    const hasRaf = typeof (globalThis as any).requestAnimationFrame === "function";
     const raf: (cb: FrameRequestCallback) => number =
-      typeof (globalThis as any).requestAnimationFrame === "function"
-        ? (globalThis as any).requestAnimationFrame.bind(globalThis)
+      hasRaf
+        ? globalThis.requestAnimationFrame.bind(globalThis)
         : ((cb: FrameRequestCallback) =>
             globalThis.setTimeout(
               () => cb(globalThis.performance.now()),
