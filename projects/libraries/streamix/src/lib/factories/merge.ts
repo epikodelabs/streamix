@@ -1,7 +1,7 @@
 import { normalizeError } from "../atoms";
 import { flow, type Readable } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
-import { createAsyncCoordinator } from "../utils";
+import { createAsyncCoordinator, raceNext } from "../utils";
 
 /**
  * Merges multiple source streams into a single atom, emitting values as they arrive from any source.
@@ -38,7 +38,7 @@ import { createAsyncCoordinator } from "../utils";
  * ```
  */
 export function merge<T = any>(...sources: PipeInput<T>[]): Readable<T> {
-  return flow<T>(async function* () {
+  return flow<T>(async function* (signal) {
     if (sources.length === 0) return;
 
     const iterators = sources.map((source) =>
@@ -48,7 +48,7 @@ export function merge<T = any>(...sources: PipeInput<T>[]): Readable<T> {
 
     try {
       while (true) {
-        const result = await coordinator.next();
+        const result = await raceNext(coordinator, signal);
         if (result.done) break;
 
         const event = result.value;
@@ -61,7 +61,9 @@ export function merge<T = any>(...sources: PipeInput<T>[]): Readable<T> {
         }
       }
     } finally {
-      await coordinator.return?.();
+      // Close the coordinator immediately. An upstream return() can be
+      // stuck behind a pending next() and must not delay error delivery.
+      void coordinator.return?.();
     }
   });
 }

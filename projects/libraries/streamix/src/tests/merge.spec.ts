@@ -81,7 +81,7 @@ describe('merge', () => {
         };
       }
     };
-    const iterator = iterate(merge(from([1]), never))[Symbol.asyncIterator]();
+    const iterator = iterate(merge(never, from([1])))[Symbol.asyncIterator]();
 
     const first = await Promise.race([
       iterator.next(),
@@ -92,6 +92,65 @@ describe('merge', () => {
 
     expect(first.done).toBeFalse();
     expect(first.value).toBe(1);
+  });
+
+  it('completes after all sources finish and interleaves ready synchronous sources', async () => {
+    const values: number[] = [];
+    for await (const value of merge(from([1, 2]), from([3]), from([4]))) {
+      values.push(value);
+    }
+    expect(values).toEqual([1, 3, 4, 2]);
+  });
+
+  it('returns a stalled input when the merged flow is disposed', async () => {
+    let pulled!: () => void;
+    let closed!: () => void;
+    const started = new Promise<void>(resolve => { pulled = resolve; });
+    const returned = new Promise<void>(resolve => { closed = resolve; });
+    const stalled: AsyncIterable<number> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          pulled();
+          return new Promise<IteratorResult<number>>(() => {});
+        },
+        return: async () => {
+          closed();
+          return { done: true, value: undefined };
+        },
+      }),
+    };
+    const merged = merge(stalled);
+    const stop = merged.subscribe();
+    try {
+      await started;
+      merged.dispose();
+      const result = await Promise.race([returned.then(() => 'closed'), delay(100).then(() => 'pending')]);
+      expect(result).toBe('closed');
+    } finally {
+      stop();
+      merged.dispose();
+    }
+  });
+
+  it('delivers an input error even while another input is stalled in teardown', async () => {
+    const stalled: AsyncIterable<number> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<number>>(() => {}),
+        return: () => new Promise<IteratorResult<number>>(() => {}),
+      }),
+    };
+    const failure = new Error('input failed');
+    const merged = merge(stalled, flow<number>(async function* () { throw failure; }));
+    const iterator = merged[Symbol.asyncIterator]();
+    try {
+      const result = await Promise.race([
+        iterator.next().catch(error => error),
+        delay(100).then(() => 'pending'),
+      ]);
+      expect(result).toBe(failure);
+    } finally {
+      merged.dispose();
+    }
   });
 
   it('should emit nothing immediately when no sources are provided', async () => {
