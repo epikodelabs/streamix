@@ -4,6 +4,7 @@ import ts from 'typescript';
 import { parse as parseSfc } from '@vue/compiler-sfc';
 import {
   createStreamixProgram,
+  createTokenSourceMap,
   findStreamixProgramConfig,
   injectIntrospectionActivation,
   instrumentStreamixSource,
@@ -88,8 +89,7 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
     const instrumented = instrumentStreamixSource({ file: sourceFile, checker: program.getTypeChecker(),
       sourcePath: fileName, enabled: true });
     if (instrumented === script.content) return source;
-    const start = source.indexOf(script.content, Math.max(0, source.indexOf('<script')));
-    if (start < 0) return source;
+    const start = script.loc.start.offset;
     return source.slice(0, start) + instrumented + source.slice(start + script.content.length);
   };
 
@@ -103,8 +103,9 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
       : undefined,
     transform(source, id) {
       const fileName = sourceFileName(id);
+      const authored = source;
 
-      if (fileName.includes('/node_modules/')) {
+      if (fileName.replace(/\\/g, '/').includes('/node_modules/')) {
         return null;
       }
 
@@ -127,7 +128,7 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
           let code = instrumentStreamixSource({ file: sourceFile, checker: program.getTypeChecker(),
             sourcePath: fileName, enabled: true });
           if (ENTRY_NAMES.includes(basename(fileName).toLowerCase())) code = injectIntrospectionActivation(code);
-          if (code !== source) return { code, map: null };
+          if (code !== source) return { code, map: createTokenSourceMap(authored, code, fileName) };
         }
         return null;
       }
@@ -138,27 +139,23 @@ export function sxVue(options: StreamixVueViteOptions = {}): Plugin {
 
       // Attribute order is intentionally unconstrained: both `<script setup
       // lang="ts">` and `<script lang="ts" setup>` are standard SFCs.
-      if (!/<script\b[^>]*\bsetup\b[^>]*>/i.test(source) || !/<template\b/i.test(source)) {
-        return null;
-      }
+      const result = /<script\b[^>]*\bsetup\b[^>]*>/i.test(source) && /<template\b/i.test(source)
+        ? transformVueSfc(source, fileName)
+        : undefined;
 
-      const result = transformVueSfc(source, fileName);
-
-      for (const warning of result.diagnostics.filter(item => item.category === 'warning')) {
+      for (const warning of result?.diagnostics.filter(item => item.category === 'warning') ?? []) {
         this.warn(formatVueSfcDiagnostics(source, fileName, [warning]));
       }
 
-      const errors = result.diagnostics.filter(diagnostic => diagnostic.category === 'error');
+      const errors = result?.diagnostics.filter(diagnostic => diagnostic.category === 'error') ?? [];
 
       if (errors.length > 0) {
         this.error(formatVueSfcDiagnostics(source, fileName, errors));
       }
 
-      if (result.bindingCount === 0) {
-        return null;
-      }
-
-      return { code: result.code, map: result.sourceMap ?? null };
+      const code = result?.code ?? source;
+      if (code === authored) return null;
+      return { code, map: source === authored ? result?.sourceMap ?? null : createTokenSourceMap(authored, code, fileName) };
     },
     watchChange(id, change) {
       const fileName = sourceFileName(id);

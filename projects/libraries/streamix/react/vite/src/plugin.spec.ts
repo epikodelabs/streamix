@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { SourceMap } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ts from "typescript";
@@ -174,16 +175,45 @@ describe("Streamix React Vite plugin", () => {
     const on = sx({ introspection: true });
     const define = (on.config as any)?.call(on, {}, { command: "build" });
     expect(define.define["import.meta.env.DEV"]).toBe("true");
-    const enabled = transformOf(on).call(context, source, entry) as { code: string };
+    const enabled = transformOf(on).call(context, source, entry) as {
+      code: string; map: ConstructorParameters<typeof SourceMap>[0];
+    };
     expect(enabled.code).toContain("import '@epikodelabs/streamix/introspection/activate';");
     expect(enabled.code).toContain("__sxMount();");
     expect(enabled.code).toContain("__sxDebug(atom(0)");
+    expect(enabled.map.sourcesContent).toEqual([source]);
+    const beforeCount = enabled.code.slice(0, enabled.code.indexOf("const count") + "const ".length).split("\n");
+    const location = new SourceMap(enabled.map).findEntry(beforeCount.length - 1, beforeCount.at(-1)!.length);
+    expect(location).toEqual(jasmine.objectContaining({ originalLine: 1, originalColumn: "export const ".length }));
 
     const off = sx();
     expect((off.config as any)?.call(off, {}, { command: "build" })).toBeUndefined();
     const plain = transformOf(off).call(context, source, entry) as { code: string };
     expect(plain.code).not.toContain('introspection/activate');
     expect(plain.code).not.toContain("__sxDebug");
+  });
+
+  it("activates the inspector in a plain entry without loading a semantic program", () => {
+    const source = 'import "./bootstrap";';
+    const entry = "/workspace/src/main.ts";
+    const readFile = spyOn(ts.sys, "readFile").and.callThrough();
+    const transformed = transformOf(sx({ introspection: true }))(source, entry) as {
+      code: string; map: { sourcesContent: string[] };
+    };
+    expect(transformed.code).toContain("introspection/activate");
+    expect(transformed.map.sourcesContent).toEqual([source]);
+    expect(transformOf(sx())(source, entry)).toBeNull();
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects wrapped asynchronous formulas before Vite handles TypeScript", () => {
+    const context = { error: (message: string): never => { throw new Error(message); } };
+    const source = `
+      import { derived } from "@epikodelabs/streamix";
+      derived(((async () => 2) as () => Promise<number>)!);
+    `;
+    expect(() => transformOf(sx()).call(context, source, "/workspace/src/AsyncFormula.ts"))
+      .toThrowError(/AsyncFormula\.ts:\d+:\d+[\s\S]*synchronously/);
   });
 });
 

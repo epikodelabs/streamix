@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import ts from "typescript";
 import {
   createStreamixProgram,
+  createTokenSourceMap,
   findStreamixProgramConfig,
   injectIntrospectionActivation,
   instrumentStreamixSource,
@@ -30,7 +31,7 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
 
     const files = await collectAdoptableFiles(staging);
     const program = createSourceProgram(workspaceRoot, sourceRoot);
-    const results = new Map<string, { code: string; map: string }>();
+    const results = new Map<string, { input: string; transformed: ReturnType<typeof transformReactJsx> }>();
     // Collect every file's diagnostics before failing: a single failure names
     // all affected authored files and preserves warnings alongside contract
     // errors instead of stopping at the first one.
@@ -44,14 +45,7 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
         failures.push(formatReactJsxDiagnostics(input, relative(workspaceRoot, original), transformed.diagnostics));
         continue;
       }
-      // Map sources carry the workspace-relative authored path so the chained
-      // devtools point at a portable location instead of the machine's temp
-      // workspace (mirrors the vite plugin's source rewrite).
-      const mapSource = relative(workspaceRoot, original).replace(/\\/g, "/");
-      results.set(original, {
-        code: transformed.code,
-        map: JSON.stringify(transformed.sourceMap && { ...transformed.sourceMap, sources: [mapSource] }),
-      });
+      results.set(original, { input, transformed });
     }
     if (failures.length > 0) throw new Error(failures.join("\n\n"));
     // Registration runs AFTER adoption, not before: the adoption transform
@@ -61,19 +55,22 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
     // metadata positions match the served virtual file. The program over the
     // transformed tree binds the __sxDebug import the pass inserts.
     const registrationProgram = introspection && results.size > 0
-      ? createSourceProgram(workspaceRoot, sourceRoot, new Map([...results].map(([path, result]) => [path, result.code])))
+      ? createSourceProgram(workspaceRoot, sourceRoot, new Map([...results].map(([path, result]) => [path, result.transformed.code])))
       : undefined;
+    const entry = await findEntry(staging);
     const outputs: Array<{ file: string; code: string; mapName: string; map: string }> = [];
     for (const file of files) {
       const original = join(source, relative(staging, file));
-      const result = results.get(original)!;
-      let code = result.code;
+      const { input, transformed } = results.get(original)!;
+      let code = transformed.code;
       if (registrationProgram) {
         const sourceFile = registrationProgram.getSourceFile(original) ?? ts.createSourceFile(original, code, ts.ScriptTarget.Latest, true);
         code = instrumentStreamixSource({ file: sourceFile, checker: registrationProgram.getTypeChecker(),
           sourcePath: relative(workspaceRoot, original), enabled: true });
       }
-      outputs.push({ file, code, mapName: `${basename(file)}.map`, map: result.map });
+      if (introspection && file === entry) code = injectIntrospectionActivation(code);
+      outputs.push({ file, code, mapName: `${basename(file)}.map`,
+        map: serializeSourceMap(workspaceRoot, original, input, transformed, code) });
     }
     // Write only after the registration pass has finished. The program can
     // lazily read the virtual paths it also owns; letting it observe a
@@ -81,17 +78,10 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
     // TypeScript on a later file in projects that never import Streamix.
     for (const outputFile of outputs) {
       await writeFile(outputFile.file, `${outputFile.code}\n//# sourceMappingURL=${outputFile.mapName}\n`);
-      await writeFile(join(dirname(outputFile.file), outputFile.mapName), `${outputFile.map}\n`);
+      await writeFile(join(dirname(outputFile.file), outputFile.mapName), outputFile.map);
     }
-    const entry = await findEntry(staging);
     // The tree root maps to `<app>/src` on the virtual tsconfig's level.
     const entryPath = entry ? relative(staging, entry).replace(/\\/g, "/") : undefined;
-    if (introspection && entry !== undefined) {
-      // Devtools activation is injected into the generated entry only, mirroring
-      // the Angular builder: authored source stays clean and the gate stays
-      // `import.meta.env.DEV`, so production builds carry inert definitions.
-      await writeFile(entry, injectIntrospectionActivation(await readFile(entry, "utf8")));
-    }
     // Atomically replace the live tree only after every transform succeeded:
     // rename tolerates a first-run missing output, and a failure before the
     // swap leaves the previous generation serving untouched.
@@ -327,14 +317,28 @@ async function regenerateReactFileInternal(workspaceRoot: string, sourceRoot: st
     }
     // A watch edit of the entry must keep the injected activation, or the
     // first save would silently drop introspection until the next full regen.
-    if (introspection && ENTRY_NAMES.includes(basename(normalized).toLowerCase())) code = injectIntrospectionActivation(code);
+    if (introspection && origin === await findEntry(originalRoot)) code = injectIntrospectionActivation(code);
     await writeIfChanged(destination, `${code}\n//# sourceMappingURL=${basename(destination)}.map\n`);
-    await writeIfChanged(`${destination}.map`, JSON.stringify(transformed.sourceMap));
+    await writeIfChanged(`${destination}.map`, serializeSourceMap(workspaceRoot, origin, batch.overlays.get(origin)!, transformed, code));
   } else {
     // Mirrored assets are compared before replacing, so an unchanged watch
     // cycle does not touch the delegate tree.
     await writeIfChanged(destination, await readFile(origin));
   }
+}
+
+function serializeSourceMap(
+  workspaceRoot: string,
+  origin: string,
+  input: string,
+  transformed: ReturnType<typeof transformReactJsx>,
+  code: string,
+): string {
+  const source = relative(workspaceRoot, origin).replace(/\\/g, "/");
+  const map = code === transformed.code && transformed.sourceMap
+    ? { ...transformed.sourceMap, sources: [source] }
+    : createTokenSourceMap(input, code, source);
+  return `${JSON.stringify(map)}\n`;
 }
 
 /** Share the semantic source graph with the Vite compiler, including imports.

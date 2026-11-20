@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { SourceMap } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import ts from 'typescript';
@@ -71,7 +72,7 @@ describe('Streamix Vue Vite plugin', () => {
         <script setup>
         import { atom, derived } from '@epikodelabs/streamix';
         const source = atom(1);
-        const doubled = derived(async () => source * 2);
+        const doubled = derived(((async () => source * 2) as () => Promise<number>)!);
         </script>
         <template><p>{{ doubled }}</p></template>
       `,
@@ -87,17 +88,38 @@ describe('Streamix Vue Vite plugin', () => {
     const define = (on.config as any)?.call(on, {}, { command: 'build' });
     expect(define.define['import.meta.env.DEV']).toBe('true');
     const transform = transformOf(on);
-    const enabledSfc = transform.call(context(), sfc, '/workspace/src/Counter.vue') as { code: string };
+    const enabledSfc = transform.call(context(), sfc, '/workspace/src/Counter.vue') as {
+      code: string; map: ConstructorParameters<typeof SourceMap>[0];
+    };
     expect(enabledSfc.code).toContain('__sxDebug(atom(0)');
     expect(enabledSfc.code).toContain("useWritable(count, 'count')");
-    const enabledEntry = transform.call(context(), entry, '/workspace/src/main.ts') as { code: string };
+    expect(enabledSfc.map.sourcesContent).toEqual([sfc]);
+    const beforeCount = enabledSfc.code.slice(0, enabledSfc.code.indexOf('const count') + 'const '.length).split('\n');
+    const location = new SourceMap(enabledSfc.map).findEntry(beforeCount.length - 1, beforeCount.at(-1)!.length);
+    expect(location).toEqual(jasmine.objectContaining({ originalLine: 0, originalColumn: sfc.indexOf('count =') }));
+    const enabledEntry = transform.call(context(), entry, '/workspace/src/main.ts') as typeof enabledSfc;
     expect(enabledEntry.code).toContain("import '@epikodelabs/streamix/introspection/activate';");
     expect(enabledEntry.code).toContain('__sxMount();');
+    expect(enabledEntry.map.sourcesContent).toEqual([entry]);
 
     const off = transformOf(sxVue());
     const offSfc = off.call(context(), sfc, '/workspace/src/Counter.vue') as { code: string };
     expect(offSfc.code).not.toContain('__sxDebug');
     expect(off.call(context(), entry, '/workspace/src/main.ts')).toBeNull();
+  });
+
+  it('retains inspector registration in an SFC without a setup template', () => {
+    const source = `<script lang="ts">
+      import { atom } from '@epikodelabs/streamix';
+      export const count = atom(0);
+    </script>`;
+    const fileName = '/workspace/src/Store.vue';
+    const transformed = transformOf(sxVue({ introspection: true })).call(context(), source, fileName) as {
+      code: string; map: { sourcesContent: string[] };
+    };
+    expect(transformed.code).toContain('__sxDebug(atom(0)');
+    expect(transformed.map.sourcesContent).toEqual([source]);
+    expect(transformOf(sxVue()).call(context(), source, fileName)).toBeNull();
   });
 
   it('reuses cached programs and invalidates only the project containing the edit', async () => {

@@ -7,6 +7,7 @@ import {
 } from "@epikodelabs/streamix/react/compiler";
 import {
   createStreamixProgram,
+  createTokenSourceMap,
   findStreamixProgramConfig,
   injectIntrospectionActivation,
   instrumentStreamixSource,
@@ -66,7 +67,12 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
       // over comparisons (`a<b&&c>d`) and type assertions (`<Foo>x`) guessed
       // JSX and paid for a full semantic program; parse the extension-valid
       // candidates instead and skip everything else before programFor.
-      if (!source.includes("@epikodelabs/streamix") && !containsJsx(source, fileName)) return null;
+      const isEntry = options.introspection && ENTRY_NAMES.includes(basename(fileName).toLowerCase());
+      if (!source.includes("@epikodelabs/streamix") && !containsJsx(source, fileName)) {
+        if (!isEntry) return null;
+        const code = injectIntrospectionActivation(source);
+        return { code, map: createTokenSourceMap(source, code, fileName) };
+      }
 
       const result = transformReactJsx(source, fileName, { program: programFor(fileName, source) });
       for (const warning of result.diagnostics.filter(item => item.category === "warning")) {
@@ -86,15 +92,16 @@ export function sx(options: StreamixReactViteOptions = {}): Plugin {
           code = instrumentStreamixSource({ file: sourceFile, checker: program.getTypeChecker(),
             sourcePath: fileName, enabled: true });
         }
-        if (ENTRY_NAMES.includes(basename(fileName).toLowerCase())) code = injectIntrospectionActivation(code);
+        if (isEntry) code = injectIntrospectionActivation(code);
       }
+      const map = code === result.code ? result.sourceMap : createTokenSourceMap(source, code, fileName);
       return {
         code,
-        map: result.sourceMap && {
-          ...result.sourceMap,
-          sources: [...result.sourceMap.sources],
-          sourcesContent: [...result.sourceMap.sourcesContent],
-          names: [...result.sourceMap.names],
+        map: map && {
+          ...map,
+          sources: [...map.sources],
+          sourcesContent: [...map.sourcesContent],
+          names: [...map.names],
         },
       };
     },

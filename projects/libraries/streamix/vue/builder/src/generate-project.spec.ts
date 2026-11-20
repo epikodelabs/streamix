@@ -331,6 +331,12 @@ describe('Vue builder introspection injection', () => {
       expect(counter).toContain('__sxDebug(useScope(() => scope(');
       expect(counter).toContain('"kind":"scope"');
       expect(counter).toContain("useWritable(clicks, 'clicks')");
+      const mapPath = join(output, 'Counter.vue.map');
+      const fullMap = await readFile(mapPath, 'utf8');
+      expect(JSON.parse(fullMap).sourcesContent).toEqual([await readFile(join(source, 'Counter.vue'), 'utf8')]);
+      await regenerateVueFile(workspace, sourceRoot, 'Counter.vue', true);
+      expect(await readFile(join(output, 'Counter.vue'), 'utf8')).toBe(counter);
+      expect(await readFile(mapPath, 'utf8')).toBe(fullMap);
 
       // Without the flag: no registration wrappers anywhere.
       const plain = await generateVueProject(workspace, sourceRoot, false);

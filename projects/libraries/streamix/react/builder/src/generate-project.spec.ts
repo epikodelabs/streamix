@@ -98,12 +98,16 @@ describe("React Angular-hosted source generation", () => {
       expect(generated).toContain("__sxMount();");
       expect(generated).toContain("__sxDebug(atom(0)");
       expect(generated.indexOf("introspection/activate")).toBeLessThan(generated.indexOf("export const count"));
+      const fullMap = await readFile(`${generatedPath}.map`, "utf8");
+      expect(JSON.parse(fullMap).sources).toEqual([`${sourceRoot}/main.tsx`]);
+      expect(JSON.parse(fullMap).sourcesContent).toEqual([authored]);
       // Authored source stays clean: injection lives only in the generated tree.
       expect(await readFile(join(source, "main.tsx"), "utf8")).toBe(authored);
 
       // A watch edit of the entry must keep the activation.
       await regenerateReactFile(root, sourceRoot, "main.tsx", true);
-      expect(await readFile(generatedPath, "utf8")).toContain("introspection/activate");
+      expect(await readFile(generatedPath, "utf8")).toBe(generated);
+      expect(await readFile(`${generatedPath}.map`, "utf8")).toBe(fullMap);
       // Dropping the flag regenerates without it.
       await generateReactProject(root, sourceRoot, false);
       expect(await readFile(join(virtualRoot, "main.tsx"), "utf8")).not.toContain("introspection/activate");
@@ -440,10 +444,12 @@ describe("React builder watch recovery and work", () => {
       const destination = join(output, "plain.tsx");
       const past = new Date("2000-01-01T00:00:00Z");
       await utimes(destination, past, past);
+      await utimes(`${destination}.map`, past, past);
 
       await regenerateReactFile(root, sourceRoot, "plain.tsx");
 
       expect((await stat(destination)).mtimeMs).toBeLessThan(Date.parse("2001-01-01T00:00:00Z"));
+      expect((await stat(`${destination}.map`)).mtimeMs).toBeLessThan(Date.parse("2001-01-01T00:00:00Z"));
     } finally {
       await rm(root, { recursive: true, force: true });
     }

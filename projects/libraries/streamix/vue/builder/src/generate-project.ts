@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { parse as parseSfc } from '@vue/compiler-sfc';
 import {
   createStreamixProgram,
+  createTokenSourceMap,
   findStreamixProgramConfig,
   injectIntrospectionActivation,
   instrumentStreamixSource,
@@ -36,7 +37,9 @@ export async function generateVueProject(workspaceRoot: string, sourceRoot: stri
     // affected authored SFCs instead of stopping at the first one.
     const failures: string[] = [];
     for (const file of await collectVueFiles(staging)) {
-      const failure = await transformFile(file, relative(workspaceRoot, join(source, relative(staging, file))));
+      const original = join(source, relative(staging, file));
+      const failure = await transformFile(file, relative(workspaceRoot, original),
+        introspection ? await readFile(original, 'utf8') : undefined);
       if (failure !== undefined) failures.push(failure);
     }
     if (failures.length > 0) throw new Error(failures.join('\n\n'));
@@ -151,7 +154,7 @@ function createSourceProgram(workspaceRoot: string, sourceRoot: string, overlays
  */
 async function instrumentVueTree(workspaceRoot: string, source: string, staging: string): Promise<void> {
   const virtualScripts = new Map<string, string>();
-  const sfcScripts = new Map<string, { path: string; virtualName: string; content: string }>();
+  const sfcScripts = new Map<string, { path: string; virtualName: string; content: string; start: number }>();
   for (const file of await collectVueFiles(staging)) {
     const original = join(source, relative(staging, file));
     const parsed = parseSfc(await readFile(file, 'utf8'), { filename: original });
@@ -159,7 +162,7 @@ async function instrumentVueTree(workspaceRoot: string, source: string, staging:
     if (!script) continue;
     const virtualName = original.replace(/\.vue$/i, '.vue.ts');
     virtualScripts.set(virtualName, script.content);
-    sfcScripts.set(file, { path: original, virtualName, content: script.content });
+    sfcScripts.set(file, { path: original, virtualName, content: script.content, start: script.loc.start.offset });
   }
 
   const program = createSourceProgram(workspaceRoot, source, virtualScripts);
@@ -181,8 +184,7 @@ async function instrumentVueTree(workspaceRoot: string, source: string, staging:
       sourcePath: relative(workspaceRoot, script.path), enabled: true });
     if (instrumented === script.content) continue;
     const text = await readFile(file, 'utf8');
-    const start = text.indexOf(script.content, Math.max(0, text.indexOf('<script')));
-    if (start < 0) continue;
+    const { start } = script;
     await writeFile(file, text.slice(0, start) + instrumented + text.slice(start + script.content.length));
   }
 }
@@ -199,8 +201,7 @@ async function instrumentVueFileText(workspaceRoot: string, sourceRoot: string, 
   const instrumented = instrumentStreamixSource({ file: sourceFile, checker: program.getTypeChecker(),
     sourcePath: relative(workspaceRoot, origin), enabled: true });
   if (instrumented === script.content) return text;
-  const start = text.indexOf(script.content, Math.max(0, text.indexOf('<script')));
-  if (start < 0) return text;
+  const start = script.loc.start.offset;
   return text.slice(0, start) + instrumented + text.slice(start + script.content.length);
 }
 
@@ -278,7 +279,8 @@ async function regenerateVueFileInternal(
   let output = content;
   let map: string | undefined;
   if (normalized.endsWith('.vue')) {
-    let input = content.toString('utf8');
+    const authored = content.toString('utf8');
+    let input = authored;
     if (introspection) input = await instrumentVueFileText(workspaceRoot, originalRoot, origin, input, program);
     const transformed = transformVueSfc(input, relative(workspaceRoot, origin));
     const errors = transformed.diagnostics.filter(diagnostic => diagnostic.category === 'error');
@@ -286,7 +288,7 @@ async function regenerateVueFileInternal(
       throw new Error(formatVueSfcDiagnostics(input, relative(workspaceRoot, origin), errors));
     }
     output = Buffer.from(transformed.code);
-    map = transformed.sourceMap ? `${JSON.stringify(transformed.sourceMap)}\n` : undefined;
+    map = serializeSfcMap(authored, input, transformed, relative(workspaceRoot, origin));
   } else if (introspection && /\.[jt]sx?$/i.test(normalized) && !/\.(?:d|spec|test)\.[jt]sx?$/i.test(normalized)) {
     const text = content.toString('utf8');
     const registrationProgram = program ?? createSourceProgram(workspaceRoot, originalRoot, new Map([[origin, text]]));
@@ -296,7 +298,7 @@ async function regenerateVueFileInternal(
   }
   // A watch edit of the entry must keep the injected activation, or the
   // first save would silently drop introspection until the next full regen.
-  if (introspection && ENTRY_NAMES.includes(basename(normalized).toLowerCase())) {
+  if (introspection && origin === await findEntry(originalRoot)) {
     output = Buffer.from(injectIntrospectionActivation(output.toString('utf8')));
   }
 
@@ -373,18 +375,21 @@ async function findEntry(root: string): Promise<string | undefined> {
 
 /** Transforms one staged SFC; returns its formatted failure instead of
  * throwing so a full pass can report every affected file. */
-async function transformFile(file: string, fileName: string): Promise<string | undefined> {
+async function transformFile(file: string, fileName: string, authored?: string): Promise<string | undefined> {
   const input = await readFile(file, 'utf8');
   const transformed = transformVueSfc(input, fileName);
   if (transformed.diagnostics.some(diagnostic => diagnostic.category === 'error')) {
     return formatVueSfcDiagnostics(input, fileName, transformed.diagnostics);
   }
   await writeFile(file, transformed.code);
-  if (transformed.sourceMap) {
-    // The compiler maps every surviving authored SFC text position onto its
-    // original line and column; inserted bridges and imports stay unmapped.
-    // The vite delegate chains this map so devtools point at authored files.
-    await writeFile(`${file}.map`, `${JSON.stringify(transformed.sourceMap)}\n`);
-  }
+  const map = serializeSfcMap(authored ?? input, input, transformed, fileName);
+  if (map !== undefined) await writeFile(`${file}.map`, map);
   return undefined;
+}
+
+function serializeSfcMap(
+  authored: string, input: string, transformed: ReturnType<typeof transformVueSfc>, fileName: string,
+): string | undefined {
+  const map = authored === input ? transformed.sourceMap : createTokenSourceMap(authored, transformed.code, fileName);
+  return map && `${JSON.stringify(map)}\n`;
 }
