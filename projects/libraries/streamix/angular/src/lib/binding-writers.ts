@@ -123,13 +123,31 @@ export type SxStyleMap = Readonly<Record<string, unknown>>;
 const SECURITY_SENSITIVE_STYLE_PROPERTIES = new Set([
   'background',
   'background-image',
+  'border-image',
+  'border-image-source',
+  'box-reflect',
   'clip-path',
+  'content',
   'cursor',
+  'fill',
   'filter',
+  'backdrop-filter',
   'list-style',
   'list-style-image',
   'mask',
   'mask-image',
+  'mask-border',
+  'mask-border-source',
+  'mask-box-image',
+  'mask-box-image-source',
+  'marker',
+  'marker-start',
+  'marker-mid',
+  'marker-end',
+  'offset',
+  'offset-path',
+  'shape-outside',
+  'stroke',
 ]);
 
 /**
@@ -145,9 +163,10 @@ export function normalizeStyleProperty(property: string): string {
 }
 
 function assertSafeStyleProperty(property: string): void {
-  if (SECURITY_SENSITIVE_STYLE_PROPERTIES.has(property.toLowerCase())) {
+  const canonical = property.toLowerCase().replace(/^-?(?:webkit|moz|ms|o)-/, '');
+  if (property.startsWith('--') || SECURITY_SENSITIVE_STYLE_PROPERTIES.has(canonical)) {
     throw new Error(
-      `Direct sx.style property ${JSON.stringify(property)} may contain a URL-bearing CSS value and bypass Angular sanitization. Use an Angular-owned style binding for this property instead.`,
+      `Direct sx.style property ${JSON.stringify(property)} can supply a URL-bearing CSS value directly or through a custom property. Keep this binding Angular-owned and supply only trusted CSS values.`,
     );
   }
 }
@@ -179,7 +198,7 @@ export function writeStyle(
  * inline styles are left untouched.
  *
  * Both CSS (`transform-origin`) and DOM-style (`transformOrigin`) property
- * names are accepted. CSS custom properties (`--token`) are preserved.
+ * names are accepted. URL-bearing and custom properties are refused.
  */
 export function writeStyleMap(
   target: HTMLElement,

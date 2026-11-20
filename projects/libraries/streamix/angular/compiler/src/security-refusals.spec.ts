@@ -25,6 +25,12 @@ describe('security-sensitive binding refusals', () => {
     '[attr.href]="url"',
     '[style.background-image]="background"',
     '[style.background]="background"',
+    '[style.-webkit-mask-image]="background"',
+    '[style.border-image-source]="background"',
+    '[style.shape-outside]="background"',
+    '[style.content]="background"',
+    '[style.mask-border-source]="background"',
+    '[style.--image]="background"',
   ];
 
   for (const sink of sinks) {
@@ -87,5 +93,12 @@ describe('security-sensitive binding refusals', () => {
 
     expect(result.template).toBe(template);
     expect(result.setup).not.toContain('ɵsxProperty');
+  });
+
+  it('keeps ordinary resource-bearing and custom style bindings Angular-owned', () => {
+    const template = '<div [style.-webkit-mask-image]="mask" [style.--image]="image"></div>';
+    const result = transformAngularComponentTemplate(template, 'inline.html');
+    expect(result.template).toBe(template);
+    expect(result.setup).not.toContain('ɵsxStyle');
   });
 });

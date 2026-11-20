@@ -4,6 +4,19 @@ const compile = (source: string) => transformReactJsx(source, "component.tsx");
 const errorsOf = (source: string) => compile(source).diagnostics.filter(diagnostic => diagnostic.category === "error");
 
 describe("React JSX attribute contracts", () => {
+  it("passes a reactive style object to React's native style prop", () => {
+    const result = compile(`
+      import { atom } from "@epikodelabs/streamix";
+      const styles = atom({ WebkitMaskImage: "none", "--image": "none" });
+      export function View() { return <div style={styles} />; }
+    `);
+
+    expect(result.diagnostics.filter(diagnostic => diagnostic.category === "error")).toEqual([]);
+    expect(result.code).toContain('useStreamixSource(styles, "styles")');
+    expect(result.code).toContain("style={__streamixBinding");
+    expect(result.code).not.toContain("setProperty");
+  });
+
   it("lowers reactive atom spreads to their values on intrinsic and component elements", () => {
     for (const tag of ["div", "Child"]) {
       const result = compile(`

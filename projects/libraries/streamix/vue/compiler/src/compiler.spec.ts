@@ -1,6 +1,20 @@
 import { formatVueSfcDiagnostics, transformVueSfc } from './compiler';
 
 describe('Vue SFC compiler', () => {
+  it('passes a reactive style object to Vue’s native style binding', () => {
+    const result = transformVueSfc(`
+      <script setup>
+      import { atom } from '@epikodelabs/streamix';
+      const styles = atom({ WebkitMaskImage: 'none', '--image': 'none' });
+      </script>
+      <template><div :style="styles"></div></template>
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain('<div :style="__sx_styles"></div>');
+    expect(result.code).not.toContain('setProperty');
+  });
+
   it('preserves explicitly tracked sources with a named reader', () => {
     const result = transformVueSfc(`
       <script setup lang="ts">

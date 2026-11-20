@@ -1,5 +1,6 @@
 import { atom } from '@epikodelabs/streamix';
 
+import { createBindingTable, ɵsxStyle, ɵsxStyleMap } from '../lib/binding-table';
 import {
   bindAttribute,
   bindClass,
@@ -208,14 +209,32 @@ idescribe('direct bindings', () => {
     binding.destroy();
   });
 
-  it('rejects sanitizer-sensitive style-map properties', () => {
+  it('rejects resource-bearing and custom properties in imperative and compiled style bindings', () => {
     const frame = new ManualFrameScheduler();
     const scheduler = new RendererScheduler(frame);
-    const styles = atom({ backgroundImage: 'url(https://example.test/x.png)' });
     const element = document.createElement('div');
-
-    expect(() => bindStyleMap(styles, element, { scheduler }))
-      .toThrowError(/sanitization/i);
+    element.style.opacity = '0.5';
+    const value = atom<unknown>('none');
+    for (const property of [
+      'backgroundImage', '-webkit-mask-image', 'WebkitMaskImage',
+      'webkitMaskBoxImageSource', 'border-image-source', 'shapeOutside',
+      'content', 'maskBorderSource', '--image',
+    ]) {
+      const styles = atom({ opacity: '1', [property]: 'none' });
+      const table = createBindingTable(2, scheduler);
+      expect(() => bindStyle(value, element, property, { scheduler }))
+        .withContext(property).toThrowError(/URL-bearing CSS/);
+      expect(() => bindStyleMap(styles, element, { scheduler }))
+        .withContext(property).toThrowError(/URL-bearing CSS/);
+      expect(() => ɵsxStyle(table, 0, element, property, value))
+        .withContext(property).toThrowError(/URL-bearing CSS/);
+      expect(() => ɵsxStyleMap(table, 1, element, styles))
+        .withContext(property).toThrowError(/URL-bearing CSS/);
+      expect(element.style.opacity).toBe('0.5');
+      table.destroy();
+      styles.dispose();
+    }
+    value.dispose();
   });
   it('stringifies booleans for Angular attribute-style bindings', () => {
     const frame = new ManualFrameScheduler();

@@ -173,6 +173,11 @@ update. These text updates work in zoneless apps without a change-detection pass
 Plain-only interpolations remain Angular-owned. Angular pipes and sanitizer-sensitive
 attribute sinks are outside this direct interpolation path.
 
+The direct style writers accept trusted CSS values. They reject known
+resource-bearing properties (including vendor-prefixed aliases) and custom
+properties, which can feed those properties through `var()`. Use an
+Angular-owned binding with trusted CSS when you need those styles.
+
 ### What is generated
 
 The compiler preserves the component field and emits a per-view binding table.
