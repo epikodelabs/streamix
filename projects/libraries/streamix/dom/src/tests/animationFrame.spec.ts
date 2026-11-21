@@ -18,6 +18,22 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<vo
     }
 }
 
+
+/**
+ * Temporarily replaces a global binding and restores it afterwards, so
+ * Node-like host shapes can be simulated inside a browser page.
+ */
+async function withGlobal<T>(key: string, value: T, fn: () => void | Promise<void>): Promise<void> {
+    const globalScope = globalThis as Record<string, unknown>;
+    const original = globalScope[key];
+    globalScope[key] = value;
+    try {
+        await fn();
+    } finally {
+        globalScope[key] = original;
+    }
+}
+
 idescribe('onAnimationFrame', () => {
     it('should emit delta values with reasonable time intervals', async () => {
         const stream = on('animationFrame');
@@ -237,22 +253,23 @@ idescribe('onAnimationFrame', () => {
             }
         });
     });
-    it('returns early when performance is undefined (SSR)', (done) => {
-        const originalPerformance = (globalThis as any).performance;
-        delete (globalThis as any).performance;
+    it('returns early in a Node-like host without DOM globals (SSR)', (done) => {
+        const originalElement = (globalThis as any).Element;
+        delete (globalThis as any).Element;
         try {
             const values: number[] = [];
             const unsubscribe = on('animationFrame').subscribe(v => values.push(v));
             setTimeout(() => {
-                // Should not emit without performance
+                // Should not emit without a browser-like host: modern Node
+                // provides performance and a global RAF, but no Element.
                 expect(values.length).toBe(0);
                 unsubscribe();
-                (globalThis as any).performance = originalPerformance;
+                (globalThis as any).Element = originalElement;
                 done();
             }, 50);
         }
         catch (err: any) {
-            (globalThis as any).performance = originalPerformance;
+            (globalThis as any).Element = originalElement;
             done.fail(err);
         }
     });
@@ -301,5 +318,32 @@ idescribe('onAnimationFrame', () => {
                 }
             }
         });
+    });
+
+    it('stays a no-op in a Node-like host that provides performance and RAF but no DOM globals', async () => {
+        // Modern Node exposes performance and (since Node 22) a global
+        // requestAnimationFrame; capability probing alone would start a frame
+        // loop during SSR and keep the process alive.
+        const rafSpy = spyOn(globalThis, 'requestAnimationFrame').and.callThrough();
+        await withGlobal('Element', undefined, async () => {
+            const stream = on('animationFrame');
+            const emitted: number[] = [];
+            const subscription = stream.subscribe((delta: number) => emitted.push(delta));
+            await new Promise(resolve => setTimeout(resolve, 30));
+            subscription();
+
+            expect(emitted).toEqual([]);
+            // SSR no-op: no frame loop was scheduled.
+            expect(rafSpy).not.toHaveBeenCalled();
+        });
+    });
+
+    it('cancels the frame callback at teardown', async () => {
+        const cancelSpy = spyOn(globalThis, 'cancelAnimationFrame').and.callThrough();
+        const stream = on('animationFrame');
+        const subscription = stream.subscribe(() => {});
+        await waitUntil(() => cancelSpy.calls.count() > 0 || true);
+        subscription();
+        expect(cancelSpy).toHaveBeenCalled();
     });
 });

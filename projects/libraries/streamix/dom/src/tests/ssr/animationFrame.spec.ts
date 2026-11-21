@@ -20,11 +20,14 @@ ndescribe('SSR animation frames', () => {
     }
   });
 
-  it('uses and cancels an explicitly installed RAF in Node', async () => {
-    let frame!: FrameRequestCallback;
+  it('stays a no-op even when a global RAF is explicitly installed in Node', async () => {
+    // The old policy treated a global RAF as a non-browser opt-in, which made
+    // the SSR no-op promise unenforceable once Node shipped its own
+    // requestAnimationFrame: "installed" cannot be distinguished from
+    // "built in". The browser host gate (DOM globals present) now decides.
     let frameId = 41;
     const request = jasmine.createSpy('requestAnimationFrame').and.callFake((callback: FrameRequestCallback) => {
-      frame = callback;
+      void callback;
       return ++frameId;
     });
     const cancel = jasmine.createSpy('cancelAnimationFrame');
@@ -37,12 +40,9 @@ ndescribe('SSR animation frames', () => {
     const stop = source.subscribe(value => emit(value));
     try {
       await Promise.resolve();
-      expect(request).toHaveBeenCalledTimes(1);
-      await frame(performance.now());
-      expect(emit).toHaveBeenCalledOnceWith(0);
-      expect(request).toHaveBeenCalledTimes(2);
-      stop();
-      expect(cancel).toHaveBeenCalledOnceWith(43);
+      expect(request).not.toHaveBeenCalled();
+      expect(emit).not.toHaveBeenCalled();
+      expect(cancel).not.toHaveBeenCalled();
     } finally {
       stop();
       source.dispose();

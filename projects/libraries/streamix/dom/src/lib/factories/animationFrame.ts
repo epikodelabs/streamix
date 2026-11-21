@@ -5,8 +5,12 @@ import { fromPush, type Readable } from "@epikodelabs/streamix";
  * consecutive animation frames.
  *
  * This stream is driven by `requestAnimationFrame` when available, with a
- * timer-based fallback in browsers that lack RAF. Non-browser hosts can opt
- * in by providing a global RAF implementation.
+ * timer-based fallback in browsers that lack RAF. The environment policy is
+ * explicit: the stream runs only in browser-like hosts (`window` and
+ * `document` present) and is a no-op everywhere else. Node provides
+ * `performance` and - on modern versions - a global `requestAnimationFrame`,
+ * so capability probing alone would start a frame loop during SSR and keep
+ * the server process alive.
  *
  * **Behavior:**
  * - A shared RAF loop starts when the first subscriber subscribes.
@@ -36,11 +40,15 @@ export function animationFrame(): Readable<number> {
       cancelFrame = null;
     };
 
-    const hasRaf = typeof globalThis.requestAnimationFrame === "function";
-    if (typeof globalThis.performance === "undefined" ||
-        (!hasRaf && typeof window === "undefined")) {
+    // Browser-like host gate: the DOM element base class exists only where a
+    // frame loop is meaningful. Capability probing (performance/RAF) cannot
+    // serve as the gate because modern Node provides both, which would start
+    // a frame loop during SSR and keep the server process alive.
+    if (typeof Element === "undefined") {
       return cleanup;
     }
+
+    const hasRaf = typeof globalThis.requestAnimationFrame === "function";
 
     let lastTime = 0;
 
