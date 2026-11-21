@@ -260,4 +260,31 @@ describe("bufferCount", () => {
     const result3 = await it.next();
     expect(result3.done).toBe(true);
   });
+
+  it('rejects non-positive and NaN buffer sizes at creation', () => {
+    expect(() => bufferCount(0)).toThrowError(/positive buffer size/);
+    expect(() => bufferCount(-1)).toThrowError(/positive buffer size/);
+    expect(() => bufferCount(Number.NaN)).toThrowError(/positive buffer size/);
+  });
+
+  it('terminates on an empty source instead of emitting empty buffers', async () => {
+    let pulls = 0;
+    const empty = {
+      next: () => {
+        pulls += 1;
+        return Promise.resolve({ done: true as const, value: undefined });
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+
+    const it2 = bufferCount(2).apply(empty);
+    const first = await it2.next();
+    expect(first.done).toBe(true);
+    expect(pulls).toBe(1);
+
+    const second = await it2.next();
+    expect(second.done).toBe(true);
+  });
 });
