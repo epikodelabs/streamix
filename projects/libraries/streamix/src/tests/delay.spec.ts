@@ -87,4 +87,43 @@ describe('delay', () => {
     expect(results).toEqual([1]);
     expect(caught?.message).toBe('boom');
   });
+
+  it('clears the pending sleep timer and stops the reader on cancellation', async () => {
+    const timeoutSpy = spyOn(globalThis, 'setTimeout').and.callThrough();
+    const clearSpy = spyOn(globalThis, 'clearTimeout').and.callThrough();
+
+    let sourceCalls = 0;
+    const source: AsyncIterator<number> & AsyncIterable<number> = {
+      next: () => {
+        sourceCalls += 1;
+        if (sourceCalls === 1) {
+          return Promise.resolve({ done: false as const, value: 1 });
+        }
+        // Parked forever: only cancellation may stop the loop.
+        return new Promise<IteratorResult<number>>(() => {});
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+
+    const output = delay<number>(5000).apply(source);
+    await wait(20);
+    expect(timeoutSpy).toHaveBeenCalledWith(jasmine.any(Function), 5000);
+    // Select the delay's own 5000 ms timer: other timers (including this
+    // test's waits) may interleave in a shared page.
+    const sleepHandle = timeoutSpy.calls
+      .all()
+      .find(call => call.args[1] === 5000)!.returnValue;
+
+    await output.return?.();
+    // The pending sleep timer is cleared at teardown instead of staying
+    // armed for the full 5000 ms.
+    expect(clearSpy).toHaveBeenCalledWith(sleepHandle);
+
+    // The reader never pulls the source again after cancellation.
+    const callsAfterCancel = sourceCalls;
+    await wait(30);
+    expect(sourceCalls).toBe(callsAfterCancel);
+  });
 });
