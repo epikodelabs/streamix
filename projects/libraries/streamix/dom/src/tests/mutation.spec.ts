@@ -141,7 +141,13 @@ idescribe('onMutation', () => {
       (callback as any)?.(mutations);
       await new Promise(resolve => setTimeout(resolve, 0));
 
-      expect(observeSpy).toHaveBeenCalledWith(observedElement, undefined);
+      // Omitted options observe the whole subtree by default.
+      expect(observeSpy).toHaveBeenCalledWith(observedElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
       expect(values.length).toBe(1);
       expect(values[0]).not.toBe(mutations);
       expect(values[0][0]).toBe(mutations[0]);
@@ -176,5 +182,45 @@ idescribe('onMutation', () => {
 
     sub1();
     sub2();
+  });
+
+  it('observes the whole subtree by default when options are omitted', (done) => {
+    const mutationStream = on('mutation', observedElement);
+    const unsubscribe = mutationStream.subscribe((mutations: any) => {
+        try {
+            expect(mutations.length).toBeGreaterThan(0);
+            expect(mutations[0].type).toBe('childList');
+            unsubscribe();
+            done();
+        } catch (error) {
+            unsubscribe();
+            done.fail(error as Error);
+        }
+    });
+
+    const child = document.createElement('span');
+    observedElement.appendChild(child);
+  });
+
+  it('routes explicitly invalid options through the error channel', (done) => {
+    const mutationStream = on('mutation', observedElement, {});
+    const report = jasmine.createSpy('error');
+    mutationStream.onError(report);
+    const unsubscribe = mutationStream.subscribe(
+        () => done.fail('no emission was expected'),
+    );
+
+    setTimeout(() => {
+        try {
+            expect(report).toHaveBeenCalledWith(jasmine.any(TypeError));
+            expect((report.calls.mostRecent().args[0] as TypeError).message)
+                .toContain('childList');
+            unsubscribe();
+            done();
+        } catch (error) {
+            unsubscribe();
+            done.fail(error as Error);
+        }
+    }, 20);
   });
 });
