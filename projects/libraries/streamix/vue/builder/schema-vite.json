@@ -7,6 +7,10 @@
       "type": "string",
       "description": "Vite project root, relative to the workspace root."
     },
+    "sourceRoot": {
+      "type": "string",
+      "description": "Authored source root relative to the workspace, supplied by the Streamix Vue application builder."
+    },
     "outputPath": {
       "type": "string",
       "description": "Build output directory, relative to the workspace root."

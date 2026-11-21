@@ -3,7 +3,8 @@ import { createBuilder, type BuilderOutput, type Target } from "@angular-devkit/
 import { Observable } from "rxjs";
 import { generateReactProject, regenerateReactFiles } from "./generate-project";
 import { shouldWatchSources } from "./options";
-import { watch, type FSWatcher } from "node:fs";
+import { existsSync, watch, type FSWatcher } from "node:fs";
+import { virtualApplicationPathOverrides } from "@epikodelabs/streamix/compiler";
 import { readdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
@@ -130,7 +131,7 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
     }
 
     try {
-      await generateReactProject(context.workspaceRoot, sourceRoot, introspection);
+      const generatedRoot = await generateReactProject(context.workspaceRoot, sourceRoot, introspection);
       if (stopped) return;
       // Watch the actual authored tree; the delegated builder watches only the virtual copy.
       // Queue edits so writes never interleave, and retain the previous virtual copy on errors.
@@ -155,7 +156,19 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
 
       const delegate: Target = { project, target };
       if (context.target?.configuration !== undefined) delegate.configuration = context.target.configuration;
-      const scheduledRun = await context.scheduleTarget(delegate) as NonNullable<typeof run>;
+      const builderName = await context.getBuilderNameForTarget(delegate);
+      const delegateOverrides = builderName === "@angular/build:application" ||
+          builderName === "@angular-devkit/build-angular:application"
+        ? virtualApplicationPathOverrides(
+            await context.getTargetOptions(delegate), {}, sourceRoot,
+            relative(context.workspaceRoot, generatedRoot),
+            path => existsSync(resolve(context.workspaceRoot, path)),
+          )
+        : undefined;
+      if (stopped) return;
+      const scheduledRun = await context.scheduleTarget(
+        delegate, delegateOverrides as Parameters<typeof context.scheduleTarget>[1],
+      ) as NonNullable<typeof run>;
       run = scheduledRun;
       if (stopped) {
         scheduledRun.stop();

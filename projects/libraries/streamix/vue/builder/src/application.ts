@@ -165,7 +165,12 @@ export const applicationBuilder = createBuilder((options, context) => new Observ
       if (context.target?.configuration !== undefined) {
         delegate.configuration = context.target.configuration;
       }
-      const scheduledRun = await context.scheduleTarget(delegate) as NonNullable<typeof run>;
+      const builderName = await context.getBuilderNameForTarget(delegate);
+      if (stopped) return;
+      const scheduledRun = await context.scheduleTarget(
+        delegate,
+        builderName === '@epikodelabs/streamix/vue/builder:vite' ? { sourceRoot } : undefined,
+      ) as NonNullable<typeof run>;
       run = scheduledRun;
       if (stopped) {
         scheduledRun.stop();

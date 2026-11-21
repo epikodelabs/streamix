@@ -1,6 +1,7 @@
 import { refreshApplication, watchLibraries } from './watch-libraries';
 import { createBuilder, type Target } from '@angular-devkit/architect';
-import { watch, type FSWatcher } from 'node:fs';
+import { existsSync, watch, type FSWatcher } from 'node:fs';
+import { virtualApplicationPathOverrides } from '@epikodelabs/streamix/compiler';
 import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 
@@ -218,16 +219,19 @@ const applicationBuilder = createBuilder(async function* (options, context) {
   // workspace therefore never needs to add `.angular/.streamix` to its own
   // tsconfig or configure a file replacement by hand.
   const virtualRoot = virtualRootOf(sourceRoot);
-  // Dev-server validates a different schema; its buildTarget supplies these roots.
-  if (target !== 'serve' && target !== 'dev-server') {
-    delegateOptions['browser'] = `${virtualRoot}/main.ts`;
-    delegateOptions['tsConfig'] = virtualTsconfigOf(sourceRoot);
-  }
-
   const delegate: Target = { project, target };
-
   if (context.target?.configuration !== undefined) {
     delegate.configuration = context.target.configuration;
+  }
+  // Dev-server validates a different schema; its buildTarget supplies these roots.
+  if (target !== 'serve' && target !== 'dev-server') {
+    const configured = await context.getTargetOptions(delegate);
+    Object.assign(delegateOptions, virtualApplicationPathOverrides(
+      configured, delegateOptions, sourceRoot, virtualRoot,
+      path => existsSync(resolve(context.workspaceRoot, path)),
+    ));
+    delegateOptions['browser'] = `${virtualRoot}/main.ts`;
+    delegateOptions['tsConfig'] = virtualTsconfigOf(sourceRoot);
   }
 
   // `buildDelegateOptions` returns plain JSON values; architect types its

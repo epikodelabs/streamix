@@ -1,10 +1,47 @@
 import { createBuilder, type BuilderOutput } from '@angular-devkit/architect';
 import { Observable } from 'rxjs';
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve, win32 } from 'node:path';
-import { build, createServer, loadConfigFromFile, type InlineConfig, type Plugin, type PluginOption, type ViteDevServer } from 'vite';
+import { isAbsolute, join, relative, resolve, sep, win32 } from 'node:path';
+import { build, createServer, loadConfigFromFile, normalizePath, type InlineConfig, type Plugin, type PluginOption, type ViteDevServer } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { stripStreamixVuePlugins } from './options';
+
+function remapAuthoredPaths(config: InlineConfig, authoredRoot: string, virtualRoot: string): InlineConfig {
+  const remap = (path: string): string => {
+    if (!isAbsolute(path)) return path;
+    const suffix = relative(authoredRoot, path);
+    if (suffix === '..' || suffix.startsWith('..' + sep) || isAbsolute(suffix)) return path;
+    const generated = normalizePath(resolve(virtualRoot, suffix));
+    return /[\\/]$/.test(path) ? generated + '/' : generated;
+  };
+  const remapInput = (input: string | string[] | Record<string, string>) =>
+    typeof input === 'string' ? remap(input)
+      : Array.isArray(input) ? input.map(remap)
+      : Object.fromEntries(Object.entries(input).map(([name, path]) => [name, remap(path)]));
+  const alias = config.resolve?.alias;
+  const buildOptions = config.build;
+  const rollup = buildOptions?.rollupOptions;
+  const rolldown = buildOptions?.rolldownOptions;
+  return {
+    ...config,
+    ...(alias && {
+      resolve: {
+        ...config.resolve,
+        alias: Array.isArray(alias)
+          ? alias.map(entry => ({ ...entry, replacement: remap(entry.replacement) }))
+          : Object.fromEntries(Object.entries(alias).map(([name, path]) => [name, remap(path)])),
+      },
+    }),
+    ...(buildOptions && {
+      build: {
+        ...buildOptions,
+        ...(typeof buildOptions.ssr === 'string' && { ssr: remap(buildOptions.ssr) }),
+        ...(rollup?.input && { rollupOptions: { ...rollup, input: remapInput(rollup.input) } }),
+        ...(rolldown?.input && { rolldownOptions: { ...rolldown, input: remapInput(rolldown.input) } }),
+      },
+    }),
+  };
+}
 
 /**
  * Chains the authored source maps the Streamix builder wrote beside each
@@ -99,7 +136,10 @@ export const viteBuilder = createBuilder((options, context) => new Observable<Bu
         : serve ? 'development' : 'production';
       const command = serve ? 'serve' : 'build';
       const loaded = await loadConfigFromFile({ command, mode }, join(rootPath, viteConfig));
-      const authored = loaded?.config ?? {};
+      const sourceRoot = options['sourceRoot'];
+      const authored = typeof sourceRoot === 'string' && sourceRoot
+        ? remapAuthoredPaths(loaded?.config ?? {}, resolve(context.workspaceRoot, sourceRoot), rootPath)
+        : loaded?.config ?? {};
       // The authored config was already loaded and merged above. Without this,
       // Vite would load vite.config.ts from the root a second time and run its
       // plugin list twice: a duplicated SFC plugin re-parses its own emitted
