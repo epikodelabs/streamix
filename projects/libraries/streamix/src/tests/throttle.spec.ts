@@ -166,4 +166,46 @@ describe('throttle', () => {
     await sleep(70);
     expect(await iterator.next()).toEqual({ value: undefined, done: true });
   });
+
+  it('does not re-arm the cooldown timer after cancellation', async () => {
+    let resolveSecond: ((result: IteratorResult<number>) => void) | undefined;
+    let secondRequested = false;
+    const source: AsyncIterator<number> & AsyncIterable<number> = {
+      next: () => {
+        if (!secondRequested) {
+          secondRequested = true;
+          return Promise.resolve({ done: false as const, value: 1 });
+        }
+        return new Promise<IteratorResult<number>>(resolve => {
+          resolveSecond = resolve;
+        });
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+
+    const timerSpy = spyOn(globalThis, 'setTimeout').and.callThrough();
+    const output = throttle<number>(1000).apply(source);
+
+    // The leading value is emitted immediately; the loop parks on the
+    // second source read while no cooldown timer is armed.
+    expect((await output.next()).value).toBe(1);
+    expect(secondRequested).toBe(true);
+
+    // Cancel while the second read is parked, then deliver the in-flight
+    // value: the loop must observe the cancellation instead of entering
+    // the cooldown branch and re-arming a full-duration timer.
+    const returned = output.return?.();
+    resolveSecond?.({ done: false as const, value: 2 });
+    await returned;
+
+    const postCancelTimers = timerSpy.calls
+      .allArgs()
+      .filter(args => (args[1] as number) >= 1000);
+    expect(postCancelTimers.length).toBe(0);
+
+    // Release the parked pull so the loop unwinds.
+    resolveSecond?.({ done: true as const, value: undefined });
+  });
 });

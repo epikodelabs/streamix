@@ -47,6 +47,10 @@ export const throttle = <T = any>(duration: number) =>
         while (true) {
           const result = await source.next();
           if (result.done) break;
+          // Cancellation may arrive while the read is in flight. Stop before
+          // entering the cooldown branch: installing a fresh timer would
+          // re-arm the cooldown after teardown and keep pulling the source.
+          if (aborted) break;
 
           const now = Date.now();
 
