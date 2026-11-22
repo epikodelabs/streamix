@@ -75,6 +75,7 @@ interface ScopeMemberDeclaration {
   readonly members: readonly ScopeMemberDeclaration[];
   /** A nested scope built by a factory the compiler cannot inspect. */
   readonly opaque?: boolean;
+  readonly primitiveValue?: boolean;
 }
 
 interface ReactiveDeclaration {
@@ -456,6 +457,15 @@ export function transformVueSfc(
 
     const prefix = read.path.slice(0, resolution.depth);
     const rest = read.path.slice(resolution.depth);
+    if (rest[0] === 'value' && resolution.primitiveValue) {
+      diagnostics.push({
+        category: 'error',
+        start: templateOffset + read.start,
+        length: read.end - read.start,
+        message: `Scope member "${scopeLabel(read.scope, prefix)}" already exposes its primitive value. Read the member directly, or use .get(...) to access its atom.`,
+      });
+      continue;
+    }
     const bridge = bridgeName(read.scope, prefix);
     templateEdits.push({
       start: read.start,
@@ -864,7 +874,7 @@ function scopeSetCall(scope: string, path: readonly string[]): string {
 }
 
 type ScopePathResolution =
-  | { readonly kind: 'source'; readonly depth: number }
+  | { readonly kind: 'source'; readonly depth: number; readonly primitiveValue?: boolean }
   | { readonly kind: 'method'; readonly depth: number }
   | { readonly kind: 'nested'; readonly depth: number }
   | { readonly kind: 'missing'; readonly depth: number }
@@ -888,7 +898,7 @@ function resolveScopePath(
     const member = current.find(item => item.name === path[index]);
     if (!member) return { kind: 'missing', depth: index };
 
-    if (member.kind === 'source') return { kind: 'source', depth: index + 1 };
+    if (member.kind === 'source') return { kind: 'source', depth: index + 1, primitiveValue: member.primitiveValue };
     if (member.kind === 'method') return { kind: 'method', depth: index + 1 };
 
     // Nested scope. A factory the compiler cannot inspect makes every deeper
@@ -1425,7 +1435,13 @@ function classifyScopeMember(
     }
   }
 
-  return { name, kind: 'source', members: [] };
+  const seed = ts.isCallExpression(value) && !value.typeArguments && ts.isIdentifier(value.expression) &&
+    (imports.aliases.get(value.expression.text) === 'atom' || value.expression.text === 'atom')
+    ? value.arguments[0] : value;
+  const primitiveValue = seed !== undefined && (ts.isStringLiteralLike(seed) || ts.isNumericLiteral(seed) ||
+    ts.isBigIntLiteral(seed) || seed.kind === ts.SyntaxKind.TrueKeyword || seed.kind === ts.SyntaxKind.FalseKeyword ||
+    seed.kind === ts.SyntaxKind.NullKeyword);
+  return { name, kind: 'source', members: [], primitiveValue };
 }
 
 interface ScopeMemberChain {
@@ -1449,6 +1465,23 @@ function scopeMemberChain(node: ts.Node, scopeNames: ReadonlySet<string>): Scope
 
   if (!ts.isIdentifier(current) || !scopeNames.has(current.text)) return undefined;
   return { scope: current.text, path };
+}
+
+/** A literal `scope.get(key).value` reads the atom rather than a field of its value. */
+function explicitScopeValueRead(node: ts.Node, scopeNames: ReadonlySet<string>): ScopeMemberChain | undefined {
+  const access = ts.isPropertyAccessExpression(node) && node.name.text === 'value' ||
+    ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) &&
+      node.argumentExpression.text === 'value';
+  if (!access) return undefined;
+  const call = unwrapCast(node.expression);
+  if (!ts.isCallExpression(call) || !ts.isPropertyAccessExpression(call.expression) ||
+      call.expression.name.text !== 'get' || call.arguments.length !== 1 ||
+      !ts.isStringLiteralLike(call.arguments[0])) return undefined;
+  const receiver = unwrapCast(call.expression.expression);
+  const key = call.arguments[0].text;
+  if (ts.isIdentifier(receiver) && scopeNames.has(receiver.text)) return { scope: receiver.text, path: [key] };
+  const parent = scopeMemberChain(receiver, scopeNames);
+  return parent && { scope: parent.scope, path: [...parent.path, key] };
 }
 
 function collectTemplateUsage(
@@ -1492,7 +1525,9 @@ function collectTemplateUsage(
           return;
         }
       }
-      const chain = scopeMemberChain(node, scopeNames);
+      const explicit = explicitScopeValueRead(node, scopeNames);
+      if (span.event && explicit) return;
+      const chain = explicit ?? scopeMemberChain(node, scopeNames);
       if (chain && !shadowed(node, chain.scope)) {
         reads.push({
           start: span.start + node.getStart(file) - prefix,
@@ -1563,6 +1598,7 @@ function rewriteReadsInText(
   const { file, prefix } = parseTemplateExpression(fragment);
   const edits: SpanEdit[] = [];
   const visit = (node: ts.Node): void => {
+    if (explicitScopeValueRead(node, scopeNames)) return;
     const chain = scopeMemberChain(node, scopeNames);
     const start = node.getStart(file) - prefix;
     if (chain &&

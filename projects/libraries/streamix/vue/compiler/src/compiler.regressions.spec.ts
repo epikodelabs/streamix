@@ -1,6 +1,6 @@
 import ts from 'typescript';
 import { compileScript, parse } from '@vue/compiler-sfc';
-import { atom } from '@epikodelabs/streamix';
+import { atom, scope } from '@epikodelabs/streamix';
 import * as streamixVue from '@epikodelabs/streamix/vue';
 import * as Vue from 'vue';
 import { transformVueSfc } from './compiler';
@@ -13,7 +13,7 @@ function expectNoError(result: ReturnType<typeof compile>): void {
   expect(result.diagnostics.filter(item => item.category === 'error')).toEqual([]);
 }
 
-function mountCompiled(result: ReturnType<typeof compile>, source: ReturnType<typeof atom>) {
+function mountCompiled(result: ReturnType<typeof compile>, source?: ReturnType<typeof atom>) {
   expectNoError(result);
   const script = compileScript(parse(result.code).descriptor, { id: 'fixture', inlineTemplate: true });
   const javascript = ts.transpileModule(script.content, {
@@ -23,7 +23,7 @@ function mountCompiled(result: ReturnType<typeof compile>, source: ReturnType<ty
   const require = (name: string) => {
     if (name === 'vue') return Vue;
     if (name === '@epikodelabs/streamix/vue') return streamixVue;
-    if (name === '@epikodelabs/streamix') return { atom: () => source };
+    if (name === '@epikodelabs/streamix') return { atom: source ? () => source : atom, scope };
     throw new Error(`Unexpected generated import: ${name}`);
   };
   new Function('require', 'exports', javascript)(require, exports);
@@ -34,6 +34,26 @@ function mountCompiled(result: ReturnType<typeof compile>, source: ReturnType<ty
 }
 
 idescribe('Vue compiled object value fields', () => {
+  it('tracks a scope atom getter while preserving an object value field', async () => {
+    const result = compile(`
+      import { atom, scope } from '@epikodelabs/streamix';
+      const state = scope({ count: 42, nested: { count: 9 }, box: atom({ value: 'data' }) });
+      function observe(value: number) { return value; }
+    `, `<button @click="state.count = state.get('count').value + 1">advance</button>
+      <button @click="observe(state.get('count').value)">observe</button>
+      <p>{{ state.get('count')['value'] }} {{ state.nested.get('count').value }} {{ state.box.value }}</p>`);
+    const { app, host } = mountCompiled(result);
+    try {
+      expect(host.querySelector('p')?.textContent).toBe('42 9 data');
+      host.querySelector('button')!.click();
+      await Vue.nextTick();
+      expect(host.querySelector('p')?.textContent).toBe('43 9 data');
+      expect(result.code).toContain("observe(state.get('count').value)");
+    } finally {
+      app.unmount();
+    }
+  });
+
   it('keeps an explicit value read reactive in conditional rendering', async () => {
     const source = atom(0);
     const result = compile(`
@@ -71,6 +91,16 @@ idescribe('Vue compiled object value fields', () => {
       form.dispose();
     }
   });
+});
+
+it('diagnoses a mistaken atom value getter on a primitive scope property', () => {
+  const result = compile(`
+    import { scope } from '@epikodelabs/streamix';
+    const state = scope({ count: 42 });
+  `, '<p>{{ state.count.value }}</p>');
+  expect(result.diagnostics).toContain(jasmine.objectContaining({
+    category: 'error', message: jasmine.stringMatching(/state.count.*already exposes its primitive value/),
+  }));
 });
 
 idescribe('Vue compiled destructuring assignments', () => {

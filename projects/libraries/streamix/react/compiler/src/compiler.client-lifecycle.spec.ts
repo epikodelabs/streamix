@@ -115,7 +115,14 @@ idescribe("React JSX compiler client lifecycle", () => {
   });
 
   for (const [name, component] of [
-    ["concise arrow", "export const App = () => String(count.value);"],
+    ["concise arrow", `
+      const Counter = () => String(count['value']);
+      export const App = () => <Counter />;
+    `],
+    ["React wrapper", `
+      import { memo } from 'react';
+      export const App = memo(() => String(count.value));
+    `],
     ["class", `
       export class App extends React.Component {
         render() {
@@ -163,6 +170,33 @@ idescribe("React JSX compiler client lifecycle", () => {
       category: "error",
       message: jasmine.stringMatching(/render-time atom read precedes the generated subscription/),
     }));
+  });
+
+  it("preserves snapshot reads in an ordinary TypeScript helper invoked at module scope", () => {
+    const result = transformReactJsx(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(1);
+      function FormatCount() { return String(count.value); }
+      export const label = FormatCount();
+    `, "format.ts");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).not.toContain("useStreamixSource");
+    expect(result.code).toContain("return String(count.value)");
+  });
+
+  it("preserves snapshot reads when a JSX factory is invoked as a plain function", () => {
+    const result = transformReactJsx(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(1);
+      function MakeLabel() {
+        const label = String(count.value);
+        return <span>{label}</span>;
+      }
+      export const label = MakeLabel();
+    `, "label.tsx");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).not.toContain("useStreamixSource");
+    expect(result.code).toContain("String(count.value)");
   });
 
   it("updates object value fields that share names with source APIs", async () => {

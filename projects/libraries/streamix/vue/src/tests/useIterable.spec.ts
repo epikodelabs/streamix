@@ -49,8 +49,38 @@ describe('useIterable', () => {
     vueScope.run(() => useIterable(source));
     vueScope.stop();
     await expectAsync(waitForDisposal(vueScope)).toBeRejectedWith(failure);
+    await expectAsync(waitForDisposal(vueScope)).toBeRejectedWith(failure);
     expect(report).toHaveBeenCalledWith(jasmine.stringMatching(/disposal failed/), failure);
     source.dispose();
+  });
+
+  it('awaits an attached nested effect scope when stopping its parent', async () => {
+    const release = Promise.withResolvers<void>();
+    const returnIterator = jasmine.createSpy('iterator return').and.callFake(async (): Promise<IteratorResult<number>> => {
+      await release.promise;
+      return { done: true, value: undefined };
+    });
+    const child = vueScope.run(() => {
+      const child = effectScope();
+      child.run(() => useIterable<number>({
+        [Symbol.asyncIterator]: () => ({
+          next: () => new Promise<IteratorResult<number>>(() => {}),
+          return: returnIterator,
+        }),
+      }, 0));
+      return child;
+    })!;
+    vueScope.stop();
+    let completed = false;
+    const closing = waitForDisposal(vueScope).then(() => { completed = true; });
+    try {
+      await flushMicrotasks();
+      expect(returnIterator).toHaveBeenCalledTimes(1);
+      expect(completed).toBeFalse();
+    } finally {
+      release.resolve();
+    }
+    await Promise.all([closing, waitForDisposal(child)]);
   });
 
   it('invalidates even when the source emits the same object identity', () => {
