@@ -26,8 +26,9 @@ describe('concatMap', () => {
     const iterator = concatMap(value => project(value)).apply({ next, return: async () => ({ done: true, value: undefined }) });
     const pending = iterator.next();
     await started;
-    await iterator.return!();
+    const closing = iterator.return!();
     resolve([2]);
+    await closing;
     expect((await pending).done).toBe(true);
     expect(next).toHaveBeenCalledTimes(1);
   });

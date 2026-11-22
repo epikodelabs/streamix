@@ -11,7 +11,7 @@ import type { SourceCapabilities, SyncPoll } from "../utils/source-protocol";
  * flow primitives.
  */
 export function from<R = any>(
-  value: PipeInput<R> | ((signal?: AbortSignal) => MaybePromise<R>)
+  value: MaybePromise<PipeInput<R>> | ((signal?: AbortSignal) => MaybePromise<R>)
 ): Readable<R> {
   if (isAtomLike(value)) {
     return value;
@@ -99,6 +99,9 @@ export function from<R = any>(
     let index = 0;
     let done = false;
     let asyncIterator: AsyncIterator<R> | undefined;
+    let resolution: Promise<void> | undefined;
+    let closing: Promise<void> | undefined;
+    const finished: IteratorReturnResult<undefined> = { value: undefined, done: true };
 
     const resolveSynchronousArray = (): boolean => {
       if (resolved) return !error && !asyncSource;
@@ -112,23 +115,29 @@ export function from<R = any>(
 
     const iterator: AsyncIterator<R> & SourceCapabilities<R> = {
       async next(): Promise<IteratorResult<R>> {
-        if (done) return { value: undefined as any, done: true };
+        if (done) return finished;
         const completed = selectCompletedIterator();
         if (completed) return completed.next();
-        await resolveItems();
-        if (error) throw error;
-        if (asyncSource) {
-          asyncIterator ??= asyncSource[Symbol.asyncIterator]();
-          const result = await asyncIterator.next();
-          if (result.done) done = true;
-          return result;
+        try {
+          resolution ??= resolveItems();
+          await resolution;
+          if (done) return finished;
+          if (error) throw error;
+          if (asyncSource) {
+            asyncIterator ??= asyncSource[Symbol.asyncIterator]();
+            if (done) return finished;
+            const result = await asyncIterator.next();
+            if (done) return finished;
+            if (result.done) done = true;
+            return result;
+          }
+          if (index < items.length) return { value: items[index++], done: false };
+          done = true;
+          return finished;
+        } catch (error) {
+          if (done) return finished;
+          throw error;
         }
-        if (done) return { value: undefined as any, done: true };
-        if (index < items.length) {
-          return { value: items[index++], done: false };
-        }
-        done = true;
-        return { value: undefined as any, done: true };
       },
       pollSync(): SyncPoll<R> {
         const completedResult: SyncPoll<R> = {
@@ -161,11 +170,21 @@ export function from<R = any>(
         if (completedIterator) return completedIterator.isTerminal?.() ?? false;
         return done;
       },
-      async return(value?: any) {
+      async return(returnValue?: any) {
         done = true;
-        if (completedIterator) return completedIterator.return!();
-        await asyncIterator?.return?.();
-        return value !== undefined ? { value, done: true } : { value: undefined as any, done: true };
+        closing ??= Promise.resolve().then(async () => {
+          if (completedIterator) {
+            await completedIterator.return?.();
+          } else {
+            // A pull may already own an unresolved input. Close any async
+            // child it produces without issuing a pull after cancellation.
+            if (resolution && isPromiseLike(value)) await resolution.catch(() => {});
+            if (resolution && asyncSource) asyncIterator ??= asyncSource[Symbol.asyncIterator]();
+            await asyncIterator?.return?.();
+          }
+        });
+        await closing;
+        return { value: completedIterator ? undefined : returnValue, done: true };
       },
     };
 

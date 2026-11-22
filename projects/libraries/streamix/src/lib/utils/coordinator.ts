@@ -441,6 +441,8 @@ export function createAsyncCoordinator<T = any>(
 
     return() {
       if (returnPromise) return returnPromise;
+      const completion = Promise.withResolvers<IteratorResult<RunnerEvent<T>>>();
+      returnPromise = completion.promise;
       iteratorReturned = true;
       execution.close();
       activeCount = 0;
@@ -457,7 +459,7 @@ export function createAsyncCoordinator<T = any>(
       }
       keyToSource.clear();
       // Release consumers before awaiting potentially non-terminating return().
-      returnPromise = Promise.all(toClose.map(safeReturnSource)).then(() => DONE);
+      completion.resolve(Promise.all(toClose.map(safeReturnSource)).then(() => DONE));
       return returnPromise;
     },
 
