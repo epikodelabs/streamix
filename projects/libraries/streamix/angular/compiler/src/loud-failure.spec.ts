@@ -133,6 +133,35 @@ describe('reactive reads the compiler cannot own', () => {
     )).toThrowError(/cannot bind "count"/);
   });
 
+  for (const [kind, template, path] of [
+    ['interpolation inside @if', '@if (plain) { <p>{{ count.value }}</p> }', 'count.value'],
+    ['top-level @let', '@let total = this.count.value * 2; <p>{{ total }}</p>', 'count.value'],
+    ['nested @let', '@if (plain) { @let total = count.value; <p>{{ total }}</p> }', 'count.value'],
+    ['@defer trigger', '@defer (when this.count.value > 3) { <p>lazy</p> }', 'count.value'],
+    ['@switch condition', '@switch (count.value) { @case (plain) { <p>yes</p> } }', 'count.value'],
+    ['@case condition', '@switch (plain) { @case (this.model.items?.value.length) { <p>yes</p> } }',
+      'model.items.value.length'],
+  ] as const) {
+    it(`rejects an explicit value read in ${kind}`, () => {
+      expect(() => transformAngularComponentTemplate(template, 'inline.html', { resolveReactiveSource }))
+        .toThrowError(new RegExp(`cannot bind "${path.replaceAll('.', '\\.')}"`));
+    });
+  }
+
+  it('keeps plain value properties and quoted case values on the Angular path', () => {
+    const template = '@switch (model.plain.value) { @case ("count.value") { <p>{{ model.plain.value }}</p> } }';
+    expect(transformAngularComponentTemplate(template, 'inline.html', { resolveReactiveSource }).template)
+      .toBe(template);
+  });
+
+  it('distinguishes a local value from an explicit component read', () => {
+    const local = '@for (count of plainItems; track count.value) { <p>{{ count.value }}</p> }';
+    expect(transformAngularComponentTemplate(local, 'inline.html', { resolveReactiveSource }).template)
+      .toBe(local);
+    expect(() => transformAngularComponentTemplate(local.replace('{{ count', '{{ this.count'),
+      'inline.html', { resolveReactiveSource })).toThrowError(/cannot bind "count.value"/);
+  });
+
   it('keeps an unresolved @if on the Angular path', () => {
     const template = '@if (isReady) { <p>a</p> }';
     const result = transformAngularComponentTemplate(
