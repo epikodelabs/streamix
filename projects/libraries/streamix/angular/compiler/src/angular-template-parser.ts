@@ -1,4 +1,7 @@
 import {
+  CssSelector,
+  SelectorMatcher,
+  createCssSelectorFromNode,
   Interpolation,
   TmplAstBoundText,
   TmplAstContent,
@@ -65,6 +68,8 @@ export interface SxTemplateEdit extends SxSourceSpan {
 }
 
 export interface ParseSxTemplateOptions {
+  /** Selectors of Angular components in scope, including attribute selectors. */
+  readonly componentSelectors?: readonly string[];
   /**
    * Compile-time source classifier supplied by the component TypeScript build
    * adapter. Runtime duck typing is intentionally not used.
@@ -94,20 +99,21 @@ export interface ParsedSxTemplate {
   readonly bindingEdits: readonly SxTemplateEdit[];
   readonly nodes: readonly string[];
   readonly nodePaths: Readonly<Record<string, SxElementPath>>;
-  /** Stable selector assigned only where Angular-owned control flow shifts sibling indices. */
-  readonly nodeSelectors: Readonly<Record<string, string>>;
+  /** Direct-child markers assigned where Angular-owned control flow shifts sibling indices. */
+  readonly nodeMarkerPaths: Readonly<Record<string, readonly string[]>>;
   /** Lowered structural marker id (its `data-sx-block` value) to node id. */
   readonly markers: Readonly<Record<string, string>>;
 }
 
 interface WalkState {
+  readonly componentMatcher?: SelectorMatcher<boolean>;
   readonly template: string;
   readonly bindings: SxTemplateBinding[];
   readonly bindingSpans: SxSourceSpan[];
   readonly bindingEdits: SxTemplateEdit[];
   readonly nodes: string[];
   readonly nodePaths: Record<string, number[]>;
-  readonly nodeSelectors: Record<string, string>;
+  readonly nodeMarkerPaths: Record<string, readonly string[]>;
   readonly nodeElements: Record<string, TmplAstElement>;
   readonly nodeIdsByPath: Record<string, string>;
   readonly unstableTargets: Set<string>;
@@ -191,6 +197,11 @@ const DYNAMIC_TOPOLOGY_ERROR =
   'projection are not yet supported by the static-node compiler. Compile ' +
   'dynamic structure with the sx structural compiler stage.';
 
+const PROJECTED_TOPOLOGY_ERROR =
+  'Direct sx bindings require a static element topology. Angular content projection ' +
+  'can move the rendered node. Move the binding or block into the receiving component ' +
+  'or outside the projection host.';
+
 /**
  * Parses an Angular template and extracts Streamix-owned bindings.
  *
@@ -222,14 +233,22 @@ export function parseSxTemplate(
   const resolveReactiveSource = options.resolveReactiveSource ??
     adaptDependencySourceResolver(options.isDependencySource);
 
+  let componentMatcher: SelectorMatcher<boolean> | undefined;
+  if (options.componentSelectors?.length) {
+    componentMatcher = new SelectorMatcher<boolean>();
+    for (const selector of options.componentSelectors) {
+      componentMatcher.addSelectables(CssSelector.parse(selector), true);
+    }
+  }
   const state: WalkState = {
+    componentMatcher,
     template,
     bindings: [],
     bindingSpans: [],
     bindingEdits: [],
     nodes: [],
     nodePaths: {},
-    nodeSelectors: {},
+    nodeMarkerPaths: {},
     nodeElements: {},
     nodeIdsByPath: {},
     unstableTargets: new Set(),
@@ -256,7 +275,7 @@ export function parseSxTemplate(
     bindingEdits: state.bindingEdits,
     nodes: state.nodes,
     nodePaths: state.nodePaths,
-    nodeSelectors: state.nodeSelectors,
+    nodeMarkerPaths: state.nodeMarkerPaths,
     markers: state.markers,
   };
 }
@@ -320,22 +339,23 @@ function walkStaticChildren(
     }
 
     if (node instanceof TmplAstElement) {
-      // Children of a custom element are projected into a component-owned
+      // Children of a component host are projected into a component-owned
       // view. Their eventual DOM position is not the authored child index,
       // so a direct binding must fail loudly rather than walk into the host's
       // rendered implementation.
       if (
         state.strict &&
-        node.name.includes('-') &&
+        (node.name.includes('-') || state.componentMatcher?.match(createCssSelectorFromNode(node), null)) &&
+        (node.attributes.some(attribute => attribute.name === MARKER_ATTRIBUTE) ||
         node.children.some(child =>
           containsCompiledBinding(
             child,
             state.template,
             state.resolveReactiveSource,
           )
-        )
+        ))
       ) {
-        throw new Error(DYNAMIC_TOPOLOGY_ERROR);
+        throw new Error(PROJECTED_TOPOLOGY_ERROR);
       }
 
       const path = [...parentPath, elementIndex++];
@@ -678,10 +698,9 @@ function visitElement(
 }
 
 /**
- * Scope selectors to each direct-child segment from the Angular component
- * host. A bare descendant query can accidentally select a nested component's
- * marker first (especially for recursive components), whereas the explicit
- * chain belongs to the declaring component's DOM path.
+ * Mark each direct-child segment from the Angular component host. A direct
+ * path stays inside the declaring component's DOM and avoids dependency on
+ * selector features that differ between browser and server renderers.
  */
 function installStableTargetMarkers(state: WalkState): void {
   const marked = new Set<string>();
@@ -714,9 +733,9 @@ function installStableTargetMarkers(state: WalkState): void {
           marked.add(ancestor);
         }
       }
-      segments.push(`[data-sx-node="${ancestor}"]`);
+      segments.push(ancestor);
     }
-    state.nodeSelectors[target] = `:scope > ${segments.join(' > ')}`;
+    state.nodeMarkerPaths[target] = segments;
   }
 }
 
@@ -757,6 +776,7 @@ function containsCompiledBinding(
   }
 
   if (node instanceof TmplAstElement) {
+    if (node.attributes.some(attribute => attribute.name === MARKER_ATTRIBUTE)) return true;
     let hasExplicitTextBinding = false;
 
     for (const output of node.outputs) {
