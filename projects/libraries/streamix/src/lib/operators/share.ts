@@ -1,5 +1,6 @@
-import { atom, createOperator, DONE, iterate, type Operator, type Writable } from "../atoms";
+import { atom, createOperator, iterate, type Operator, type Writable } from "../atoms";
 import { normalizeError } from "../atoms";
+import { ɵcreateDisposer, type ɵDisposalQueue } from "../utils/disposal";
 
 /**
  * Shares a single subscription to the source stream between multiple consumers.
@@ -28,14 +29,15 @@ export function share<T = any>() {
   let subscriberCount = 0;
   let activeConnection: symbol | null = null;
 
-  const disconnect = () => {
+  const disconnect = (queue: ɵDisposalQueue) => {
     if (sourceIterator) {
       const it = sourceIterator;
       sourceIterator = null;
       isConnected = false;
       activeConnection = null;
-      shared?.dispose();
-      void it.return?.().catch(() => {});
+      const subject = shared;
+      queue.run(() => subject?.dispose());
+      queue.run(() => it.return?.());
     }
   };
 
@@ -75,7 +77,7 @@ export function share<T = any>() {
     }
     if (!isConnected) {
       connect(source);
-    } else if (typeof source.return === "function") {
+    } else if (source !== sourceIterator && typeof source.return === "function") {
       // Each `for await` on the piped stream creates a fresh upstream iterator.
       // Once we're connected, we must close these unused iterators immediately,
       // otherwise they remain subscribed and can backpressure the shared source.
@@ -84,32 +86,31 @@ export function share<T = any>() {
 
     subscriberCount++;
     const subject = shared;
-    let released = false;
-    const release = () => {
-      if (released) return;
-      released = true;
+    const release = ɵcreateDisposer(queue => {
       if (shared !== subject) return;
       subscriberCount--;
-      if (subscriberCount === 0 && isConnected) disconnect();
-    };
+      if (subscriberCount === 0 && isConnected) disconnect(queue);
+    });
     const outputIterator = iterate(shared)[Symbol.asyncIterator]();
     const baseNext = outputIterator.next.bind(outputIterator);
     outputIterator.next = async () => {
       try {
         const result = await baseNext();
-        if (result.done) release();
+        if (result.done) void release();
         return result;
       } catch (err) {
-        release();
+        void release();
         throw err;
       }
     };
-    const baseReturn = outputIterator.return?.bind(outputIterator);
+    const baseReturn = outputIterator.return!.bind(outputIterator);
     const baseThrow = outputIterator.throw?.bind(outputIterator);
 
     (outputIterator as any).return = async (value?: any) => {
-      release();
-      return baseReturn ? baseReturn(value) : DONE;
+      const teardown = release();
+      const result = await baseReturn(value);
+      await teardown;
+      return result;
     };
 
     // Note: throw() intentionally does not release the shared subscription.

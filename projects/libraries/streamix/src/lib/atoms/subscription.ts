@@ -1,5 +1,5 @@
 import { __streamixDebugDispose } from '../runtime/introspection-hooks';
-import type { MaybePromise } from "./operator";
+import { isPromiseLike, type MaybePromise } from "./operator";
 
 /**
  * Represents a subscription to a stream-like source.
@@ -46,17 +46,25 @@ export function createSubscription(
 ): Subscription {
   /** Internal mutable subscription state */
   let _unsubscribed = false;
+  let completion: Promise<unknown> | undefined;
 
   const unsubscribe = (): MaybePromise => {
     if (!_unsubscribed) {
       _unsubscribed = true;
       __streamixDebugDispose(subscription, 'unsubscribe');
       try {
-        return teardown?.();
+        const result: unknown = teardown?.();
+        if (isPromiseLike(result)) {
+          completion = Promise.resolve(result);
+          void completion.catch(() => {});
+          return completion;
+        }
+        return result;
       } catch (err) {
         console.error("Error during unsubscribe callback:", err);
       }
     }
+    return completion;
   };
 
   const subscription = unsubscribe as Subscription;

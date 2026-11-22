@@ -1041,7 +1041,9 @@ function fromIteratorInternal<T>(
     },
     onUnsubscribe: async (_callback, unsubscribe) => {
       if (!subscriptions.delete(unsubscribe)) return;
+      const releasesProducer = lifecycle.subscriberCount === 1 && !lifecycle.disposed;
       await lifecycle.removeSubscriber();
+      if (releasesProducer) throwCleanupErrors(cleanupErrors);
     },
     onDispose: async () => {
       await lifecycle.dispose();

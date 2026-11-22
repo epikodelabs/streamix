@@ -1,6 +1,121 @@
-import { atom, DONE, handoff, iterate, pipe, using } from '@epikodelabs/streamix';
+import { atom, DONE, handoff, iterate, NEXT, pipe, share, shareReplay, using } from '@epikodelabs/streamix';
 
 describe('using', () => {
+  for (const [name, factory] of [['share', share], ['shareReplay', shareReplay]] as const) {
+    it(`keeps one connected iterator when ${name} receives it twice`, async () => {
+      const next = Promise.withResolvers<IteratorResult<number>>();
+      const close = jasmine.createSpy('upstream return').and.resolveTo(DONE);
+      const upstream = { next: () => next.promise, return: close };
+      const operator = factory<number>();
+      const first = operator.apply(upstream), second = operator.apply(upstream);
+      const left = first.next(), right = second.next();
+      expect(close).not.toHaveBeenCalled();
+      await first.return!();
+      expect(await left).toEqual(DONE);
+      expect(close).not.toHaveBeenCalled();
+      await second.return!();
+      expect(await right).toEqual(DONE);
+      expect(close).toHaveBeenCalledTimes(1);
+      next.resolve(DONE);
+    });
+
+    it(`waits for ${name} to close the upstream iterator before releasing its owner`, async () => {
+      const release = Promise.withResolvers<void>();
+      const childClosing = Promise.withResolvers<void>();
+      const delivered = Promise.withResolvers<void>();
+      const disposeOwner = jasmine.createSpy('dispose owner');
+      let emitted = false;
+      const source = using({
+        acquire: () => 'session',
+        stream: () => pipe({
+          [Symbol.asyncIterator]: () => ({
+            next: () => {
+              if (emitted) return new Promise<IteratorResult<number>>(() => {});
+              emitted = true;
+              return Promise.resolve(NEXT(1));
+            },
+            return: async () => { childClosing.resolve(); await release.promise; return DONE; },
+          }),
+        }, factory<number>()),
+        dispose: disposeOwner,
+      });
+      const stop = source.subscribe(() => delivered.resolve());
+      await delivered.promise;
+      const closing = stop();
+      const repeated = stop();
+      try {
+        expect(await Promise.race([childClosing.promise.then(() => 'closing'), closing.then(() => 'done')])).toBe('closing');
+        const endedEarly = await Promise.race([closing.then(() => true), new Promise<boolean>(resolve => setTimeout(() => resolve(false), 0))]);
+        expect(endedEarly).toBeFalse();
+        expect(disposeOwner).not.toHaveBeenCalled();
+        expect(repeated).toBe(closing);
+      } finally {
+        release.resolve();
+      }
+      await Promise.all([closing, repeated]);
+      expect(disposeOwner).toHaveBeenCalledOnceWith('session');
+    });
+  }
+
+  it('propagates a handoff cleanup failure after releasing the owning resource', async () => {
+    const selected = atom(1);
+    const delivered = Promise.withResolvers<void>();
+    const failure = new Error('child cleanup failed');
+    const disposeOwner = jasmine.createSpy('dispose owner');
+    const source = using({
+      acquire: () => 'session',
+      stream: () => pipe(selected, handoff<number, number>({
+        prepare: value => value,
+        ready: () => {},
+        dispose: () => { throw failure; },
+      })),
+      dispose: disposeOwner,
+    });
+    const stop = source.subscribe(() => delivered.resolve());
+    await delivered.promise;
+    await expectAsync(stop()).toBeRejectedWith(failure);
+    expect(disposeOwner).toHaveBeenCalledOnceWith('session');
+    await selected.dispose();
+  });
+
+  it('reports a handoff teardown failure on natural completion', async () => {
+    const failure = new Error('child cleanup failed');
+    const close = jasmine.createSpy('close player').and.callFake(() => { throw failure; });
+    let emitted = false;
+    const iterator = handoff<number, number>({
+      prepare: value => value,
+      ready: () => {},
+      dispose: close,
+    }).apply({
+      next: async () => {
+        if (emitted) return DONE;
+        emitted = true;
+        return NEXT(1);
+      },
+    });
+    expect(await iterator.next()).toEqual(NEXT(1));
+    await expectAsync(iterator.next()).toBeRejectedWith(failure);
+    await expectAsync(iterator.return!()).toBeRejectedWith(failure);
+    expect(close).toHaveBeenCalledOnceWith(1);
+  });
+
+  for (const [name, operator] of [
+    ['shareReplay', shareReplay<number>()],
+    ['handoff', handoff<number, number>({ prepare: value => value, ready: () => {}, dispose: () => {} })],
+  ] as const) {
+    it(`${name} preserves the consumer error when upstream teardown also fails`, async () => {
+      const failure = new Error('consumer failed');
+      const cleanup = new Error('upstream failed');
+      const close = jasmine.createSpy('upstream return').and.rejectWith(cleanup);
+      const iterator = operator.apply({ next: () => new Promise(() => {}), return: close });
+      const reading = iterator.next().then(result => result, error => error);
+      await expectAsync(iterator.throw!(failure)).toBeRejectedWith(jasmine.objectContaining({
+        cause: failure, errors: [failure, cleanup],
+      }));
+      expect(close).toHaveBeenCalledTimes(1);
+      await reading;
+    });
+  }
   it('starts lazily and closes the child before the owner on completion', async () => {
     const events: string[] = [];
     const source = using({

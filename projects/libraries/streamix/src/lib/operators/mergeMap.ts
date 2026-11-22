@@ -4,6 +4,8 @@ import type { PipeInput } from "../atoms/pipe";
 import { from } from '../factories';
 import { createAsyncCoordinator, createAsyncPushable, type RunnerEvent } from '../utils';
 import { ConcurrentInnerExecution } from '../runtime/concurrent-inner-execution';
+import { prepareProjection } from '../runtime/projected-inner';
+import { ɵDisposalQueue } from '../utils/disposal';
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream
@@ -51,6 +53,7 @@ export function mergeMap<T = any, R = any>(
   return createOperator<T, R>('mergeMap', function (source) {
     let stopped = false;
     const output = createAsyncPushable<R>();
+    const projections = new ɵDisposalQueue();
     const operator = this;
     const lifetimes = new Map<number, StreamixLifetimeSpan>();
     const finishActive = (outcome: 'cancel' | 'error') => {
@@ -67,10 +70,21 @@ export function mergeMap<T = any, R = any>(
       const executions = new ConcurrentInnerExecution<{ value: T; span?: StreamixLifetimeSpan }>(concurrent, bufferSize, ({ value, span }) => {
         span?.start();
         try {
-          const projected = project(value, projectIndex++);
-          const inner = from<R>(projected);
-          const sourceIndex = coordinator.addSource(inner[Symbol.asyncIterator]() as AsyncIterator<T | R>);
-          if (span) lifetimes.set(sourceIndex, span);
+          prepareProjection(projections, () => project(value, projectIndex++), projected => {
+            if (stopped) {
+              span?.finish('cancel');
+              return false;
+            }
+            const inner = from<R>(projected)[Symbol.asyncIterator]();
+            if (stopped) {
+              projections.run(() => inner.return?.());
+              span?.finish('cancel');
+              return true;
+            }
+            const sourceIndex = coordinator.addSource(inner);
+            if (span) lifetimes.set(sourceIndex, span);
+            return true;
+          });
         } catch (error) { span?.finish('error'); throw error; }
       }, (job, reason) => job.span?.finish(reason));
       cancelPending = () => executions.close();
@@ -125,11 +139,11 @@ export function mergeMap<T = any, R = any>(
       }
     })();
 
-    const close = (outcome: 'cancel' | 'error') => {
+    const close = async (outcome: 'cancel' | 'error') => {
       stopped = true;
       finishActive(outcome);
       cancelPending();
-      return coordinator.return!();
+      await Promise.all([coordinator.return!(), projections.wait()]);
     };
     const baseReturn = output.return!.bind(output);
     const baseThrow = output.throw!.bind(output);

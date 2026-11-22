@@ -1,9 +1,12 @@
+import { ɵDisposalQueue } from '../utils/disposal';
+
 /** Internal lifetime boundary shared by sequential higher-order operators. */
 export class SerialInnerExecution<T> {
   private iterator: AsyncIterator<T> | null = null;
   private closed = false;
   private closing: Promise<void> | undefined;
   private epoch = 0;
+  readonly disposal = new ɵDisposalQueue();
 
   get active(): boolean { return this.iterator !== null; }
   get stopped(): boolean { return this.closed; }
@@ -11,7 +14,7 @@ export class SerialInnerExecution<T> {
 
   attach(iterator: AsyncIterator<T>): boolean {
     if (this.closed) {
-      void this.cancel(iterator);
+      this.disposal.track(this.cancel(iterator));
       return false;
     }
     if (this.iterator) throw new Error('An inner execution is already active');
@@ -45,10 +48,9 @@ export class SerialInnerExecution<T> {
     this.release();
     const completion = Promise.withResolvers<void>();
     this.closing = completion.promise;
-    completion.resolve(Promise.all([
-      iterator && this.cancel(iterator),
-      source && this.cancel(source),
-    ]).then(() => {}));
+    if (iterator) this.disposal.track(this.cancel(iterator));
+    if (source) this.disposal.track(this.cancel(source));
+    completion.resolve(this.disposal.wait());
     return this.closing;
   }
 

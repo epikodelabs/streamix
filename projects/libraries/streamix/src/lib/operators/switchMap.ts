@@ -5,6 +5,7 @@ import { from } from "../factories";
 import { createAsyncPushable } from "../utils";
 import { normalizeError } from "../atoms";
 import { SwitchingInnerExecution } from "../runtime/inner-execution";
+import { prepareProjection } from "../runtime/projected-inner";
 import { isAsyncIterable } from "../utils/helpers";
 import { asStreamixSource, type SyncPoll } from "../utils/source-protocol";
 import { trackOperatorExecution } from "../runtime/introspection-hooks";
@@ -115,14 +116,17 @@ export function switchMap<T = any, R = any>(
       lifetime = __streamixBeginLifetime(this);
       lifetime?.start();
       const generation = execution.advance();
-      let projected: ReturnType<typeof project>;
+      if (!execution.isCurrent(generation)) return;
       try {
-        projected = project(value, index++);
+        prepareProjection(execution.disposal, () => project(value, index++), projected => {
+          if (!execution.isCurrent(generation)) return false;
+          consumeInner(generation, projected);
+          return true;
+        });
       } catch (error) {
         fail(error);
         return;
       }
-      consumeInner(generation, projected);
     };
 
     const sourceView = asStreamixSource(source);
@@ -166,7 +170,7 @@ export function switchMap<T = any, R = any>(
     }
 
     const baseReturn = output.return?.bind(output);
-    const baseThrow = output.throw?.bind(output);
+    const baseThrow = output.throw!.bind(output);
     output.return = async () => {
       stopped = true;
       stopSourceReadiness();
@@ -179,9 +183,11 @@ export function switchMap<T = any, R = any>(
       stopped = true;
       stopSourceReadiness();
       lifetime?.finish('error');
+      const failure = normalizeError(error);
+      const result = baseThrow(failure);
+      void result.catch(() => {});
       await execution.close(source);
-      if (baseThrow) return baseThrow(normalizeError(error));
-      throw normalizeError(error);
+      return result;
     };
     return output;
   });
