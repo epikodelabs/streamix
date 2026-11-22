@@ -16,13 +16,36 @@ const emptySource = <T>(): AsyncIterator<T> => ({
   next: async () => DONE,
 });
 
+function controlledSource<T>() {
+  let resolve!: (result: IteratorResult<T>) => void;
+  let reject!: (error: Error) => void;
+  let returns = 0;
+  const source: AsyncIterator<T> = {
+    next: () => new Promise((finish, fail) => {
+      resolve = finish;
+      reject = fail;
+    }),
+    async return() {
+      returns++;
+      resolve(DONE);
+      return DONE;
+    },
+  };
+  return {
+    source,
+    release: (result: IteratorResult<T>) => resolve(result),
+    fail: (error: Error) => reject(error),
+    get returns() { return returns; },
+  };
+}
+
 describe('shareReplay', () => {
   // Observe operator-owned subscriber sets without exposing them publicly.
   function subscriberRegistries(): Set<unknown>[] {
     const registries: Set<unknown>[] = [];
     const add = Set.prototype.add;
     spyOn(Set.prototype, 'add').and.callFake(function (this: Set<unknown>, value: unknown) {
-      if (value && typeof value === 'object' && 'pendingResolve' in value && 'pendingReject' in value &&
+      if (value && typeof value === 'object' && 'pending' in value && 'queueHead' in value &&
           !registries.includes(this)) registries.push(this);
       return add.call(this, value);
     });
@@ -81,6 +104,105 @@ describe('shareReplay', () => {
       expect(await collect(op.apply(source()))).toEqual(values);
       expect(await collect(op.apply(emptySource<number>())))
         .toEqual(size === 0 ? [] : values.slice(-size));
+    }
+  });
+
+  for (const bufferSize of [undefined, 200_000]) {
+    it(`replays a 200,000-value history with a ${bufferSize === undefined ? 'default' : 'wrapped finite'} buffer`, async () => {
+      const historySize = 200_000;
+      const sourceSize = historySize + (bufferSize === undefined ? 0 : 7);
+      let pulls = 0;
+      const op = shareReplay<number>(bufferSize);
+      const original = await collect(op.apply({
+        async next() {
+          const value = pulls++;
+          return value < sourceSize ? NEXT(value) : DONE;
+        },
+      }));
+      expect(original.length).toBe(sourceSize);
+
+      const unusedNext = jasmine.createSpy('unused next').and.resolveTo(DONE);
+      const late = op.apply({ next: unusedNext });
+      const peer = op.apply({ next: unusedNext });
+      const start = sourceSize - historySize;
+      expect(await late.next()).toEqual(NEXT(start));
+      expect(await late.next()).toEqual(NEXT(start + 1));
+      expect(await peer.next()).toEqual(NEXT(start));
+      const rest = await collect(late);
+      expect(rest.length).toBe(historySize - 2);
+      expect(rest[0]).toBe(start + 2);
+      expect(rest.at(-1)).toBe(sourceSize - 1);
+      expect(rest.every((value, index) => value === start + index + 2)).toBeTrue();
+      expect(await late.next()).toEqual(DONE);
+      expect(await peer.next()).toEqual(NEXT(start + 1));
+      await peer.return?.();
+      expect(pulls).toBe(sourceSize + 1);
+      expect(unusedNext).not.toHaveBeenCalled();
+    });
+  }
+
+  it('fulfills overlapping live reads in FIFO order', async () => {
+    const input = controlledSource<number | undefined>();
+    const reader = shareReplay<number | undefined>(1).apply(input.source);
+    const first = reader.next();
+    const second = reader.next();
+    await Promise.resolve();
+    input.release(NEXT(undefined));
+    expect(await first).toEqual(NEXT(undefined));
+    input.release(NEXT(2));
+    expect(await second).toEqual(NEXT(2));
+    input.release(DONE);
+    expect(await reader.next()).toEqual(DONE);
+  });
+
+  for (const terminal of ['completion', 'failure', 'cancellation'] as const) {
+    it(`settles every outstanding read on ${terminal}`, async () => {
+      const input = controlledSource<number>();
+      const reader = shareReplay<number>(1).apply(input.source);
+      const pending = Promise.allSettled([reader.next(), reader.next()]);
+      await Promise.resolve();
+      const error = new Error('upstream failed');
+      if (terminal === 'failure') input.fail(error);
+      else if (terminal === 'completion') input.release(DONE);
+      else await reader.return?.();
+
+      const result: PromiseSettledResult<IteratorResult<number>> = terminal === 'failure'
+        ? { status: 'rejected', reason: error }
+        : { status: 'fulfilled', value: DONE };
+      expect(await pending).toEqual([result, result]);
+      expect(await reader.next()).toEqual(DONE);
+      expect(input.returns).toBe(terminal === 'cancellation' ? 1 : 0);
+    });
+  }
+
+  it('does not wait for an unused source to close before serving a new reader', async () => {
+    const input = controlledSource<number>();
+    const op = shareReplay<number>(1);
+    const live = op.apply(input.source);
+    const initial = live.next();
+    await Promise.resolve();
+    input.release(NEXT(1));
+    expect(await initial).toEqual(NEXT(1));
+
+    let closeUnused!: (result: IteratorResult<number>) => void;
+    const unused = new Promise<IteratorResult<number>>(resolve => { closeUnused = resolve; });
+    const unusedReturn = jasmine.createSpy('unused return').and.returnValue(unused);
+    const joining = op.apply({ next: async () => DONE, return: unusedReturn });
+    try {
+      const first = joining.next();
+      const second = joining.next();
+      expect(await first).toEqual(NEXT(1));
+      expect(unusedReturn).toHaveBeenCalledTimes(1);
+      input.release(NEXT(2));
+      expect(await second).toEqual(NEXT(2));
+      const pending = [joining.next(), joining.next()];
+      await joining.return?.();
+      expect(await Promise.all(pending)).toEqual([DONE, DONE]);
+      expect(input.returns).toBe(0);
+    } finally {
+      closeUnused(DONE);
+      await joining.return?.();
+      await live.return?.();
     }
   });
 
