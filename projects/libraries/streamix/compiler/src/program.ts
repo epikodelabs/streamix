@@ -106,18 +106,20 @@ export function streamixPathKey(path: string): string {
  * Creates a semantic program with in-memory overlays. Overlay text replaces
  * disk content and can introduce virtual files. Each overlay keeps one
  * SourceFile instance: recreating it would split nodes and symbols across
- * instances and corrupt the checker.
+ * instances and corrupt the checker. Set includeOverlayRoots to false when
+ * edited files should participate only if their configured graph reaches them.
  */
 export function createStreamixProgram(
   config: StreamixProgramConfig,
   overlays: ReadonlyMap<string, string> = new Map(),
   oldProgram?: ts.Program,
+  includeOverlayRoots = true,
 ): ts.Program {
   const options = config.options;
   // Prefer the config's spelling when an overlay only differs by separators
   // or the casing of a path on a case-insensitive host.
   const roots = new Map<string, string>();
-  for (const path of [...config.fileNames, ...overlays.keys()]) {
+  for (const path of includeOverlayRoots ? [...config.fileNames, ...overlays.keys()] : config.fileNames) {
     const key = streamixPathKey(path);
     if (!roots.has(key)) roots.set(key, path);
   }
