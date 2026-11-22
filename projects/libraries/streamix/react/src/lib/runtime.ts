@@ -12,7 +12,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { Readable, DependencySource, Writable } from "@epikodelabs/streamix";
-import { NO_INITIAL_VALUE, __streamixRuntime } from "@epikodelabs/streamix";
+import { NO_INITIAL_VALUE, __streamixRuntime, ɵcreateDisposer, ɵtrackDisposal, waitForDisposal } from "@epikodelabs/streamix";
 import { recordStreamixDevtoolsEvent, streamixDevtoolsEnabled } from "./devtools";
 
 export type AtomSnapshot = Record<string, unknown>;
@@ -23,7 +23,7 @@ export interface AtomSnapshotPayload {
   readonly atoms: AtomSnapshot;
 }
 
-type Disposable = { dispose(): void };
+type Disposable = { dispose(): void | Promise<void> };
 type Listener = () => void;
 
 async function settleSubscriptionTeardown(stop: () => unknown): Promise<void> {
@@ -36,7 +36,7 @@ async function settleSubscriptionTeardown(stop: () => unknown): Promise<void> {
 
 type CompilerSubscriptionEntry = {
   listeners: Set<Listener>;
-  stop: (() => void) | null;
+  stop: (() => void | Promise<void>) | null;
   generation: number;
   version: number;
   value: unknown;
@@ -102,29 +102,27 @@ function readSourceState(source: DependencySource<unknown>): SourceState {
 export interface StreamixLifetime {
   readonly disposed: boolean;
   retain(value: unknown): void;
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 export function createStreamixLifetime(): StreamixLifetime {
   const owned = new Set<Disposable>();
   let disposed = false;
-  return {
+  const lifetime: StreamixLifetime = {
     get disposed() { return disposed; },
     retain(value) {
       if (disposed) throw new Error("Cannot register a Streamix instance with a disposed lifetime.");
       if (isDisposable(value)) owned.add(value);
     },
-    dispose() {
-      if (disposed) return;
+    dispose: ɵcreateDisposer(queue => {
       disposed = true;
-      const errors: unknown[] = [];
-      for (const instance of owned) {
-        try { instance.dispose(); } catch (error) { errors.push(error); }
-      }
+      for (const instance of owned) queue.run(() => instance.dispose());
       owned.clear();
-      if (errors.length) throw new AggregateError(errors, "Streamix lifetime disposal failed.");
-    },
+      // React may run a parent's effect cleanup before its children's cleanup.
+      queue.run(() => Promise.resolve().then(() => waitForDisposal(lifetime)));
+    }),
   };
+  return lifetime;
 }
 
 const StreamixLifetimeContext = createContext<StreamixLifetime | null>(null);
@@ -306,7 +304,7 @@ export function useStreamixLocal<T>(factory: () => T): T {
           if (compilerLocalDisposals.get(instance) !== token) return;
           compilerLocalDisposals.delete(instance);
         }
-        if (isDisposable(instance)) instance.dispose();
+        if (isDisposable(instance)) void settleSubscriptionTeardown(() => instance.dispose());
       });
     };
   }, [lifetime]);
@@ -321,6 +319,7 @@ export function useStreamixLocal<T>(factory: () => T): T {
  * no trace event. The explicit read hatches pass `dedupe: false` to keep
  * their in-place-mutation re-render contract. */
 export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "dynamic atom", dedupe = true): T {
+  const lifetime = useContext(StreamixLifetimeContext);
   const entryFor = (): CompilerSubscriptionEntry => {
     const sourceKey = source as unknown as object;
     let modes = compilerSubscriptions.get(sourceKey);
@@ -398,28 +397,30 @@ export function useStreamixSource<T>(source: DependencySource<T>, sourceName = "
           })
           : null;
         const valueStop = entry.stop;
-        entry.stop = () => {
-          void settleSubscriptionTeardown(valueStop);
-          if (stopError) void settleSubscriptionTeardown(stopError);
-        };
+        entry.stop = ɵcreateDisposer(queue => {
+          queue.run(valueStop);
+          if (stopError) queue.run(stopError);
+        });
       }
       entry.listeners.add(notify);
       return () => {
         entry!.listeners.delete(notify);
         if (entry!.listeners.size > 0) return;
         const generation = ++entry!.generation;
-        queueMicrotask(() => {
+        const completion = Promise.resolve().then(() => {
           if (entry!.generation !== generation || entry!.listeners.size > 0) return;
           __streamixTrace("unsubscribe", sourceName);
-          entry!.stop?.();
           const modes = compilerSubscriptions.get(sourceKey);
           if (modes?.get(dedupe) === entry) {
             modes.delete(dedupe);
             if (modes.size === 0) compilerSubscriptions.delete(sourceKey);
           }
+          return entry!.stop?.();
         });
+        if (lifetime) ɵtrackDisposal(lifetime, completion);
+        void settleSubscriptionTeardown(() => completion);
       };
-    }, [dedupe, source, sourceName]);
+    }, [dedupe, lifetime, source, sourceName]);
   const getSnapshot = useCallback(() => {
     const entry = entryFor();
     // Accommodate stores changed before their first subscriber attaches.

@@ -24,7 +24,7 @@ export function ɵcreateSxCompiledBlock<C extends object>(
   last: Node,
   update: (context: C) => void,
   initialContext: C,
-  destroy: () => void = () => {},
+  destroy: () => void | Promise<void> = () => {},
 ): SxCompiledBlockInstance<C> {
   let currentContext = initialContext;
   const instance: SxCompiledBlockInstance<C> = {

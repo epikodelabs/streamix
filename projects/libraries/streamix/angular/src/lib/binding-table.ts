@@ -1,5 +1,7 @@
 import {
   recordStreamixDevtoolsEvent,
+  ɵcreateDisposer,
+  ɵDisposalQueue,
   type DependencySource,
   type Subscription,
 } from '@epikodelabs/streamix';
@@ -22,7 +24,7 @@ import {
   type RendererScheduler,
   type ScheduledBinding,
 } from './render-scheduler';
-import { readSourceState, readViewExpression, subscribeSourceError, viewValue } from './view-value';
+import { combineSubscriptions, readSourceState, readViewExpression, subscribeSourceError, viewValue } from './view-value';
 import { ɵsxCurrentRenderErrorSink } from './error-delivery';
 import { registerSxConstruction } from './block-construction';
 
@@ -33,17 +35,6 @@ type BindingEquals = (previous: unknown, next: unknown) => boolean;
 type BindingReader = () => unknown;
 /** Wrapper avoids the `error === undefined` ambiguity for stored failures. */
 type SlotError = { error: unknown };
-
-function subscriptionFromAll(subscriptions: Subscription[]): Subscription {
-  const combined = (): void => {
-    for (const subscription of subscriptions) subscription();
-  };
-  return Object.assign(combined, {
-    get unsubscribed(): boolean {
-      return subscriptions.every(subscription => subscription.unsubscribed);
-    },
-  });
-}
 
 /**
  * Preallocated binding table used by compiler-generated Streamix Angular views.
@@ -70,6 +61,7 @@ export class SxBindingTable {
 
   private scheduled?: ScheduledBinding;
   private destroyed = false;
+  private readonly disposals = new ɵDisposalQueue();
   /** Captured at creation so delivery always uses the owning application's handler. */
   private readonly errorSink = ɵsxCurrentRenderErrorSink();
 
@@ -239,23 +231,19 @@ export class SxBindingTable {
   }
 
   /** Tears down every source subscription and releases all table slots. */
-  destroy(): void {
-    if (this.destroyed) {
-      return;
-    }
-
+  readonly destroy = ɵcreateDisposer(queue => {
     this.destroyed = true;
 
-    this.scheduled?.destroy();
+    queue.run(() => this.scheduled?.destroy());
     this.scheduled = undefined;
 
     for (let slot = 0; slot < this.size; slot += 1) {
       this.unsubscribeSlot(slot);
-      this.clearSlot(slot);
+      queue.run(() => this.clearSlot(slot));
     }
 
     this.dirtySlots.length = 0;
-  }
+  }, this.disposals);
 
   get pendingCount(): number {
     return this.dirtySlots.length;
@@ -305,7 +293,7 @@ export class SxBindingTable {
         this.markSlotDirty(slot);
       });
       if (errorSubscription) subscriptions.push(errorSubscription);
-      return subscriptions.length === 1 ? subscription : subscriptionFromAll(subscriptions);
+      return subscriptions.length === 1 ? subscription : combineSubscriptions(...subscriptions);
     });
   }
 
@@ -314,7 +302,7 @@ export class SxBindingTable {
       recordStreamixDevtoolsEvent({ type: "unsubscribe", source: this.slotLabel(slot) });
     }
     for (const subscription of this.subscriptions[slot] ?? []) {
-      subscription();
+      this.disposals.run(subscription);
     }
     this.subscriptions[slot] = undefined;
   }

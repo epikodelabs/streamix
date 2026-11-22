@@ -29,6 +29,7 @@ import {
 } from "./expr";
 import { getGlobalScope, isScope, type RootScope } from "./root";
 import type { Subscription } from "./subscription";
+import { ɵcreateDisposer } from "../utils/disposal";
 
 /* ── Internal expression markers for scope() ──────────────────────────────── */
 
@@ -478,12 +479,12 @@ export interface Scope<T extends Record<string, any> = Record<string, any>> {
   <A extends Readable<any>>(atom: A): ScopeAtomValue<A>;
   <A extends Readable<any>[]>(...atoms: A): { [K in keyof A]: ScopeAtomValue<A[K]> };
   type: "scope";
-  cleanups: Set<() => void>;
+  cleanups: Set<() => unknown>;
   parent: Scope | RootScope | null;
   readonly loading: boolean;
   readonly dirty: boolean;
   snapshot(): UnwrapSnapshotValues<T>;
-  dispose(): void;
+  dispose(): Promise<void>;
   _pendingCount: number;
   _dirtyCount: number;
   _exports: Set<string | symbol>;
@@ -669,7 +670,7 @@ function createScopeInternal<T extends Record<string, any>>(
       return out as any;
     },
     dispose() {
-      disposeScope(newScope as any);
+      return disposeScope(newScope);
     },
     _pendingCount: 0,
     _dirtyCount: 0,
@@ -818,10 +819,8 @@ function createScopeInternal<T extends Record<string, any>>(
       loadingAtom.next(false);
     }
 
-    newScope.cleanups.add(() => {
-      if (!loadingAtom.disposed) loadingAtom.dispose();
-      if (!dirtyAtom.disposed) dirtyAtom.dispose();
-    });
+    newScope.cleanups.add(() => loadingAtom.dispose());
+    newScope.cleanups.add(() => dirtyAtom.dispose());
 
     return newScope as any;
   } catch (err) {
@@ -980,39 +979,38 @@ function updateDirtyHierarchy(startNode: Scope | RootScope | null, dynamicDelta:
   updateScopeHierarchy(startNode, { dirty: dynamicDelta });
 }
 
-/**
- * Disposes a scope, its owned atoms, and all registered cleanup hooks.
- */
-export function disposeScope(sc: Scope): void {
-  if (sc._disposed) return;
-  sc._disposed = true;
-  __streamixDebugDispose(sc);
+const scopeDisposals = new WeakMap<Scope, () => Promise<void>>();
 
-  for (const hook of sc.cleanups) {
-    try {
-      hook();
-    } catch (err) {
-      console.error("[streamix] scope cleanup hook threw during disposal:", err);
-    }
+/** Disposes a scope and awaits its owned resources and cleanup hooks. */
+export function disposeScope(sc: Scope): Promise<void> {
+  let dispose = scopeDisposals.get(sc);
+  if (!dispose) {
+    dispose = ɵcreateDisposer(queue => {
+      sc._disposed = true;
+      __streamixDebugDispose(sc);
+
+      for (const hook of sc.cleanups) {
+        queue.run(() => {
+          try { return hook(); }
+          catch (error) {
+            console.error("[streamix] scope cleanup hook threw during disposal:", error);
+            throw error;
+          }
+        });
+      }
+      sc.cleanups.clear();
+
+      updateScopeHierarchy(sc.parent, { pending: -sc._pendingCount, dirty: -sc._dirtyCount });
+      sc._pendingCount = 0;
+      sc._dirtyCount = 0;
+      if (isScope(sc.parent)) sc.parent._ownedAtoms.delete(sc);
+
+      for (const activeItem of sc._ownedAtoms) queue.run(() => activeItem.dispose());
+      sc._ownedAtoms.clear();
+    });
+    scopeDisposals.set(sc, dispose);
   }
-  sc.cleanups.clear();
-
-  updateScopeHierarchy(sc.parent, { pending: -sc._pendingCount, dirty: -sc._dirtyCount });
-  sc._pendingCount = 0;
-  sc._dirtyCount = 0;
-
-  if (isScope(sc.parent)) {
-    sc.parent._ownedAtoms.delete(sc);
-  }
-
-  for (const activeItem of sc._ownedAtoms) {
-    try {
-      (activeItem as any).dispose();
-    } catch (err) {
-      console.error("[streamix] atom disposal threw during scope disposal:", err);
-    }
-  }
-  sc._ownedAtoms.clear();
+  return dispose();
 }
 
 /* ── Registry Linkage Handlers ───────────────────────────────────────────── */

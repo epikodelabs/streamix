@@ -1,4 +1,4 @@
-import { NO_INITIAL_VALUE, type DependencySource, type Subscription } from '@epikodelabs/streamix';
+import { NO_INITIAL_VALUE, ɵcreateDisposer, type DependencySource, type Subscription } from '@epikodelabs/streamix';
 
 /** @internal Sentinel identity used by compiler-generated SSR guards. */
 export const ɵsxNoInitialValue = NO_INITIAL_VALUE;
@@ -25,9 +25,9 @@ export function subscribeSourceError(
 /** Combines value and error subscriptions into one teardown. */
 export function combineSubscriptions(...subscriptions: (Subscription | undefined)[]): Subscription {
   const live = subscriptions.filter((subscription): subscription is Subscription => subscription !== undefined);
-  const combined = (): void => {
-    for (const subscription of live) subscription();
-  };
+  const combined = ɵcreateDisposer(queue => {
+    for (const subscription of live) queue.run(subscription);
+  });
   return Object.assign(combined, {
     get unsubscribed(): boolean {
       return live.every(subscription => subscription.unsubscribed);

@@ -222,13 +222,15 @@ export function emitComponentSetup(
     lines.push(...structural.lines);
     lines.push(`  return {`);
     lines.push(`    destroy() {`);
-    lines.push(`      table.destroy();`);
+    lines.push(`      return ɵdestroySxResources(`);
+    lines.push(`        () => { return table.destroy(); },`);
 
     for (const entry of structural.teardown) {
       // Server rendering creates no block instances, so teardown is optional.
-      lines.push(`      ${entry.block}?.destroy();`);
+      lines.push(`        () => { return ${entry.block}?.destroy(); },`);
     }
 
+    lines.push(`      );`);
     lines.push(`    },`);
     lines.push(`    ɵrestoreMarkers() {`);
 
@@ -726,15 +728,21 @@ function compiledInstanceDestroyLines(
   pad: string,
 ): readonly string[] {
   const lines: string[] = [];
+  const cleanup: string[] = [];
 
   if (body.bindings.length > 0) {
-    lines.push(`${pad}blockTable.destroy();`);
+    cleanup.push('blockTable');
   }
 
   for (const nested of body.nested) {
-    lines.push(`${pad}${nested.variable}.destroy();`);
+    cleanup.push(nested.variable);
   }
 
+  if (cleanup.length > 0) {
+    lines.push(`${pad}return ɵdestroySxResources(`);
+    for (const name of cleanup) lines.push(`${pad}  () => { return ${name}.destroy(); },`);
+    lines.push(`${pad});`);
+  }
   return lines;
 }
 

@@ -1,10 +1,37 @@
-import { atom, scope } from '@epikodelabs/streamix';
+import { atom, DONE, scope, waitForDisposal } from '@epikodelabs/streamix';
 import { createSSRApp, h } from 'vue';
 import { renderToSimpleStream, renderToString } from '@vue/server-renderer';
 import { useIterable } from '../lib/useIterable';
 import { useScope } from '../lib/useScope';
 
 describe('Vue SSR disposal', () => {
+  it('awaits asynchronous cleanup through the SSR request context', async () => {
+    const release = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const context = {};
+    const app = createSSRApp({
+      setup() {
+        useIterable({
+          [Symbol.asyncIterator]: () => ({
+            next: () => new Promise<IteratorResult<number>>(() => {}),
+            return: async () => { started.resolve(); await release.promise; return DONE; },
+          }),
+        }, 0);
+        return () => h('output', 'ready');
+      },
+    });
+    expect(await renderToString(app, context)).toBe('<output>ready</output>');
+    const completion = waitForDisposal(context);
+    let done = false;
+    void completion.then(() => { done = true; });
+    await started.promise;
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(done).toBeFalse();
+    release.resolve();
+    await completion;
+    expect(done).toBeTrue();
+  });
+
   it('unsubscribes bridged sources after renderToString', async () => {
     const shared = atom(0);
     const app = createSSRApp({

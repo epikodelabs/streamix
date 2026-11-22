@@ -14,13 +14,13 @@
  * @internal
  */
 export interface SxConstructionResource {
-  destroy(): void;
+  destroy(): void | Promise<void>;
 }
 
 interface SxConstructionFrame {
   readonly resources: SxConstructionResource[];
   /** Destroys the registered resources, last created first. */
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 const constructionStack: SxConstructionFrame[] = [];
@@ -29,16 +29,12 @@ const constructionStack: SxConstructionFrame[] = [];
 export function beginSxConstruction(): SxConstructionFrame {
   const frame: SxConstructionFrame = {
     resources: [],
-    dispose(): void {
+    dispose: ɵcreateDisposer(queue => {
       for (const resource of frame.resources.reverse()) {
-        try {
-          resource.destroy();
-        } catch (error) {
-          console.error('[streamix] A block construction resource failed to destroy.', error);
-        }
+        queue.run(() => resource.destroy());
       }
       frame.resources.length = 0;
-    },
+    }),
   };
   constructionStack.push(frame);
   return frame;
@@ -64,14 +60,28 @@ export function registerSxConstruction(resource: SxConstructionResource): void {
  */
 export function constructSxBlock<T extends SxConstructionResource>(
   create: () => T,
+  disposals?: ɵDisposalQueue,
 ): T {
   const frame = beginSxConstruction();
   try {
     return create();
   } catch (error) {
-    frame.dispose();
+    const completion = frame.dispose();
+    if (disposals) disposals.track(completion);
+    else void completion.catch(reason => {
+      console.error('[streamix] A block construction resource failed to destroy.', reason);
+    });
     throw error;
   } finally {
     endSxConstruction(frame);
   }
+}
+import { ɵcreateDisposer, type ɵDisposalQueue } from '@epikodelabs/streamix';
+
+
+/** Starts all generated teardown callbacks and awaits every one. @internal */
+export function ɵdestroySxResources(...tasks: ReadonlyArray<() => unknown>): Promise<void> {
+  return ɵcreateDisposer(queue => {
+    for (const task of tasks) queue.run(task);
+  })();
 }
