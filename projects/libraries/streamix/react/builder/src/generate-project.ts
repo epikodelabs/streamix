@@ -8,6 +8,8 @@ import {
   findStreamixProgramConfig,
   injectIntrospectionActivation,
   instrumentStreamixSource,
+  mapVirtualTypeScriptRoots,
+  parseStreamixProgramConfig,
 } from "@epikodelabs/streamix/compiler";
 import { formatReactJsxDiagnostics, transformReactJsx } from "@epikodelabs/streamix/react/compiler";
 
@@ -30,7 +32,8 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
     await stripLegacySidecars(staging);
 
     const files = await collectAdoptableFiles(staging);
-    const program = createSourceProgram(workspaceRoot, sourceRoot);
+    const config = sourceProgramConfig(workspaceRoot, sourceRoot);
+    const program = createStreamixProgram(config);
     const results = new Map<string, { input: string; transformed: ReturnType<typeof transformReactJsx> }>();
     // Collect every file's diagnostics before failing: a single failure names
     // all affected authored files and preserves warnings alongside contract
@@ -81,7 +84,12 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
       await writeFile(join(dirname(outputFile.file), outputFile.mapName), outputFile.map);
     }
     // The tree root maps to `<app>/src` on the virtual tsconfig's level.
-    const entryPath = entry ? relative(staging, entry).replace(/\\/g, "/") : undefined;
+    const entryPath = entry ? `./src/${relative(staging, entry).replace(/\\/g, "/")}` : undefined;
+    const filesInConfig = mapVirtualTypeScriptRoots(
+      config.fileNames.filter(file => !/\.(?:spec|test|sx)\.[jt]sx?$/i.test(file)),
+      source, output, !!config.configPath && relative(dirname(config.configPath), dirname(source)) === "",
+    );
+    if (entryPath && !filesInConfig.includes(entryPath)) filesInConfig.unshift(entryPath);
     // Atomically replace the live tree only after every transform succeeded:
     // rename tolerates a first-run missing output, and a failure before the
     // swap leaves the previous generation serving untouched.
@@ -100,15 +108,15 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
     await writeFileAtomic(
       join(dirname(output), "tsconfig.app.json"),
       `${JSON.stringify({
-        extends: toConfigPath(relative(dirname(output), join(workspaceRoot, "tsconfig.json"))),
+        ...(config.configPath ? { extends: toConfigPath(relative(dirname(output), config.configPath)) } : {}),
         compilerOptions: {
           // The program can combine generated files and authored workspace imports.
           rootDir: toConfigPath(relative(dirname(output), workspaceRoot)),
-          outDir: "../../out-tsc/app", types: [], jsx: "react-jsx", allowJs: true,
+          outDir: "../../out-tsc/app", types: config.options.types ?? [], jsx: "react-jsx", allowJs: true,
         },
-        files: entryPath ? [`src/${entryPath}`] : [],
-        include: ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx"],
-        exclude: ["src/**/*.spec.*", "src/**/*.test.*", "src/**/*.d.ts"],
+        files: filesInConfig,
+        include: config.configPath ? [] : ["src/**/*"],
+        exclude: [],
       }, null, 2)}\n`,
     );
     committed = true;
@@ -236,7 +244,7 @@ async function findEntry(root: string): Promise<string | undefined> {
 
 function toConfigPath(path: string): string {
   const normalized = path.replace(/\\/g, "/");
-  return normalized.startsWith(".") ? normalized : `./${normalized}`;
+  return normalized.startsWith(".") || isAbsolute(path) ? normalized : `./${normalized}`;
 }
 
 async function collectAdoptableFiles(directory: string): Promise<string[]> {
@@ -253,14 +261,29 @@ async function collectAdoptableFiles(directory: string): Promise<string[]> {
 /** One semantic graph per phase and refresh; never retained across saves. */
 export async function regenerateReactFiles(workspaceRoot: string, sourceRoot: string, changedPaths: readonly string[], introspection = false): Promise<void> {
   const source = validatedSourceDirectory(workspaceRoot, sourceRoot);
+  const output = join(workspaceRoot, ".angular", ".streamix", virtualRootOf(sourceRoot));
   const overlays = new Map<string, string>();
   for (const changedPath of changedPaths) {
     const path = changedPath.replace(/\\/g, '/');
     if (!path || isAbsolute(path) || win32.isAbsolute(path) || path.split(/[\\/]/).some(part => part === '..' || part === '.')) continue;
-    if (!/\.[jt]sx?$/i.test(path) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(path)) continue;
+    if (!/\.[jt]sx?$/i.test(path) || /\.(?:spec|test)\.[jt]sx?$/i.test(path)) continue;
     const origin = join(source, path);
-    try { overlays.set(origin, await readFile(origin, 'utf8')); }
-    catch (error) { if (!['ENOENT', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+    let content: string | undefined;
+    try { content = await readFile(origin, 'utf8'); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EISDIR') continue;
+      if (code !== 'ENOENT') throw error;
+    }
+    const mirrored = await access(join(output, path)).then(() => true, error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return false;
+    });
+    if (mirrored !== (content !== undefined)) {
+      await generateReactProject(workspaceRoot, sourceRoot, introspection);
+      return;
+    }
+    if (content !== undefined && !/\.d\.[jt]sx?$/i.test(path)) overlays.set(origin, content);
   }
   const results = new Map<string, ReturnType<typeof transformReactJsx>>();
   if (overlays.size) {
@@ -354,6 +377,12 @@ function createSourceProgram(
   sourceRoot: string,
   overlays = new Map<string, string>(),
 ): ts.Program {
-  const config = findStreamixProgramConfig(join(workspaceRoot, sourceRoot), workspaceRoot);
-  return createStreamixProgram(config, overlays);
+  return createStreamixProgram(sourceProgramConfig(workspaceRoot, sourceRoot), overlays);
+}
+
+function sourceProgramConfig(workspaceRoot: string, sourceRoot: string) {
+  const source = resolve(workspaceRoot, sourceRoot);
+  const appConfig = resolve(source, '..', 'tsconfig.app.json');
+  return ts.sys.fileExists(appConfig) ? parseStreamixProgramConfig(appConfig)
+    : findStreamixProgramConfig(source, workspaceRoot);
 }
