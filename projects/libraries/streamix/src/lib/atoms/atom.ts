@@ -8,7 +8,7 @@ import { iterate } from "./iterate";
 import { DONE, isPromiseLike, NEXT, type MaybePromise } from "./operator";
 export type { Scheduler } from "../runtime/scheduling";
 
-import { ANALOG_DELIVERY, bindProducerCompletion, forwardProducerCompletion } from "./delivery";
+import { ANALOG_DELIVERY, bindProducerCompletion, forwardProducerCompletion, notifyProducerDisposal } from "./delivery";
 import {
   hasAtomEmitted,
   markAtomAsEmitted,
@@ -98,7 +98,8 @@ export interface Readable<T = any> {
   /** Subscribes to atom errors. */
   onError(handler: (error: any) => void): Subscription;
   /** Stops the atom and releases all subscribers/resources. */
-  dispose(): void;
+  /** Stops delivery synchronously. Await the result for asynchronous cleanup. */
+  dispose(): MaybePromise<void>;
   /** Iterates values until producer completion, disposal, or iterator closure. */
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
@@ -412,6 +413,38 @@ export function asReadable<A>(atom: Readable<A>): Readable<A> {
   return view;
 }
 
+/**
+ * Disposes an atom and waits for its cleanup. Aborting the wait rejects with
+ * the signal's reason. The atom stays disposed and cleanup may finish later.
+ */
+export async function disposeAsync(source: Readable<unknown>, options?: { signal?: AbortSignal }): Promise<void> {
+  const cleanup = Promise.resolve(source.dispose());
+  const signal = options?.signal;
+  if (!signal) return cleanup;
+  if (signal.aborted) {
+    void cleanup.catch(() => {});
+    throw signal.reason;
+  }
+  return new Promise<void>((resolve, reject) => {
+    const cancel = () => reject(signal.reason);
+    signal.addEventListener("abort", cancel, { once: true });
+    void cleanup.then(
+      () => { signal.removeEventListener("abort", cancel); resolve(); },
+      error => { signal.removeEventListener("abort", cancel); reject(error); },
+    );
+  });
+}
+
+function throwCleanupErrors(errors: unknown[]): void {
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, "Atom cleanup failed");
+}
+
+async function awaitCleanup(tasks: Iterable<MaybePromise<void>>): Promise<void> {
+  const results = await Promise.allSettled(tasks);
+  throwCleanupErrors(results.flatMap(result => result.status === "rejected" ? [result.reason] : []));
+}
+
 function createTrackedAtomView<A>(owner: EvaluationOwner, atom: Readable<A>): Readable<A> {
   const view = {} as Record<PropertyKey, unknown>;
 
@@ -469,7 +502,7 @@ function finalizeAtomInstance<T extends Readable<any> & InternalAtomContainer>(i
   const dispose = instance.dispose.bind(instance);
   instance.dispose = () => {
     try {
-      dispose();
+      return dispose();
     } finally {
       // Flow cleanup finishes its execution before removing the runtime node.
       // Retain bookkeeping for custom disposers without publishing twice.
@@ -700,6 +733,7 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
   const meta = createAtomRuntimeMeta();
   const errorHandlers = new Set<(error: any) => void>();
   const subs = createSubscriberSet<T>(errorHandlers, config.conflate);
+  let disposal: Promise<void> | undefined;
 
   const instance: Readable<T> & InternalAtomContainer = {
     type: "atom",
@@ -778,7 +812,19 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
     },
 
     [Symbol.asyncIterator]() { return iterate(this); },
-    dispose() { void config.onDispose(instance); },
+    dispose() {
+      if (disposal) return disposal;
+      let resolve!: (value: MaybePromise<void>) => void;
+      let reject!: (error: unknown) => void;
+      disposal = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+      // Existing fire-and-forget disposal remains safe. Awaiting callers can
+      // observe cleanup failures through this same promise.
+      void disposal.catch(() => {});
+      try { resolve(config.onDispose(instance)); }
+      catch (error) { reject(error); }
+      finally { notifyProducerDisposal(instance); }
+      return disposal;
+    },
   };
 
   // Diagnostics-only reader: allocating it costs memory on every atom, so
@@ -835,6 +881,7 @@ function fromIteratorInternal<T>(
   let instance!: Readable<T> & InternalAtomContainer & { fail(err: any, options?: { terminate?: boolean }): void };
   const subscriptions = new Set<Subscription>();
   let iterator: AsyncIterator<T> | undefined;
+  const cleanupErrors: unknown[] = [];
   let awaitingNext = false;
   let execution: ExecutionSpan | undefined;
   let executionExit: FlowExit = "cancel";
@@ -859,12 +906,13 @@ function fromIteratorInternal<T>(
     broadcast(current);
   };
 
-  const stopIterator = async () => {
+  const stopIterator = async (captureFailure: boolean) => {
     // Detach before awaiting return() so reentrant shutdown cannot close it twice.
     const closing = iterator;
     iterator = undefined;
     if (closing && typeof (closing as any).return === "function") {
-      try { await (closing as any).return(); } catch {}
+      try { await closing.return!(); }
+      catch (error) { if (captureFailure) cleanupErrors.push(error); }
     }
   };
 
@@ -875,16 +923,24 @@ function fromIteratorInternal<T>(
     setDirty(false);
     node.version++;
     subs.clear();
+    errorHandlers.clear();
+    notifyProducerDisposal(instance);
+    getScheduler().remove(node);
 
     await released;
 
-    for (const handler of instance[META].disposeHandlers) await Promise.resolve(handler()).catch(() => {});
+    for (const handler of instance[META].disposeHandlers) {
+      try { await handler(); }
+      catch (error) { cleanupErrors.push(error); }
+    }
     instance[META].disposeHandlers.clear();
 
-    for (const sub of subscriptions) await sub().catch(() => {});
+    for (const sub of subscriptions) {
+      try { await sub(); }
+      catch (error) { cleanupErrors.push(error); }
+    }
     subscriptions.clear();
 
-    getScheduler().remove(node);
     cleanupRuntime();
   };
 
@@ -987,19 +1043,22 @@ function fromIteratorInternal<T>(
       if (!subscriptions.delete(unsubscribe)) return;
       await lifecycle.removeSubscriber();
     },
-    onDispose: () => lifecycle.dispose(),
+    onDispose: async () => {
+      await lifecycle.dispose();
+      throwCleanupErrors(cleanupErrors);
+    },
   });
 
   const { instance: baseInstance, errorHandlers, subs } = base;
   instance = baseInstance as typeof instance;
   lifecycle = new AtomLifecycle({
     start: session => { void run(session).catch(() => {}); },
-    release: async () => {
+    release: async (_session, reason) => {
       if (execution !== undefined) {
         execution.finish(executionExit, executionExit === "error" ? errorValue : undefined);
         execution = undefined;
       }
-      await stopIterator();
+      await stopIterator(reason === "dispose" || reason === "idle");
     },
     dispose: released => disposeInstance(released),
   });
@@ -1141,6 +1200,7 @@ export function flow<T>(
       let controller: AbortController | undefined;
       const latest = createLatestAsyncCoordinator<T>();
       let stopped = false;
+      const cleanupErrors: unknown[] = [];
 
       const makeSource = (): AsyncIterator<T> => {
         const localController = new AbortController();
@@ -1194,7 +1254,8 @@ export function flow<T>(
             }
           } finally {
             cleanupDeps?.();
-            await (iterator as any).return?.().catch?.(() => {});
+            try { await iterator.return?.(); }
+            catch (error) { if (stopped) cleanupErrors.push(error); }
           }
         }
 
@@ -1231,6 +1292,7 @@ export function flow<T>(
           stopped = true;
           controller?.abort();
           await latest.return();
+          throwCleanupErrors(cleanupErrors);
           return DONE;
         }
       };
@@ -1376,13 +1438,14 @@ export function atom<T = any>(
       internalRuntime.dispose(instance);
       setDirty(false);
       getScheduler().remove(node);
-      for (const h of instance[META].disposeHandlers) Promise.resolve(h()).catch(() => {});
+      const cleanup = Array.from(instance[META].disposeHandlers, async handler => handler());
       instance[META].disposeHandlers.clear();
       for (const s of subscriptions) s();
       subscriptions.clear();
       subs.clear();
       errorHandlers.clear();
       cleanupRuntime();
+      return awaitCleanup(cleanup);
     },
   });
 
@@ -1885,15 +1948,12 @@ export function derived<T>(...args: any[]): Readable<T> {
       dependencies.clear();
       subs.clear();
       errorHandlers.clear();
-      for (const handler of instance[META].disposeHandlers) {
-        Promise.resolve(handler()).catch(() => {});
-      }
+      const cleanup = Array.from(instance[META].disposeHandlers, async handler => handler());
       instance[META].disposeHandlers.clear();
       cleanupRuntime();
 
-      if (typeof computable.onDispose === "function") {
-        computable.onDispose();
-      }
+      if (typeof computable.onDispose === "function") cleanup.push((async () => computable.onDispose!())());
+      return awaitCleanup(cleanup);
     },
   });
 

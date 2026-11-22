@@ -14,6 +14,8 @@ import { isAsyncIterable, isIterable } from '../utils/helpers';
 export type ExpandOptions = {
   traversal?: 'depth' | 'breadth';
   maxDepth?: number;
+  /** Wait for in-flight projection and late child cleanup on cancellation. Defaults to true. */
+  awaitPendingProjection?: boolean;
 };
 
 /**
@@ -28,6 +30,9 @@ export type ExpandOptions = {
  * collected to completion. Traversal applies to each source root in order.
  * Depth-first retains suspended ancestor iterators; breadth-first retains the
  * next-level frontier, which can grow for an infinitely wide level.
+ * Teardown aborts the projector's signal and waits for any child it creates to
+ * close. Set `awaitPendingProjection: false` for projectors that may never
+ * settle. A child that becomes available later is still closed.
  *
  * This is particularly useful for traversing graph or tree-like data, such as
  * file directories or hierarchical API endpoints, where each item might lead
@@ -40,7 +45,7 @@ export type ExpandOptions = {
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const expand = <T = any>(
-  project: (value: T) => MaybePromise<PipeInput<T> | Array<T> | T>,
+  project: (value: T, signal: AbortSignal) => MaybePromise<PipeInput<T> | Array<T> | T>,
   options: ExpandOptions = {}
 ): Operator<T, T> =>
   createOperator<T, T>('expand', function (this: Operator, source) {
@@ -54,7 +59,9 @@ export const expand = <T = any>(
     let tail: Frame | undefined;
     let stopped = false;
     let closing: Promise<void> | undefined;
-    let preparing: StreamixLifetimeSpan | undefined;
+    const controller = new AbortController();
+    const preparations = new Set<Promise<void>>();
+    const preparationSpans = new Set<StreamixLifetimeSpan>();
     const sourceFrame: Frame = { iterator: source, depth: 0 };
 
     const closeIterator = async (iterator: AsyncIterator<T>) => {
@@ -64,18 +71,21 @@ export const expand = <T = any>(
     const close = (outcome: 'cancel' | 'error'): Promise<void> => {
       if (closing) return closing;
       stopped = true;
-      preparing?.finish(outcome);
-      preparing = undefined;
-      const pending: Promise<void>[] = [];
-      for (let frame = head; frame; frame = frame.next) {
-        frame.lifetime?.finish(outcome);
-        pending.push(closeIterator(frame.iterator));
-      }
-      head = tail = undefined;
-      // Close suspended ancestors and the source independently of a possibly
-      // pending pull on the active child.
-      pending.push(closeIterator(source));
-      closing = Promise.all(pending).then(() => {});
+      closing = Promise.resolve().then(async () => {
+        controller.abort();
+        for (const span of preparationSpans) span.finish(outcome);
+        preparationSpans.clear();
+        const pending: Promise<void>[] = [];
+        for (let frame = head; frame; frame = frame.next) {
+          frame.lifetime?.finish(outcome);
+          pending.push(closeIterator(frame.iterator));
+        }
+        head = tail = undefined;
+        // Close suspended ancestors and the source independently of the active child.
+        pending.push(closeIterator(source));
+        if (options.awaitPendingProjection !== false) pending.push(...preparations);
+        await Promise.allSettled(pending);
+      });
       return closing;
     };
 
@@ -85,9 +95,9 @@ export const expand = <T = any>(
       // Each span covers one direct child enumeration, not the whole subtree.
       const lifetime = __streamixBeginLifetime(this);
       lifetime?.start();
-      preparing = lifetime;
+      if (lifetime) preparationSpans.add(lifetime);
       try {
-        const projected = project(value);
+        const projected = project(value, controller.signal);
         const normalized = isPromiseLike(projected) ? await projected : projected;
         // Preserve native iterator cancellation, and don't eagerly materialize
         // synchronous iterables (which may themselves be infinite). Strings
@@ -114,7 +124,7 @@ export const expand = <T = any>(
         if (!stopped) lifetime?.finish('error');
         throw error;
       } finally {
-        preparing = undefined;
+        if (lifetime) preparationSpans.delete(lifetime);
       }
     };
 
@@ -138,7 +148,14 @@ export const expand = <T = any>(
               continue;
             }
             frame.lifetime?.output();
-            await enqueueChildren(result.value, frame.depth);
+            // Register preparation before calling user code, which may
+            // synchronously reenter return() or throw().
+            const preparation = Promise.resolve().then(async () => {
+              if (!stopped) await enqueueChildren(result.value, frame.depth);
+            });
+            preparations.add(preparation);
+            try { await preparation; }
+            finally { preparations.delete(preparation); }
             if (stopped) return DONE;
             return NEXT(result.value);
           }

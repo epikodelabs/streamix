@@ -16,6 +16,7 @@ export { setOriginCapture };
 export { setRuntimeInstrumentationEnabled, isRuntimeInstrumentationEnabled };
 /** Runtime access for the introspection entry; internal tooling surface. */
 export { internalRuntime as __streamixRuntime, installRuntimeDiagnostics };
+export { WeakKeyMap as __StreamixWeakKeyMap } from './weak-key-map';
 export type {
   RuntimeNode, RuntimeGraph, StreamixRuntime, ExecutionSpan, FlowExit,
   RuntimeDiagnosticsPort, RuntimeExecutionsPort,

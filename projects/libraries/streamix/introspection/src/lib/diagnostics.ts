@@ -11,6 +11,7 @@ import {
   setRuntimeInstrumentationEnabled,
   installRuntimeDiagnostics,
   __streamixRuntime,
+  __StreamixWeakKeyMap,
   type RuntimeGraph,
   type RuntimeNode,
   type StreamixRuntime,
@@ -45,7 +46,7 @@ interface ExecutionRecord {
 
 export class RuntimeExecutions {
   private readonly active = new Map<RuntimeNode, number>();
-  private readonly records = new Map<RuntimeNode, ExecutionRecord>();
+  private readonly records = new __StreamixWeakKeyMap<ExecutionRecord>();
   private generation = 0;
   private started = 0;
   private completed = 0;
@@ -161,7 +162,7 @@ export class RuntimeDiagnostics implements RuntimeDiagnosticsPort {
   private readonly origins = new WeakMap<RuntimeNode, RuntimeOrigin>();
   private readonly atomStates = new WeakMap<RuntimeNode, () => AtomStateReader>();
   private readonly scopeStates = new WeakMap<RuntimeNode, () => ScopeDiagnosticsState>();
-  private readonly flowStates = new Map<RuntimeNode, () => FlowDiagnosticsState>();
+  private readonly flowStates = new __StreamixWeakKeyMap<() => FlowDiagnosticsState>();
   readonly executions = new RuntimeExecutions();
 
   constructor(private readonly events: RuntimeEventBus) {}
@@ -203,7 +204,7 @@ export class RuntimeDiagnostics implements RuntimeDiagnosticsPort {
 
   /** Live flows, including idle and recoverably failed producers; disposed flows are removed. */
   flows(graph: RuntimeGraph) {
-    return Object.freeze(Array.from(this.flowStates, ([node, read]) => Object.freeze({
+    return Object.freeze(Array.from(this.flowStates.entries(), ([node, read]) => Object.freeze({
       node, ...read(), origin: this.origins.get(node), execution: this.executions.describe(node),
       dependencies: Object.freeze([...graph.dependencies(node)]),
       dependents: Object.freeze([...graph.dependents(node)]),

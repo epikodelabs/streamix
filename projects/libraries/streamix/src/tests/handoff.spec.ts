@@ -173,7 +173,7 @@ describe('handoff', () => {
     expect(disposed).toEqual(['r1']);
   });
 
-  it('cancels immediately while waiting for the final preparation after source completion', async () => {
+  it('stops reads immediately and waits for cleanup of the final preparation', async () => {
     const never = deferred<string>();
     const signals: AbortSignal[] = [];
     const disposed: string[] = [];
@@ -184,12 +184,15 @@ describe('handoff', () => {
     }).apply(from([1])[Symbol.asyncIterator]());
     const pending = iterator.next();
     await wait(0);
-    await iterator.return?.();
-    expect(signals[0].aborted).toBeTrue();
+    const closing = iterator.return?.();
+    let closed = false;
+    void closing?.then(() => { closed = true; });
     expect((await pending).done).toBeTrue();
+    expect(signals[0].aborted).toBeTrue();
+    expect(closed).toBeFalse();
 
     never.resolve('r1');
-    await wait(5);
+    await closing;
     expect(disposed).toEqual(['r1']);
   });
 

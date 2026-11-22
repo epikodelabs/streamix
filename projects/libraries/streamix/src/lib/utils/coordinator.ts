@@ -622,7 +622,9 @@ export function raceNext<T>(
   const pending = Promise.resolve(iterator.next());
   return new Promise<IteratorResult<T>>((resolve, reject) => {
     const onAbort = () => resolve({ done: true, value: undefined as any });
-    signal.addEventListener("abort", onAbort, { once: true });
+    // The source can abort synchronously from inside next().
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
     pending.then(
       (result) => {
         signal.removeEventListener("abort", onAbort);

@@ -3,6 +3,7 @@ import { runtimeScheduling, RuntimeScheduling, type SchedulableNode } from "./sc
 import { RuntimeEventBus } from "./events";
 import { isRuntimeInstrumentationEnabled } from "./instrumentation";
 import type { RuntimeOrigin } from "./origin";
+import { WeakKeyMap } from "./weak-key-map";
 
 export type RuntimeNode = object;
 export type { RuntimeEvent, RuntimeEventKind, RuntimeEventBus } from "./events";
@@ -442,8 +443,10 @@ export class StreamixRuntime {
  * Kept local to the core: diagnostics reads it, nothing else writes it.
  */
 export class RuntimeGraph {
-  private readonly upstream = new Map<RuntimeNode, Set<RuntimeNode>>();
-  private readonly downstream = new Map<RuntimeNode, Set<RuntimeNode>>();
+  // Each reachable node retains its edges. The runtime itself must not own
+  // an otherwise unreachable graph, including disconnected cycles of refs.
+  private readonly upstream = new WeakKeyMap<Set<RuntimeNode>>();
+  private readonly downstream = new WeakMap<RuntimeNode, Set<RuntimeNode>>();
 
   register(node: RuntimeNode): void {
     if (!this.upstream.has(node)) this.upstream.set(node, new Set());

@@ -3,6 +3,31 @@ import { DONE, fromPush, type PushSink } from '@epikodelabs/streamix';
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 describe('fromPush()', () => {
+  it('awaits cleanup returned after synchronous producer completion', async () => {
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const cleanup = jasmine.createSpy('cleanup').and.callFake(async () => {
+      started.resolve();
+      await release.promise;
+    });
+    const source = fromPush<number>(sink => {
+      sink.complete();
+      return cleanup;
+    });
+    source.subscribe();
+
+    let settled = false;
+    const teardown = source.dispose();
+    void Promise.resolve(teardown).then(() => { settled = true; });
+    expect(source.dispose()).toBe(teardown);
+    await started.promise;
+    expect(settled).toBeFalse();
+
+    release.resolve();
+    await teardown;
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
   it('drains blocked producers before completing a backpressured session', async () => {
     let sink!: PushSink<number>;
     const source = fromPush<number>(s => { sink = s; }, { capacity: 1 });

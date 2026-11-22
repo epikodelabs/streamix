@@ -7,6 +7,8 @@ import { createAsyncPushable } from '../utils';
  * resources it swaps in.
  */
 export interface HandoffOptions<T, R> {
+  /** Wait for superseded work even after normal completion. Use for owner-scoped resources. */
+  awaitSupersededOnCompletion?: boolean;
   /**
    * Builds the resource for a source value — for example, starts loading an
    * image, opening a connection, or mounting a worker.
@@ -73,10 +75,11 @@ export interface HandoffOptions<T, R> {
  * ## Cooperation requirements
  *
  * `prepare` and `ready` should honor their abort signal. The latest hooks
- * gate normal completion. Cancellation aborts pending work and closes the
- * output immediately. Superseded work may settle later, and its resources
- * are disposed. The asynchronous `dispose` hook runs at most once per
- * resource, and its promise never delays completion.
+ * gate normal completion. Cancellation aborts pending work and closes reads
+ * immediately. Awaiting cancellation also waits for outstanding preparations
+ * and resource disposal. After normal completion, superseded preparations
+ * may settle in the background. Set `awaitSupersededOnCompletion` when the
+ * resources depend on an owning session that will be closed.
  *
  * Typical scenarios:
  *
@@ -117,22 +120,34 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
     let hasActive = false;
     let latestPending = false;
     let controller: AbortController | undefined;
-    const dispose = (value: R) => { void Promise.resolve().then(() => options.dispose(value)).catch(() => {}); };
-    const stop = () => {
-      if (stopped) return;
-      stopped = true; generation++; controller?.abort();
-      if (hasActive) dispose(active as R);
-      hasActive = false;
-      void Promise.resolve(source.return?.()).catch(() => {});
+    let closing: Promise<void> | undefined;
+    const preparations = new Set<Promise<void>>();
+    const disposals = new Set<Promise<void>>();
+    const track = (pending: Set<Promise<void>>, work: Promise<void>) => {
+      const task = work.catch(() => {});
+      pending.add(task);
+      void task.then(() => pending.delete(task));
+    };
+    const dispose = (value: R) => track(disposals, Promise.resolve().then(() => options.dispose(value)));
+    const stop = (closeSource = true) => {
+      if (closing) return closing;
+      stopped = true;
+      generation++;
+      closing = Promise.resolve().then(async () => {
+        controller?.abort();
+        if (hasActive) dispose(active as R);
+        active = undefined;
+        hasActive = false;
+        if (closeSource) track(disposals, Promise.resolve().then(async () => { await source.return?.(); }));
+        if (closeSource || options.awaitSupersededOnCompletion) await Promise.all(preparations);
+        while (disposals.size) await Promise.all(disposals);
+      });
+      return closing;
     };
     const fail = (error: unknown) => { if (!stopped) { stop(); output.fail(normalizeError(error)); } };
     const finish = () => {
       if (stopped || !sourceDone || latestPending) return;
-      stopped = true;
-      generation++;
-      controller?.abort();
-      if (hasActive) dispose(active as R);
-      hasActive = false;
+      void stop(false);
       output.dispose();
     };
     void (async () => {
@@ -146,7 +161,8 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
           latestPending = true;
           const lifetime = __streamixBeginLifetime(operator);
           lifetime?.start();
-          void (async () => {
+          track(preparations, Promise.resolve().then(async () => {
+            if (signal.aborted || stopped) { lifetime?.finish('cancel'); return; }
             let resource: R;
             try { resource = await options.prepare(item.value, signal); }
             catch (error) { lifetime?.finish('error'); if (!signal.aborted && version === generation) fail(error); return; }
@@ -160,12 +176,12 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
             lifetime?.output();
             lifetime?.finish('complete');
             if (hadOld) dispose(old as R);
-          })().finally(() => {
+          }).finally(() => {
             if (version === generation) {
               latestPending = false;
               finish();
             }
-          });
+          }));
         }
         sourceDone = true;
         finish();
@@ -173,8 +189,8 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
     })();
     return {
       next: () => output.next(),
-      async return() { stop(); output.dispose(); return DONE; },
-      async throw(error: unknown) { fail(error); throw normalizeError(error); },
+      async return() { const teardown = stop(); output.dispose(); await teardown; return DONE; },
+      async throw(error: unknown) { fail(error); await stop(); throw normalizeError(error); },
     };
   });
 }

@@ -1,4 +1,4 @@
-import { abortError, combineSignals } from './abort';
+import { abortError, combineSignals, onAbort } from './abort';
 import { flow, normalizeError, type Stream } from './stream';
 import type { ParserFunction } from './readers';
 
@@ -199,14 +199,26 @@ export const useRetry = (
   shouldRetry: (error: unknown, context: Context) => boolean = isRetryableError,
 ): Middleware =>
   (next) => async (context) => {
+    const { signal } = context.init;
     for (let retry = 0; ; retry++) {
+      signal?.throwIfAborted();
       try {
         return await next(cloneRequest(context));
       } catch (error) {
+        signal?.throwIfAborted();
         if (retry >= maxRetries || !shouldRetry(error, context)) {
           throw normalizeError(error);
         }
-        await new Promise((resolve) => setTimeout(resolve, backoffBase * 2 ** retry));
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            stop?.();
+            resolve();
+          }, backoffBase * 2 ** retry);
+          const stop = signal ? onAbort(signal, reason => {
+            clearTimeout(timer);
+            reject(reason);
+          }) : undefined;
+        });
       }
     }
   };

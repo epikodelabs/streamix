@@ -245,9 +245,12 @@ describe('flattening emission lifetimes', () => {
       const op = instrument('pending-other-' + name, factory(() => pending.promise));
       const iterator = op.apply(from([1])[Symbol.asyncIterator]());
       const reading = iterator.next();
-      await tick(); now = 20; await iterator.return?.();
+      await tick(); now = 20;
+      const closing = iterator.return?.();
+      await tick();
       expect(summaries('pending-other-' + name)).toEqual([jasmine.objectContaining({ durationMs: 20, outcome: 'cancel', outputs: 0 })]);
       now = 50; pending.resolve(9);
+      await closing;
       expect(await reading).toEqual(DONE);
       expect(await iterator.next()).toEqual(DONE);
       expect(summaries('pending-other-' + name).length).toBe(1);

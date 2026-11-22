@@ -50,11 +50,16 @@ describe('share', () => {
     await current.return?.();
     await current.return?.();
     expect(sources[1].returns).toBe(0);
+    const remaining = other.next();
+    expect(await remaining).toEqual({ value: 7, done: false });
+    const live = other.next();
+    sources[1].emit(8);
+    expect(await live).toEqual({ value: 8, done: false });
     await other.return?.();
     expect(sources[1].returns).toBe(1);
-    sources[1].emit(8);
+    sources[1].emit(9);
     await wait(0);
-    expect(sources[1].pulls).toBe(2);
+    expect(sources[1].pulls).toBe(3);
   });
 
   it('shares one source execution across overlapping consumers', async () => {

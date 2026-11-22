@@ -23,12 +23,14 @@ interface Readable<T> {
   readonly error?: any;      // Last error captured by this atom, if any
   subscribe(callback?: (current: T, previous: T) => void | Promise<void>): Subscription;
   onError(handler: (error: any) => void): Subscription;
-  dispose(): void;
+  dispose(): void | Promise<void>;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 ```
 
-`value` throws while the atom is in an error state; `safeValue` never does. Subscriptions can be released by calling the returned `Subscription`, and `dispose()` stops the atom and releases every subscriber and resource it owns.
+`value` throws while the atom is in an error state. `safeValue` remains available. Call the returned `Subscription` to unsubscribe. Calling `dispose()` stops delivery immediately. Await it to wait for resource cleanup and observe cleanup failures reported by the producer. Repeated calls on a Streamix atom share the same teardown.
+
+A producer's iterator can ignore cancellation or leave its `return()` pending. Use `await disposeAsync(source, { signal })` to limit how long the caller waits. Aborting that signal rejects with its reason while the atom stays disposed and cleanup can continue in the background.
 
 > **Note:** `derived()` and `flow()` return `Readable<T>`. `Writable<T>` extends `Readable<T>` with mutation methods: `.next(value)`, its alias `.set(value)`, `.fail(error, { terminate?: boolean })` to enter an error state, and optional `.recover()` / `.clearError()` to leave a recoverable error state. `atom()` returns `Atom<T>`, which is both `Readable<T>` and `Writable<T>`.
 
@@ -186,6 +188,28 @@ type CombinedValue = AtomValue<typeof combined>; // [number, string]
 Atoms are also async iterable, so `for await (const value of count)` consumes emissions until the producer completes, the atom is disposed, or the loop breaks.
 
 ---
+
+### Resource ownership with `using`
+
+`using` acquires a resource when the first consumer attaches. Subscribers and one iterator share the session. After the last consumer cancels, Streamix closes the child iterator, disposes the session, and allows a later consumer to acquire a fresh session. Completion and failure are terminal.
+
+```ts
+const player = using({
+  acquire: signal => openMediaSession(signal),
+  stream: session => pipe(selectedVideo, handoff({
+    awaitSupersededOnCompletion: true,
+    prepare: (url, signal) => session.createPlayer(url, signal),
+    ready: (player, signal) => player.waitUntilPlayable(signal),
+    dispose: player => player.close(),
+  })),
+  dispose: session => session.close(),
+});
+
+const unsubscribe = player.subscribe(displayPlayer);
+await unsubscribe();
+```
+
+Awaiting the last unsubscribe waits for player cleanup and session disposal. If stream execution and cleanup both fail, the reported `AggregateError` has the original stream error as its cause.
 
 ## 3. The Standard Scope Blueprint
 

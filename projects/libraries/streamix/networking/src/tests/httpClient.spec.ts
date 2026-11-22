@@ -242,6 +242,54 @@ describe('execution middleware', () => {
     expect(attempts).toBe(3);
   });
 
+  it('preserves the abort reason and skips the initial attempt for an aborted request', async () => {
+    const caller = new AbortController();
+    const reason = new Error('caller cancelled');
+    caller.abort(reason);
+    const fetch = jasmine.createSpy('fetch').and.rejectWith(new Error('transport failed'));
+    const client = withFetch(fetch).withDefaults(useRetry(2, 0));
+
+    const read = client.request('/retry', readJson, { signal: caller.signal })[Symbol.asyncIterator]().next();
+
+    await expectAsync(read).toBeRejectedWith(reason);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  for (const cancelBy of ['caller abort', 'iterator return'] as const) {
+    it(`interrupts pending retry backoff on ${cancelBy}`, async () => {
+      const caller = new AbortController();
+      const reason = new Error('caller cancelled during retry');
+      let backingOff!: () => void;
+      const waiting = new Promise<void>(resolve => { backingOff = resolve; });
+      const fetch = jasmine.createSpy('fetch').and.callFake(async (request: Request) => {
+        request.signal.throwIfAborted();
+        throw new Error('retry');
+      });
+      const client = withFetch(fetch).withDefaults(useRetry(2, 10_000, () => {
+        backingOff();
+        return true;
+      }));
+
+      jasmine.clock().install();
+      try {
+        const iterator = client.request('/retry', readJson, { signal: caller.signal })[Symbol.asyncIterator]();
+        const read = iterator.next();
+        await waiting;
+        if (cancelBy === 'caller abort') {
+          caller.abort(reason);
+          await expectAsync(read).toBeRejectedWith(reason);
+        } else {
+          expect(await iterator.return?.()).toEqual(jasmine.objectContaining({ done: true }));
+          expect(await read).toEqual(jasmine.objectContaining({ done: true }));
+        }
+        jasmine.clock().tick(20_000);
+        expect(fetch).toHaveBeenCalledTimes(1);
+      } finally {
+        jasmine.clock().uninstall();
+      }
+    });
+  }
+
   it('honors retry predicates', async () => {
     let attempts = 0;
     const client = createHttpClient().withDefaults(
