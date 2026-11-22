@@ -4,6 +4,7 @@ import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { normalizeError } from "../atoms";
 import { SerialInnerExecution } from "../runtime/serial-inner-execution";
+import { prepareProjection } from "../runtime/projected-inner";
 
 /**
  * Creates a stream operator that maps each value from the source stream to a new
@@ -33,7 +34,6 @@ export const concatMap = <T = any, R = any>(
     const operator = this;
     let lifetime: StreamixLifetimeSpan | undefined;
     const inner = new SerialInnerExecution<R>();
-    let result: IteratorResult<T> | null = null;
 
     const iterator: AsyncIterator<R> = {
       next: async () => {
@@ -42,16 +42,18 @@ export const concatMap = <T = any, R = any>(
             if (inner.stopped) return DONE;
             // If no active inner iterator, pull the next outer value
             if (!inner.active) {
-              result = await source.next();
+              const result = await source.next();
               if (inner.stopped) return DONE;
 
               if (result.done) return DONE;
 
               lifetime = __streamixBeginLifetime(operator);
               lifetime?.start();
-              const projected = project(result.value, outerIndex++);
-              const innerStream = from<R>(projected);
-              inner.attach(innerStream[Symbol.asyncIterator]() as AsyncIterator<R>);
+              prepareProjection(inner.disposal, () => project(result.value, outerIndex++), projected => {
+                if (inner.stopped) return false;
+                inner.attach(from<R>(projected)[Symbol.asyncIterator]());
+                return true;
+              });
             }
 
             // Pull next value from inner stream

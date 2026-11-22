@@ -1,6 +1,8 @@
 /** Tracks cleanup started at a synchronous lifecycle boundary. @internal */
 export class ɵDisposalQueue {
   private readonly pending = new Set<Promise<unknown>>();
+  private readonly tracked = new WeakSet<Promise<unknown>>();
+  private readonly errors: unknown[] = [];
 
   run(cleanup: () => unknown): void {
     try {
@@ -14,21 +16,23 @@ export class ɵDisposalQueue {
   }
 
   track(task: Promise<unknown>): void {
+    if (this.tracked.has(task)) return;
+    this.tracked.add(task);
     this.pending.add(task);
     const remove = () => { this.pending.delete(task); };
-    void task.then(remove, remove);
+    void task.then(remove, error => {
+      this.errors.push(error);
+      remove();
+    });
   }
 
   async wait(exclude?: Promise<unknown>): Promise<void> {
-    const errors: unknown[] = [];
     let tasks: Promise<unknown>[];
     while ((tasks = [...this.pending].filter(task => task !== exclude)).length) {
-      for (const result of await Promise.allSettled(tasks)) {
-        if (result.status === "rejected") errors.push(result.reason);
-      }
+      await Promise.allSettled(tasks);
     }
-    if (errors.length === 1) throw errors[0];
-    if (errors.length > 1) throw new AggregateError(errors, "Streamix disposal failed.");
+    if (this.errors.length === 1) throw this.errors[0];
+    if (this.errors.length > 1) throw new AggregateError(this.errors, "Streamix disposal failed.");
   }
 }
 

@@ -182,6 +182,11 @@ released after its final consumer leaves.
 
 ## Components and explicit APIs
 
+The compiler tracks `.value` and `['value']` in render expressions when the
+component boundary is visible through JSX or a React wrapper. Plain function
+calls read snapshots. Use `useAtomValue(source)` for a JSX-free component whose
+render boundary is outside the transformed file.
+
 Function components, `memo`, `forwardRef`, recognized aliases, capitalized
 application wrappers, named classes, and anonymous `export default class`
 components can be adopted. Class adoption creates a private function wrapper

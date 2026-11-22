@@ -1,6 +1,7 @@
 import { createOperator, DONE, NEXT, type Operator } from "../atoms";
 import { normalizeError } from "../atoms";
 import { COMPLETED_REPLAY } from '../atoms/replay';
+import { ɵcreateDisposer } from '../utils/disposal';
 
 /**
  * Creates a stream operator that shares a single subscription to the source stream
@@ -122,14 +123,11 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
     try { await source.return?.(); } catch { /* Best-effort upstream teardown. */ }
   };
 
-  const disconnect = () => {
-    if (sourceIterator) {
-      const it = sourceIterator;
-      sourceIterator = null;
-      isConnected = false;
-      activeConnection = null;
-      void closeSource(it);
-    }
+  const disconnect = (it: AsyncIterator<T>) => {
+    sourceIterator = null;
+    isConnected = false;
+    activeConnection = null;
+    return it.return?.();
   };
 
   const connectSource = (source: AsyncIterator<T>) => {
@@ -173,20 +171,21 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
       pendingTail: undefined,
     };
 
-    const cleanup = () => {
+    const cleanup = ɵcreateDisposer(queue => {
       if (subscriber.done) return;
       finishSubscriber(subscriber);
       subscribers.delete(subscriber);
-      if (subscribers.size === 0 && isConnected) {
-        disconnect();
+      const upstream = sourceIterator;
+      if (subscribers.size === 0 && upstream) {
+        queue.run(() => disconnect(upstream));
       }
-    };
+    });
 
     const read = (): IteratorResult<T> | Promise<IteratorResult<T>> => {
       if (subscriber.queueHead < subscriber.queue.length) return dequeue(subscriber);
 
       if (completed) {
-        cleanup();
+        void cleanup();
         if (errorValue !== undefined) throw errorValue;
         return DONE;
       }
@@ -214,18 +213,22 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
           return read();
         } finally {
           if (!completed && !isConnected) connectSource(source);
-          else void closeSource(source);
+          else if (source !== sourceIterator) void closeSource(source);
         }
       },
 
       async return(value?: any) {
-        cleanup();
+        await cleanup();
         return { value, done: true } as IteratorResult<T>;
       },
 
       async throw(err: any) {
-        cleanup();
-        throw normalizeError(err);
+        const error = normalizeError(err);
+        try { await cleanup(); }
+        catch (cleanupError) {
+          throw new AggregateError([error, cleanupError], 'Replay and cleanup failed', { cause: error });
+        }
+        throw error;
       }
     };
 

@@ -1,6 +1,7 @@
 import { createOperator, DONE, normalizeError } from '../atoms';
 import { __streamixBeginLifetime } from '../runtime/introspection-hooks';
 import { createAsyncPushable } from '../utils';
+import { ɵDisposalQueue } from '../utils/disposal';
 
 /**
  * Hooks that {@link handoff} uses to build, validate, and release the
@@ -29,8 +30,8 @@ export interface HandoffOptions<T, R> {
   ready(resource: R, signal: AbortSignal): Promise<unknown> | unknown;
   /**
    * Releases a resource after it is replaced, superseded, or failed, or when
-   * the output completes. Each prepared resource is disposed at most once;
-   * returned rejections are ignored.
+   * the output completes. Each prepared resource is disposed at most once.
+   * Cleanup failures reach the consumer through completion or explicit teardown.
    */
   dispose(resource: R): Promise<void> | void;
 }
@@ -122,13 +123,13 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
     let controller: AbortController | undefined;
     let closing: Promise<void> | undefined;
     const preparations = new Set<Promise<void>>();
-    const disposals = new Set<Promise<void>>();
-    const track = (pending: Set<Promise<void>>, work: Promise<void>) => {
+    const disposals = new ɵDisposalQueue();
+    const trackPreparation = (work: Promise<void>) => {
       const task = work.catch(() => {});
-      pending.add(task);
-      void task.then(() => pending.delete(task));
+      preparations.add(task);
+      void task.then(() => preparations.delete(task));
     };
-    const dispose = (value: R) => track(disposals, Promise.resolve().then(() => options.dispose(value)));
+    const dispose = (value: R) => disposals.track(Promise.resolve().then(() => options.dispose(value)));
     const stop = (closeSource = true) => {
       if (closing) return closing;
       stopped = true;
@@ -138,17 +139,20 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
         if (hasActive) dispose(active as R);
         active = undefined;
         hasActive = false;
-        if (closeSource) track(disposals, Promise.resolve().then(async () => { await source.return?.(); }));
+        if (closeSource) disposals.run(() => source.return?.());
         if (closeSource || options.awaitSupersededOnCompletion) await Promise.all(preparations);
-        while (disposals.size) await Promise.all(disposals);
+        await disposals.wait();
       });
       return closing;
     };
-    const fail = (error: unknown) => { if (!stopped) { stop(); output.fail(normalizeError(error)); } };
+    const fail = (error: unknown) => {
+      if (stopped) return;
+      void stop().catch(() => {});
+      output.fail(normalizeError(error));
+    };
     const finish = () => {
       if (stopped || !sourceDone || latestPending) return;
-      void stop(false);
-      output.dispose();
+      void stop(false).then(() => output.dispose(), error => output.fail(normalizeError(error)));
     };
     void (async () => {
       try {
@@ -161,7 +165,7 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
           latestPending = true;
           const lifetime = __streamixBeginLifetime(operator);
           lifetime?.start();
-          track(preparations, Promise.resolve().then(async () => {
+          trackPreparation(Promise.resolve().then(async () => {
             if (signal.aborted || stopped) { lifetime?.finish('cancel'); return; }
             let resource: R;
             try { resource = await options.prepare(item.value, signal); }
@@ -190,7 +194,15 @@ export function handoff<T, R>(options: HandoffOptions<T, R>) {
     return {
       next: () => output.next(),
       async return() { const teardown = stop(); output.dispose(); await teardown; return DONE; },
-      async throw(error: unknown) { fail(error); await stop(); throw normalizeError(error); },
+      async throw(error: unknown) {
+        const failure = normalizeError(error);
+        fail(failure);
+        try { await stop(); }
+        catch (cleanupError) {
+          throw new AggregateError([failure, cleanupError], 'Handoff and cleanup failed', { cause: failure });
+        }
+        throw failure;
+      },
     };
   });
 }

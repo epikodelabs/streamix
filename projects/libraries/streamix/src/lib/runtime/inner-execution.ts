@@ -8,7 +8,7 @@ export class SwitchingInnerExecution<T> {
   private generation = 0;
   private current: AsyncIterator<T> | null = null;
   private closed = false;
-  private readonly disposal = new ɵDisposalQueue();
+  readonly disposal = new ɵDisposalQueue();
   private closing: Promise<void> | undefined;
 
   /** Invalidates the old projection immediately, even if its promise is pending. */

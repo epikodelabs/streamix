@@ -35,6 +35,97 @@ describe('flattening emission lifetimes', () => {
   beforeEach(() => { now = 0; spyOn(performance, 'now').and.callFake(() => now); });
   afterEach(() => { for (const op of operators.splice(0)) __streamixDebugDispose(op); });
 
+  for (const [name, factory] of [
+    ['concatMap', concatMap], ['exhaustMap', exhaustMap], ['switchMap', switchMap], ['mergeMap', mergeMap],
+  ] as const) {
+    it(name + ' owns a late child even when the projector calls return synchronously', async () => {
+      const outer = deferred<IteratorResult<number>>();
+      const projected = deferred<AsyncIterable<number>>();
+      const entered = deferred<void>();
+      const childClosing = deferred<void>();
+      const childReleased = deferred<void>();
+      const next = jasmine.createSpy('child next').and.resolveTo(NEXT(2));
+      const release = jasmine.createSpy('child return').and.callFake(async () => {
+        childClosing.resolve();
+        await childReleased.promise;
+        return DONE;
+      });
+      let cancelled = false;
+      let closing!: Promise<unknown>;
+      const iterator = factory<number, number>(() => {
+        closing = iterator.return!().then(() => { cancelled = true; });
+        entered.resolve();
+        return projected.promise;
+      }).apply({ next: () => outer.promise, return: async () => DONE });
+      const reading = iterator.next();
+      outer.resolve(NEXT(1));
+      await entered.promise;
+      try {
+        await tick();
+        expect(cancelled).toBeFalse();
+        projected.resolve({ [Symbol.asyncIterator]: () => ({ next, return: release }) });
+        await Promise.race([childClosing.promise, closing]);
+        expect(release).toHaveBeenCalledTimes(1);
+        expect(next).not.toHaveBeenCalled();
+        expect(cancelled).toBeFalse();
+      } finally {
+        childReleased.resolve();
+      }
+      await closing;
+      expect(await reading).toEqual(DONE);
+    });
+  }
+
+  it('switchMap rejects a pending read before a throwing consumer finishes teardown', async () => {
+    const projected = deferred<number>();
+    const entered = deferred<void>();
+    const failure = new Error('consumer failure');
+    const iterator = switchMap<number, number>(() => {
+      entered.resolve();
+      return projected.promise;
+    }).apply(from([1])[Symbol.asyncIterator]());
+    const reading = iterator.next().then(() => 'value', error => error);
+    await entered.promise;
+    const throwing = iterator.throw!(failure).catch(error => error);
+    try {
+      expect(await Promise.race([reading, tick().then(() => 'waiting')])).toBe(failure);
+    } finally {
+      projected.resolve(1);
+    }
+    expect(await throwing).toBe(failure);
+  });
+
+  it('closes a projected synchronous iterator without advancing it on reentrant return', async () => {
+    const next = jasmine.createSpy('child next').and.returnValue(NEXT(2));
+    const close = jasmine.createSpy('child return').and.returnValue(DONE);
+    let closing!: Promise<unknown>;
+    const iterator = concatMap<number, number>(() => {
+      closing = iterator.return!();
+      return Promise.resolve({ [Symbol.iterator]: () => ({ next, return: close }) });
+    }).apply(from([1])[Symbol.asyncIterator]());
+    expect(await iterator.next()).toEqual(DONE);
+    await closing;
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('mergeMap owns an iterator whose factory reenters return during publication', async () => {
+    const next = jasmine.createSpy('child next').and.resolveTo(NEXT(2));
+    const close = jasmine.createSpy('child return').and.resolveTo(DONE);
+    const source = atom(0);
+    let closing!: Promise<unknown>;
+    spyOn(source, Symbol.asyncIterator).and.callFake(() => {
+      closing = iterator.return!();
+      return { next, return: close };
+    });
+    const iterator = mergeMap<number, number>(() => source).apply(from([1])[Symbol.asyncIterator]());
+    expect(await iterator.next()).toEqual(DONE);
+    await closing;
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(next).not.toHaveBeenCalled();
+    await source.dispose();
+  });
+
   for (const [name, factory] of [['concat', concatMap], ['exhaust', exhaustMap]] as const) {
     it(name + ' includes projection waiting and preserves a single terminal snapshot', async () => {
       const pending = deferred<number>();

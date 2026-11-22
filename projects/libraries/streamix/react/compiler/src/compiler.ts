@@ -12,6 +12,13 @@ const SOURCE_API_MEMBERS = new Set([
   "next", "set", "fail", "recover", "clearError",
 ]);
 
+function explicitValueReceiver(node: ts.Node): ts.Expression | undefined {
+  if (ts.isPropertyAccessExpression(node) && node.name.text === "value" ||
+      ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) &&
+        node.argumentExpression.text === "value") return unwrapCast(node.expression);
+  return undefined;
+}
+
 /**
  * True when the expression reads a source API member rather than the
  * source's value. Ordinary value methods (`items.map(...)`) and literal
@@ -188,6 +195,13 @@ function renderValuePosition(value: ts.Node, owner: ts.FunctionLikeDeclarationBa
     if (ts.isStatement(parent) && !ts.isBlock(parent)) statement = parent;
   }
   return undefined;
+}
+
+function containsRenderJsx(body: ts.ConciseBody): boolean {
+  const visit = (node: ts.Node): boolean =>
+    ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node) ||
+    (!ts.isFunctionLike(node) && !ts.isClassLike(node) && ts.forEachChild(node, visit) === true);
+  return visit(body);
 }
 
 /** True when a top-level statement can bypass later compiler-generated hooks. */
@@ -584,6 +598,22 @@ export function transformReactJsx(
   const isJavaScript = /\.[cm]?jsx?$/i.test(fileName);
   const imports = streamixFactoryImports(sourceFile);
   const isReactWrapper = reactWrappers(sourceFile);
+  const jsxComponentNames = new Set<string>();
+  const directComponentCalls = new Set<string>();
+  const collectComponentUses = (node: ts.Node): void => {
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+        ts.isIdentifier(node.tagName) && /^[A-Z]/.test(node.tagName.text) &&
+        !isShadowedName(node.tagName.text, node.tagName, sourceFile)) {
+      jsxComponentNames.add(node.tagName.text);
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = unwrapCast(node.expression);
+      if (ts.isIdentifier(callee) && /^[A-Z]/.test(callee.text) &&
+          !isShadowedName(callee.text, callee, sourceFile)) directComponentCalls.add(callee.text);
+    }
+    ts.forEachChild(node, collectComponentUses);
+  };
+  collectComponentUses(sourceFile);
   const reactNonJsxHook = reactNonJsxHooks(sourceFile);
   let bindingCount = 0;
   let needsRuntimeImport = false;
@@ -729,11 +759,13 @@ export function transformReactJsx(
       return ts.visitEachChild(node, lowerModuleFormulas, context);
     };
 
-    const transformFunction = <T extends ts.FunctionLikeDeclarationBase>(node: T, traceName?: string): T => {
+    const transformFunction = <T extends ts.FunctionLikeDeclarationBase>(node: T, traceName?: string, wrappedByReact = false): T => {
       if (!node.body) return node;
       const functionBody = ts.isBlock(node.body) ? node.body :
         factory.createBlock([factory.createReturnStatement(node.body)], true);
       const isComponent = !!traceName && /^[A-Z]/.test(traceName);
+      const ownsEagerReads = isComponent && !directComponentCalls.has(traceName!) &&
+        (wrappedByReact || jsxComponentNames.has(traceName!) || containsRenderJsx(node.body));
 
       const atoms = new Set<string>(moduleAtoms);
       const scopes = new Set<string>(moduleScopes);
@@ -1356,23 +1388,20 @@ export function transformReactJsx(
           // the whole expression to the subscription binding rather than
           // descending into the base identifier, which would leave the
           // binding (already the current value) with a second `.value`.
-          if (
-            ts.isPropertyAccessExpression(value) &&
-            value.name.text === "value" &&
-            !isHiddenTarget(value.expression)
-          ) {
-            const baseName = atomReferenceName(value.expression, atoms, atomMaps);
+          const receiver = explicitValueReceiver(value);
+          if (receiver && !isHiddenTarget(receiver)) {
+            const baseName = atomReferenceName(receiver, atoms, atomMaps);
             if (baseName) return bindingForAtom(baseName, value);
             if (
-              ts.isElementAccessExpression(value.expression) &&
-              ts.isIdentifier(value.expression.expression) &&
-              atomMaps.has(value.expression.expression.text)
+              ts.isElementAccessExpression(receiver) &&
+              ts.isIdentifier(receiver.expression) &&
+              atomMaps.has(receiver.expression.text)
             ) {
-              if (!canHoistDynamicSource(value.expression)) {
+              if (!canHoistDynamicSource(receiver)) {
                 diagnostics.push(diagnostic(value, "error", "A dynamic atom selection captures a callback-local value and cannot be compiled into a component hook. Move the selection to component scope or use an explicit subscription."));
                 return value;
               }
-              return bindingForSource(value.expression, value.expression.getText(sourceFile), value);
+              return bindingForSource(receiver, receiver.getText(sourceFile), value);
             }
           }
           // Source API members (`safeValue`, `error`, `subscribe`, ...) stay
@@ -1750,7 +1779,7 @@ export function transformReactJsx(
         }
       };
 
-      const eagerReadSites: Array<{ read: ts.PropertyAccessExpression; statementIndex: number }> = [];
+      const eagerReadSites: Array<{ read: ts.Node; statementIndex: number }> = [];
       const visit: ts.Visitor = (child) => {
         if (ts.isCallExpression(child)) {
           const hook = reactNonJsxHook(child.expression);
@@ -1836,8 +1865,9 @@ export function transformReactJsx(
         const writeTarget = reactiveWriteOperand(child);
         if (writeTarget && !isScopeSetterWrite(child, writeTarget, scopeMembers) && reportUnsafeWrite(child, writeTarget)) return child;
 
-        if (isComponent && ts.isPropertyAccessExpression(child) && child.name.text === "value" &&
-            !isHiddenTarget(child.expression) && atomReferenceName(child.expression, atoms, atomMaps)) {
+        const receiver = ownsEagerReads && explicitValueReceiver(child);
+        if (receiver && ts.isExpression(child) &&
+            !isHiddenTarget(receiver) && atomReferenceName(receiver, atoms, atomMaps)) {
           const position = renderValuePosition(child, node);
           if (position) {
             const statementIndex = ts.isStatement(position) ? functionBody.statements.indexOf(position) : -1;
@@ -1942,15 +1972,15 @@ export function transformReactJsx(
       return updateFunctionLike(factory, node, updatedBody);
     };
 
-    const transformInitializer = (expr: ts.Expression, traceName?: string): ts.Expression => {
-      if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) return transformFunction(expr, traceName);
+    const transformInitializer = (expr: ts.Expression, traceName?: string, wrappedByReact = false): ts.Expression => {
+      if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) return transformFunction(expr, traceName, wrappedByReact);
       // A component-shaped callback remains a React render function when it is
       // passed through an application HOC.  React's built-ins are merely the
       // common case; restricting this rewrite to their spelling made ordinary
       // HOCs leave atom objects in JSX.
       if (ts.isCallExpression(expr) && expr.arguments.length > 0 &&
           (isReactWrapper(expr.expression) || (!!traceName && /^[A-Z]/.test(traceName)))) {
-        const first = transformInitializer(expr.arguments[0], traceName);
+        const first = transformInitializer(expr.arguments[0], traceName, wrappedByReact || isReactWrapper(expr.expression));
         return first === expr.arguments[0] ? expr : factory.updateCallExpression(expr, expr.expression, expr.typeArguments, [first, ...expr.arguments.slice(1)]);
       }
       return expr;
@@ -2039,7 +2069,7 @@ export function transformReactJsx(
           // Explicit source methods (especially .next) must keep their source
           // receiver. Their call arguments still descend through the visitor.
           if ((ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) &&
-              !(ts.isPropertyAccessExpression(value) && value.name.text === 'value') &&
+              !explicitValueReceiver(value) &&
               writeSource(value.expression)) return value;
           if (ts.isPropertyAccessExpression(value) && ts.isIdentifier(value.expression) &&
               moduleScopes.has(value.expression.text) && ['get', 'set', 'dispose', 'subscribe'].includes(value.name.text) &&
@@ -2077,11 +2107,11 @@ export function transformReactJsx(
             recordScope(value.expression.text, [value.name.text]);
             return snapshot(`${value.expression.text}.${value.name.text}`);
           }
-          if (ts.isPropertyAccessExpression(value) && value.name.text === "value" &&
-              ts.isIdentifier(value.expression) && moduleAtoms.has(value.expression.text) &&
-              !isShadowedName(value.expression.text, value, node)) {
-            atomSources.add(value.expression.text);
-            return snapshot(value.expression.text);
+          const receiver = explicitValueReceiver(value);
+          const atomName = receiver && writeSource(receiver);
+          if (atomName) {
+            atomSources.add(atomName);
+            return snapshot(atomName);
           }
           if (ts.isIdentifier(value) && moduleAtoms.has(value.text) && !isNamePosition(value) &&
               !isShadowedName(value.text, value, node)) {
@@ -2098,8 +2128,8 @@ export function transformReactJsx(
         if (ts.isJsxExpression(child) && child.expression &&
             !isSharedAtomComponentProp(child, moduleAtoms, moduleAtomMaps))
           return factory.updateJsxExpression(child, rewriteExpression(child.expression));
-        if (render && ts.isPropertyAccessExpression(child) && child.name.text === 'value' &&
-            ts.isIdentifier(child.expression) && writeSource(child.expression) &&
+        const receiver = render && explicitValueReceiver(child);
+        if (render && receiver && ts.isExpression(child) && writeSource(receiver) &&
             renderValuePosition(child, render)) return rewriteExpression(child);
         return ts.visitEachChild(child, visit, context);
       };

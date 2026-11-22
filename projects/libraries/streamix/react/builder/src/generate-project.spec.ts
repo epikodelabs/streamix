@@ -36,6 +36,7 @@ describe("React Angular-hosted source generation", () => {
       `);
       await writeFile(join(source, "main.tsx"), `
         import { status } from './store';
+        import './Widget.jsx';
         export function App() { return <output>{status}</output>; }
       `);
       await writeFile(join(source, "helpers.ts"), `
@@ -100,14 +101,14 @@ describe("React Angular-hosted source generation", () => {
       await writeFile(join(source, "broken.ignored.ts"), "export const broken: number = 'ignored';");
       const virtualRoot = await generateReactProject(root, sourceRoot);
       const configPath = join(dirname(virtualRoot), "tsconfig.app.json");
-      const readProgram = () => {
+      const readProgram = (typecheck = false) => {
         const config = ts.readConfigFile(configPath, ts.sys.readFile);
         const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(configPath));
         expect(parsed.errors).toEqual([]);
-        expect(ts.getPreEmitDiagnostics(ts.createProgram(parsed.fileNames, parsed.options))).toEqual([]);
+        if (typecheck) expect(ts.getPreEmitDiagnostics(ts.createProgram(parsed.fileNames, parsed.options))).toEqual([]);
         return parsed.fileNames.map(file => relative(virtualRoot, file).replace(/\\/g, "/")).sort();
       };
-      expect(readProgram()).toEqual(["globals.d.ts", "main.ts"]);
+      expect(readProgram(true)).toEqual(["globals.d.ts", "main.ts"]);
       const extra = join(source, "extra.d.ts");
       await writeFile(extra, "declare const extraLabel: string;");
       await regenerateReactFile(root, sourceRoot, "extra.d.ts");
@@ -115,6 +116,46 @@ describe("React Angular-hosted source generation", () => {
       await rm(extra);
       await regenerateReactFile(root, sourceRoot, "extra.d.ts");
       expect(readProgram()).toEqual(["globals.d.ts", "main.ts"]);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("skips excluded modules until the authored graph imports them", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-builder-graph-"));
+    const sourceRoot = "projects/apps/demo/src";
+    try {
+      const source = join(root, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", types: [] },
+        include: [sourceRoot + "/**/*"],
+        exclude: [sourceRoot + "/**/*.ignored.tsx"],
+      }));
+      const entry = join(source, "main.ts");
+      const ignoredPath = join(source, "feature.ignored.tsx");
+      const authoredIgnored = `
+        import { atom } from '@epikodelabs/streamix';
+        const count = atom(0);
+        export function Feature() { return <button onClick={() => count = 1}>{count}</button>; }
+      `;
+      await writeFile(entry, "export const label = 'app';");
+      await writeFile(ignoredPath, authoredIgnored);
+      const virtualRoot = await generateReactProject(root, sourceRoot);
+      const virtualIgnored = join(virtualRoot, "feature.ignored.tsx");
+      expect(await readFile(virtualIgnored, "utf8")).toBe(authoredIgnored);
+      await expectAsync(readFile(virtualIgnored + ".map")).toBeRejected();
+      await writeFile(ignoredPath, authoredIgnored + "\n");
+      await regenerateReactFile(root, sourceRoot, "feature.ignored.tsx");
+      expect(await readFile(virtualIgnored, "utf8")).toBe(authoredIgnored + "\n");
+
+      await writeFile(entry, "export { Feature } from './feature.ignored';");
+      await expectAsync(regenerateReactFile(root, sourceRoot, "main.ts")).toBeRejectedWithError(/read-only atom binding/);
+      expect(await readFile(join(virtualRoot, "main.ts"), "utf8")).toContain("export const label");
+      await writeFile(ignoredPath, authoredIgnored.replace('count = 1', 'count.next(1)'));
+      await regenerateReactFile(root, sourceRoot, "feature.ignored.tsx");
+      expect(await readFile(virtualIgnored, "utf8")).toContain("useStreamixSource");
+      expect(await readFile(join(virtualRoot, "main.ts"), "utf8")).toContain("export { Feature }");
     } finally {
       await rm(root, { force: true, recursive: true });
     }
@@ -177,7 +218,7 @@ describe("React Angular-hosted source generation", () => {
       `);
       await generateReactProject(root, sourceRoot);
       const before = await snapshotTree(join(root, ".angular"));
-      await writeFile(join(source, "Broken.jsx"), `
+      await writeFile(join(source, "Broken.tsx"), `
         import { atom } from '@epikodelabs/streamix';
         const count = atom(0);
         export function Broken() { return <button onClick={() => count = 1}>{count}</button>; }
@@ -344,7 +385,7 @@ describe("React Angular-hosted source generation", () => {
       const appDir = join(root, ".angular/.streamix/demo");
       await rename(join(appDir, "src"), join(appDir, ".src-sx-backup-11111111-2222-3333-4444-555555555555"));
       await mkdir(join(appDir, ".src-sx-stage-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), { recursive: true });
-      await writeFile(join(source, "Broken.jsx"), `
+      await writeFile(join(source, "Broken.tsx"), `
         import { atom } from '@epikodelabs/streamix';
         const count = atom(0);
         export function Broken() { return <button onClick={() => count = 1}>{count}</button>; }

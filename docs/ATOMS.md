@@ -170,6 +170,8 @@ const clicks = flow(clickEvents(), { mode: "discrete" });       // every event m
 
 Returning a `concatMap`, `exhaustMap`, `mergeMap`, or `switchMap` iterator stops delivery and waits for in-flight projection promises so it can close any async iterator they produce. Make sure those promises can settle during shutdown. A `switchMap` replacement can start delivering while the previous projection is still cleaning up.
 
+The last consumer of `share` or `shareReplay` waits for the shared upstream iterator to close. `handoff` reports cleanup failures on cancellation and completion. With `using`, set `awaitSupersededOnCompletion: true` when superseded resources still depend on the owning session.
+
 ```ts
 import { atom, pipe, map, filter, scan, merge } from "@epikodelabs/streamix";
 

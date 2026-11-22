@@ -4,6 +4,7 @@ import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { normalizeError } from "../atoms";
 import { SerialInnerExecution } from "../runtime/serial-inner-execution";
+import { prepareProjection } from "../runtime/projected-inner";
 import { asStreamixSource } from "../utils/source-protocol";
 
 /**
@@ -81,15 +82,16 @@ export const exhaustMap = <T = any, R = any>(
 
             lifetime = __streamixBeginLifetime(operator);
             lifetime?.start();
-            let projected: ReturnType<typeof project>;
             try {
-              projected = project(result.value, outerIndex++);
+              prepareProjection(inner.disposal, () => project(result.value, outerIndex++), projected => {
+                if (inner.stopped) return false;
+                inner.attach(from<R>(projected)[Symbol.asyncIterator]());
+                return true;
+              });
             } catch (err) {
               isSourceDone = true;
               throw normalizeError(err);
             }
-            const innerStream = from<R>(projected);
-            inner.attach(innerStream[Symbol.asyncIterator]() as AsyncIterator<R>);
           }
         } catch (error) { lifetime?.finish('error'); throw error; }
       },

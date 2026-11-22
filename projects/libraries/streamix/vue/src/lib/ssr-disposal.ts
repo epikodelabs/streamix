@@ -5,6 +5,7 @@ import {
   inject,
   onScopeDispose,
   ssrContextKey,
+  type EffectScope,
   type InjectionKey,
 } from 'vue';
 import { ɵcreateDisposer, ɵtrackDisposal } from '@epikodelabs/streamix';
@@ -41,13 +42,19 @@ export function isSSRContext(): boolean {
  * available to waitForDisposal for the effect scope, app, and SSR request.
  */
 export function registerVueDisposal(dispose: () => unknown): void {
-  const scope = getCurrentScope();
+  // Vue stops attached effect scopes recursively. Capture the parent chain
+  // before stop() detaches the scopes. Detached scopes have no parent.
+  type AttachedEffectScope = EffectScope & { readonly parent?: AttachedEffectScope };
+  const scopes: EffectScope[] = [];
+  for (let scope = getCurrentScope() as AttachedEffectScope | undefined; scope; scope = scope.parent) {
+    scopes.push(scope);
+  }
   const app = getCurrentInstance()?.appContext.app;
   const context = ssrRenderContext();
   const stop = ɵcreateDisposer(queue => queue.run(dispose));
   const run = () => {
     const completion = stop();
-    if (scope) ɵtrackDisposal(scope, completion);
+    for (const scope of scopes) ɵtrackDisposal(scope, completion);
     if (app) ɵtrackDisposal(app, completion);
     if (context) ɵtrackDisposal(context, completion);
     void completion.catch(error => {

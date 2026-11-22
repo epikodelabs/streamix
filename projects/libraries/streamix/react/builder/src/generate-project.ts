@@ -10,6 +10,7 @@ import {
   instrumentStreamixSource,
   mapVirtualTypeScriptRoots,
   parseStreamixProgramConfig,
+  streamixPathKey,
 } from "@epikodelabs/streamix/compiler";
 import { formatReactJsxDiagnostics, transformReactJsx } from "@epikodelabs/streamix/react/compiler";
 
@@ -31,9 +32,12 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
     await cp(source, staging, { recursive: true });
     await stripLegacySidecars(staging);
 
-    const files = await collectAdoptableFiles(staging);
-    const config = sourceProgramConfig(workspaceRoot, sourceRoot);
+    const entry = await findEntry(staging);
+    const entryPath = entry ? relative(staging, entry).replace(/\\/g, "/") : undefined;
+    const config = sourceProgramConfig(workspaceRoot, sourceRoot, entryPath && join(source, entryPath));
     const program = createStreamixProgram(config);
+    const files = (await collectAdoptableFiles(staging)).filter(file =>
+      !config.configPath || program.getSourceFile(join(source, relative(staging, file))));
     const results = new Map<string, { input: string; transformed: ReturnType<typeof transformReactJsx> }>();
     // Collect every file's diagnostics before failing: a single failure names
     // all affected authored files and preserves warnings alongside contract
@@ -58,9 +62,8 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
     // metadata positions match the served virtual file. The program over the
     // transformed tree binds the __sxDebug import the pass inserts.
     const registrationProgram = introspection && results.size > 0
-      ? createSourceProgram(workspaceRoot, sourceRoot, new Map([...results].map(([path, result]) => [path, result.transformed.code])))
+      ? createStreamixProgram(config, new Map([...results].map(([path, result]) => [path, result.transformed.code])), undefined, !config.configPath)
       : undefined;
-    const entry = await findEntry(staging);
     const outputs: Array<{ file: string; code: string; mapName: string; map: string }> = [];
     for (const file of files) {
       const original = join(source, relative(staging, file));
@@ -84,12 +87,9 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
       await writeFile(join(dirname(outputFile.file), outputFile.mapName), outputFile.map);
     }
     // The tree root maps to `<app>/src` on the virtual tsconfig's level.
-    const entryPath = entry ? `./src/${relative(staging, entry).replace(/\\/g, "/")}` : undefined;
     const filesInConfig = mapVirtualTypeScriptRoots(
-      config.fileNames.filter(file => !/\.(?:spec|test|sx)\.[jt]sx?$/i.test(file)),
-      source, output, !!config.configPath && relative(dirname(config.configPath), dirname(source)) === "",
+      config.fileNames, source, output,
     );
-    if (entryPath && !filesInConfig.includes(entryPath)) filesInConfig.unshift(entryPath);
     // Atomically replace the live tree only after every transform succeeded:
     // rename tolerates a first-run missing output, and a failure before the
     // swap leaves the previous generation serving untouched.
@@ -116,7 +116,7 @@ export async function generateReactProject(workspaceRoot: string, sourceRoot: st
         },
         files: filesInConfig,
         include: config.configPath ? [] : ["src/**/*"],
-        exclude: [],
+        exclude: config.configPath ? [] : ["src/**/*.spec.*", "src/**/*.test.*"],
       }, null, 2)}\n`,
     );
     committed = true;
@@ -253,9 +253,13 @@ async function collectAdoptableFiles(directory: string): Promise<string[]> {
   for (const entry of entries) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...await collectAdoptableFiles(path));
-    else if (entry.isFile() && /\.[jt]sx?$/i.test(path) && !/\.(?:d|spec|test)\.[jt]sx?$/i.test(path)) files.push(path);
+    else if (entry.isFile() && isAdoptablePath(path)) files.push(path);
   }
   return files;
+}
+
+function isAdoptablePath(path: string): boolean {
+  return /\.[jt]sx?$/i.test(path) && !/\.(?:d|spec|test|sx)\.[jt]sx?$/i.test(path);
 }
 
 /** One semantic graph per phase and refresh; never retained across saves. */
@@ -283,15 +287,33 @@ export async function regenerateReactFiles(workspaceRoot: string, sourceRoot: st
       await generateReactProject(workspaceRoot, sourceRoot, introspection);
       return;
     }
-    if (content !== undefined && !/\.d\.[jt]sx?$/i.test(path)) overlays.set(origin, content);
+    if (content !== undefined && isAdoptablePath(path)) overlays.set(origin, content);
   }
   const results = new Map<string, ReturnType<typeof transformReactJsx>>();
+  let config: ReturnType<typeof sourceProgramConfig> | undefined;
   if (overlays.size) {
-    const program = createSourceProgram(workspaceRoot, sourceRoot, overlays);
+    config = sourceProgramConfig(workspaceRoot, sourceRoot, await findEntry(source));
+    const program = createStreamixProgram(config, overlays, undefined, !config.configPath);
+    if (config.configPath) {
+      // An edit can bring an unchanged, formerly excluded module into the
+      // authored graph. Regenerate before publishing the importing file.
+      const newlyReachable = program.getSourceFiles().filter(file =>
+        !file.isDeclarationFile && isSourceDescendant(source, file.fileName) && isAdoptablePath(file.fileName));
+      const alreadyTransformed = await Promise.all(newlyReachable.map(file =>
+        access(join(output, relative(source, file.fileName)) + '.map').then(() => true, error => {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          return false;
+        })));
+      if (alreadyTransformed.includes(false)) {
+        await generateReactProject(workspaceRoot, sourceRoot, introspection);
+        return;
+      }
+    }
     // A batched watch save reports every failing file in one diagnostic, as
     // full regeneration does; nothing is written unless the batch is clean.
     const failures: string[] = [];
     for (const [origin, content] of overlays) {
+      if (config.configPath && !program.getSourceFile(origin)) continue;
       const transformed = transformReactJsx(content, origin, { program });
       if (transformed.diagnostics.some(item => item.category === 'error')) {
         failures.push(formatReactJsxDiagnostics(content, relative(workspaceRoot, origin), transformed.diagnostics));
@@ -301,8 +323,8 @@ export async function regenerateReactFiles(workspaceRoot: string, sourceRoot: st
     }
     if (failures.length) throw new Error(failures.join("\n\n"));
   }
-  const registrationProgram = introspection && results.size
-    ? createSourceProgram(workspaceRoot, sourceRoot, new Map([...results].map(([path, result]) => [path, result.code])))
+  const registrationProgram = introspection && config && results.size
+    ? createStreamixProgram(config, new Map([...results].map(([path, result]) => [path, result.code])), undefined, !config.configPath)
     : undefined;
   for (const path of changedPaths) await regenerateReactFileInternal(workspaceRoot, sourceRoot, path, introspection, { results, registrationProgram, overlays });
 }
@@ -329,10 +351,17 @@ async function regenerateReactFileInternal(workspaceRoot: string, sourceRoot: st
     return;
   }
   await mkdir(dirname(destination), { recursive: true });
-  if (/\.[jt]sx?$/i.test(normalized) && !/\.(?:d|spec|test)\.[jt]sx?$/i.test(normalized)) {
+  if (isAdoptablePath(normalized)) {
     // Adoption and registration use the same authored snapshot for this batch.
     const transformed = batch.results.get(origin);
-    if (!transformed) return; // A newly appearing file is handled by its next watch event.
+    if (!transformed) {
+      const content = batch.overlays.get(origin);
+      if (content !== undefined) {
+        await writeIfChanged(destination, content);
+        await rm(`${destination}.map`, { force: true });
+      }
+      return;
+    }
     // Registration after adoption (see generateReactProject): the transformed
     // text is what the browser runs, so its positions are the honest metadata.
     let code = transformed.code;
@@ -372,17 +401,23 @@ function serializeSourceMap(
  * Solution-style app tsconfigs (`files: []` + project references) give the
  * checker no roots; the shared resolver falls back to the workspace config,
  * which owns the real source graph. */
-function createSourceProgram(
-  workspaceRoot: string,
-  sourceRoot: string,
-  overlays = new Map<string, string>(),
-): ts.Program {
-  return createStreamixProgram(sourceProgramConfig(workspaceRoot, sourceRoot), overlays);
+function isSourceDescendant(root: string, file: string): boolean {
+  const path = relative(root, file);
+  return path !== ".." && !path.startsWith("..\\") && !path.startsWith("../") && !isAbsolute(path);
 }
 
-function sourceProgramConfig(workspaceRoot: string, sourceRoot: string) {
+function sourceProgramConfig(workspaceRoot: string, sourceRoot: string, entry?: string) {
   const source = resolve(workspaceRoot, sourceRoot);
   const appConfig = resolve(source, '..', 'tsconfig.app.json');
-  return ts.sys.fileExists(appConfig) ? parseStreamixProgramConfig(appConfig)
+  const config = ts.sys.fileExists(appConfig) ? parseStreamixProgramConfig(appConfig)
     : findStreamixProgramConfig(source, workspaceRoot);
+  const appOwnsConfig = !!config.configPath && relative(dirname(config.configPath), dirname(source)) === "";
+  const roots = new Map<string, string>();
+  if (entry) roots.set(streamixPathKey(entry), entry);
+  for (const file of config.fileNames) {
+    if (!/\.(?:spec|test|sx)\.[jt]sx?$/i.test(file) && (appOwnsConfig || isSourceDescendant(source, file))) {
+      roots.set(streamixPathKey(file), file);
+    }
+  }
+  return { ...config, fileNames: [...roots.values()] };
 }
