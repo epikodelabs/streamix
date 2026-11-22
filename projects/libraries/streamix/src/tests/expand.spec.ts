@@ -86,6 +86,45 @@ describe('expand', () => {
   }
 
   for (const method of ['return', 'throw'] as const) {
+    it(`waits for a projected child and its cleanup on ${method}`, async () => {
+      const projectStarted = Promise.withResolvers<AbortSignal>();
+      const projected = Promise.withResolvers<AsyncIterable<number>>();
+      const closingChild = Promise.withResolvers<void>();
+      const releaseChild = Promise.withResolvers<void>();
+      const close = jasmine.createSpy('return').and.callFake(async () => {
+        closingChild.resolve();
+        await releaseChild.promise;
+        return { done: true, value: undefined } as const;
+      });
+      const output = expand<number>((_, signal) => {
+        projectStarted.resolve(signal);
+        return projected.promise;
+      }).apply(from([1])[Symbol.asyncIterator]());
+      const read = output.next();
+      const signal = await projectStarted.promise;
+      const reason = new Error('stop');
+      const teardown = method === 'throw' ? output.throw!(reason) : output.return!();
+      let settled = false;
+      const outcome = teardown.then(
+        () => { settled = true; return undefined; },
+        error => { settled = true; return error; },
+      );
+
+      projected.resolve({ [Symbol.asyncIterator]: () => ({
+        next: async () => ({ done: false, value: 2 }),
+        return: close,
+      }) });
+      await closingChild.promise;
+      expect(signal.aborted).toBeTrue();
+      expect(settled).toBeFalse();
+
+      releaseChild.resolve();
+      expect(await outcome).toBe(method === 'throw' ? reason : undefined);
+      expect(await read).toEqual({ done: true, value: undefined });
+      await output.return?.();
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
     it(`closes suspended ancestors and the source on ${method}`, async () => {
       const returned: number[] = [];
       const child = (value: number) => ({ [Symbol.asyncIterator]: () => ({
@@ -106,6 +145,27 @@ describe('expand', () => {
       expect(returned.length).toBe(3);
     });
   }
+
+  it('supports best-effort cancellation for a projector that does not settle on abort', async () => {
+    const projectStarted = Promise.withResolvers<AbortSignal>();
+    const projected = Promise.withResolvers<AsyncIterable<number>>();
+    const close = jasmine.createSpy('return').and.resolveTo({ done: true, value: undefined });
+    const output = expand<number>((_, signal) => {
+      projectStarted.resolve(signal);
+      return projected.promise;
+    }, { awaitPendingProjection: false }).apply(from([1])[Symbol.asyncIterator]());
+    const read = output.next();
+    const signal = await projectStarted.promise;
+
+    await output.return?.();
+    expect(signal.aborted).toBeTrue();
+    projected.resolve({ [Symbol.asyncIterator]: () => ({
+      next: async () => ({ done: false, value: 2 }),
+      return: close,
+    }) });
+    expect(await read).toEqual({ done: true, value: undefined });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
 
   it('closes the source and suspended child when a nested projection fails', async () => {
     let sourceClosed = false;
