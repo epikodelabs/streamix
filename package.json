@@ -8,6 +8,7 @@
     "build:packages": "node scripts/build.mjs && node scripts/finalize-dist.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node scripts/run-testify.mjs --headless --browser chrome",
+    "test:gc": "node --expose-gc node_modules/@epikodelabs/testify/bin/testify --browser node --file runtime-graph-gc.spec.ts --no-random",
     "test:watch": "node scripts/run-testify.mjs --browser chrome",
     "test:install-browser": "node scripts/install-test-browser.mjs chromium",
     "watch": "ng build --watch --configuration development",

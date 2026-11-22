@@ -86,6 +86,10 @@ The graph rejects direct self-dependencies and cycles. When a node is disposed,
 the runtime removes its edges and its invalidation callback so that it cannot be
 scheduled again.
 
+Reachable graph nodes retain their dependency edges. The runtime's index uses
+weak keys, so otherwise unreachable standalone atoms and disconnected subgraphs
+can be collected. Dispose active resources explicitly to run their cleanup.
+
 ## Scheduling and transactions
 
 Ordinary `atom.next()` and `atom.set()` writes invalidate their dependents and
