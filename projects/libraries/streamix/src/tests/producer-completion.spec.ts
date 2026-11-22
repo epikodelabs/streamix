@@ -1,4 +1,4 @@
-import { asReadable, atom, derived, flow, from, hasAtomEmitted, iterate, NO_INITIAL_VALUE } from '@epikodelabs/streamix';
+import { asReadable, atom, derived, disposeAsync, DONE, flow, from, fromIterator, hasAtomEmitted, iterate, NO_INITIAL_VALUE } from '@epikodelabs/streamix';
 import { getProducerCompletion } from '../lib/atoms/delivery';
 
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
@@ -9,6 +9,73 @@ async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
 }
 
 describe('producer completion', () => {
+  it('stops deliveries immediately and returns the same promise until disposal completes', async () => {
+    const cleanup = Promise.withResolvers<void>();
+    const close = jasmine.createSpy('return').and.callFake(async () => {
+      await cleanup.promise;
+      return DONE;
+    });
+    const source = fromIterator<number>({
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise(() => {}),
+        return: close,
+      }),
+    });
+    const reader = iterate(source);
+    const read = reader.next();
+    const disposal = source.dispose();
+    let completed = false;
+    void Promise.resolve(disposal).then(() => { completed = true; });
+
+    expect(source.disposed).toBeTrue();
+    expect(source.dispose()).toBe(disposal);
+    expect(await read).toEqual(DONE);
+    expect(completed).toBeFalse();
+    expect(close).toHaveBeenCalledTimes(1);
+
+    cleanup.resolve();
+    await disposal;
+    expect(completed).toBeTrue();
+  });
+
+  it('reports source cleanup rejection to every disposal waiter', async () => {
+    const failure = new Error('cleanup failed');
+    const close = jasmine.createSpy('return').and.rejectWith(failure);
+    const source = flow<number>({
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise(() => {}),
+        return: close,
+      }),
+    });
+    source.subscribe();
+
+    const first = disposeAsync(source);
+    const second = disposeAsync(asReadable(source));
+    await expectAsync(first).toBeRejectedWith(failure);
+    await expectAsync(second).toBeRejectedWith(failure);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('can stop waiting for a source return that never settles', async () => {
+    const close = jasmine.createSpy('return').and.callFake(() => new Promise(() => {}));
+    const source = fromIterator<number>({
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise(() => {}),
+        return: close,
+      }),
+    });
+    const read = iterate(source).next();
+    const controller = new AbortController();
+    const reason = new Error('disposal wait expired');
+    const waiting = disposeAsync(source, { signal: controller.signal });
+    controller.abort(reason);
+
+    await expectAsync(waiting).toBeRejectedWith(reason);
+    expect(await read).toEqual(DONE);
+    expect(source.disposed).toBeTrue();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('releases one producer and retains the final state for late consumers', async () => {
     let starts = 0;
     let cleanups = 0;

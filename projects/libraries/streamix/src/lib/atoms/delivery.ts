@@ -13,13 +13,27 @@ class CompletionSlot implements ProducerCompletion {
   private source?: ProducerCompletion;
   private unsubscribe?: () => void;
   private readonly listeners = new Set<() => void>();
+  private readonly disposalListeners = new Set<() => void>();
 
   get completed(): boolean { return this.source?.completed ?? false; }
 
   onDispose(listener: () => void): () => void {
-    const handlers = (this.atom as { _onDispose?: Set<() => void> })._onDispose;
-    handlers?.add(listener);
-    return () => { handlers?.delete(listener); };
+    const hooks = (this.atom as { _onDispose?: Set<() => void> })._onDispose;
+    hooks?.add(listener);
+    this.disposalListeners.add(listener);
+    return () => {
+      hooks?.delete(listener);
+      this.disposalListeners.delete(listener);
+    };
+  }
+
+  dispose(): void {
+    const hooks = (this.atom as { _onDispose?: Set<() => void> })._onDispose;
+    for (const listener of [...this.disposalListeners]) {
+      hooks?.delete(listener);
+      try { listener(); } catch { /* Disposal observers cannot interrupt teardown. */ }
+    }
+    this.disposalListeners.clear();
   }
 
   onComplete(listener: () => void): () => void {
@@ -52,6 +66,11 @@ export function getProducerCompletion(source: unknown): ProducerCompletion | und
     completionSlots.set(source, slot);
   }
   return slot;
+}
+
+/** Tell delivery consumers the atom has stopped before awaiting producer cleanup. */
+export function notifyProducerDisposal(atom: object): void {
+  completionSlots.get(atom)?.dispose();
 }
 
 export function bindProducerCompletion(atom: object, source: ProducerCompletion): void {

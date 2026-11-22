@@ -72,6 +72,7 @@ export function iterate<T>(
   let done = false;
   const readiness = createSourceReadiness();
   let finish: (() => MaybePromise<void>) | undefined;
+  let teardown: MaybePromise<void>;
   let errorUnsubscribe: Subscription | undefined;
 
   const settlePending = (settle: (pull: PendingPull<T>) => void) => {
@@ -110,7 +111,7 @@ export function iterate<T>(
     subscribing = false;
 
     finish = () => {
-      if (finished) return;
+      if (finished) return teardown;
       finished = true;
       if (!done) {
         const error = atom.error;
@@ -131,9 +132,9 @@ export function iterate<T>(
       stopCompletion = undefined;
       errorUnsubscribe?.();
       errorUnsubscribe = undefined;
-      const cleanup = unsubscribe();
+      teardown = unsubscribe();
       notifyPush();
-      return cleanup;
+      return teardown;
     };
 
     if (done) {

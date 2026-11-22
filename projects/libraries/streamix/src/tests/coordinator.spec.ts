@@ -361,6 +361,14 @@ describe('coordinator utils', () => {
       value: undefined,
     });
 
+    const reentrant = new AbortController();
+    expect(await raceNext({
+      next() {
+        reentrant.abort();
+        return new Promise<IteratorResult<number>>(() => {});
+      },
+    }, reentrant.signal)).toEqual({ done: true, value: undefined });
+
     const active = new AbortController();
     await expectAsync(
       raceNext(

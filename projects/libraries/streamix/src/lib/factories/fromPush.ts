@@ -9,7 +9,8 @@ import {
 import { normalizeError } from '../atoms/atom';
 import { DONE } from '../atoms/operator';
 import { createSubscription } from '../atoms/subscription';
-import { ANALOG_DELIVERY } from '../atoms/delivery';
+import { ANALOG_DELIVERY, bindProducerCompletion } from '../atoms/delivery';
+import { cyclicBuffer, type CyclicBuffer, type CyclicBufferOverflow } from '../primitives/cyclicBuffer';
 
 /** The write-only producer interface for adapting callback-driven APIs. */
 export interface PushSink<T> {
@@ -35,7 +36,7 @@ export interface PushSink<T> {
   complete(): void;
 }
 
-export type PushOverflow = 'block' | 'drop-oldest' | 'drop-newest' | 'error';
+export type PushOverflow = Exclude<CyclicBufferOverflow, 'replace-latest'>;
 
 export interface FromPushOptions {
   /** Optional diagnostic name. */
@@ -75,11 +76,10 @@ export interface FromPushOptions {
 type Cleanup = () => MaybePromise<void>;
 type Connect<T> = (sink: PushSink<T>, signal: AbortSignal) => MaybePromise<void | Cleanup>;
 
-type Delivery<T> = { value: T; resolve: () => void };
 type Listener<T> = { callback?: (current: T, previous: T) => MaybePromise; replay?: Promise<void> };
 type IteratorWaiter<T> = { resolve: (value: IteratorResult<T>) => void; reject: (error: Error) => void };
 type ConsumerIterator<T> = {
-  queue: T[];
+  queue: CyclicBuffer<T>;
   waiters: IteratorWaiter<T>[];
   roomWaiters: Array<() => void>;
   closed: boolean;
@@ -93,8 +93,7 @@ type Session<T> = {
   pumping: boolean;
   pumpScheduled: boolean;
   settled: boolean;
-  queued: Delivery<T>[];
-  blocked: Delivery<T>[];
+  queued: CyclicBuffer<T>;
   cleanup?: Cleanup;
   ready?: Promise<void>;
   cleanupPromise?: Promise<void>;
@@ -138,6 +137,11 @@ type Session<T> = {
  * the existing Streamix shared-source contract. Callback subscribers multicast.
  */
 export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}): Readable<T> {
+  return createPushSource(connect, options);
+}
+
+/** Shared push lifecycle for factories with explicit cleanup error semantics. */
+export function createPushSource<T>(connect: Connect<T>, options: FromPushOptions, reportCleanupErrors = false): Readable<T> {
   const mode = options.mode ?? 'discrete';
   const analog = mode === 'analog';
   const capacity = options.capacity ?? (analog ? 1 : 16);
@@ -163,10 +167,13 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
   let completed = false;
   let hasCurrent = false;
   let failed: Error | undefined;
+  let disposal: Promise<void> | undefined;
+  const completionListeners = new Set<() => void>();
 
-  const quietCleanup = async (cleanup?: Cleanup) => {
+  const runCleanup = async (cleanup?: Cleanup) => {
     if (!cleanup) return;
-    try { await cleanup(); } catch { /* Secondary cleanup errors do not replace source errors. */ }
+    try { await cleanup(); }
+    catch (error) { if (reportCleanupErrors) throw error; }
   };
 
   const releaseIteratorSpace = (it: ConsumerIterator<T>) => {
@@ -179,87 +186,84 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
     const it = consumer;
     if (!it || it.closed) return;
     it.ended = true;
-    if (error) it.queue.length = 0;
+    if (error) it.queue.abort(error);
+    else it.queue.complete();
     while (it.waiters.length) {
       const waiter = it.waiters.shift()!;
       if (error) waiter.reject(error);
-      else if (it.queue.length > 0) waiter.resolve({ done: false, value: it.queue.shift()! });
-      else waiter.resolve(DONE);
+      else waiter.resolve(it.queue.tryShift() ?? DONE);
     }
     releaseIteratorSpace(it);
   };
 
   const stopSession = (session: Session<T>): Promise<void> => {
     if (session.cleanupPromise) return session.cleanupPromise;
+    let finish!: (cleanup: Promise<void>) => void;
+    const cleanupPromise = new Promise<void>(resolve => { finish = resolve; });
+    session.cleanupPromise = cleanupPromise;
+    cleanupBarrier = cleanupPromise;
+    const releaseBarrier = () => {
+      if (cleanupBarrier === cleanupPromise) cleanupBarrier = undefined;
+    };
+    void cleanupPromise.then(releaseBarrier, releaseBarrier);
     session.stopped = true;
-    session.controller.abort();
     if (currentSession === session) currentSession = null;
+    session.controller.abort();
 
     // Resolve pending producer pushes. Old session callbacks cannot cross into
     // the next session, even if their originating transport emits late.
-    for (const record of session.queued.splice(0)) record.resolve();
-    for (const record of session.blocked.splice(0)) record.resolve();
+    session.queued.abort();
     if (consumer) releaseIteratorSpace(consumer);
 
-    let cleanupPromise: Promise<void>;
     if (session.settled) {
       // Setup already returned its cleanup synchronously (the common case for
       // DOM/timer sources). Tear down in the same turn so `unsubscribe()` and
       // `dispose()` have the same synchronous cleanup semantics as other atoms.
       const fn = session.cleanup;
       session.cleanup = undefined;
-      cleanupPromise = quietCleanup(fn);
+      finish(runCleanup(fn));
     } else {
       const ready = session.ready ?? Promise.resolve();
       // `ready` is responsible for running cleanup if setup settles after stop.
-      cleanupPromise = ready.then(async () => {
+      finish(ready.then(async () => {
         const fn = session.cleanup;
         session.cleanup = undefined;
-        await quietCleanup(fn);
-      });
+        await runCleanup(fn);
+      }));
     }
-    session.cleanupPromise = cleanupPromise;
-    cleanupBarrier = cleanupPromise;
-    void cleanupPromise.finally(() => {
-      if (cleanupBarrier === cleanupPromise) cleanupBarrier = undefined;
-    });
     return cleanupPromise;
   };
 
   const finishComplete = (session: Session<T>) => {
-    if (session.stopped || session.queued.length || session.blocked.length || session.pumping) return;
+    if (session.stopped || session.queued.length || session.pumping) return;
     completed = true;
     finishIterator();
     void stopSession(session);
+    for (const listener of completionListeners) {
+      try { listener(); } catch { /* Completion observers cannot interrupt delivery. */ }
+    }
+    completionListeners.clear();
   };
 
   const fail = (session: Session<T>, reason: unknown) => {
     if (session.stopped || closed || completed) return;
     failed = normalizeError(reason);
     completed = true;
+    completionListeners.clear();
     state.fail(failed, { terminate: false });
     finishIterator(failed);
     void stopSession(session);
   };
 
-  const admitBlocked = (session: Session<T>) => {
-    while (!session.stopped && session.queued.length < capacity && session.blocked.length) {
-      const record = session.blocked.shift()!;
-      session.queued.push(record);
-      // Admission ends producer backpressure; delivery happens later.
-      record.resolve();
-    }
-  };
-
   /** Publishes a dequeued value to the atom and callback subscribers. */
-  const deliver = (item: Delivery<T>): Promise<unknown>[] => {
-    state.next(item.value);
+  const deliver = (value: T): Promise<unknown>[] => {
+    state.next(value);
     hasCurrent = true;
     const pending: Promise<unknown>[] = [];
     for (const listener of listeners) {
       if (!listener.callback) continue;
       // Replays and event delivery are serialized per listener.
-      const invoke = () => listener.callback!(item.value, item.value);
+      const invoke = () => listener.callback!(value, value);
       if (listener.replay) {
         const chained = listener.replay.then(invoke).catch(() => {});
         listener.replay = Promise.resolve(chained).then(() => {});
@@ -295,20 +299,17 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
         }
         if (session.stopped) break;
 
-        const item = session.queued.shift()!;
-        admitBlocked(session);
+        const item = session.queued.tryShift()!;
 
         if (it && !it.closed) {
           if (it.waiters.length) {
-            it.waiters.shift()!.resolve({ done: false, value: item.value });
-          } else if (analog && it.queue.length >= capacity) {
-            it.queue[it.queue.length - 1] = item.value;
+            it.waiters.shift()!.resolve(item);
           } else {
-            it.queue.push(item.value);
+            it.queue.tryPush(item.value);
           }
         }
 
-        const pending = deliver(item);
+        const pending = deliver(item.value);
         if (pending.length) await Promise.all(pending);
       }
     } catch (error) {
@@ -340,89 +341,67 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
 
   const next = (session: Session<T>, value: T): Promise<void> => {
     if (closed || completed || session.stopped || session.finishing) return Promise.resolve();
-    return new Promise<void>(resolve => {
-      const delivery: Delivery<T> = { value, resolve: () => resolve() };
-      let admitted = false;
-      if (analog && session.queued.length >= capacity) {
-        const replaced = session.queued.pop()!;
-        replaced.resolve();
-        session.queued.push(delivery);
-        admitted = true;
-      } else if (session.queued.length < capacity) {
-        session.queued.push(delivery);
-        admitted = true;
-      } else if (overflow === 'drop-oldest') {
-        session.queued.shift()!.resolve();
-        session.queued.push(delivery);
-        admitted = true;
-      } else if (overflow === 'drop-newest') {
-        resolve();
-        return;
-      } else if (overflow === 'error') {
-        resolve();
-        fail(session, new Error('fromPush buffer capacity exceeded'));
-        return;
-      } else {
-        // Cooperative backpressure. Producers must await `next()`; a native
-        // event emitter cannot be paused merely by returning a Promise.
-        session.blocked.push(delivery);
+    try {
+      if (session.queued.tryPush(value)) schedulePump(session);
+      else if (overflow === 'block') {
+        const admitted = session.queued.push(value);
+        schedulePump(session);
+        return admitted;
       }
-      schedulePump(session);
-      // Admission ends producer backpressure. Delivery, the atom value, and
-      // subscriber callbacks happen later in the pump.
-      if (admitted) delivery.resolve();
-    });
+    } catch {
+      fail(session, new Error('fromPush buffer capacity exceeded'));
+    }
+    return Promise.resolve();
   };
 
   const startSession = () => {
     if (closed || completed || currentSession || (!listeners.size && !consumer)) return;
     const session: Session<T> = {
       controller: new AbortController(), stopped: false, finishing: false,
-      pumping: false, pumpScheduled: false, settled: false, queued: [], blocked: [],
+      pumping: false, pumpScheduled: false, settled: false,
+      queued: cyclicBuffer<T>(capacity, { overflow: analog ? 'replace-latest' : overflow }),
     };
     currentSession = session;
 
     const activate = () => {
       if (session.stopped || currentSession !== session) return;
+      let connected!: (setup?: Promise<void>) => void;
+      // Install the setup barrier before connect() can synchronously complete,
+      // fail, or reenter disposal.
+      session.ready = new Promise<void>(resolve => { connected = resolve; });
       const sink: PushSink<T> = {
         next: value => next(session, value),
         error: reason => fail(session, reason),
         complete: () => {
           if (session.stopped || session.finishing || closed) return;
           session.finishing = true;
+          session.queued.complete();
           finishComplete(session);
         },
       };
       try {
         const result = connect(sink, session.controller.signal);
         if (isPromiseLike(result)) {
-          session.ready = Promise.resolve(result).then(
+          connected(Promise.resolve(result).then(
             value => {
-              const cleanup = value as Cleanup | undefined;
-              if (session.stopped) return quietCleanup(cleanup);
-              session.cleanup = cleanup;
+              session.cleanup = value as Cleanup | undefined;
               session.settled = true;
-              return;
             },
             reason => fail(session, reason),
-          );
+          ));
         } else {
           session.cleanup = typeof result === 'function' ? result : undefined;
           session.settled = true;
-          if (session.stopped) {
-            // The session stopped while connect() was still running (for
-            // example a synchronous emit unsubscribed the last consumer).
-            // stopSession() ran before the cleanup existed; run it now.
-            const cleanup = session.cleanup;
-            session.cleanup = undefined;
-            void quietCleanup(cleanup);
-          }
+          connected();
         }
-      } catch (error) { fail(session, error); }
+      } catch (error) {
+        connected();
+        fail(session, error);
+      }
     };
 
     // Serialize reconnection behind asynchronous teardown of the old producer.
-    if (cleanupBarrier) void cleanupBarrier.then(activate);
+    if (cleanupBarrier) void cleanupBarrier.then(activate, activate);
     else activate();
   };
 
@@ -472,17 +451,18 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
       };
     }
     const it: ConsumerIterator<T> = {
-      queue: [], waiters: [], roomWaiters: [], closed: false, ended: false,
+      queue: cyclicBuffer<T>(capacity, { overflow: analog ? 'replace-latest' : 'block' }),
+      waiters: [], roomWaiters: [], closed: false, ended: false,
     };
     consumer = it;
     startSession();
     return {
       next: async () => {
         if (it.closed) return DONE;
-        if (it.queue.length) {
-          const value = it.queue.shift()!;
+        const item = it.queue.tryShift();
+        if (item) {
           releaseIteratorSpace(it);
-          return { done: false, value };
+          return item;
         }
         if (it.ended) return failed ? Promise.reject(failed) : DONE;
         return new Promise<IteratorResult<T>>((resolve, reject) => {
@@ -495,7 +475,7 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
       return: async () => {
         if (it.closed) return DONE;
         it.closed = true;
-        it.queue.length = 0;
+        it.queue.abort();
         for (const waiter of it.waiters.splice(0)) waiter.reject(new Error('Iterator returned'));
         releaseIteratorSpace(it);
         if (consumer === it) consumer = null;
@@ -505,7 +485,7 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
       throw: async (reason: unknown) => {
         const error = normalizeError(reason);
         it.closed = true;
-        it.queue.length = 0;
+        it.queue.abort();
         for (const waiter of it.waiters.splice(0)) waiter.reject(error);
         releaseIteratorSpace(it);
         if (consumer === it) consumer = null;
@@ -516,22 +496,34 @@ export function fromPush<T>(connect: Connect<T>, options: FromPushOptions = {}):
   };
 
   instance.dispose = () => {
-    if (closed) return;
+    if (disposal) return disposal;
+    let finish!: (cleanup: Promise<void>) => void;
+    disposal = new Promise<void>(resolve => { finish = resolve; });
+    void disposal.catch(() => {});
     closed = true;
     completed = true;
+    completionListeners.clear();
     listeners.clear();
     if (consumer) {
       const it = consumer;
       consumer = null;
       it.closed = true;
-      it.queue.length = 0;
+      it.queue.abort();
       for (const waiter of it.waiters.splice(0)) waiter.reject(new Error('Source disposed'));
       releaseIteratorSpace(it);
     }
-    if (currentSession) void stopSession(currentSession);
-    baseDispose();
+    const cleanup = currentSession ? stopSession(currentSession) : cleanupBarrier;
+    finish(Promise.all([cleanup, baseDispose()]).then(() => {}));
+    return disposal;
   };
 
+  bindProducerCompletion(instance, {
+    get completed() { return completed && !closed && !failed; },
+    onComplete(listener) {
+      completionListeners.add(listener);
+      return () => { completionListeners.delete(listener); };
+    },
+  });
   if (analog) (instance as any)[ANALOG_DELIVERY] = true;
   return instance;
 }
