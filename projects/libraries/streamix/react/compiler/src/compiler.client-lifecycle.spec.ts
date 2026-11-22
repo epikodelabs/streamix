@@ -97,6 +97,23 @@ idescribe("React JSX compiler client lifecycle", () => {
     container.remove();
   });
 
+  it("subscribes to explicit atom reads that decide an eager render branch", async () => {
+    const count = atom(0);
+    const module = compileGeneratedModule(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(0);
+      export function App() {
+        if (count.value === 0) return <output>zero</output>;
+        return <output>one</output>;
+      }
+    `, () => count as Writable<unknown>);
+    await act(async () => { root = createRoot(container); root.render(createElement(module.App)); });
+    expect(container.textContent).toBe("zero");
+    await act(async () => { count.next(1); });
+    expect(container.textContent).toBe("one");
+    await count.dispose();
+  });
+
   it("updates object value fields that share names with source APIs", async () => {
     const form = atom({ error: "bad" });
     const module = compileGeneratedModule(`
