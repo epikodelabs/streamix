@@ -1,8 +1,8 @@
 import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection-hooks';
-import { createPushOperator, MaybePromise, normalizeError } from "../atoms";
+import { createOperator, type MaybePromise, normalizeError } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from '../factories';
-import { createAsyncCoordinator, type RunnerEvent } from '../utils';
+import { createAsyncCoordinator, createAsyncPushable, type RunnerEvent } from '../utils';
 import { ConcurrentInnerExecution } from '../runtime/concurrent-inner-execution';
 
 /**
@@ -38,7 +38,7 @@ import { ConcurrentInnerExecution } from '../runtime/concurrent-inner-execution'
  * ```
  */
 export function mergeMap<T = any, R = any>(
-  project: (value: T, index: number) => PipeInput<R> | MaybePromise<R> | Array<R>,
+  project: (value: T, index: number) => MaybePromise<PipeInput<R>>,
   concurrent: number = Infinity,
   bufferSize: number = Infinity
 ) {
@@ -48,8 +48,9 @@ export function mergeMap<T = any, R = any>(
   if (!(bufferSize === Infinity || (Number.isInteger(bufferSize) && bufferSize >= 0))) {
     throw new RangeError('mergeMap bufferSize must be a non-negative integer or Infinity');
   }
-  return createPushOperator<T, R>('mergeMap', function (source, output) {
+  return createOperator<T, R>('mergeMap', function (source) {
     let stopped = false;
+    const output = createAsyncPushable<R>();
     const operator = this;
     const lifetimes = new Map<number, StreamixLifetimeSpan>();
     const finishActive = (outcome: 'cancel' | 'error') => {
@@ -67,7 +68,7 @@ export function mergeMap<T = any, R = any>(
         span?.start();
         try {
           const projected = project(value, projectIndex++);
-          const inner = from(projected as any);
+          const inner = from<R>(projected);
           const sourceIndex = coordinator.addSource(inner[Symbol.asyncIterator]() as AsyncIterator<T | R>);
           if (span) lifetimes.set(sourceIndex, span);
         } catch (error) { span?.finish('error'); throw error; }
@@ -124,11 +125,25 @@ export function mergeMap<T = any, R = any>(
       }
     })();
 
-    return async () => {
+    const close = (outcome: 'cancel' | 'error') => {
       stopped = true;
-      finishActive('cancel');
+      finishActive(outcome);
       cancelPending();
-      await coordinator.return?.();
+      return coordinator.return!();
     };
+    const baseReturn = output.return!.bind(output);
+    const baseThrow = output.throw!.bind(output);
+    output.return = async value => {
+      const completion = baseReturn(value);
+      await close('cancel');
+      return completion;
+    };
+    output.throw = async error => {
+      const failure = normalizeError(error);
+      output.fail(failure);
+      await close('error');
+      return baseThrow(failure);
+    };
+    return output;
   });
 }

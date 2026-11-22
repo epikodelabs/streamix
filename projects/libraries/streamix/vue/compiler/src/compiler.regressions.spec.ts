@@ -34,6 +34,26 @@ function mountCompiled(result: ReturnType<typeof compile>, source: ReturnType<ty
 }
 
 idescribe('Vue compiled object value fields', () => {
+  it('keeps an explicit value read reactive in conditional rendering', async () => {
+    const source = atom(0);
+    const result = compile(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(0);
+    `, `<button v-on:click="count.next(count.value + 1)">advance</button>
+      <p v-if="count['value'] === 0">zero</p><p v-else>{{ count?.value }}</p>`);
+    const { app, host } = mountCompiled(result, source);
+    try {
+      expect(host.querySelector('p')?.textContent).toBe('zero');
+      host.querySelector('button')!.click();
+      await Vue.nextTick();
+      expect(source.value).toBe(1);
+      expect(host.querySelector('p')?.textContent).toBe('1');
+    } finally {
+      app.unmount();
+      await source.dispose();
+    }
+  });
+
   it('updates object value fields that share names with source APIs', async () => {
     const form = atom({ error: 'bad' });
     const result = compile(`
@@ -568,11 +588,11 @@ describe('Vue compiler correctness regressions', () => {
     const result = compile(`
       import { atom } from '@epikodelabs/streamix';
       const count = atom(1);
-    `, '<button @click="count.set(2)">{{ count.safeValue }} {{ count.value }}</button>');
+    `, '<button @click="count.set(count.value + 1)">{{ count.safeValue }} {{ count.value }}</button>');
     expectNoError(result);
-    expect(result.code).toContain('@click="count.set(2)"');
+    expect(result.code).toContain('@click="count.set(count.value + 1)"');
     expect(result.code).toContain('{{ count.safeValue }}');
-    expect(result.code).toContain('{{ count.value }}');
+    expect(result.code).toContain('{{ __sx_count }}');
     expect(result.code).not.toContain('__sx_count.set');
   });
 

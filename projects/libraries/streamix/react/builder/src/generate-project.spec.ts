@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile 
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
+import ts from "typescript";
 import { generateReactProject, regenerateReactFile } from "./generate-project";
 
 /** Content snapshot of every file under a tree, keyed by slash-relative path. */
@@ -65,7 +66,7 @@ describe("React Angular-hosted source generation", () => {
       const testSource = await readFile(join(virtualRoot, "main.spec.tsx"), "utf8");
       expect(testSource).not.toContain("useStreamixSource");
       const config = JSON.parse(await readFile(join(root, ".angular/.streamix/demo/tsconfig.app.json"), "utf8"));
-      expect(config.files).toEqual(["src/main.tsx"]);
+      expect(config.files.sort()).toEqual(["./src/helpers.ts", "./src/main.tsx", "./src/store.ts"]);
       // The builder map chains through esbuild so devtools point at authored files.
       const map = JSON.parse(await readFile(join(virtualRoot, "main.tsx.map"), "utf8"));
       expect(map.version).toBe(3);
@@ -73,6 +74,47 @@ describe("React Angular-hosted source generation", () => {
       expect(map.sourcesContent[0]).toContain("export function App");
       expect(compiled.trimEnd().endsWith("//# sourceMappingURL=main.tsx.map")).toBe(true);
       await expectAsync(regenerateReactFile(root, sourceRoot, "assets")).toBeResolved();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("uses the authored app roots and retains ambient declarations across watch changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "streamix-react-builder-roots-"));
+    const sourceRoot = "projects/apps/demo/src";
+    try {
+      const source = join(root, sourceRoot);
+      await mkdir(source, { recursive: true });
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", types: [] },
+        exclude: ["projects/apps/demo/src/**/*.ignored.ts"],
+      }));
+      await writeFile(join(dirname(source), "tsconfig.app.json"), JSON.stringify({
+        extends: "../../../tsconfig.json",
+        compilerOptions: { rootDir: "./src" },
+        files: ["src/main.ts"],
+        include: ["src/**/*.ts"],
+      }));
+      await writeFile(join(source, "main.ts"), "export const label = runtimeLabel;");
+      await writeFile(join(source, "globals.d.ts"), "declare const runtimeLabel: string;");
+      await writeFile(join(source, "broken.ignored.ts"), "export const broken: number = 'ignored';");
+      const virtualRoot = await generateReactProject(root, sourceRoot);
+      const configPath = join(dirname(virtualRoot), "tsconfig.app.json");
+      const readProgram = () => {
+        const config = ts.readConfigFile(configPath, ts.sys.readFile);
+        const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(configPath));
+        expect(parsed.errors).toEqual([]);
+        expect(ts.getPreEmitDiagnostics(ts.createProgram(parsed.fileNames, parsed.options))).toEqual([]);
+        return parsed.fileNames.map(file => relative(virtualRoot, file).replace(/\\/g, "/")).sort();
+      };
+      expect(readProgram()).toEqual(["globals.d.ts", "main.ts"]);
+      const extra = join(source, "extra.d.ts");
+      await writeFile(extra, "declare const extraLabel: string;");
+      await regenerateReactFile(root, sourceRoot, "extra.d.ts");
+      expect(readProgram()).toEqual(["extra.d.ts", "globals.d.ts", "main.ts"]);
+      await rm(extra);
+      await regenerateReactFile(root, sourceRoot, "extra.d.ts");
+      expect(readProgram()).toEqual(["globals.d.ts", "main.ts"]);
     } finally {
       await rm(root, { force: true, recursive: true });
     }

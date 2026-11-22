@@ -170,6 +170,26 @@ function isShadowedName(name: string, site: ts.Node, component: ts.Node): boolea
   return false;
 }
 
+/** Finds eager value reads in render control flow and its local initializers. */
+function renderValuePosition(value: ts.Node, owner: ts.FunctionLikeDeclarationBase): ts.Node | undefined {
+  let consumed = false;
+  let statement: ts.Statement | undefined;
+  for (let child = value, parent = child.parent; parent; child = parent, parent = parent.parent) {
+    if (parent === owner) {
+      if (owner.body === child && !ts.isBlock(child)) return child;
+      return consumed ? statement : undefined;
+    }
+    if (ts.isFunctionLike(parent) || ts.isClassLike(parent) ||
+        ts.isJsxExpression(parent) || ts.isJsxSpreadAttribute(parent)) return undefined;
+    if (ts.isReturnStatement(parent) ||
+        ((ts.isIfStatement(parent) || ts.isSwitchStatement(parent) || ts.isCaseClause(parent)) &&
+          parent.expression === child) ||
+        (ts.isVariableDeclaration(parent) && parent.initializer === child)) consumed = true;
+    if (ts.isStatement(parent) && !ts.isBlock(parent)) statement = parent;
+  }
+  return undefined;
+}
+
 /** True when a top-level statement can bypass later compiler-generated hooks. */
 function statementMayReturn(statement: ts.Statement): boolean {
   let found = false;
@@ -1730,6 +1750,7 @@ export function transformReactJsx(
         }
       };
 
+      const eagerReadSites: Array<{ read: ts.PropertyAccessExpression; statementIndex: number }> = [];
       const visit: ts.Visitor = (child) => {
         if (ts.isCallExpression(child)) {
           const hook = reactNonJsxHook(child.expression);
@@ -1815,6 +1836,16 @@ export function transformReactJsx(
         const writeTarget = reactiveWriteOperand(child);
         if (writeTarget && !isScopeSetterWrite(child, writeTarget, scopeMembers) && reportUnsafeWrite(child, writeTarget)) return child;
 
+        if (isComponent && ts.isPropertyAccessExpression(child) && child.name.text === "value" &&
+            !isHiddenTarget(child.expression) && atomReferenceName(child.expression, atoms, atomMaps)) {
+          const position = renderValuePosition(child, node);
+          if (position) {
+            const statementIndex = ts.isStatement(position) ? functionBody.statements.indexOf(position) : -1;
+            if (statementIndex >= 0) eagerReadSites.push({ read: child, statementIndex });
+            return rewriteJsxValue(child);
+          }
+        }
+
         if (ts.isJsxSpreadAttribute(child)) {
           // A spread places an object's properties on the element, so atom
           // reads inside it are value reads, not transport props. Plain
@@ -1856,6 +1887,10 @@ export function transformReactJsx(
       };
 
       const body = ts.visitEachChild(functionBody, visit, context) as ts.Block;
+      for (const site of eagerReadSites) {
+        if (site.statementIndex < insertionIndex) diagnostics.push(diagnostic(site.read, "error",
+          "This render-time atom read precedes the generated subscription. Move it below the reactive declarations or read it through useAtomValue at component scope."));
+      }
       if (isComponent) reportEagerBindingReads();
       if (!isComponent && bindings.length > 0) {
         diagnostics.push(diagnostic(node, "error", "Reactive JSX in a non-component function cannot use generated React hooks. Rename it as a React component or use an explicit component boundary."));
@@ -2057,10 +2092,15 @@ export function transformReactJsx(
         };
         return ts.visitNode(expression, visit) as ts.Expression;
       };
+      const render = node.members.find((member): member is ts.MethodDeclaration =>
+        ts.isMethodDeclaration(member) && ts.isIdentifier(member.name) && member.name.text === 'render');
       const visit: ts.Visitor = child => {
         if (ts.isJsxExpression(child) && child.expression &&
             !isSharedAtomComponentProp(child, moduleAtoms, moduleAtomMaps))
           return factory.updateJsxExpression(child, rewriteExpression(child.expression));
+        if (render && ts.isPropertyAccessExpression(child) && child.name.text === 'value' &&
+            ts.isIdentifier(child.expression) && writeSource(child.expression) &&
+            renderValuePosition(child, render)) return rewriteExpression(child);
         return ts.visitEachChild(child, visit, context);
       };
       const rewritten = ts.visitEachChild(node, visit, context) as ts.ClassDeclaration;

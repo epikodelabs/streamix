@@ -53,16 +53,104 @@ describe('flattening emission lifetimes', () => {
       expect(rows[0].durationMs).toBe(25);
     });
 
-    it(name + ' ends a pending projection immediately on cancellation', async () => {
+    it(name + ' records cancellation immediately while a pending projection settles', async () => {
       const pending = deferred<number>();
       const op = instrument('cancel-' + name, factory<number, number>(() => pending.promise));
       const iterator = op.apply(from([1])[Symbol.asyncIterator]());
       const reading = iterator.next();
       await tick();
-      now = 30; await iterator.return?.();
+      now = 30; const closing = iterator.return?.();
       expect(summaries('cancel-' + name)[0]).toEqual(jasmine.objectContaining({ durationMs: 30, outcome: 'cancel', outputs: 0 }));
-      now = 90; pending.resolve(1); await reading;
+      now = 90; pending.resolve(1); await closing; await reading;
       expect(summaries('cancel-' + name).length).toBe(1);
+    });
+  }
+
+  for (const [name, createIterator] of [
+    ['from', (projection: () => Promise<AsyncIterable<number>>) => from<number>(projection())[Symbol.asyncIterator]()],
+    ['concatMap', (projection: () => Promise<AsyncIterable<number>>) => concatMap<number, number>(projection).apply(from([1])[Symbol.asyncIterator]())],
+    ['exhaustMap', (projection: () => Promise<AsyncIterable<number>>) => exhaustMap<number, number>(projection).apply(from([1])[Symbol.asyncIterator]())],
+    ['switchMap', (projection: () => Promise<AsyncIterable<number>>) => switchMap<number, number>(projection).apply(from([1])[Symbol.asyncIterator]())],
+    ['mergeMap', (projection: () => Promise<AsyncIterable<number>>) => mergeMap<number, number>(projection).apply(from([1])[Symbol.asyncIterator]())],
+  ] as const) {
+    it(name + ' awaits the late child exactly once without pulling it', async () => {
+      const started = deferred<void>();
+      const pending = deferred<AsyncIterable<number>>();
+      const childClosed = deferred<void>();
+      const releaseChild = deferred<void>();
+      const read = jasmine.createSpy('child next').and.resolveTo(NEXT(9));
+      const close = jasmine.createSpy('child return').and.callFake(async () => {
+        childClosed.resolve();
+        await releaseChild.promise;
+        return DONE;
+      });
+      const iterator = createIterator(() => {
+        started.resolve();
+        return pending.promise;
+      });
+      const reading = iterator.next();
+      await started.promise;
+      let finished = false;
+      let repeatedFinished = false;
+      const closing = iterator.return!().then(() => { finished = true; });
+      const repeated = iterator.return!().then(() => { repeatedFinished = true; });
+      try {
+        await tick();
+        expect(finished).toBeFalse();
+        expect(repeatedFinished).toBeFalse();
+        pending.resolve({ [Symbol.asyncIterator]: () => ({ next: read, return: close }) });
+        await Promise.race([childClosed.promise, closing]);
+        expect(close).toHaveBeenCalledTimes(1);
+        expect(read).not.toHaveBeenCalled();
+        expect(finished).toBeFalse();
+      } finally {
+        releaseChild.resolve();
+      }
+      await Promise.all([closing, repeated]);
+      expect(await reading).toEqual(DONE);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  for (const [name, factory] of [['concatMap', concatMap], ['mergeMap', mergeMap], ['switchMap', switchMap]] as const) {
+    it(name + ' awaits child teardown after throw and returns the original error', async () => {
+      const cleanupStarted = deferred<void>();
+      const cleanup = deferred<void>();
+      const failure = new Error('consumer threw');
+      const closeChild = jasmine.createSpy('child return').and.callFake(async () => {
+        cleanupStarted.resolve();
+        await cleanup.promise;
+        return DONE;
+      });
+      const closeSource = jasmine.createSpy('source return').and.callFake(() => {
+        throw new Error('upstream cleanup failed');
+      });
+      let outerValueRead = false;
+      const iterator = factory<number, number>(() => ({
+        [Symbol.asyncIterator]: () => ({
+          next: jasmine.createSpy('child next').and.returnValues(Promise.resolve(NEXT(9)), new Promise(() => {})),
+          return: closeChild,
+        }),
+      })).apply({
+        next: () => {
+          if (outerValueRead) return new Promise(() => {});
+          outerValueRead = true;
+          return Promise.resolve(NEXT(1));
+        },
+        return: closeSource,
+      });
+      expect(await iterator.next()).toEqual(NEXT(9));
+      let failed = false;
+      const throwing = iterator.throw!(failure).catch(error => { failed = true; return error; });
+      try {
+        await Promise.race([cleanupStarted.promise, throwing]);
+        expect(closeChild).toHaveBeenCalledTimes(1);
+        expect(failed).toBeFalse();
+      } finally {
+        cleanup.resolve();
+      }
+      expect(await throwing).toBe(failure);
+      expect(closeSource).toHaveBeenCalledTimes(1);
     });
   }
 
@@ -93,6 +181,33 @@ describe('flattening emission lifetimes', () => {
     const rows = summaries('lifetime-switch');
     expect(rows.length).toBe(2);
     expect(rows[1]).toEqual(jasmine.objectContaining({ emission: 2, durationMs: 35, outputs: 1, outcome: 'complete' }));
+  });
+
+  it('switchMap emits the replacement while a superseded child is pending and awaits its cleanup on return', async () => {
+    const oldProjection = deferred<AsyncIterable<number>>();
+    const oldChildCleanup = deferred<void>();
+    const oldChildClosing = deferred<void>();
+    const oldNext = jasmine.createSpy('old child next').and.resolveTo(NEXT(1));
+    const oldReturn = jasmine.createSpy('old child return').and.callFake(async () => {
+      oldChildClosing.resolve();
+      await oldChildCleanup.promise;
+      return DONE;
+    });
+    const iterator = switchMap<number, number>(value => value === 1 ? oldProjection.promise : [2])
+      .apply(from([1, 2])[Symbol.asyncIterator]());
+    expect(await iterator.next()).toEqual(NEXT(2));
+    let finished = false;
+    const closing = iterator.return!().then(() => { finished = true; });
+    try {
+      oldProjection.resolve({ [Symbol.asyncIterator]: () => ({ next: oldNext, return: oldReturn }) });
+      await Promise.race([oldChildClosing.promise, closing]);
+      expect(oldReturn).toHaveBeenCalledTimes(1);
+      expect(oldNext).not.toHaveBeenCalled();
+      expect(finished).toBeFalse();
+    } finally {
+      oldChildCleanup.resolve();
+    }
+    await closing;
   });
 
   it('mergeMap includes internal queue time and records overflow as dropped', async () => {

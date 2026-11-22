@@ -1,5 +1,5 @@
 import ts from 'typescript';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
 /**
@@ -12,6 +12,23 @@ export interface StreamixProgramConfig {
   readonly configPath?: string;
   readonly fileNames: readonly string[];
   readonly options: ts.CompilerOptions;
+}
+
+/** Maps effective TypeScript roots from authored app paths to staged app paths. */
+export function mapVirtualTypeScriptRoots(
+  roots: readonly string[],
+  source: string,
+  output: string,
+  includeExternal = true,
+): string[] {
+  return roots.flatMap(file => {
+    const path = relative(source, file).replace(/\\/g, '/');
+    const external = path === '..' || path.startsWith('../') || isAbsolute(path);
+    if (external && !includeExternal) return [];
+    const target = external ? file : resolve(output, path);
+    const mapped = relative(dirname(output), target).replace(/\\/g, '/');
+    return [mapped.startsWith('.') || isAbsolute(mapped) ? mapped : `./${mapped}`];
+  });
 }
 
 /** Standalone defaults for hosts without a tsconfig (tests, virtual projects). */

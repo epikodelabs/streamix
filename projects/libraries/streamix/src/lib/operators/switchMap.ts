@@ -1,5 +1,5 @@
 import type { MaybePromise, Operator } from "../atoms";
-import { createOperator, DONE, isPromiseLike } from "../atoms";
+import { createOperator, DONE } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { createAsyncPushable } from "../utils";
@@ -34,13 +34,12 @@ import { __streamixBeginLifetime, type StreamixLifetimeSpan, __streamixOperatorE
  * ```
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => PipeInput<R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => MaybePromise<PipeInput<R>>
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createAsyncPushable<R>();
     const execution = new SwitchingInnerExecution<R>();
     let inputCompleted = false;
-    let pendingProjection = false;
     let index = 0;
     let stopped = false;
     let lifetime: StreamixLifetimeSpan | undefined;
@@ -55,7 +54,7 @@ export function switchMap<T = any, R = any>(
     };
 
     const checkComplete = () => {
-      if (!stopped && inputCompleted && !execution.active && !pendingProjection) {
+      if (!stopped && inputCompleted && !execution.active) {
         stopped = true;
         stopSourceReadiness();
         output.dispose();
@@ -73,20 +72,18 @@ export function switchMap<T = any, R = any>(
       stopped = true;
       stopSourceReadiness();
       lifetime?.finish('error');
-      void execution.close();
+      void execution.close(source);
       output.fail(normalizeError(error));
-      void Promise.resolve(source.return?.()).catch(() => {});
     };
 
-    const consumeInner = (generation: number, inner: PipeInput<R>) => {
-      if (!execution.isCurrent(generation)) return;
+    const consumeInner = (generation: number, inner: MaybePromise<PipeInput<R>>) => {
       let iterator: AsyncIterator<R>;
       try {
         // Preserve a cancellable iterable's return() directly: wrapping it in an
         // async generator can defer cancellation until its pending next() settles.
         iterator = isAsyncIterable(inner)
-          ? inner[Symbol.asyncIterator]() as AsyncIterator<R>
-          : from<R>(inner as any)[Symbol.asyncIterator]() as AsyncIterator<R>;
+          ? inner[Symbol.asyncIterator]()
+          : from<R>(inner)[Symbol.asyncIterator]();
         __streamixOperatorExecution(this, iterator);
         iterator = trackOperatorExecution(iterator, `${this.name ?? 'switchMap'}.inner`);
       } catch (error) {
@@ -118,7 +115,6 @@ export function switchMap<T = any, R = any>(
       lifetime = __streamixBeginLifetime(this);
       lifetime?.start();
       const generation = execution.advance();
-      pendingProjection = false;
       let projected: ReturnType<typeof project>;
       try {
         projected = project(value, index++);
@@ -126,24 +122,7 @@ export function switchMap<T = any, R = any>(
         fail(error);
         return;
       }
-      if (isPromiseLike(projected)) {
-        pendingProjection = true;
-        Promise.resolve(projected).then(
-          resolved => {
-            if (!execution.isCurrent(generation)) return;
-            pendingProjection = false;
-            consumeInner(generation, resolved as PipeInput<R>);
-            checkComplete();
-          },
-          error => {
-            if (!execution.isCurrent(generation)) return;
-            pendingProjection = false;
-            fail(error);
-          }
-        );
-      } else {
-        consumeInner(generation, projected as PipeInput<R>);
-      }
+      consumeInner(generation, projected);
     };
 
     const sourceView = asStreamixSource(source);
@@ -192,16 +171,15 @@ export function switchMap<T = any, R = any>(
       stopped = true;
       stopSourceReadiness();
       lifetime?.finish('cancel');
-      await execution.close();
-      try { await source.return?.(); } catch { /* best effort */ }
-      return baseReturn ? baseReturn() : DONE;
+      const completion = baseReturn?.();
+      await execution.close(source);
+      return completion ?? DONE;
     };
     output.throw = async (error: unknown) => {
       stopped = true;
       stopSourceReadiness();
       lifetime?.finish('error');
-      await execution.close();
-      try { await source.return?.(); } catch { /* best effort */ }
+      await execution.close(source);
       if (baseThrow) return baseThrow(normalizeError(error));
       throw normalizeError(error);
     };

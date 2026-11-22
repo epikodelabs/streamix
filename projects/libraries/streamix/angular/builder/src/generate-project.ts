@@ -7,7 +7,7 @@ import ts from 'typescript';
 // published subpath so ng-packagr treats it as an external dependency rather
 // than folding its sources into this entry.
 import { instrumentStreamixSource } from '@epikodelabs/streamix/angular/compiler';
-import { createStreamixProgram, createTokenSourceMap, injectIntrospectionActivation } from '@epikodelabs/streamix/compiler';
+import { createStreamixProgram, createTokenSourceMap, injectIntrospectionActivation, mapVirtualTypeScriptRoots } from '@epikodelabs/streamix/compiler';
 import { compileSxComponent } from '@epikodelabs/streamix/angular/compiler';
 import { installSxLifecycleIntoComponentSource } from '@epikodelabs/streamix/angular/compiler';
 import { findSxComponentTemplate, installSxComponentTemplate, resolveSourceRoot, virtualRootOf } from './options';
@@ -113,15 +113,10 @@ export async function generateProject({
         extends: configPath(relative(resolve(outputDirectory, '..'), tsconfigPath)),
         // Both the virtual app and imported workspace sources belong to the program.
         compilerOptions: { rootDir: configPath(relative(dirname(outputDirectory), workspaceRoot)) },
-        files: parsedConfig.fileNames
-          .filter(file => !/\.(?:spec|sx)\.ts$/.test(file))
-          .map(file => {
-            const path = relative(sourceDirectory, file);
-            const virtual = path !== '..' && !path.startsWith('..\\') &&
-              !path.startsWith('../') && !isAbsolute(path)
-              ? resolve(outputDirectory, path) : file;
-            return configPath(relative(dirname(outputDirectory), virtual));
-          }),
+        files: mapVirtualTypeScriptRoots(
+          parsedConfig.fileNames.filter(file => !/\.(?:spec|sx)\.ts$/.test(file)),
+          sourceDirectory, outputDirectory,
+        ),
         include: [],
         exclude: [],
       }, null, 2)}\n`,

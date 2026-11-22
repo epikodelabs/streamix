@@ -1112,10 +1112,30 @@ function collectTemplateReactiveReads(
     // Wrapping produces a normal expression source file and prevents strings,
     // comments, and object keys from being mistaken for reactive identifiers.
     const { file, prefix } = parseTemplateExpression(expression);
+    const isOuterSource = (node: ts.Identifier) => names.has(node.text) &&
+      !localsAt(span.start + node.getStart(file) - prefix).has(node.text) &&
+      !isShadowedIn(node, file, node.text);
     const visit = (node: ts.Node): void => {
-      if (ts.isIdentifier(node) && names.has(node.text) && isValueIdentifier(node, names.get(node.text)) &&
-          !localsAt(span.start + node.getStart(file) - prefix).has(node.text) &&
-          !isShadowedIn(node, file, node.text)) {
+      if (!span.event && (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) {
+        const valueAccess = ts.isPropertyAccessExpression(node) ? node.name.text === 'value'
+          : ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === 'value';
+        const receiver = unwrapCast(node.expression);
+        const parent = node.parent;
+        const writesMember = (ts.isBinaryExpression(parent) && parent.left === node &&
+          isAssignmentKind(parent.operatorToken.kind)) ||
+          ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) &&
+          (parent.operator === ts.SyntaxKind.PlusPlusToken || parent.operator === ts.SyntaxKind.MinusMinusToken)) ||
+          ts.isDeleteExpression(parent);
+        if (valueAccess && !writesMember && ts.isIdentifier(receiver) && isOuterSource(receiver)) {
+          reads.push({
+            start: span.start + node.getStart(file) - prefix,
+            end: span.start + node.end - prefix,
+            name: receiver.text,
+          });
+          return;
+        }
+      }
+      if (ts.isIdentifier(node) && isOuterSource(node) && isValueIdentifier(node, names.get(node.text))) {
           const start = span.start + node.getStart(file) - prefix;
           const shorthand = ts.isShorthandPropertyAssignment(node.parent);
           reads.push({
@@ -1645,6 +1665,7 @@ interface TemplateExpressionSpan {
   /** Absolute offset in the template string. */
   readonly start: number;
   readonly end: number;
+  readonly event?: boolean;
 }
 
 /** Minimal structural view of Vue's parsed template AST. */
@@ -1883,7 +1904,11 @@ function templateExpressionSpans(template: string): TemplateExpressionSpan[] {
         if (!split) continue;
         spans.push({ start: valueStart + split.sourceStart, end: valueStart + match[3].length });
       } else {
-        spans.push({ start: valueStart, end: valueStart + match[3].length });
+        spans.push({
+          start: valueStart,
+          end: valueStart + match[3].length,
+          event: directive === 'on' || match[0].trimStart().startsWith('@'),
+        });
       }
     }
   }

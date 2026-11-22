@@ -168,6 +168,8 @@ const clicks = flow(clickEvents(), { mode: "discrete" });       // every event m
 
 `pipe()` combines one source with operators into a new atom, and a factory layer builds multi-source topologies. Operators are plain functions: `map`, `filter`, `scan`, `debounce`, `distinctUntilChanged`, `takeUntil`, `switchMap`, `withLatestFrom`, `catchError`, `retry`, and dozens more.
 
+Returning a `concatMap`, `exhaustMap`, `mergeMap`, or `switchMap` iterator stops delivery and waits for in-flight projection promises so it can close any async iterator they produce. Make sure those promises can settle during shutdown. A `switchMap` replacement can start delivering while the previous projection is still cleaning up.
+
 ```ts
 import { atom, pipe, map, filter, scan, merge } from "@epikodelabs/streamix";
 

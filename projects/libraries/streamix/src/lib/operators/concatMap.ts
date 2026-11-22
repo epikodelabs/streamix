@@ -1,5 +1,5 @@
 import { __streamixBeginLifetime, type StreamixLifetimeSpan } from '../runtime/introspection-hooks';
-import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../atoms";
+import { createOperator, DONE, type MaybePromise, NEXT, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { normalizeError } from "../atoms";
@@ -26,7 +26,7 @@ import { SerialInnerExecution } from "../runtime/serial-inner-execution";
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
 export const concatMap = <T = any, R = any>(
-  project: (value: T, index: number) => PipeInput<R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => MaybePromise<PipeInput<R>>
 ) =>
   createOperator<T, R>("concatMap", function (this : Operator, source) {
     let outerIndex = 0;
@@ -50,9 +50,7 @@ export const concatMap = <T = any, R = any>(
               lifetime = __streamixBeginLifetime(operator);
               lifetime?.start();
               const projected = project(result.value, outerIndex++);
-              const normalized = isPromiseLike(projected) ? await projected : projected;
-              if (inner.stopped) return DONE;
-              const innerStream = from<R>(normalized);
+              const innerStream = from<R>(projected);
               inner.attach(innerStream[Symbol.asyncIterator]() as AsyncIterator<R>);
             }
 
@@ -75,24 +73,14 @@ export const concatMap = <T = any, R = any>(
 
       async return(_value?: any) {
         lifetime?.finish('cancel');
-        try {
-          await inner.close();
-        } catch {}
-        try {
-          await source.return?.();
-        } catch {}
+        await inner.close(source);
         return DONE;
       },
 
       async throw(err: any) {
         lifetime?.finish('error');
         const error = normalizeError(err);
-        try {
-          await inner.close();
-        } catch {}
-        try {
-          await source.return?.();
-        } catch {}
+        await inner.close(source);
         throw error;
       }
     };

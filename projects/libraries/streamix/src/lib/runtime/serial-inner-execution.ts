@@ -2,6 +2,7 @@
 export class SerialInnerExecution<T> {
   private iterator: AsyncIterator<T> | null = null;
   private closed = false;
+  private closing: Promise<void> | undefined;
   private epoch = 0;
 
   get active(): boolean { return this.iterator !== null; }
@@ -37,15 +38,21 @@ export class SerialInnerExecution<T> {
     ++this.epoch;
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(source?: AsyncIterator<unknown>): Promise<void> {
+    if (this.closing) return this.closing;
     this.closed = true;
     const iterator = this.iterator;
     this.release();
-    if (iterator) await this.cancel(iterator);
+    const completion = Promise.withResolvers<void>();
+    this.closing = completion.promise;
+    completion.resolve(Promise.all([
+      iterator && this.cancel(iterator),
+      source && this.cancel(source),
+    ]).then(() => {}));
+    return this.closing;
   }
 
-  private async cancel(iterator: AsyncIterator<T>): Promise<void> {
+  private async cancel(iterator: AsyncIterator<unknown>): Promise<void> {
     try { await iterator.return?.(); } catch { /* Best-effort cleanup. */ }
   }
 }
