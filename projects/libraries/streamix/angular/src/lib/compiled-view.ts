@@ -1,4 +1,5 @@
 import {
+  ApplicationRef,
   DestroyRef,
   ElementRef,
   Injector,
@@ -7,9 +8,8 @@ import {
   inject,
   runInInjectionContext,
 } from '@angular/core';
-import type {
-  Subscription,
-} from '@epikodelabs/streamix';
+import { ɵcreateDisposer, ɵDisposalQueue, ɵtrackDisposal, type Subscription } from '@epikodelabs/streamix';
+import { constructSxBlock } from './block-construction';
 
 import type {
   SxSourceReferenceMap,
@@ -22,7 +22,7 @@ import type {
  * object emitted for compiled structural blocks.
  */
 export interface SxTeardown {
-  destroy(): void;
+  destroy(): void | Promise<void>;
   /**
    * Puts the compiled blocks' marker elements back, so a rebind re-resolves
    * the template's original element paths. Only a rebind needs this: during
@@ -38,7 +38,7 @@ export type SxCompiledViewSetup<T> = (
   server?: boolean,
 ) => SxTeardown;
 
-type Disposable = { dispose(): void };
+type Disposable = { dispose(): void | Promise<void> };
 
 /**
  * Handle returned by {@link ɵinstallSxCompiledView}.
@@ -46,6 +46,8 @@ type Disposable = { dispose(): void };
  * @internal
  */
 export interface SxCompiledViewHandle {
+  /** Stops the view and waits for pending binding and scope cleanup. */
+  dispose(): Promise<void>;
   /**
    * Mounts the compiled view during server rendering, where
    * `afterNextRender` is a no-op. The generated component calls this from
@@ -98,19 +100,23 @@ export function ɵinstallSxCompiledView<T extends object>(
   const host = inject<ElementRef<Element>>(ElementRef).nativeElement;
   const injector = inject(Injector);
   const destroyRef = inject(DestroyRef);
+  const app = inject(ApplicationRef, { optional: true });
   const server = inject(PLATFORM_ID) === 'server';
 
   let teardown: SxTeardown | undefined;
   let referenceSubscriptions: Subscription[] = [];
   let mounted = false;
   let destroyed = false;
+  const disposals = new ɵDisposalQueue();
 
   const mount = (): void => {
     if (destroyed || !setup) {
       return;
     }
 
-    teardown = runInInjectionContext(injector, () => setup(host, context, server));
+    teardown = runInInjectionContext(injector, () => constructSxBlock(
+      () => setup(host, context, server), disposals,
+    ));
     mounted = true;
   };
 
@@ -126,7 +132,7 @@ export function ɵinstallSxCompiledView<T extends object>(
     // Destroy first so old subscriptions and any queued renderer work are
     // invalidated before the new source is read and subscribed. The markers
     // come back before the remount re-resolves their element paths.
-    previous?.destroy();
+    if (previous) disposals.run(() => previous.destroy());
     previous?.ɵrestoreMarkers?.();
     mount();
   };
@@ -153,67 +159,41 @@ export function ɵinstallSxCompiledView<T extends object>(
     });
   }
 
-  destroyRef.onDestroy(() => {
+  const dispose = ɵcreateDisposer(queue => {
     destroyed = true;
 
     for (const unsubscribe of referenceSubscriptions) {
-      void settleReferenceTeardown(unsubscribe);
+      queue.run(unsubscribe);
     }
     referenceSubscriptions = [];
 
-    teardown?.destroy();
+    const previous = teardown;
     teardown = undefined;
     mounted = false;
+    if (previous) queue.run(() => previous.destroy());
 
-    // Binding tables are destroyed first so no live subscription observes a
-    // scope while its owned atoms are being disposed.
-    disposeOwnedScopes(options.ownedScopes);
+    // Detach binding consumers before starting teardown of their owners.
+    queue.run(() => {
+      for (const scope of options.ownedScopes?.() ?? []) {
+        if (scope && typeof scope.dispose === 'function') queue.run(() => scope.dispose());
+      }
+    });
+  }, disposals);
+  destroyRef.onDestroy(() => {
+    const completion = dispose();
+    ɵtrackDisposal(context, completion);
+    if (app) ɵtrackDisposal(app, completion);
+    void completion.catch(error => {
+      console.error('[streamix] Angular view teardown failed:', error);
+    });
   });
 
   return {
+    dispose,
     ɵafterViewInit(): void {
       if (server) {
         start();
       }
     },
   };
-}
-
-async function settleReferenceTeardown(unsubscribe: Subscription): Promise<void> {
-  try {
-    await unsubscribe();
-  } catch (error) {
-    console.error('[streamix] Angular source-reference teardown failed:', error);
-  }
-}
-
-/**
- * Disposes component-owned scopes registered by the compiler.
- *
- * Each instance is isolated: one failing cleanup must not leave the rest of
- * the component's scopes alive.
- */
-function disposeOwnedScopes(
-  read: SxCompiledViewOptions['ownedScopes'],
-): void {
-  if (!read) return;
-
-  let owned: Iterable<Disposable | undefined>;
-  try {
-    owned = read();
-  } catch (error) {
-    console.error('[streamix] reading component-owned scopes threw during destruction:', error);
-    return;
-  }
-
-  for (const scope of owned) {
-    // A field can be reassigned after construction; anything without a
-    // disposer at destruction time was never component-owned.
-    if (!scope || typeof scope.dispose !== 'function') continue;
-    try {
-      scope.dispose();
-    } catch (error) {
-      console.error('[streamix] component-owned scope disposal threw:', error);
-    }
-  }
 }

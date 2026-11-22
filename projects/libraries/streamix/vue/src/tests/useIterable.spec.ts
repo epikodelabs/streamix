@@ -2,6 +2,7 @@ import {
   atom,
   createSubscription,
   flow,
+  waitForDisposal,
   type Atom,
 } from '@epikodelabs/streamix';
 import {
@@ -47,8 +48,8 @@ describe('useIterable', () => {
     });
     vueScope.run(() => useIterable(source));
     vueScope.stop();
-    await new Promise(resolve => setTimeout(resolve, 0));
-    expect(report).toHaveBeenCalledWith(jasmine.stringMatching(/teardown rejected/), failure);
+    await expectAsync(waitForDisposal(vueScope)).toBeRejectedWith(failure);
+    expect(report).toHaveBeenCalledWith(jasmine.stringMatching(/disposal failed/), failure);
     source.dispose();
   });
 
@@ -205,10 +206,10 @@ describe('useIterable', () => {
 
     vueScope.run(() => useIterable(source));
     vueScope.stop();
-    await flushMicrotasks();
+    await expectAsync(waitForDisposal(vueScope)).toBeRejectedWithError('unsubscribe failed');
 
     expect(errorSpy).toHaveBeenCalledWith(
-      jasmine.stringContaining('teardown rejected (unsubscribe)'),
+      jasmine.stringContaining('disposal failed'),
       jasmine.any(Error),
     );
   });
@@ -226,10 +227,10 @@ describe('useIterable', () => {
 
     vueScope.run(() => useIterable(source, 0));
     vueScope.stop();
-    await flushMicrotasks();
+    await expectAsync(waitForDisposal(vueScope)).toBeRejectedWithError('return failed');
 
     expect(errorSpy).toHaveBeenCalledWith(
-      jasmine.stringContaining('teardown rejected (iterator.return)'),
+      jasmine.stringContaining('disposal failed'),
       jasmine.any(Error),
     );
   });

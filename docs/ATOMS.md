@@ -32,6 +32,16 @@ interface Readable<T> {
 
 A producer's iterator can ignore cancellation or leave its `return()` pending. Use `await disposeAsync(source, { signal })` to limit how long the caller waits. Aborting that signal rejects with its reason while the atom stays disposed and cleanup can continue in the background.
 
+Scopes also return a teardown promise from `dispose()`. It settles after owned atoms, nested scopes, and registered cleanup hooks settle.
+
+Framework unmount methods start Streamix cleanup synchronously. Applications that need to wait for cleanup can use the following completion points.
+
+- **Angular** · After destroying a compiled view or application, await `waitForDisposal(componentInstance)` or `waitForDisposal(appRef)`.
+- **React** · Unmount the tree under a `StreamixLifetimeProvider` and await `lifetime.dispose()` to drain its owned resources and pending subscription cleanup.
+- **Vue** · After unmounting an app or stopping an effect scope, await `waitForDisposal(app)` or `waitForDisposal(effectScope)`. A manually owned iterable bridge returns a promise from `dispose()`.
+
+For server renders, await `waitForDisposal(appRef)` after Angular rendering or `waitForDisposal(context)` after Vue rendering with an explicit SSR context. Import `waitForDisposal` from `@epikodelabs/streamix`.
+
 > **Note:** `derived()` and `flow()` return `Readable<T>`. `Writable<T>` extends `Readable<T>` with mutation methods: `.next(value)`, its alias `.set(value)`, `.fail(error, { terminate?: boolean })` to enter an error state, and optional `.recover()` / `.clearError()` to leave a recoverable error state. `atom()` returns `Atom<T>`, which is both `Readable<T>` and `Writable<T>`.
 
 Subscriptions are **stateful**. If a non-disposed atom already has a current value, `subscribe()` synchronously delivers that value once before future emissions. This applies to writable atoms, derived atoms, and flows. A disposed writable, derived, or flow atom returns a no-op subscription instead. An atom or flow that has not produced a value yet stays silent until its first real emission; no placeholder `undefined` is invented. Explicit state is still state, so `atom(undefined)` does replay `undefined`.

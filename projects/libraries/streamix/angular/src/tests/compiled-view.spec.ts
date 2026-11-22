@@ -4,7 +4,7 @@ import {
 import {
   TestBed,
 } from '@angular/core/testing';
-import { atom, createSubscription, scope } from '@epikodelabs/streamix';
+import { atom, createSubscription, scope, waitForDisposal } from '@epikodelabs/streamix';
 
 import {
   createBindingTable,
@@ -24,6 +24,56 @@ ensureAngularTestEnvironment();
 
 idescribe('ɵinstallSxCompiledView', () => {
   useAngularTestEnvironment();
+  it('awaits binding and owned scope teardown after Angular destroys the view', async () => {
+    const bindingStopped = Promise.withResolvers<void>();
+    const scopeStopped = Promise.withResolvers<void>();
+    const releaseBinding = Promise.withResolvers<void>();
+    const releaseScope = Promise.withResolvers<void>();
+    const source = atom(1);
+    const subscribe = source.subscribe.bind(source);
+    spyOn(source, 'subscribe').and.callFake(callback => {
+      const stop = subscribe(callback);
+      return createSubscription(async () => {
+        await stop();
+        bindingStopped.resolve();
+        await releaseBinding.promise;
+      });
+    });
+    @Component({ template: '<span></span>' })
+    class AsyncDisposalComponent {
+      readonly state = scope({});
+      readonly handle = ɵinstallSxCompiledView(this, () => {
+        const table = createBindingTable(1);
+        table.bind(0, source, () => {});
+        return table;
+      }, { ownedScopes: () => [this.state] });
+
+      constructor() {
+        this.state.cleanups.add(async () => { scopeStopped.resolve(); await releaseScope.promise; });
+      }
+    }
+    const fixture = TestBed.createComponent(AsyncDisposalComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const instance = fixture.componentInstance;
+    fixture.destroy();
+    const disposal = instance.handle.dispose();
+    expect(instance.handle.dispose()).toBe(disposal);
+    const tracked = waitForDisposal(instance);
+    let done = false;
+    void tracked.then(() => { done = true; });
+    await Promise.all([bindingStopped.promise, scopeStopped.promise]);
+    releaseBinding.resolve();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(done).toBeFalse();
+    expect(source.subscriberCount).toBe(0);
+    expect(instance.state._disposed).toBeTrue();
+    releaseScope.resolve();
+    await Promise.all([tracked, disposal]);
+    expect(done).toBeTrue();
+    await source.dispose();
+  });
+
   it('reports a rejected source-reference teardown when the view is destroyed', async () => {
     const failure = new Error('unsubscribe failed');
     const report = spyOn(console, 'error');

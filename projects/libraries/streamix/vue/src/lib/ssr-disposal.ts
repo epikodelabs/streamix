@@ -1,10 +1,13 @@
 import {
   getCurrentInstance,
+  getCurrentScope,
   hasInjectionContext,
   inject,
+  onScopeDispose,
   ssrContextKey,
   type InjectionKey,
 } from 'vue';
+import { ɵcreateDisposer, ɵtrackDisposal } from '@epikodelabs/streamix';
 
 /** The piece of Vue's server render context this adapter relies on. */
 interface SSRDisposalContext {
@@ -34,23 +37,24 @@ export function isSSRContext(): boolean {
 }
 
 /**
- * Registers a disposer with the active server render.
- *
- * Vue's server renderer creates a component effect scope per request but never
- * stops it, so `onScopeDispose` alone never runs on the server. Bridges and
- * compiler-owned Streamix scopes would otherwise outlive the render and keep
- * their subscriptions (and iterators) alive. Returning `false` outside an SSR
- * component setup leaves ownership with the Vue effect scope.
+ * Starts cleanup at Vue's lifecycle boundary and makes its completion
+ * available to waitForDisposal for the effect scope, app, and SSR request.
  */
-export function registerSSRDisposal(dispose: () => void): boolean {
+export function registerVueDisposal(dispose: () => unknown): void {
+  const scope = getCurrentScope();
+  const app = getCurrentInstance()?.appContext.app;
   const context = ssrRenderContext();
-  if (!context) {
-    return false;
-  }
-
-  if (!Array.isArray(context.__watcherHandles)) {
-    context.__watcherHandles = [];
-  }
-  context.__watcherHandles.push(dispose);
-  return true;
+  const stop = ɵcreateDisposer(queue => queue.run(dispose));
+  const run = () => {
+    const completion = stop();
+    if (scope) ɵtrackDisposal(scope, completion);
+    if (app) ɵtrackDisposal(app, completion);
+    if (context) ɵtrackDisposal(context, completion);
+    void completion.catch(error => {
+      console.error('[streamix] Vue disposal failed:', error);
+    });
+  };
+  onScopeDispose(run);
+  // The server renderer drains these callbacks without stopping component scopes.
+  if (context) (context.__watcherHandles ??= []).push(run);
 }

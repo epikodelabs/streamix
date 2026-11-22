@@ -13,7 +13,7 @@ import {
   subscribeStreamixDevtools,
   type StreamixDevtoolsEvent,
 } from '@epikodelabs/streamix';
-import { isSSRContext, registerSSRDisposal } from './ssr-disposal';
+import { isSSRContext, registerVueDisposal } from './ssr-disposal';
 
 export { recordStreamixDevtoolsEvent, streamixDevtoolsEnabled };
 export type { StreamixDevtoolsEvent };
@@ -117,8 +117,7 @@ export function useStreamixDevtoolsEvents(): Readonly<
   }
 
   const bridge = createStreamixDevtoolsEventsBridge();
-  onScopeDispose(bridge.dispose);
-  registerSSRDisposal(bridge.dispose);
+  registerVueDisposal(bridge.dispose);
 
   return bridge.events;
 }

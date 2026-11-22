@@ -6,6 +6,7 @@ import * as instructions from '../lib/binding-table';
 import * as blockInstructions from '../lib/structural-block';
 import { ɵsxInstallErrorDelivery } from '../lib/error-delivery';
 import { ɵsxFindTarget } from '../lib/compiled-block-helpers';
+import { ɵdestroySxResources } from '../lib/block-construction';
 import { rendererScheduler } from '../lib/render-scheduler';
 import { idescribe } from '../../../src/tests/env.spec';
 
@@ -20,11 +21,11 @@ function install(template: string, host: Element, context: object, resolve?: SxR
   }).outputText;
   const setup = new Function(
     ...Object.keys(instructions), ...Object.keys(blockInstructions),
-    'ɵsxInstallErrorDelivery', 'ɵsxFindTarget',
+    'ɵsxInstallErrorDelivery', 'ɵsxFindTarget', 'ɵdestroySxResources',
     javascript + '\nreturn ɵsetupSxBindings;',
   )(
     ...Object.values(instructions), ...Object.values(blockInstructions),
-    ɵsxInstallErrorDelivery, ɵsxFindTarget,
+    ɵsxInstallErrorDelivery, ɵsxFindTarget, ɵdestroySxResources,
   );
   return setup(host, context) as { destroy(): void };
 }

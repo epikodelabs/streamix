@@ -1,21 +1,20 @@
 import {
   customRef,
   getCurrentScope,
-  onScopeDispose,
   type ShallowRef,
 } from 'vue';
 import type {
   DependencySource,
   Subscription,
 } from '@epikodelabs/streamix';
-import { NO_INITIAL_VALUE } from '@epikodelabs/streamix';
+import { NO_INITIAL_VALUE, ɵcreateDisposer } from '@epikodelabs/streamix';
 import {
   ɵrecordStreamixDevtoolsWrite,
   recordStreamixDevtoolsEvent,
 } from './devtools';
-import { registerSSRDisposal } from './ssr-disposal';
+import { registerVueDisposal } from './ssr-disposal';
 
-type Disposable = { dispose(): void };
+type Disposable = { dispose(): void | Promise<void> };
 type ErrorSource = {
   onError(handler: (error: unknown) => void): Subscription;
 };
@@ -32,7 +31,7 @@ export type IterableRef<T> = Readonly<ShallowRef<T>>;
 export interface IterableBridge<T> {
   readonly ref: IterableRef<T>;
   /** Stops the Streamix subscription or iterator. Safe to call more than once. */
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 function isDependencySource<T>(source: unknown): source is DependencySource<T> {
@@ -103,29 +102,6 @@ function readonlyBridgeRef<T>(read: () => T): {
     ref: ref as IterableRef<T>,
     invalidate,
   };
-}
-
-/**
- * Runs a teardown callback and reports a synchronous throw or rejected
- * promise instead of leaving an unhandled rejection. Teardown failures are
- * surfaced to the host console rather than swallowed.
- */
-function settleTeardown(run: () => unknown, action: string): void {
-  let result: unknown;
-  try {
-    result = run();
-  } catch (error) {
-    console.error(`[streamix] Vue bridge teardown failed (${action}):`, error);
-    return;
-  }
-
-  if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
-    return;
-  }
-
-  void Promise.resolve(result as PromiseLike<unknown>).catch(error => {
-    console.error(`[streamix] Vue bridge teardown rejected (${action}):`, error);
-  });
 }
 
 function isDisposed(source: DependencySource<unknown>): boolean {
@@ -216,20 +192,12 @@ function dependencyRef<T>(
     })
     : undefined;
 
-  let disposed = false;
-  const dispose = (): void => {
-    if (disposed) return;
-    disposed = true;
+  const dispose = ɵcreateDisposer(queue => {
     recordStreamixDevtoolsEvent({ type: 'unsubscribe', source: sourceName });
-    settleTeardown(subscription, 'unsubscribe');
-    if (errorSubscription) {
-      settleTeardown(errorSubscription, 'unsubscribe');
-    }
-
-    if (owned && isDisposable(source)) {
-      source.dispose();
-    }
-  };
+    queue.run(subscription);
+    if (errorSubscription) queue.run(errorSubscription);
+    if (owned && isDisposable(source)) queue.run(() => source.dispose());
+  });
 
   return { ref: bridge.ref, dispose };
 }
@@ -279,20 +247,11 @@ function asyncIterableRef<T>(
     }
   })();
 
-  let disposed = false;
-  const dispose = (): void => {
-    if (disposed) return;
-    disposed = true;
+  const dispose = ɵcreateDisposer(queue => {
     active = false;
-
-    if (typeof iterator.return === 'function') {
-      settleTeardown(() => iterator.return!(), 'iterator.return');
-    }
-
-    if (owned && isDisposable(source)) {
-      source.dispose();
-    }
-  };
+    queue.run(() => iterator.return?.());
+    if (owned && isDisposable(source)) queue.run(() => source.dispose());
+  });
 
   return { ref: bridge.ref, dispose };
 }
@@ -338,8 +297,7 @@ export function useIterable<T>(
 ): IterableRef<T> {
   requireEffectScope('useIterable()');
   const bridge = createIterableBridgeImpl(sourceOrFactory, initialValue, sourceName);
-  onScopeDispose(bridge.dispose);
-  registerSSRDisposal(bridge.dispose);
+  registerVueDisposal(bridge.dispose);
   return bridge.ref;
 }
 

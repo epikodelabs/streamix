@@ -7,6 +7,7 @@ import { SX_NO_INITIAL_VALUE_FIELD, SX_SOURCE_REFERENCES_FIELD } from './generat
  */
 export const SX_SETUP_RUNTIME_SYMBOLS = [
   'createBindingTable',
+  'ɵdestroySxResources',
   'ɵcreateSxConditionalBlock',
   'ɵcreateSxCompiledBlock',
   'ɵcreateSxKeyedBlock',

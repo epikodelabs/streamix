@@ -1,3 +1,4 @@
+import { ɵcreateDisposer, ɵDisposalQueue } from '@epikodelabs/streamix';
 import type {
   DependencySource,
   Subscription,
@@ -29,7 +30,7 @@ interface BlockFailure {
 export interface SxBlockInstance {
   readonly first: Node;
   readonly last: Node;
-  destroy(): void;
+  destroy(): void | Promise<void>;
   /** Re-run compiled bindings when a parent loop's context changes. */
   refresh?(): void;
 }
@@ -76,6 +77,7 @@ export class SxValueBlock<T> {
   private current: T | undefined | typeof UNSET = UNSET;
   private generation = 0;
   private destroyed = false;
+  private readonly disposals = new ɵDisposalQueue();
 
   constructor(
     private readonly anchor: Node,
@@ -126,15 +128,13 @@ export class SxValueBlock<T> {
     }
   }
 
-  destroy(): void {
-    if (this.destroyed) return;
-
+  readonly destroy = ɵcreateDisposer(() => {
     this.destroyed = true;
     this.generation += 1;
     this.unbind();
     this.removeInstance();
     this.current = UNSET;
-  }
+  }, this.disposals);
 
   private ensureScheduled(generation: number): void {
     if (!this.scheduled) {
@@ -191,7 +191,7 @@ export class SxValueBlock<T> {
           applyContentScope(instance, this.anchor);
           moveInstanceAfter(this.anchor, instance);
           return instance;
-        });
+        }, this.disposals);
       } catch (error) {
         // The value was committed before the factory ran, so a failed factory
         // or move would leave `Object.is(current, value)` true with no
@@ -212,14 +212,15 @@ export class SxValueBlock<T> {
     if (!this.instance) return;
 
     removeInstance(this.instance);
-    this.instance.destroy();
+    const instance = this.instance;
+    this.disposals.run(() => instance.destroy());
     this.instance = undefined;
   }
 
   private unbind(): void {
     this.generation += 1;
 
-    this.unsubscribe?.();
+    if (this.unsubscribe) this.disposals.run(this.unsubscribe);
     this.unsubscribe = undefined;
 
     this.scheduled?.destroy();
@@ -301,6 +302,7 @@ export class SxConditionalBlock {
   private current = -1;
   private generation = 0;
   private destroyed = false;
+  private readonly disposals = new ɵDisposalQueue();
   private failure?: BlockFailure;
 
   constructor(
@@ -355,15 +357,13 @@ export class SxConditionalBlock {
     }
   }
 
-  destroy(): void {
-    if (this.destroyed) return;
-
+  readonly destroy = ɵcreateDisposer(() => {
     this.destroyed = true;
     this.generation += 1;
     this.unbind();
     this.removeInstance();
     this.current = -1;
-  }
+  }, this.disposals);
 
   /**
    * Re-evaluates the branch selection synchronously. Used by a nested block
@@ -447,7 +447,7 @@ export class SxConditionalBlock {
         applyContentScope(instance, this.anchor);
         moveInstanceAfter(this.anchor, instance);
         return instance;
-      });
+      }, this.disposals);
     } catch (error) {
       // The selection was committed before the branch factory ran, so a
       // failed factory or move would leave `index === current` with no
@@ -463,7 +463,8 @@ export class SxConditionalBlock {
     if (!this.instance) return;
 
     removeInstance(this.instance);
-    this.instance.destroy();
+    const instance = this.instance;
+    this.disposals.run(() => instance.destroy());
     this.instance = undefined;
   }
 
@@ -471,7 +472,7 @@ export class SxConditionalBlock {
     this.generation += 1;
 
     for (const unsubscribe of this.unsubscribes) {
-      unsubscribe();
+      this.disposals.run(unsubscribe);
     }
     this.unsubscribes = [];
 
@@ -498,6 +499,7 @@ export class SxKeyedBlock<T> {
   private emptyInstance?: SxBlockInstance;
   private generation = 0;
   private destroyed = false;
+  private readonly disposals = new ɵDisposalQueue();
   private failure?: BlockFailure;
 
   constructor(
@@ -550,26 +552,24 @@ export class SxKeyedBlock<T> {
     }
   }
 
-  destroy(): void {
-    if (this.destroyed) return;
-
+  readonly destroy = ɵcreateDisposer(() => {
     this.destroyed = true;
     this.generation += 1;
     this.unbind();
 
     for (const record of this.records) {
       removeInstance(record.instance);
-      record.instance.destroy();
+      this.disposals.run(() => record.instance.destroy());
     }
 
     this.records = [];
 
     if (this.emptyInstance) {
       removeInstance(this.emptyInstance);
-      this.emptyInstance.destroy();
+      this.disposals.run(() => this.emptyInstance!.destroy());
       this.emptyInstance = undefined;
     }
-  }
+  }, this.disposals);
 
   /**
    * Re-reads the collection and re-renders synchronously. Used by a nested
@@ -586,7 +586,7 @@ export class SxKeyedBlock<T> {
   private removeRecords(): void {
     for (const record of this.records) {
       removeInstance(record.instance);
-      record.instance.destroy();
+      this.disposals.run(() => record.instance.destroy());
     }
 
     this.records = [];
@@ -639,7 +639,7 @@ export class SxKeyedBlock<T> {
           applyContentScope(instance, this.anchor);
           moveInstanceAfter(this.anchor, instance);
           return instance;
-        });
+        }, this.disposals);
       }
 
       return;
@@ -647,7 +647,7 @@ export class SxKeyedBlock<T> {
 
     if (this.emptyInstance) {
       removeInstance(this.emptyInstance);
-      this.emptyInstance.destroy();
+      this.disposals.run(() => this.emptyInstance!.destroy());
       this.emptyInstance = undefined;
     }
 
@@ -685,7 +685,7 @@ export class SxKeyedBlock<T> {
             const createdInstance = this.factory.create(item, index, items.length);
             applyContentScope(createdInstance, this.anchor);
             return createdInstance;
-          });
+          }, this.disposals);
           record = { key, item, instance };
           created.push(record);
         }
@@ -706,14 +706,14 @@ export class SxKeyedBlock<T> {
           // A half-inserted range cannot be walked; the subscriptions are
           // still released below.
         }
-        record.instance.destroy();
+        this.disposals.run(() => record.instance.destroy());
       }
       throw error;
     }
 
     for (const record of available.values()) {
       removeInstance(record.instance);
-      record.instance.destroy();
+      this.disposals.run(() => record.instance.destroy());
     }
 
     this.records = next;
@@ -723,7 +723,7 @@ export class SxKeyedBlock<T> {
     this.generation += 1;
 
     for (const unsubscribe of this.unsubscribes) {
-      unsubscribe();
+      this.disposals.run(unsubscribe);
     }
     this.unsubscribes = [];
 
