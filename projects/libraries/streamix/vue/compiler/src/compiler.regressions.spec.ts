@@ -39,13 +39,15 @@ idescribe('Vue compiled object value fields', () => {
     const result = compile(`
       import { atom } from '@epikodelabs/streamix';
       const count = atom(0);
-    `, '<p v-if="count.value === 0">zero</p><p v-else>one</p>');
+    `, `<button v-on:click="count.next(count.value + 1)">advance</button>
+      <p v-if="count['value'] === 0">zero</p><p v-else>{{ count?.value }}</p>`);
     const { app, host } = mountCompiled(result, source);
     try {
-      expect(host.textContent).toBe('zero');
-      source.next(1);
+      expect(host.querySelector('p')?.textContent).toBe('zero');
+      host.querySelector('button')!.click();
       await Vue.nextTick();
-      expect(host.textContent).toBe('one');
+      expect(source.value).toBe(1);
+      expect(host.querySelector('p')?.textContent).toBe('1');
     } finally {
       app.unmount();
       await source.dispose();

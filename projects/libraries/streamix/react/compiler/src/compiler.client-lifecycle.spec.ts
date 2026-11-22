@@ -114,6 +114,57 @@ idescribe("React JSX compiler client lifecycle", () => {
     await count.dispose();
   });
 
+  for (const [name, component] of [
+    ["concise arrow", "export const App = () => String(count.value);"],
+    ["class", `
+      export class App extends React.Component {
+        render() {
+          if (count.value === 0) return <output>0</output>;
+          return <output>1</output>;
+        }
+      }
+    `],
+    ["local and switch", `
+      export function App() {
+        const label = String(count.value);
+        switch (count.value) {
+          case count.value + 1: return <output>unreachable</output>;
+          default: return <output>{label}</output>;
+        }
+      }
+    `],
+  ]) {
+    it(`tracks explicit atom values in a ${name} render`, async () => {
+      const count = atom(0);
+      const module = compileGeneratedModule(`
+        import { atom } from '@epikodelabs/streamix';
+        const count = atom(0);
+        ${component}
+      `, () => count as Writable<unknown>);
+      await act(async () => { root = createRoot(container); root.render(createElement(module.App)); });
+      expect(container.textContent).toBe("0");
+      await act(async () => { count.next(1); });
+      expect(container.textContent).toBe("1");
+      await count.dispose();
+    });
+  }
+
+  it("reports an explicit render value read that must precede the subscription", () => {
+    const compiled = transformReactJsx(`
+      import { atom } from '@epikodelabs/streamix';
+      const count = atom(0);
+      export function App() {
+        const initial = count.value;
+        const local = atom(1);
+        return <output>{initial + local}</output>;
+      }
+    `, "early-read.tsx");
+    expect(compiled.diagnostics).toContain(jasmine.objectContaining({
+      category: "error",
+      message: jasmine.stringMatching(/render-time atom read precedes the generated subscription/),
+    }));
+  });
+
   it("updates object value fields that share names with source APIs", async () => {
     const form = atom({ error: "bad" });
     const module = compileGeneratedModule(`

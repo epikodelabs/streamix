@@ -112,6 +112,48 @@ describe('flattening emission lifetimes', () => {
     });
   }
 
+  for (const [name, factory] of [['concatMap', concatMap], ['mergeMap', mergeMap], ['switchMap', switchMap]] as const) {
+    it(name + ' awaits child teardown after throw and returns the original error', async () => {
+      const cleanupStarted = deferred<void>();
+      const cleanup = deferred<void>();
+      const failure = new Error('consumer threw');
+      const closeChild = jasmine.createSpy('child return').and.callFake(async () => {
+        cleanupStarted.resolve();
+        await cleanup.promise;
+        return DONE;
+      });
+      const closeSource = jasmine.createSpy('source return').and.callFake(() => {
+        throw new Error('upstream cleanup failed');
+      });
+      let outerValueRead = false;
+      const iterator = factory<number, number>(() => ({
+        [Symbol.asyncIterator]: () => ({
+          next: jasmine.createSpy('child next').and.returnValues(Promise.resolve(NEXT(9)), new Promise(() => {})),
+          return: closeChild,
+        }),
+      })).apply({
+        next: () => {
+          if (outerValueRead) return new Promise(() => {});
+          outerValueRead = true;
+          return Promise.resolve(NEXT(1));
+        },
+        return: closeSource,
+      });
+      expect(await iterator.next()).toEqual(NEXT(9));
+      let failed = false;
+      const throwing = iterator.throw!(failure).catch(error => { failed = true; return error; });
+      try {
+        await Promise.race([cleanupStarted.promise, throwing]);
+        expect(closeChild).toHaveBeenCalledTimes(1);
+        expect(failed).toBeFalse();
+      } finally {
+        cleanup.resolve();
+      }
+      expect(await throwing).toBe(failure);
+      expect(closeSource).toHaveBeenCalledTimes(1);
+    });
+  }
+
   it('switchMap cancels a pending projection at replacement and ignores its late failure', async () => {
     const first = deferred<number>(), second = deferred<number>();
     const buffer: number[] = [1];
