@@ -78,9 +78,9 @@ function elementPathExpression(path: SxElementPath): string {
 
 /** Use the authored marker when Angular control flow changes child indices. */
 function targetExpression(parsed: ParsedSxTemplate, nodeId: string): string {
-  const selector = parsed.nodeSelectors?.[nodeId];
-  return selector
-    ? `host.querySelector(${jsStringLiteral(selector)})`
+  const markerPath = parsed.nodeMarkerPaths[nodeId];
+  return markerPath
+    ? `ɵsxFindTarget(host, ${JSON.stringify(markerPath)})`
     : elementPathExpression(parsed.nodePaths[nodeId]);
 }
 

@@ -11,6 +11,7 @@ import { createStreamixProgram, createTokenSourceMap, injectIntrospectionActivat
 import { compileSxComponent } from '@epikodelabs/streamix/angular/compiler';
 import { installSxLifecycleIntoComponentSource } from '@epikodelabs/streamix/angular/compiler';
 import { findSxComponentTemplate, installSxComponentTemplate, resolveSourceRoot, virtualRootOf } from './options';
+import { componentSelectorsInScope } from './component-selectors';
 
 /** Factory recognition must look through type-only casts and debug wrappers. */
 function unwrapReactiveInitializer(expression: ts.Expression): ts.Expression {
@@ -101,10 +102,8 @@ export async function generateProject({
     }
     await rename(stagingDirectory, outputDirectory);
     swapped = true;
-    // Angular's template compiler requires decorated components to be program
-    // roots, not merely transitively imported by a file replacement. Point the
-    // delegated build at a virtual tsconfig which includes the entire generated
-    // source tree. This keeps consuming projects free from `.angular` paths.
+    // Preserve TypeScript's effective roots (including inherited exclusions)
+    // and move application files to their corresponding generated paths.
     // The config belongs to the generation: install it atomically after the
     // swap, and treat any failure until here as uncommitted so the previous
     // tree is restored instead of serving new sources with the old config.
@@ -114,9 +113,17 @@ export async function generateProject({
         extends: configPath(relative(resolve(outputDirectory, '..'), tsconfigPath)),
         // Both the virtual app and imported workspace sources belong to the program.
         compilerOptions: { rootDir: configPath(relative(dirname(outputDirectory), workspaceRoot)) },
-        files: [],
-        include: ['src/**/*.ts'],
-        exclude: ['src/**/*.spec.ts'],
+        files: parsedConfig.fileNames
+          .filter(file => !/\.(?:spec|sx)\.ts$/.test(file))
+          .map(file => {
+            const path = relative(sourceDirectory, file);
+            const virtual = path !== '..' && !path.startsWith('..\\') &&
+              !path.startsWith('../') && !isAbsolute(path)
+              ? resolve(outputDirectory, path) : file;
+            return configPath(relative(dirname(outputDirectory), virtual));
+          }),
+        include: [],
+        exclude: [],
       }, null, 2)}\n`,
     );
     committed = true;
@@ -769,6 +776,7 @@ async function compileVirtualSource({
     componentPath: sourcePath,
     templatePath,
     template: templateText,
+    componentSelectors: components[0] && componentSelectorsInScope(components[0], program, checker),
     preserveWhitespaces: match.preserveWhitespaces,
     resolveReactiveSource: standaloneDependencySources(program, checker, sourcePath),
     scopeValuePaths,
@@ -802,14 +810,25 @@ async function compileVirtualSource({
 
 /** A fresh semantic graph is shared by all files in this watch batch. */
 export async function regenerateAngularFiles(workspaceRoot: string, sourceRoot: string, changedPaths: readonly string[], introspection = false): Promise<void> {
-  const sourceDirectory = resolve(workspaceRoot, resolveSourceRoot({ sourceRoot }));
+  const validatedRoot = resolveSourceRoot({ sourceRoot });
+  const sourceDirectory = resolve(workspaceRoot, validatedRoot);
+  const outputDirectory = resolve(workspaceRoot, virtualRootOf(validatedRoot));
   const overlays = new Map<string, string>();
   for (const changedPath of changedPaths) {
     const path = changedPath.replace(/\\/g, '/');
     if (!path || isAbsolute(path) || win32.isAbsolute(path) || path.split(/[\\/]/).some(part => part === '..' || part === '.')) continue;
-    if (!/\.[jt]sx?$/i.test(path) || /\.(?:d|spec|test)\.[jt]sx?$/i.test(path)) continue;
+    if (!/\.[jt]sx?$/i.test(path) || /\.(?:spec|test)\.[jt]sx?$/i.test(path)) continue;
     try { overlays.set(join(sourceDirectory, path), await readFile(join(sourceDirectory, path), 'utf8')); }
     catch (error) { if (!['ENOENT', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+    const existed = await access(join(outputDirectory, path)).then(() => true, error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return false;
+    });
+    if (existed !== overlays.has(join(sourceDirectory, path))) {
+      // Creation or removal may change the mapped tsconfig roots.
+      await generateProject({ workspaceRoot, sourceRoot: validatedRoot, introspection });
+      return;
+    }
   }
   let program: Promise<ts.Program> | undefined;
   const semanticProgram = (create: () => Promise<ts.Program>): Promise<ts.Program> => program ??= create();
@@ -907,7 +926,7 @@ async function listFiles(
 
 function configPath(path: string): string {
   const normalized = path.replace(/\\/g, '/');
-  return normalized.startsWith('.') ? normalized : `./${normalized}`;
+  return normalized.startsWith('.') || isAbsolute(path) ? normalized : `./${normalized}`;
 }
 
 const ENTRY_NAMES = ['main.tsx', 'main.jsx', 'main.ts', 'main.js', 'index.tsx', 'index.jsx', 'index.ts', 'index.js'];

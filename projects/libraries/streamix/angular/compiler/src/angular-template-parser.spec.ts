@@ -1,6 +1,7 @@
 import {
   parseSxTemplate,
 } from './angular-template-parser';
+import { transformAngularComponentTemplate } from './build-transform';
 
 describe('parseSxTemplate static topology', () => {
   const resolveReactiveSource = (path: string) => ({
@@ -16,8 +17,7 @@ describe('parseSxTemplate static topology', () => {
     </section>`;
     const parsed = parseSxTemplate(source, 'inline.html', { resolveReactiveSource });
     expect(parsed.plan.size).toBe(2);
-    expect(parsed.nodeSelectors['node2']).toContain(':scope >');
-    expect(parsed.nodeSelectors['node2']).toContain('data-sx-node');
+    expect(parsed.nodeMarkerPaths['node2']).toEqual(['node0', 'node2']);
     expect(parsed.bindingEdits.some(edit => edit.replacement.includes('data-sx-node'))).toBeTrue();
   });
 
@@ -57,6 +57,27 @@ describe('parseSxTemplate static topology', () => {
     )).toThrowError(/projection|static element topology/i);
   });
 
+  for (const [host, template] of [
+    ['element', '<app-card>@if (model.ready) { <p>yes</p> }</app-card>'],
+    ['attribute', '<div appCard><ng-container>@if (model.ready) { <p>yes</p> }</ng-container></div>'],
+  ] as const) {
+    it(`rejects lowered markers inside a component with an ${host} selector`, () => {
+      expect(() => transformAngularComponentTemplate(template, 'inline.html', {
+        resolveReactiveSource,
+        componentSelectors: ['app-card', 'div[appCard]'],
+      })).toThrowError(/static element topology.*projection/i);
+    });
+  }
+
+  it('keeps lowered markers under a native host with an unrelated attribute', () => {
+    const result = transformAngularComponentTemplate(
+      '<div other>@if (model.ready) { <p>yes</p> }</div>',
+      'inline.html',
+      { resolveReactiveSource, componentSelectors: ['div[appCard]'] },
+    );
+    expect(result.structuralBlockCount).toBe(1);
+  });
+
 
   it('counts flattened ng-container text when addressing interpolations', () => {
     const parsed = parseSxTemplate(
@@ -85,10 +106,10 @@ describe('parseSxTemplate static topology', () => {
     expect(text).toBeDefined();
     expect(text!.name).toBeUndefined();
     // The wrapper carries its own stable-target marker and is addressed
-    // through a selector instead of a shifting element path.
+    // through a marker path instead of shifting child indices.
     expect(
-      parsed.nodeSelectors[text!.node].includes('[data-sx-node="' + text!.node + '"'),
-    ).toBeTrue();
+      parsed.nodeMarkerPaths[text!.node],
+    ).toEqual(['node0', text!.node]);
   });
 
   it('wraps interpolations after Angular-owned dynamic siblings too', () => {

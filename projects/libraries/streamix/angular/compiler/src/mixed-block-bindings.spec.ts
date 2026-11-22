@@ -48,7 +48,7 @@ describe('sx mixed loop-local/reactive block expressions', () => {
       plan: { size: 0, bindings: [] },
       nodePaths: { marker: [0] },
       markers: { '0': 'marker' },
-      nodeSelectors: {},
+      nodeMarkerPaths: {},
     } as unknown as Parameters<typeof emitComponentSetup>[0], 'ɵsetup', [{
       kind: 'collection', marker: '0',
       source: { kind: 'source', source: 'model.get("items")' },

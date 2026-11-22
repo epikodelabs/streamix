@@ -1,14 +1,28 @@
 import {
+  ImplicitReceiver,
+  PropertyRead,
+  R3TargetBinder,
+  RecursiveAstVisitor,
+  SafePropertyRead,
+  ThisReceiver,
+  TmplAstBoundDeferredTrigger,
   TmplAstDeferredBlock,
   TmplAstElement,
   TmplAstForLoopBlock,
   TmplAstIfBlock,
   TmplAstLetDeclaration,
+  TmplAstRecursiveVisitor,
   TmplAstSwitchBlock,
   TmplAstTemplate,
   parseTemplate,
   type AST,
+  type TmplAstBoundAttribute,
+  type TmplAstBoundEvent,
+  type TmplAstBoundText,
+  type TmplAstDeferredTrigger,
+  type TmplAstIfBlockBranch,
   type TmplAstNode,
+  type TmplAstSwitchBlockCase,
 } from '@angular/compiler';
 
 import {
@@ -16,10 +30,6 @@ import {
   type SxLoopAlias,
   type SxCompiledBlockTemplate,
 } from './block-template-compiler';
-import {
-  angularExpressionSpans,
-  componentPathsInExpression,
-} from './expression-spans';
 import type { SxReactiveSourceResolver } from './source-resolution';
 import { analyzeSxExpression } from './text-expression';
 
@@ -157,7 +167,6 @@ export function lowerStructuralBlocks(
       blocks: [],
       sourceFields: [],
       rejected: collectRejectedReads(
-        template,
         parsed.nodes,
         new Set<TmplAstNode>(),
         resolveReactiveSource,
@@ -218,7 +227,6 @@ export function lowerStructuralBlocks(
   }
 
   const rejected = collectRejectedReads(
-    template,
     parsed.nodes,
     owned,
     resolveReactiveSource,
@@ -237,18 +245,79 @@ export function lowerStructuralBlocks(
 }
 
 /**
- * Atom reads inside dynamic regions the lowering pass left to Angular. Their
- * source text is scanned with the same expression-span rules the compiler uses
- * elsewhere, so static attributes and prose are never mistaken for reads.
+ * Atom reads inside dynamic regions the lowering pass left to Angular. Use
+ * Angular's expression AST and lexical binding information so locals and
+ * references can shadow component fields.
  */
 function collectRejectedReads(
-  template: string,
   nodes: readonly TmplAstNode[],
   owned: ReadonlySet<TmplAstNode>,
   resolveReactiveSource: SxReactiveSourceResolver,
 ): readonly string[] {
-  const rejected: string[] = [];
-  const seen = new Set<string>();
+  const rejected = new Set<string>();
+  const target = new R3TargetBinder(null).bind({ template: [...nodes] });
+  const expressions = new class extends RecursiveAstVisitor {
+    override visitPropertyRead(read: PropertyRead): void { this.readPath(read); }
+    override visitSafePropertyRead(read: SafePropertyRead): void { this.readPath(read); }
+
+    private readPath(read: PropertyRead | SafePropertyRead): void {
+      const parts = [read.name];
+      let root = read;
+      while (root.receiver instanceof PropertyRead || root.receiver instanceof SafePropertyRead) {
+        root = root.receiver;
+        parts.push(root.name);
+      }
+      if (!(root.receiver instanceof ImplicitReceiver || root.receiver instanceof ThisReceiver)) {
+        read.receiver.visit(this);
+        return;
+      }
+      if (root.name.startsWith('$') ||
+          (!(root.receiver instanceof ThisReceiver) && target.getExpressionTarget(root))) return;
+      parts.reverse();
+      const path = parts.join('.');
+      // A value read can itself be followed by more property reads.
+      if (resolveReactiveSource(path) || parts.some((segment, index) =>
+        segment === 'value' && index > 0 && resolveReactiveSource(parts.slice(0, index).join('.'))
+      )) rejected.add(path);
+    }
+  }();
+
+  const region = new class extends TmplAstRecursiveVisitor {
+    override visitBoundText(node: TmplAstBoundText): void { node.value.visit(expressions); }
+    override visitBoundAttribute(node: TmplAstBoundAttribute): void { node.value.visit(expressions); }
+    override visitBoundEvent(node: TmplAstBoundEvent): void { node.handler.visit(expressions); }
+    override visitLetDeclaration(node: TmplAstLetDeclaration): void { node.value.visit(expressions); }
+
+    override visitTemplate(node: TmplAstTemplate): void {
+      for (const attr of node.templateAttrs) attr.visit(this);
+      super.visitTemplate(node);
+    }
+
+    override visitIfBlockBranch(node: TmplAstIfBlockBranch): void {
+      node.expression?.visit(expressions);
+      super.visitIfBlockBranch(node);
+    }
+
+    override visitForLoopBlock(node: TmplAstForLoopBlock): void {
+      node.expression.visit(expressions);
+      node.trackBy.visit(expressions);
+      super.visitForLoopBlock(node);
+    }
+
+    override visitSwitchBlock(node: TmplAstSwitchBlock): void {
+      node.expression.visit(expressions);
+      super.visitSwitchBlock(node);
+    }
+
+    override visitSwitchBlockCase(node: TmplAstSwitchBlockCase): void {
+      node.expression?.visit(expressions);
+      super.visitSwitchBlockCase(node);
+    }
+
+    override visitDeferredTrigger(node: TmplAstDeferredTrigger): void {
+      if (node instanceof TmplAstBoundDeferredTrigger) node.value.visit(expressions);
+    }
+  }();
 
   const visit = (list: readonly TmplAstNode[]): void => {
     for (const node of list) {
@@ -262,24 +331,14 @@ function collectRejectedReads(
           node instanceof TmplAstSwitchBlock ||
           node instanceof TmplAstTemplate ||
           node instanceof TmplAstDeferredBlock) {
-        if (!owned.has(node)) {
-          collectRegionReads(node, template, resolveReactiveSource, rejected, seen);
-        }
+        if (!owned.has(node)) node.visit(region);
         continue;
       }
 
       // `@let x = <expression>;` is Angular-owned: the declaration is evaluated
       // once per Angular render, so reactive reads there would never update.
       if (node instanceof TmplAstLetDeclaration) {
-        collectReads(
-          template.slice(
-            spanStart(node.value.sourceSpan),
-            spanEnd(node.value.sourceSpan),
-          ),
-          resolveReactiveSource,
-          rejected,
-          seen,
-        );
+        node.visit(region);
         continue;
       }
 
@@ -292,37 +351,7 @@ function collectRejectedReads(
   };
 
   visit(nodes);
-  return rejected;
-}
-
-function collectRegionReads(
-  node: TmplAstNode,
-  template: string,
-  resolveReactiveSource: SxReactiveSourceResolver,
-  rejected: string[],
-  seen: Set<string>,
-): void {
-  const text = template.slice(spanStart(node.sourceSpan), spanEnd(node.sourceSpan));
-
-  for (const span of angularExpressionSpans(text)) {
-    collectReads(span.text, resolveReactiveSource, rejected, seen);
-  }
-}
-
-function collectReads(
-  expression: string,
-  resolveReactiveSource: SxReactiveSourceResolver,
-  rejected: string[],
-  seen: Set<string>,
-): void {
-  for (const path of componentPathsInExpression(expression)) {
-    if (seen.has(path) || !resolveReactiveSource(path)) {
-      continue;
-    }
-
-    seen.add(path);
-    rejected.push(path);
-  }
+  return [...rejected];
 }
 
 function applyEdits(

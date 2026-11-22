@@ -19,6 +19,7 @@ import {
 } from './source-resolution';
 
 export interface SxComponentBuildInput {
+  readonly componentSelectors?: readonly string[];
   readonly componentPath: string;
   readonly template: string;
   readonly templatePath?: string;
@@ -121,6 +122,7 @@ export function compileSxComponent(
     {
       resolveReactiveSource,
       resolveReactiveWritable,
+      componentSelectors: input.componentSelectors,
       preserveWhitespaces: input.preserveWhitespaces,
     },
   );
