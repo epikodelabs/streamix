@@ -1,15 +1,34 @@
 import type { Readable } from "./atom";
 import { ANALOG_DELIVERY, getProducerCompletion } from "./delivery";
-import type { MaybePromise } from "./operator";
+import { DONE, NEXT, type MaybePromise } from "./operator";
 import { REPLAY_ITERATOR } from './replay';
+import type { Subscription } from "./subscription";
 import { createSourceReadiness, type SourceCapabilities, type SyncPoll } from "../utils/source-protocol";
+
+interface PendingPull<T> {
+  resolve: (result: IteratorResult<T>) => void;
+  reject: (error: unknown) => void;
+  next?: PendingPull<T>;
+}
+
+export interface IterateOptions {
+  /**
+   * Whether a Readable's current value should be delivered when iteration starts.
+   * Defaults to true. Internal adapters can disable this when they already
+   * captured the same current value and only need future emissions.
+   */
+  replayCurrent?: boolean;
+}
 
 /**
  * Creates an async iterable from an atom.
  *
  * Yields the current value immediately, then yields subsequent values
- * whenever the atom emits. Producer completion ends iteration after buffered
- * values drain; atom disposal and iterator closure also end iteration.
+ * whenever the atom emits. Producer completion and atom disposal end
+ * iteration after buffered values drain.
+ * Concurrent next() calls receive values in call order. If the source fails,
+ * buffered values drain before the error, and all waiting reads reject.
+ * Explicit return() discards buffered values and ends all waiting reads.
  *
  * @param source - The atom or async iterable to iterate over.
  * @returns An async iterable iterator that yields source values.
@@ -26,15 +45,6 @@ import { createSourceReadiness, type SourceCapabilities, type SyncPoll } from ".
  * }
  * ```
  */
-export interface IterateOptions {
-  /**
-   * Whether an Readable's current value should be delivered when iteration starts.
-   * Defaults to true. Internal adapters can disable this when they already
-   * captured the same current value and only need future emissions.
-   */
-  replayCurrent?: boolean;
-}
-
 export function iterate<T>(
   source: Readable<T> | AsyncIterable<T>,
   options?: IterateOptions,
@@ -54,40 +64,46 @@ export function iterate<T>(
   let finished = false;
   let stopCompletion: (() => void) | undefined;
   let stopDisposal: (() => void) | undefined;
-  const sourceEnded = () => finished || atom.disposed || completion?.completed === true;
-  let buffer: T[] = [];
-  let resolveNext: ((res: IteratorResult<T>) => void) | null = null;
-  let rejectNext: ((e: any) => void) | null = null;
+  const sourceEnded = () => done || finished || atom.disposed || completion?.completed === true;
+  const buffer: T[] = [];
+  let pendingHead: PendingPull<T> | undefined;
+  let pendingTail: PendingPull<T> | undefined;
+  let terminalError: Error | undefined;
   let done = false;
   const readiness = createSourceReadiness();
   let finish: (() => MaybePromise<void>) | undefined;
-  let checkError: (() => any) | undefined;
-  let errorUnsubscribe: any;
+  let errorUnsubscribe: Subscription | undefined;
+
+  const settlePending = (settle: (pull: PendingPull<T>) => void) => {
+    let pull = pendingHead;
+    pendingHead = pendingTail = undefined;
+    while (pull) {
+      settle(pull);
+      pull = pull.next;
+    }
+  };
 
   const notifyPush = () => {
     if (!initializing) readiness.notify();
   };
 
-  const ensureInit = () => {
-    if (initialized) return;
-    initialized = true;
-    initializing = true;
-
+  const subscribeToSource = () => {
     let subscribing = true;
     const unsubscribe = atom.subscribe((value) => {
-      if (done) return;
+      if (done || finished) return;
       if (options?.replayCurrent === false && subscribing) return;
-      if (resolveNext) {
-        resolveNext({ value, done: false });
-        resolveNext = null;
-        rejectNext = null;
+      if (pendingHead) {
+        const pull = pendingHead;
+        pendingHead = pull.next;
+        if (!pendingHead) pendingTail = undefined;
+        pull.resolve(NEXT(value));
       } else if (conflate && buffer.length > 0) {
         buffer[0] = value;
       } else {
         buffer.push(value);
       }
       // Initial replay happens inside subscribe(), before error and disposal
-      // handlers are installed. Let the initiating pull drain that replay;
+      // handlers are installed. Let the initiating read receive that replay;
       // reentering pollSync here would observe a partially initialized iterator.
       if (!subscribing) notifyPush();
     });
@@ -96,6 +112,16 @@ export function iterate<T>(
     finish = () => {
       if (finished) return;
       finished = true;
+      if (!done) {
+        const error = atom.error;
+        if (pendingHead) {
+          done = true;
+          settlePending(error ? pull => pull.reject(error) : pull => pull.resolve(DONE));
+        } else {
+          terminalError = error;
+          done = buffer.length === 0 && !error;
+        }
+      }
       // Remove ourselves from the atom's dispose handlers: iteration can end
       // (return()/error) long before the atom is disposed, and every finished
       // iterator left here would otherwise leak until the atom's disposal.
@@ -103,51 +129,69 @@ export function iterate<T>(
       stopDisposal = undefined;
       stopCompletion?.();
       stopCompletion = undefined;
+      errorUnsubscribe?.();
+      errorUnsubscribe = undefined;
       const cleanup = unsubscribe();
-      if (errorUnsubscribe) {
-        errorUnsubscribe();
-        errorUnsubscribe = undefined;
-      }
-      const err = atom.error;
-      if (resolveNext) {
-        if (err) {
-          done = true;
-          const r = rejectNext!;
-          resolveNext = null;
-          rejectNext = null;
-          r(err);
-        } else {
-          if (buffer.length === 0) {
-            // When resolveNext is set the buffer is always empty (values
-            // resolve the promise instead of buffering), so we can safely
-            // complete immediately.
-            done = true;
-            resolveNext({ value: undefined as any, done: true });
-            resolveNext = null;
-            rejectNext = null;
-          }
-        }
-      } else if (buffer.length === 0 && !atom.error) {
-        done = true;
-      }
       notifyPush();
       return cleanup;
     };
 
-    checkError = () => atom.error;
+    if (done) {
+      finish();
+      return;
+    }
     stopDisposal = completion?.onDispose?.(() => { finish?.(); });
     errorUnsubscribe = atom.onError(() => {
       if (!done) finish?.();
     });
     if (finished) {
-      errorUnsubscribe();
+      errorUnsubscribe?.();
       errorUnsubscribe = undefined;
     } else {
       stopCompletion = completion?.onComplete(() => { finish?.(); });
       if (finished) { stopCompletion?.(); stopCompletion = undefined; }
     }
     if (atom.disposed && !finished) finish();
-    initializing = false;
+  };
+
+  const ensureInit = () => {
+    if (initialized) return;
+    initialized = true;
+    initializing = true;
+    try {
+      subscribeToSource();
+    } catch (error) {
+      done = true;
+      buffer.length = 0;
+      settlePending(pull => pull.reject(error));
+      finish?.();
+      throw error;
+    } finally {
+      initializing = false;
+    }
+  };
+
+  const poll = (): SyncPoll<T> => {
+    if (done) return { status: "available", result: DONE };
+    ensureInit();
+    if (done) return { status: "available", result: DONE };
+    if (initializing) return { status: "unavailable" };
+
+    // Values already accepted from the source precede a terminal error.
+    if (buffer.length > 0) {
+      return { status: "available", result: NEXT(buffer.shift()!) };
+    }
+    if (terminalError) {
+      const error = terminalError;
+      terminalError = undefined;
+      done = true;
+      throw error;
+    }
+    if (sourceEnded()) {
+      done = true;
+      return { status: "available", result: DONE };
+    }
+    return { status: "unavailable" };
   };
 
   const iterator: AsyncIterableIterator<T> & SourceCapabilities<T> = {
@@ -155,81 +199,36 @@ export function iterate<T>(
       return this;
     },
     async next() {
-      ensureInit();
-      if (done) return { value: undefined as any, done: true };
-
-      // Drain buffered values first, even if the atom has errored or been
-      // disposed, so that no values are silently dropped before an error.
-      if (buffer.length > 0) {
-        const val = buffer.shift()!;
-        if (sourceEnded() && buffer.length === 0) {
-          const err = checkError!();
-          if (!err) {
-            done = true;
-          }
-          // If there *is* an error, don't set done yet — the next call
-          // to next() will surface it.
-        }
-        return { value: val, done: false };
-      }
-
-      // Buffer is empty — surface any pending error.
-      const err = checkError!();
-      if (err) {
-        if (finish) await finish();
-        done = true;
-        throw err;
-      }
-
-      if (sourceEnded()) {
-        done = true;
-        return { value: undefined as any, done: true };
+      if (initialized || done) {
+        const polled = poll();
+        if (polled.status === "available") return polled.result;
       }
 
       return new Promise<IteratorResult<T>>((resolve, reject) => {
-        resolveNext = resolve;
-        rejectNext = reject;
+        // Reserve the first pull before subscribing, since producer startup
+        // can reenter next() before the subscription returns.
+        const pull: PendingPull<T> = { resolve, reject };
+        if (pendingTail) pendingTail.next = pull;
+        else pendingHead = pull;
+        pendingTail = pull;
+        ensureInit();
       });
     },
     async return() {
-      ensureInit();
-      if (finish) await finish();
+      const wasDone = done;
       done = true;
       buffer.length = 0;
-      return { value: undefined as any, done: true };
+      terminalError = undefined;
+      settlePending(pull => pull.resolve(DONE));
+      if (finish) await finish();
+      else if (!wasDone) notifyPush();
+      return DONE;
     },
-    pollSync(): SyncPoll<T> {
-      ensureInit();
-      if (done) return { status: "available", result: { value: undefined as any, done: true } };
-
-      // Drain buffered values first
-      if (buffer.length > 0) {
-        const val = buffer.shift()!;
-        if (sourceEnded() && buffer.length === 0) {
-          const err = checkError!();
-          if (!err) {
-            done = true;
-          }
-        }
-        return { status: "available", result: { value: val, done: false } };
-      }
-
-      // Buffer is empty — surface any pending error.
-      const err = checkError!();
-      if (err) {
-        done = true;
-        throw err;
-      }
-      if (sourceEnded()) {
-        done = true;
-        return { status: "available", result: { value: undefined as any, done: true } };
-      }
-      return { status: "unavailable" };
-    },
+    pollSync: poll,
 
     // Held values only — terminal completion is reported by `isTerminal`.
     hasBufferedEvents(): boolean {
-      return buffer.length > 0 || (!done && atom.error !== undefined);
+      return !done && (buffer.length > 0 || terminalError !== undefined || (!initialized && atom.error !== undefined));
     },
 
     isTerminal(): boolean {
