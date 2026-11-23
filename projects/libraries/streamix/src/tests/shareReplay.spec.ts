@@ -190,6 +190,21 @@ describe('shareReplay', () => {
     expect(source2ReturnCalls).toBe(1);
     expect(source2ReturnRejected).toBe(true);
   });
+
+  it('settles overlapping reads in pull order', async () => {
+    let emit!: (result: IteratorResult<number>) => void;
+    const source: AsyncIterator<number> = {
+      next: () => new Promise(resolve => { emit = resolve; }),
+    };
+    const iterator = shareReplay<number>().apply(source);
+    const first = iterator.next();
+    const second = iterator.next();
+    emit({ done: false, value: 1 });
+    expect(await first).toEqual({ done: false, value: 1 });
+    emit({ done: false, value: 2 });
+    expect(await second).toEqual({ done: false, value: 2 });
+    await iterator.return?.();
+  });
 });
 
 

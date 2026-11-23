@@ -7,6 +7,7 @@ describe('interval', () => {
 
     const emittedValues: number[] = [];
     const timestamps: number[] = [];
+    const started = Date.now();
 
     await new Promise<void>((resolve) => {
       intervalStream.subscribe({
@@ -23,6 +24,7 @@ describe('interval', () => {
     // ??? Expectations run after stream completes
     expect(emittedValues.length).toBe(3);
     expect(emittedValues).toEqual([0, 1, 2]);
+    expect(timestamps[0] - started).toBeGreaterThanOrEqual(intervalMs - 10);
     
     // Check timing between emissions
     for (let i = 1; i < timestamps.length; i++) {

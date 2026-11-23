@@ -1,6 +1,7 @@
-import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, type Operator, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { normalizeError } from "../utils/helpers";
+import { createDisposer } from "../utils/disposal";
 
 /**
  * Creates a stream operator that maps each value from the source stream to a new
@@ -23,11 +24,19 @@ import { normalizeError } from "../utils/helpers";
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
 export const concatMap = <T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => MaybePromise<Stream<R> | R | Array<R>>
 ) =>
   createOperator<T, R>("concatMap", function (this : Operator, source) {
     let outerIndex = 0;
+    let stopped = false;
     let innerIterator: AsyncIterator<R> | null = null;
+    const close = createDisposer(queue => {
+      stopped = true;
+      const inner = innerIterator;
+      innerIterator = null;
+      queue.run(async () => { try { await inner?.return?.(); } catch {} });
+      queue.run(async () => { try { await source.return?.(); } catch {} });
+    });
     let result: IteratorResult<T> | null = null;
 
     const iterator: AsyncIterator<R> = {
@@ -37,16 +46,16 @@ export const concatMap = <T = any, R = any>(
           if (!innerIterator) {
             result = await source.next();
 
-            if (result.done) return DONE;
+            if (stopped || result.done) return DONE;
 
             const projected = project(result.value, outerIndex++);
-            const normalized = isPromiseLike(projected) ? await projected : projected;
-            const innerStream = fromAny<R>(normalized);
+            const innerStream = fromAny<R>(projected);
             innerIterator = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
           }
 
           // Pull next value from inner stream
           const innerResult = await innerIterator.next();
+          if (stopped) return DONE;
 
           if (innerResult.done) {
             innerIterator = null;
@@ -57,29 +66,17 @@ export const concatMap = <T = any, R = any>(
 
           return NEXT(innerResult.value);
         }
+        return DONE;
       },
 
-      async return(value?: any) {
-        try {
-          await innerIterator?.return?.(value);
-        } catch {}
-        try {
-          await source.return?.();
-        } catch {}
-        innerIterator = null;
+      async return() {
+        await close();
         return DONE;
       },
 
       async throw(err: any) {
-        const error = normalizeError(err);
-        try {
-          await innerIterator?.return?.();
-        } catch {}
-        try {
-          await source.return?.();
-        } catch {}
-        innerIterator = null;
-        throw error;
+        await close();
+        throw normalizeError(err);
       }
     };
 

@@ -5,7 +5,7 @@ import { timer } from './timer';
  * Creates a stream that emits incremental numbers starting from 0 at a regular
  * interval.
  *
- * This operator is a shorthand for `timer(0, intervalMs)`, useful for
+ * This operator is a shorthand for `timer(intervalMs, intervalMs)`, useful for
  * creating a simple, repeating sequence of numbers. The stream emits a new
  * value every `intervalMs` milliseconds. It is analogous to `setInterval` but
  * as an asynchronous stream.
@@ -15,7 +15,7 @@ import { timer } from './timer';
  */
 export function interval(intervalMs: MaybePromise<number>): Stream<number> {
   // Use the timer function to create a stream that emits at the specified interval
-  const stream = timer(0, intervalMs);
+  const stream = timer(intervalMs, intervalMs);
 
   stream.name = 'interval';
   return stream;

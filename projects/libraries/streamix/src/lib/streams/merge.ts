@@ -1,6 +1,6 @@
 import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
-import { createAsyncCoordinator, normalizeError } from "../utils";
+import { createAsyncCoordinator, normalizeError, raceNext } from "../utils";
 
 /**
  * Merges multiple source streams into a single stream, emitting values as they arrive from any source.
@@ -31,7 +31,7 @@ import { createAsyncCoordinator, normalizeError } from "../utils";
  * ```
  */
 export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T> {
-  const gen = async function* () {
+  const gen = async function* (signal?: AbortSignal) {
     if (sources.length === 0) return;
 
     const iterators = sources.map((source) =>
@@ -41,7 +41,7 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
 
     try {
       while (true) {
-        const result = await coordinator.next();
+        const result = await (signal ? raceNext(coordinator, signal) : coordinator.next());
         if (result.done) break;
 
         const event = result.value;
@@ -53,7 +53,7 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
         }
       }
     } finally {
-      await coordinator.return?.();
+      void coordinator.return?.();
     }
   };
 

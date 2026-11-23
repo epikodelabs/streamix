@@ -192,6 +192,23 @@ describe('expand', () => {
 
     expect(result).toEqual(['A', 'B', 'D', 'C']);
   });
+
+  it('emits children before their iterator completes', async () => {
+    let pulls = 0;
+    const child: AsyncIterable<number> = {
+      [Symbol.asyncIterator]: () => ({
+        next: async () => {
+          if (++pulls === 1) return { done: false, value: 2 };
+          return new Promise<IteratorResult<number>>(() => {});
+        },
+      }),
+    };
+    const iterator = from([1]).pipe(expand(() => child, { maxDepth: 1 }))[Symbol.asyncIterator]();
+    expect(await iterator.next()).toEqual({ done: false, value: 1 });
+    expect(await iterator.next()).toEqual({ done: false, value: 2 });
+    expect(pulls).toBe(1);
+    await iterator.return?.();
+  });
 });
 
 

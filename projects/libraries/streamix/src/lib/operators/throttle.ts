@@ -47,9 +47,9 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
       try {
         resolvedDuration = isPromiseLike(duration) ? await duration : duration;
 
-        while (true) {
+        while (!aborted) {
           const result = await source.next();
-          if (result.done) break;
+          if (aborted || result.done) break;
 
           const now = Date.now();
 
@@ -74,10 +74,10 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           }
         }
 
-        if (pendingResult !== undefined) flushPending();
+        if (!aborted && pendingResult !== undefined) flushPending();
       } catch (err) {
         // Normalise to Error, consistent with every other operator.
-        output.error(err instanceof Error ? err : new Error(String(err)));
+        if (!aborted) output.error(err instanceof Error ? err : new Error(String(err)));
       } finally {
         aborted = true;
         if (timer) { clearTimeout(timer); timer = null; }

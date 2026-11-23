@@ -1,3 +1,4 @@
+import { createDisposer } from './disposal';
 /**
  * Coordinator utilities for merging and managing multiple async iterators.
  *
@@ -142,7 +143,7 @@ export function createAsyncCoordinator<T = any>(
   const originalPushHandlers: Array<(() => void) | undefined> = [];
   const wiredPushHandlers: Array<(() => void) | undefined> = [];
 
-  let waitingResolve: ((v: any) => void) | null = null;
+  const waiting: ((result: IteratorResult<RunnerEvent<T>>) => void)[] = [];
   let isDraining = false;
   let iteratorReturned = false;
   let activeCount = sources.length;
@@ -250,19 +251,12 @@ export function createAsyncCoordinator<T = any>(
       return;
     }
 
-    if (!waitingResolve) return;
-
-    if (queue.length > 0) {
-      const item = queue.shift()!;
-      const res = waitingResolve;
-      waitingResolve = null;
-      res(item.result);
-    } else if (allDone()) {
-      const res = waitingResolve;
-      waitingResolve = null;
-      res(DONE);
+    while (waiting.length && queue.length) {
+      waiting.shift()!(queue.shift()!.result);
     }
-  }
+    if (allDone()) {
+      for (const resolve of waiting.splice(0)) resolve(DONE);
+    }  }
 
   /**
    * Asynchronously pulls the next value from a source.
@@ -409,6 +403,30 @@ export function createAsyncCoordinator<T = any>(
     wireSource((sources as any[])[i], i);
   }
 
+  const close = createDisposer(cleanup => {
+    iteratorReturned = true;
+    activeCount = 0;
+    queue.length = 0;
+
+    // Mark all as completed immediately
+    for (let i = 0; i < completed.length; i++) {
+      completed[i] = true;
+      pulling[i] = false;
+      pendingPulls[i] = false;
+      const source = sourceList[i];
+      if (source) {
+        restoreSource(source, i);
+      }
+    }
+
+    keyToSource.clear();
+
+    for (const resolve of waiting.splice(0)) resolve(DONE);
+    for (const source of sourceList.splice(0)) {
+      if (source) cleanup.run(() => safeReturnSource(source));
+    }
+  });
+
   const iterator: any = {
     [Symbol.asyncIterator]() {
       return this;
@@ -418,6 +436,7 @@ export function createAsyncCoordinator<T = any>(
       if (iteratorReturned) return Promise.resolve(DONE);
 
       drainSources();
+      notify();
 
       if (queue.length > 0) {
         const item = queue.shift()!;
@@ -426,8 +445,8 @@ export function createAsyncCoordinator<T = any>(
 
       if (allDone()) return Promise.resolve(DONE);
 
-      return new Promise(res => {
-        waitingResolve = res;
+      return new Promise<IteratorResult<RunnerEvent<T>>>(res => {
+        waiting.push(res);
       });
     },
 
@@ -435,6 +454,7 @@ export function createAsyncCoordinator<T = any>(
       if (iteratorReturned) return DONE;
 
       drainSources();
+      notify();
 
       if (queue.length > 0) {
         const item = queue.shift()!;
@@ -449,33 +469,7 @@ export function createAsyncCoordinator<T = any>(
     },
 
     async return() {
-      iteratorReturned = true;
-      activeCount = 0;
-      queue.length = 0;
-
-      // Mark all as completed immediately
-      for (let i = 0; i < completed.length; i++) {
-        completed[i] = true;
-        pulling[i] = false;
-        pendingPulls[i] = false;
-        const source = sourceList[i];
-        if (source) {
-          restoreSource(source, i);
-        }
-      }
-
-      keyToSource.clear();
-      await Promise.all(
-        sourceList
-          .filter((source): source is AsyncIterator<T> => source !== null)
-          .map(source => safeReturnSource(source))
-      );
-
-      if (waitingResolve) {
-        waitingResolve(DONE);
-        waitingResolve = null;
-      }
-
+      await close();
       return DONE;
     },
 
@@ -643,6 +637,10 @@ export function raceNext<T>(
   return new Promise<IteratorResult<T>>((resolve, reject) => {
     const onAbort = () => resolve({ done: true, value: undefined as any });
     signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      signal.removeEventListener("abort", onAbort);
+      onAbort();
+    }
     pending.then(
       (result) => {
         signal.removeEventListener("abort", onAbort);

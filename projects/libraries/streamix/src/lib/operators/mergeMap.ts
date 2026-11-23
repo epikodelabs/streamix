@@ -1,11 +1,11 @@
 import {
-  createPushOperator,
+  createOperator,
   MaybePromise,
   type Operator,
   type Stream
 } from '../abstractions';
 import { fromAny } from '../converters';
-import { createAsyncCoordinator, normalizeError, type RunnerEvent } from '../utils';
+import { createAsyncCoordinator, createAsyncPushable, normalizeError, type RunnerEvent } from '../utils';
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream
@@ -39,11 +39,12 @@ import { createAsyncCoordinator, normalizeError, type RunnerEvent } from '../uti
  * ```
  */
 export function mergeMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>,
+  project: (value: T, index: number) => MaybePromise<Stream<R> | R | Array<R>>,
   concurrent: number = Infinity,
   bufferSize: number = Infinity
 ) {
-  return createPushOperator<T, R>('mergeMap', function (source, output) {
+  return createOperator<T, R>('mergeMap', function (source) {
+    const output = createAsyncPushable<R>();
     let stopped = false;
     const coordinator = createAsyncCoordinator<T | R>([source]);
 
@@ -70,7 +71,7 @@ export function mergeMap<T = any, R = any>(
       try {
         while (!stopped) {
           const nextEvent = await coordinator.next();
-          if (nextEvent.done) break;
+          if (stopped || nextEvent.done) break;
 
           const event = nextEvent.value as RunnerEvent<R>;
 
@@ -78,6 +79,7 @@ export function mergeMap<T = any, R = any>(
             if (event.type === 'value') {
               const sourceValue = event.value as unknown as T;
               if (pendingInners >= concurrent) {
+                if (bufferSize <= 0) continue;
                 if (bufferSize !== Infinity && queuedSourceValues.length >= bufferSize) {
                   queuedSourceValues.shift();
                 }
@@ -117,9 +119,23 @@ export function mergeMap<T = any, R = any>(
       }
     })();
 
-    return async () => {
+    const end = output.return!.bind(output);
+    const fail = output.throw!.bind(output);
+    const stop = () => {
       stopped = true;
-      await coordinator.return?.();
+      return coordinator.return?.();
     };
+    output.return = async value => {
+      const closing = stop();
+      const result = await end(value);
+      await closing;
+      return result;
+    };
+    output.throw = async error => {
+      const closing = stop();
+      try { return await fail(error); }
+      finally { await closing; }
+    };
+    return output;
   });
 }

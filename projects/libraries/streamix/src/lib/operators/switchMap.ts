@@ -6,6 +6,7 @@ import {
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncPushable, normalizeError } from "../utils";
+import { createDisposer } from "../utils/disposal";
 
 /**
  * Transforms each value from the source stream into a new inner stream, promise, or array,
@@ -51,6 +52,7 @@ export function switchMap<T = any, R = any>(
     let currentInnerToken: object | null = null;
     let index = 0;
     let stopped = false;
+    const preparations = new Set<Promise<void>>();
 
     /**
      * Checks if the overall operator should complete.
@@ -62,17 +64,14 @@ export function switchMap<T = any, R = any>(
       }
     };
 
+    const closeInner = async (iterator: AsyncIterator<R>) => {
+      try { await iterator.return?.(); } catch { /* Best-effort cleanup. */ }
+    };
+
     const subscribeToInner = (
       innerStream: Stream<R>,
       token: object
     ) => {
-      // Cancel the previous inner immediately so sync inner streams can't
-      // interleave emissions out-of-order via re-entrant scheduler execution.
-      const prev = currentInner;
-      if (prev) {
-        Promise.resolve(prev.it.return?.()).catch(() => {});
-      }
-
       const it = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
       if (pendingInnerToken === token) {
         pendingInnerToken = null;
@@ -102,6 +101,10 @@ export function switchMap<T = any, R = any>(
     };
 
     const processOuterValue = (value: T) => {
+      if (stopped) return;
+      const previous = currentInner;
+      currentInner = null;
+      if (previous) void closeInner(previous.it);
       const token = {};
       currentInnerToken = token;
 
@@ -116,9 +119,14 @@ export function switchMap<T = any, R = any>(
       if (isPromiseLike(projected)) {
         const capturedToken = token;
         pendingInnerToken = capturedToken;
-        Promise.resolve(projected).then(
-          (normalized) => {
-            if (stopped || capturedToken !== currentInnerToken) return;
+        const preparation = Promise.resolve(projected).then(
+          async (normalized) => {
+            if (stopped || capturedToken !== currentInnerToken) {
+              const iterable = normalized as AsyncIterable<R> | null | undefined;
+              const iterator = iterable?.[Symbol.asyncIterator]?.();
+              if (iterator) await closeInner(iterator);
+              return;
+            }
             subscribeToInner(fromAny<R>(normalized as any), capturedToken);
           },
           (err) => {
@@ -127,6 +135,17 @@ export function switchMap<T = any, R = any>(
               pendingInnerToken = null;
             }
             output.error(normalizeError(err));
+          }
+        );
+        preparations.add(preparation);
+        void preparation.then(
+          () => preparations.delete(preparation),
+          error => {
+            preparations.delete(preparation);
+            if (!stopped && currentInnerToken === capturedToken) {
+              pendingInnerToken = null;
+              output.error(normalizeError(error));
+            }
           }
         );
       } else {
@@ -150,7 +169,7 @@ export function switchMap<T = any, R = any>(
       wiredOnPush = undefined;
     };
 
-    if (typeof tryNext === "function") {
+    if (typeof tryNext === "function" && "__onPush" in source) {
       const drain = () => {
         while (!stopped) {
           let result: IteratorResult<T> | null;
@@ -181,8 +200,8 @@ export function switchMap<T = any, R = any>(
       void (async () => {
         try {
           while (!stopped) {
-            const result = await source.next();
-            if (result.done) break;
+            const result = tryNext?.call(source) ?? await source.next();
+            if (stopped || result.done) break;
             processOuterValue(result.value);
           }
 
@@ -197,39 +216,36 @@ export function switchMap<T = any, R = any>(
     const baseReturn = outputIterator.return?.bind(outputIterator);
     const baseThrow = outputIterator.throw?.bind(outputIterator);
 
-    (outputIterator as any).return = async () => {
+    const stop = createDisposer(queue => {
       stopped = true;
       pendingInnerToken = null;
       restoreSourcePush();
-      try {
-        try {
-          await currentInner?.it.return?.();
-        } catch {}
-      } finally {
-        currentInner = null;
-      }
-      try {
-        await source.return?.();
-      } catch {}
-      return baseReturn ? baseReturn(undefined as any) : DONE;
+      const inner = currentInner;
+      currentInner = null;
+      if (inner) queue.run(() => closeInner(inner.it));
+      queue.run(async () => {
+        try { await source.return?.(); } catch { /* Best-effort cleanup. */ }
+      });
+      for (const preparation of preparations) queue.track(preparation);
+    });
+
+    outputIterator.return = async value => {
+      const cleanup = stop();
+      const result = await (baseReturn?.(value) ?? DONE);
+      await cleanup;
+      return result;
     };
 
-    (outputIterator as any).throw = async (err: any) => {
+    outputIterator.throw = async err => {
       const error = normalizeError(err);
-      stopped = true;
-      pendingInnerToken = null;
-      restoreSourcePush();
+      const cleanup = stop();
       try {
-        try {
-          await currentInner?.it.return?.();
-        } catch {}
+        if (baseThrow) return await baseThrow(error);
+        throw error;
       } finally {
-        currentInner = null;
+        await cleanup;
       }
-      if (baseThrow) return baseThrow(error);
-      throw error;
     };
-
     return outputIterator;
   });
 }

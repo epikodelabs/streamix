@@ -269,3 +269,29 @@ describe('fork', () => {
 });
 
 
+
+describe('fork cancellation', () => {
+  it('does not start a handler after a pending predicate is cancelled', async () => {
+    let start!: () => void;
+    let match!: (value: boolean) => void;
+    const started = new Promise<void>(resolve => { start = resolve; });
+    const predicate = new Promise<boolean>(resolve => { match = resolve; });
+    const handler = jasmine.createSpy('handler').and.returnValue([1]);
+    const close = jasmine.createSpy('close').and.resolveTo({ done: true });
+    const iterator = fork({
+      on: () => { start(); return predicate; },
+      handler,
+    }).apply({
+      next: async () => ({ done: false, value: 1 }),
+      return: close,
+    });
+    const pending = iterator.next();
+    await started;
+    await iterator.return?.();
+    expect((await pending).done).toBeTrue();
+    match(true);
+    await predicate;
+    expect(handler).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+});

@@ -129,5 +129,47 @@ describe('from', () => {
 
     await iterator.return?.();
   });
+
+  it('closes an input while its read is stalled', async () => {
+    let started!: () => void;
+    const reading = new Promise<void>(resolve => { started = resolve; });
+    const close = jasmine.createSpy('return').and.resolveTo({ done: true, value: undefined });
+    const source: AsyncIterable<number> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => { started(); return new Promise(() => {}); },
+        return: close,
+      }),
+    };
+    const iterator = from(source)[Symbol.asyncIterator]();
+    const read = iterator.next();
+    await reading;
+    await iterator.return?.();
+    expect((await read).done).toBeTrue();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('unwraps promised items on the pull path', async () => {
+    const iterator = from([Promise.resolve(3)])[Symbol.asyncIterator]();
+    const result = await iterator.next();
+    expect(result.value as unknown).toBe(3);
+    await iterator.return?.();
+  });
+
+  it('closes a stalled input when the last subscriber unsubscribes', async () => {
+    let start!: () => void;
+    let close!: () => void;
+    const reading = new Promise<void>(resolve => { start = resolve; });
+    const closed = new Promise<void>(resolve => { close = resolve; });
+    const source: AsyncIterable<number> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => { start(); return new Promise(() => {}); },
+        return: async () => { close(); return { done: true, value: undefined }; },
+      }),
+    };
+    const subscription = from(source).subscribe();
+    await reading;
+    await subscription.unsubscribe();
+    await closed;
+  });
 });
 

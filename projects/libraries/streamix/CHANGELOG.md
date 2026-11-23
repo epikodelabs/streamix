@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Timing change** `timer(delay)` emits `0` once and completes. To repeat, pass a period with `timer(delay, period)`. `interval(period)` now waits one full period before emitting `0`.
+- Fixed cancellation in `delay`, `throttle`, `from`, and `merge`, including stalled upstream reads. `bufferCount` rejects non-positive and NaN sizes.
+- Fixed teardown of late async projections in `concatMap`, `exhaustMap`, `mergeMap`, and `switchMap`. `switchMap` also handles sources that offer synchronous probes without push notifications. `expand` emits child values incrementally. Cancelling `fork` prevents pending predicates from starting a handler and closes streams returned by handlers that were already running.
+- Fixed `share` reconnection and `shareReplay` handling of overlapping reads, large replay buffers, and terminal subscribers.
+- `onAnimationFrame` stays idle during server-side rendering. `onMutation` observes the whole subtree by default and reports invalid options through the stream error channel.
+
 ## 2.0.53
 
 Fixed lifecycle, cancellation, timing, and error handling across take, delay, finalize, from, withLatestFrom, and merge.

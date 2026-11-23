@@ -1,7 +1,6 @@
 import {
   createOperator,
   DONE,
-  isPromiseLike,
   MaybePromise,
   NEXT,
   type Operator,
@@ -9,6 +8,7 @@ import {
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { normalizeError } from "../utils/helpers";
+import { createDisposer } from "../utils/disposal";
 
 /**
  * Maps each value from the source stream to an inner stream, ignoring 
@@ -29,11 +29,19 @@ import { normalizeError } from "../utils/helpers";
  * @returns An {@link Operator} that performs the "exhaust" transformation.
  */
 export const exhaustMap = <T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => MaybePromise<Stream<R> | R | Array<R>>
 ) =>
   createOperator<T, R>("exhaustMap", function (this: Operator, source) {
     let outerIndex = 0;
+    let stopped = false;
     let innerIterator: AsyncIterator<R> | null = null;
+    const close = createDisposer(queue => {
+      stopped = true;
+      const inner = innerIterator;
+      innerIterator = null;
+      queue.run(async () => { try { await inner?.return?.(); } catch {} });
+      queue.run(async () => { try { await source.return?.(); } catch {} });
+    });
     let isSourceDone = false;
 
     const drainBufferedOuterValues = (): IteratorResult<T> | null => {
@@ -52,9 +60,10 @@ export const exhaustMap = <T = any, R = any>(
 
     return {
       async next() {
-        while (true) {
+        while (!stopped) {
           if (innerIterator) {
             const result = await innerIterator.next();
+            if (stopped) return DONE;
 
             if (!result.done) {
               return NEXT(result.value);
@@ -68,7 +77,7 @@ export const exhaustMap = <T = any, R = any>(
           }
 
           const result = await source.next();
-          if (result.done) {
+          if (stopped || result.done) {
             isSourceDone = true;
             return DONE;
           }
@@ -80,41 +89,21 @@ export const exhaustMap = <T = any, R = any>(
             isSourceDone = true;
             throw normalizeError(err);
           }
-          if (isPromiseLike(projected)) {
-            try {
-              projected = await projected;
-            } catch (err) {
-              isSourceDone = true;
-              throw normalizeError(err);
-            }
-          }
 
           const innerStream = fromAny<R>(projected as any);
           innerIterator = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
         }
+        return DONE;
       },
 
-      async return(value?: any) {
-        try {
-          await innerIterator?.return?.(value);
-        } catch {}
-        try {
-          await source.return?.();
-        } catch {}
-        innerIterator = null;
+      async return() {
+        await close();
         return DONE;
       },
 
       async throw(err: any) {
-        const error = normalizeError(err);
-        try {
-          await innerIterator?.return?.();
-        } catch {}
-        try {
-          await source.return?.();
-        } catch {}
-        innerIterator = null;
-        throw error;
+        await close();
+        throw normalizeError(err);
       }
     };
   });

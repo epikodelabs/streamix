@@ -1,4 +1,5 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { DONE, NEXT, createStream, type MaybePromise, type Stream } from "../abstractions";
+import { raceNext } from "../utils/coordinator";
 
 /**
  * Creates a stream from an asynchronous or synchronous iterable.
@@ -13,39 +14,80 @@ import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../
  * @returns {Stream<T>} A new stream that emits each value from the source.
  */
 export function from<T = any>(source: MaybePromise<AsyncIterable<T> | Iterable<T>>): Stream<T> {
-  async function* generator() {
-    const resolvedSource = isPromiseLike(source) ? await source : source;
-    const iterator = (resolvedSource as any)[Symbol.asyncIterator]?.() ?? (resolvedSource as any)[Symbol.iterator]?.();
+  const openIterator = (): AsyncIterator<T> & AsyncIterable<T> => {
+    let upstream: Promise<AsyncIterator<T> | Iterator<T>> | undefined;
+    let closed = false;
+    let closing: Promise<void> | undefined;
+    let pending = Promise.resolve();
+    const controller = new AbortController();
+    const close = () => {
+      closed = true;
+      controller.abort();
+      return closing ??= upstream?.then(
+        async iterator => { await iterator.return?.(); },
+        () => {},
+      ) ?? Promise.resolve();
+    };
 
+    const iterator: AsyncIterator<T> & AsyncIterable<T> = {
+      [Symbol.asyncIterator]() { return this; },
+      next() {
+        if (closed) return Promise.resolve(DONE);
+        const read = pending.then(async () => {
+          if (closed) return DONE;
+          upstream ??= Promise.resolve(source).then(iterable =>
+            (iterable as AsyncIterable<T>)[Symbol.asyncIterator]?.()
+            ?? (iterable as Iterable<T>)[Symbol.iterator]()
+          );
+          try {
+            const input = await upstream;
+            if (closed) return DONE;
+            const result = await input.next();
+            if (!result.done) {
+              const value = await (result.value as T);
+              return closed ? DONE : NEXT(value);
+            }
+            return DONE;
+          } catch (error) {
+            if (!closed) throw error;
+            return DONE;
+          }
+        });
+        const result = raceNext<T>({ next: () => read }, controller.signal).then(async item => {
+          if (item.done) await close();
+          return item;
+        }, async error => {
+          await close();
+          throw error;
+        });
+        pending = result.then(() => {}, () => {});
+        return result;
+      },
+      async return(value?: unknown) {
+        await close();
+        return { done: true, value };
+      },
+      async throw(error?: unknown) {
+        await close();
+        throw error;
+      },
+    };
+    return iterator;
+  };
+
+  const stream = createStream<T>('from', async function* (signal) {
+    const iterator = openIterator();
     try {
       while (true) {
-        const result = await iterator.next();
-        if (result.done) break;
+        const result = signal ? await raceNext(iterator, signal) : await iterator.next();
+        if (result.done) return;
         yield result.value;
       }
     } finally {
-      if (iterator.return) {
-        await iterator.return();
-      }
+      await iterator.return?.();
     }
-  }
-
-  const stream = createStream<T>("from", generator);
-
-  // `from()` is fundamentally pull-based. Iterating it (directly or through
-  // pull operators such as `take`) must therefore pull the wrapped iterable
-  // only when downstream asks for another value.
-  //
-  // createStream() intentionally fans a generator run out through a Subject for
-  // subscription/multicast semantics. That producer loop can advance before an
-  // AsyncIterator consumer has pulled the buffered value, which is correct for
-  // push subscriptions but would make `from(source).pipe(take(n))` observe
-  // source value n + 1 before `take` gets a chance to close upstream.
-  //
-  // Preserve createStream's subscription behaviour, but expose the source
-  // generator directly for AsyncIterator consumption so iterator cancellation
-  // reaches the original iterable without prefetching.
-  stream[Symbol.asyncIterator] = () => generator();
-
+  });
+  // Direct consumers pull on demand. Subscriptions share a generator run.
+  stream[Symbol.asyncIterator] = openIterator;
   return stream;
 }

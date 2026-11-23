@@ -1,27 +1,41 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from '../utils/helpers';
+import { createOperator, DONE, NEXT, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
+
+import { createDisposer } from '../utils/disposal';
 
 /**
  * Creates a stream operator that shares a single subscription to the source stream
  * and replays a specified number of past values to new subscribers.
  *
  * This operator multicasts the source stream, ensuring that multiple downstream
- * consumers can receive values from a single source connection. It uses an internal
- * subscriber queue and a bounded replay buffer so that late subscribers receive the
- * most recent values before continuing with live emissions.
+ * consumers can receive values from a single source connection. Late subscribers
+ * receive the retained replay values before continuing with live emissions.
+ * Overlapping reads on the same iterator are fulfilled in request order.
+ * The cache survives natural completion, including subsequent iteration of a
+ * completed `pipe()`. If all consumers cancel before completion, the upstream
+ * disconnects; a later `apply(source)` replays the cache and reconnects.
  *
  * This is useful for:
  * - Preventing redundant execution of a source stream (e.g. a network request).
  * - Providing a "state history" to late subscribers.
  *
  * @template T The type of the values in the stream.
- * @param bufferSize The number of last values to replay to new subscribers. Defaults to `Infinity`.
- *                   Can be a Promise that resolves to a number.
+ * @param size A non-negative safe integer or Infinity, optionally provided as a promise.
+ * Zero disables replay while still sharing live emissions.
+ * @throws {RangeError} If bufferSize is fractional, negative, NaN, or an unsafe integer.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity) {
+export function shareReplay<T = any>(size: MaybePromise<number> = Infinity) {
+  const validateSize = (bufferSize: number) => {
+    if (bufferSize !== Infinity && (!Number.isSafeInteger(bufferSize) || bufferSize < 0)) {
+      throw new RangeError('shareReplay bufferSize must be a non-negative safe integer or Infinity');
+    }
+    return bufferSize;
+  };
+  let bufferSize = isPromiseLike(size) ? undefined : validateSize(size);
+  const sizePromise = isPromiseLike(size) ? Promise.resolve(size) : undefined;
+  void sizePromise?.catch(() => {});
   let isConnected = false;
-  let resolvedSize: number | undefined;
   let sourceIterator: AsyncIterator<T> | null = null;
   let activeConnection: symbol | null = null;
 
@@ -29,93 +43,97 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
   let replayHead = 0;
 
   let completed = false;
-  let errorValue: any;
+  let errorValue: Error | undefined;
+
+  type PendingRead = {
+    resolve(result: IteratorResult<T>): void;
+    reject(error: Error): void;
+    next?: PendingRead;
+  };
 
   type Subscriber = {
     done: boolean;
-    queue: T[];
-    pendingResolve: ((result: IteratorResult<T>) => void) | null;
-    pendingReject: ((error: any) => void) | null;
+    queue: Array<T | undefined>;
+    queueHead: number;
+    pending: PendingRead | undefined;
+    pendingTail: PendingRead | undefined;
   };
 
   const subscribers = new Set<Subscriber>();
 
   const pushReplay = (value: T) => {
-    if (resolvedSize === undefined || resolvedSize === Infinity) {
-      replay.push(value);
-      return;
-    }
-    if (resolvedSize <= 0) return;
-    if (replay.length < resolvedSize) {
+    if (bufferSize === 0) return;
+    if (replay.length < bufferSize!) {
       replay.push(value);
     } else {
       replay[replayHead] = value;
-      replayHead = (replayHead + 1) % resolvedSize;
+      replayHead = (replayHead + 1) % bufferSize!;
     }
   };
 
-  const snapshotReplay = (): T[] => {
-    if (resolvedSize === undefined || resolvedSize === Infinity) {
-      return [...replay];
-    }
+  const snapshotReplay = (): T[] => replayHead === 0
+    ? replay.slice()
+    : replay.slice(replayHead).concat(replay.slice(0, replayHead));
 
-    if (resolvedSize <= 0 || replay.length === 0) {
-      return [];
+  const dequeue = (subscriber: Subscriber): IteratorResult<T> => {
+    // Drop each consumed reference without shifting the rest of a large replay.
+    const value = subscriber.queue[subscriber.queueHead] as T;
+    subscriber.queue[subscriber.queueHead++] = undefined;
+    if (subscriber.queueHead === subscriber.queue.length) {
+      subscriber.queue = [];
+      subscriber.queueHead = 0;
+    } else if (subscriber.queueHead >= 1024 && subscriber.queueHead * 2 >= subscriber.queue.length) {
+      subscriber.queue = subscriber.queue.slice(subscriber.queueHead);
+      subscriber.queueHead = 0;
     }
-
-    if (replay.length < resolvedSize) {
-      return [...replay];
-    }
-
-    return [...replay.slice(replayHead), ...replay.slice(0, replayHead)];
+    return NEXT(value);
   };
 
   const broadcastValue = (value: T) => {
     for (const subscriber of subscribers) {
       if (subscriber.done) continue;
 
-      if (subscriber.pendingResolve) {
-        const resolve = subscriber.pendingResolve;
-        subscriber.pendingResolve = subscriber.pendingReject = null;
-        resolve({ value, done: false });
+      const read = subscriber.pending;
+      if (read) {
+        subscriber.pending = read.next;
+        if (!subscriber.pending) subscriber.pendingTail = undefined;
+        read.resolve(NEXT(value));
       } else {
         subscriber.queue.push(value);
       }
     }
   };
 
-  const broadcastCompletion = () => {
-    for (const subscriber of subscribers) {
-      if (subscriber.done || subscriber.queue.length > 0 || !subscriber.pendingResolve) {
-        continue;
-      }
-
-      const resolve = subscriber.pendingResolve;
-      subscriber.pendingResolve = subscriber.pendingReject = null;
-      resolve(DONE);
+  const finishSubscriber = (subscriber: Subscriber, error?: Error) => {
+    subscriber.done = true;
+    subscriber.queue = [];
+    subscriber.queueHead = 0;
+    let read = subscriber.pending;
+    subscriber.pending = subscriber.pendingTail = undefined;
+    for (; read; read = read.next) {
+      if (error === undefined) read.resolve(DONE);
+      else read.reject(error);
     }
   };
 
-  const broadcastError = (error: any) => {
+  const broadcastTerminal = () => {
     for (const subscriber of subscribers) {
-      if (subscriber.done || !subscriber.pendingReject) {
-        continue;
-      }
-
-      const reject = subscriber.pendingReject;
-      subscriber.pendingResolve = subscriber.pendingReject = null;
-      reject(error);
+      if (subscriber.pending) finishSubscriber(subscriber, errorValue);
     }
+    // Readers without pending pulls can still drain their private queues.
+    // The terminal connection will never broadcast to them again.
+    subscribers.clear();
   };
 
-  const disconnect = () => {
-    if (sourceIterator) {
-      const it = sourceIterator;
-      sourceIterator = null;
-      isConnected = false;
-      activeConnection = null;
-      void it.return?.().catch(() => {});
-    }
+  const closeSource = async (source: AsyncIterator<T>) => {
+    try { await source.return?.(); } catch { /* Best-effort upstream teardown. */ }
+  };
+
+  const disconnect = (it: AsyncIterator<T>) => {
+    sourceIterator = null;
+    isConnected = false;
+    activeConnection = null;
+    return it.return?.();
   };
 
   const connectSource = (source: AsyncIterator<T>) => {
@@ -127,14 +145,14 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       try {
         while (true) {
           const result = await source.next();
+          if (activeConnection !== connection) return;
           if (result.done) break;
           pushReplay(result.value);
           broadcastValue(result.value);
         }
       } catch (err) {
+        if (activeConnection !== connection) return;
         errorValue = normalizeError(err);
-        broadcastError(errorValue);
-        return;
       } finally {
         if (activeConnection !== connection) {
           return;
@@ -144,92 +162,90 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
         completed = true;
         isConnected = false;
         activeConnection = null;
-        broadcastCompletion();
+        broadcastTerminal();
       }
     })();
   };
 
-  return createOperator<T, T>('shareReplay', function (this: Operator, source) {
+  const operator = createOperator<T, T>('shareReplay', function (this: Operator, source) {
     let initialized = false;
     const subscriber: Subscriber = {
       done: false,
       queue: [],
-      pendingResolve: null,
-      pendingReject: null,
+      queueHead: 0,
+      pending: undefined,
+      pendingTail: undefined,
     };
 
-    const ensureConnected = async () => {
-      if (initialized) return;
-      initialized = true;
-      if (resolvedSize === undefined) {
-        resolvedSize = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
-      }
-
-      subscriber.queue.push(...snapshotReplay());
-      subscribers.add(subscriber);
-
-      if (!completed && errorValue === undefined && !isConnected) {
-        connectSource(source);
-      } else if (typeof source.return === 'function') {
-        await Promise.resolve(source.return()).catch(() => {});
-      }
-    };
-
-    const cleanup = () => {
+    const cleanup = createDisposer(queue => {
       if (subscriber.done) return;
-
-      subscriber.done = true;
+      finishSubscriber(subscriber);
+      if (!initialized && source !== sourceIterator) queue.run(() => closeSource(source));
       subscribers.delete(subscriber);
+      const upstream = sourceIterator;
+      if (subscribers.size === 0 && upstream) {
+        queue.run(() => disconnect(upstream));
+      }
+    });
 
-      if (subscribers.size === 0 && isConnected) {
-        disconnect();
+    const read = (): IteratorResult<T> | Promise<IteratorResult<T>> => {
+      if (subscriber.queueHead < subscriber.queue.length) return dequeue(subscriber);
+
+      if (completed) {
+        void cleanup();
+        if (errorValue !== undefined) throw errorValue;
+        return DONE;
       }
 
-      if (subscriber.pendingResolve) {
-        subscriber.pendingResolve(DONE);
-        subscriber.pendingResolve = subscriber.pendingReject = null;
-      }
+      return new Promise((resolve, reject) => {
+        const pending: PendingRead = { resolve, reject };
+        if (subscriber.pendingTail) subscriber.pendingTail.next = pending;
+        else subscriber.pending = pending;
+        subscriber.pendingTail = pending;
+      });
     };
+
+    const initialize = () => {
+      if (subscriber.done) return;
+      initialized = true;
+      subscriber.queue = snapshotReplay();
+      if (!completed) subscribers.add(subscriber);
+      if (!completed && !isConnected) connectSource(source);
+      else if (source !== sourceIterator) void closeSource(source);
+    };
+
+    let preparation: Promise<void> | undefined;
+    if (bufferSize !== undefined) initialize();
+    else {
+      preparation = sizePromise!.then(value => {
+        bufferSize = validateSize(value);
+        initialize();
+      });
+      void preparation.catch(() => {});
+    }
 
     const iterator: AsyncIterator<T> = {
       async next() {
         if (subscriber.done) return DONE;
-
-        await ensureConnected();
-
-        if (subscriber.queue.length > 0) {
-          return { value: subscriber.queue.shift()!, done: false };
-        }
-
-        if (errorValue !== undefined) {
-          cleanup();
-          throw errorValue;
-        }
-
-        if (completed) {
-          cleanup();
-          return DONE;
-        }
-
-        return new Promise<IteratorResult<T>>((resolve, reject) => {
-          subscriber.pendingResolve = resolve;
-          subscriber.pendingReject = reject;
-        });
+        if (preparation) await preparation;
+        return subscriber.done ? DONE : read();
       },
-
       async return(value?: any) {
-        cleanup();
+        await cleanup();
         return { value, done: true } as IteratorResult<T>;
       },
 
       async throw(err: any) {
-        cleanup();
-        throw normalizeError(err);
+        const error = normalizeError(err);
+        try { await cleanup(); }
+        catch (cleanupError) {
+          throw new AggregateError([error, cleanupError], 'Replay and cleanup failed', { cause: error });
+        }
+        throw error;
       }
     };
 
-    void ensureConnected();
-
     return iterator;
   });
+  return operator;
 }

@@ -520,13 +520,14 @@ describe('switchMap', () => {
     let done = false;
 
     const sourceIterator: any = {
+      __onPush: undefined,
       __tryNext() {
         if (buffer.length > 0) return NEXT(buffer.shift());
         if (done) return DONE;
         return null;
       },
       next: async () => {
-        throw new Error("next() should not be used when __tryNext is present");
+        throw new Error("next() should not be used when push notifications are available");
       }
     };
 
@@ -561,7 +562,7 @@ describe('switchMap', () => {
       __onPush: originalOnPush,
       __tryNext: () => null,
       next: async () => {
-        throw new Error("next() should not be used when __tryNext is present");
+        throw new Error("next() should not be used when push notifications are available");
       }
     };
 
@@ -579,13 +580,14 @@ describe('switchMap', () => {
     let done = false;
 
     const sourceIterator: any = {
+      __onPush: undefined,
       __tryNext() {
         if (buffer.length > 0) return NEXT(buffer.shift()!);
         if (done) return DONE;
         return null;
       },
       next: async () => {
-        throw new Error("next() should not be used when __tryNext is present");
+        throw new Error("next() should not be used when push notifications are available");
       }
     };
 
@@ -634,6 +636,7 @@ describe('switchMap', () => {
     let done = false;
 
     const sourceIterator: any = {
+      __onPush: undefined,
       __tryNext() {
         if (buffer.length > 0) {
           return NEXT(buffer.shift()!);
@@ -644,7 +647,7 @@ describe('switchMap', () => {
         return null;
       },
       next: async () => {
-        throw new Error("next() should not be used when __tryNext is present");
+        throw new Error("next() should not be used when push notifications are available");
       }
     };
 
@@ -783,13 +786,14 @@ describe('switchMap', () => {
     let calls = 0;
 
     const sourceIterator: any = {
+      __onPush: undefined,
       __tryNext() {
         calls++;
         if (calls === 1) return NEXT(1);
         throw new Error("tryNext boom");
       },
       next: async () => {
-        throw new Error("next() should not be used when __tryNext is present");
+        throw new Error("next() should not be used when push notifications are available");
       }
     };
 
@@ -820,5 +824,20 @@ describe('switchMap', () => {
 
     await expectAsync(read).toBeRejectedWithError("reject boom");
     await iterator.return?.();
+  });
+
+  it('pulls async values when the sync probe has no push hook', async () => {
+    let read = false;
+    const source = {
+      __tryNext: () => null,
+      async next(): Promise<IteratorResult<number>> {
+        if (read) return { done: true, value: undefined };
+        read = true;
+        return { done: false, value: 2 };
+      },
+    };
+    const iterator = switchMap((value: number) => [value * 3]).apply(source);
+    expect(await iterator.next()).toEqual({ done: false, value: 6 });
+    expect((await iterator.next()).done).toBeTrue();
   });
 });

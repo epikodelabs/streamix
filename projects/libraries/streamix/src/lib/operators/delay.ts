@@ -28,9 +28,9 @@ export function delay<T = any>(ms: MaybePromise<number>) {
       try {
         const resolvedMs = isPromiseLike(ms) ? await ms : ms;
 
-        while (true) {
+        while (!stopped) {
           const result = await source.next();
-          if (result.done) break;
+          if (stopped || result.done) break;
 
           if (resolvedMs === undefined) {
             output.push(result.value!);

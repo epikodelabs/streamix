@@ -8,8 +8,14 @@ import { DONE, type MaybePromise, NEXT, type Operator, createOperator, isPromise
  * @param bufferSize The maximum number of values per buffer (default: Infinity).
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
-export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity) =>
-  createOperator<T, T[]>("bufferCount", function (this: Operator, source) {
+export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity) => {
+  const validate = (size: number) => {
+    if (!(size > 0)) throw new RangeError('bufferCount requires a positive buffer size');
+    return size;
+  };
+  if (!isPromiseLike(bufferSize)) validate(bufferSize);
+
+  return createOperator<T, T[]>("bufferCount", function (this: Operator, source) {
     let completed = false;
 
     const iterator: AsyncIterator<any> = {
@@ -17,7 +23,7 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
         if (completed) return DONE;
 
         const buffer: IteratorResult<T>[] = [];
-        const size = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
+        const size = validate(await bufferSize);
         while (buffer.length < size) {
           const result = await source.next();
 
@@ -41,3 +47,4 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
 
     return iterator;
   });
+};

@@ -28,51 +28,46 @@ export function onMutation(
   let subscriberCount = 0;
   let stopped = true;
 
-  let resolvedElement: Element | null = null;
-  let resolvedOptions: MutationObserverInit | undefined;
   let observer: MutationObserver | null = null;
+  let generation = 0;
 
   const start = () => {
     if (!stopped) return;
     stopped = false;
 
-    // SSR / unsupported guard
-    if (typeof MutationObserver === "undefined") return;
+    if (typeof MutationObserver === 'undefined') return;
+    const run = ++generation;
+    const observe = (target: Element, config?: MutationObserverInit) => {
+      if (stopped || generation !== run || !target) return;
+      const nextObserver = new MutationObserver(mutations => {
+        if (!stopped && generation === run) subject.next([...mutations]);
+      });
+      try {
+        nextObserver.observe(target, config ?? {
+          childList: true, subtree: true, attributes: true, characterData: true,
+        });
+        observer = nextObserver;
+      } catch (error) {
+        nextObserver.disconnect();
+        subject.error(error);
+      }
+    };
 
     if (isPromiseLike(element) || isPromiseLike(options)) {
-      // Async path for promise element/options
-      void (async () => {
-        resolvedElement = isPromiseLike(element) ? await element : element;
-        resolvedOptions = isPromiseLike(options) ? await options : options;
-
-        if (stopped || !resolvedElement) return;
-
-        observer = new MutationObserver(mutations => {
-          subject.next([...mutations]);
-        });
-
-        observer.observe(resolvedElement, resolvedOptions);
-      })();
+      void Promise.all([element, options]).then(
+        ([target, config]) => observe(target, config),
+        error => { if (!stopped && generation === run) subject.error(error); },
+      );
     } else {
-      // Synchronous path for immediate element/options
-      resolvedElement = element;
-      resolvedOptions = options;
-
-      observer = new MutationObserver(mutations => {
-        subject.next([...mutations]);
-      });
-
-      observer.observe(resolvedElement, resolvedOptions);
+      observe(element, options);
     }
   };
-
   const stop = () => {
     if (stopped) return;
     stopped = true;
 
     observer?.disconnect();
     observer = null;
-    resolvedElement = null;
   };
 
   /* ------------------------------------------------------------------------

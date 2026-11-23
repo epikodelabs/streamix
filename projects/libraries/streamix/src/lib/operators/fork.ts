@@ -1,6 +1,8 @@
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { fromAny } from '../converters';
 import { normalizeError } from '../utils/helpers';
+import { createDisposer } from '../utils/disposal';
+import { raceNext } from '../utils/coordinator';
 
 /**
  * Represents a conditional branch for the `fork` operator.
@@ -33,7 +35,7 @@ export interface ForkOption<T = any, R = any> {
    * @param value The source value that matched the predicate.
    * @returns A stream, value, promise, or array to be flattened and emitted.
    */
-  handler: (value: T) => (Stream<R> | MaybePromise<R> | Array<R>);
+  handler: (value: T) => MaybePromise<Stream<R> | R | Array<R>>;
 }
 
 /**
@@ -64,70 +66,68 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
     let outerIndex = 0;
     let innerIterator: AsyncIterator<R> | null = null;
 
-    const iterator: AsyncIterator<R> = {
-      next: async () => {
-        while (true) {
-          // If no active inner iterator, get next outer value
-          if (!innerIterator) {
-            const result = await source.next();
-            if (result.done) {
-              return DONE;
-            }
+    const controller = new AbortController();
+    const { signal } = controller;
+    const close = createDisposer(queue => {
+      controller.abort();
+      const inner = innerIterator;
+      innerIterator = null;
+      queue.run(async () => { try { await inner?.return?.(); } catch {} });
+      queue.run(async () => { try { await source.return?.(); } catch {} });
+    });
 
-            let matched: typeof resolvedOptions[number] | undefined;
-            const outerValue = result.value;
-            const currentIndex = outerIndex++;
+    return {
+      async next() {
+        try {
+          while (!signal.aborted) {
+            if (!innerIterator) {
+              const result = await raceNext(source, signal);
+              if (result.done || signal.aborted) return DONE;
 
-            for (const option of resolvedOptions) {
-              const predicateResult = option.on(outerValue, currentIndex);
-              if (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) {
-                matched = option;
-                break;
+              let matched: ForkOption<T, R> | undefined;
+              const outerValue = result.value;
+              const currentIndex = outerIndex++;
+              for (const option of resolvedOptions) {
+                const predicate = option.on(outerValue, currentIndex);
+                const matches = isPromiseLike(predicate)
+                  ? (await raceNext({ next: async () => NEXT(await predicate) }, signal)).value
+                  : predicate;
+                if (signal.aborted) return DONE;
+                if (matches) {
+                  matched = option;
+                  break;
+                }
               }
+
+              if (!matched) throw new Error(`No handler found for value: ${outerValue}`);
+              const output = fromAny<R>(matched.handler(outerValue))[Symbol.asyncIterator]();
+              if (signal.aborted) {
+                await output.return?.();
+                return DONE;
+              }
+              innerIterator = output;
             }
 
-            if (!matched) {
-              throw new Error(`No handler found for value: ${outerValue}`);
-            }
-
-            const innerStream = fromAny(matched.handler(outerValue));
-            innerIterator = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
-          }
-
-          // Pull next inner value
-          const innerResult = await innerIterator.next();
-          if (innerResult.done) {
+            const result = await raceNext(innerIterator, signal);
+            if (signal.aborted) return DONE;
+            if (!result.done) return NEXT(result.value);
             innerIterator = null;
-            continue;
           }
-
-          return NEXT(innerResult.value);
+          return DONE;
+        } catch (error) {
+          void close();
+          throw normalizeError(error);
         }
       },
 
-      async return(value?: any) {
-        try {
-          await innerIterator?.return?.(value);
-        } catch {}
-        try {
-          await source.return?.();
-        } catch {}
-        innerIterator = null;
+      async return() {
+        await close();
         return DONE;
       },
 
-      async throw(err: any) {
-        const error = normalizeError(err);
-        try {
-          await innerIterator?.return?.();
-        } catch {}
-        try {
-          await source.return?.();
-        } catch {}
-        innerIterator = null;
-        throw error;
-      }
+      async throw(error: unknown) {
+        await close();
+        throw normalizeError(error);
+      },
     };
-
-    return iterator;
   });

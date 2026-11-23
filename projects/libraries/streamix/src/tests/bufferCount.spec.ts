@@ -297,6 +297,16 @@ describe("bufferCount", () => {
     expect(result3.done).toBe(true);
   });
 
+
+  it('rejects buffer sizes that cannot consume a value', async () => {
+    for (const size of [0, -1, NaN]) {
+      expect(() => bufferCount(size)).toThrowError(RangeError);
+    }
+    const iterator = bufferCount(Promise.resolve(0)).apply({
+      next: async () => ({ done: true, value: undefined }),
+    });
+    await expectAsync(iterator.next()).toBeRejectedWithError(RangeError);
+  });
 });
 
 

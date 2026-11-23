@@ -54,19 +54,10 @@ describe('timer', () => {
     });
   });
 
-  it('should use the delay value when no interval is provided', (done) => {
-    const timerStream = timer(20);
-    const emitted: number[] = [];
-    const subscription = timerStream.subscribe((value) => {
-      emitted.push(value);
-    });
-
-    setTimeout(() => {
-      subscription.unsubscribe();
-      expect(emitted[0]).toBe(0);
-      expect(emitted[1]).toBe(1);
-      done();
-    }, 80);
+  it('completes after one emission when the period is omitted', async () => {
+    const iterator = timer(20)[Symbol.asyncIterator]();
+    expect(await iterator.next()).toEqual({ value: 0, done: false });
+    expect((await iterator.next()).done).toBeTrue();
   });
 });
 

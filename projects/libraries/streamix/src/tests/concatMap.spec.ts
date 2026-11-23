@@ -1,4 +1,4 @@
-import { concatMap, createStream, createSubject, from, of, type Stream } from '@epikodelabs/streamix';
+import { concatMap, createStream, createSubject, DONE, exhaustMap, fork, from, mergeMap, of, switchMap, type ForkOption, type Stream } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
 
@@ -218,6 +218,46 @@ describe('concatMap', () => {
     source.next(3); // Should never process
     source.complete();
   });
+});
+
+describe('async projection teardown', () => {
+  function forkProjection<T, R>(handler: ForkOption<T, R>['handler']) {
+    return fork<T, R>({ on: () => true, handler });
+  }
+
+  for (const operator of [concatMap, exhaustMap, mergeMap, switchMap, forkProjection]) {
+    it(`closes a late projected stream when ${operator.name} is cancelled`, async () => {
+      let started!: () => void;
+      let resolve!: (stream: ReturnType<typeof createStream<number>>) => void;
+      const projecting = new Promise<void>(done => { started = done; });
+      const projection = new Promise<ReturnType<typeof createStream<number>>>(done => { resolve = done; });
+      const child = createStream<number>('child', async function* () {});
+      const close = jasmine.createSpy('return').and.resolveTo(DONE);
+      child[Symbol.asyncIterator] = () => ({ next: async () => DONE, return: close });
+      let pulled = false;
+      const iterator = operator<number, number>(() => {
+        started();
+        return projection;
+      }).apply({
+        next: async () => {
+          if (pulled) return DONE;
+          pulled = true;
+          return { done: false, value: 1 };
+        },
+      });
+      const reading = iterator.next();
+      await projecting;
+      const closing = iterator.return!();
+      let returned = false;
+      void closing.then(() => { returned = true; });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(returned).toBeFalse();
+      resolve(child);
+      await closing;
+      expect(await reading).toEqual(DONE);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+  }
 });
 
 // Error Handling Stream using library's `of` for simplicity

@@ -5,7 +5,7 @@ import { createAsyncIterator, createSubject, type Receiver, type Stream } from "
  * consecutive animation frames.
  *
  * This stream is driven by `requestAnimationFrame` when available, with a
- * timer-based fallback for non-browser environments.
+ * timer-based fallback for browser hosts without RAF.
  *
  * **Behavior:**
  * - A shared RAF loop starts when the first subscriber subscribes.
@@ -31,7 +31,7 @@ export function onAnimationFrame(): Stream<number> {
     stopped = false;
 
     // SSR / non-browser guard
-    if (typeof globalThis.performance === "undefined") return;
+    if (typeof window === "undefined" || typeof document === "undefined" || !globalThis.performance) return;
 
     const hasRaf = typeof (globalThis as any).requestAnimationFrame === "function";
     const raf: (cb: FrameRequestCallback) => number =

@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, isStreamLike, MaybePromise, type Stream } from "../abstractions";
+import { DONE, createStream, isPromiseLike, isStreamLike, MaybePromise, type Stream } from "../abstractions";
 
 /**
  * Converts various value types into a Stream.
@@ -19,7 +19,7 @@ import { createStream, isPromiseLike, isStreamLike, MaybePromise, type Stream } 
  * @returns A {@link Stream<R>} that emits the normalized values.
  */
 export function fromAny<R = any>(
-  value: Stream<R> | MaybePromise<R> | Array<R> | Iterable<R> | AsyncIterable<R>
+  value: MaybePromise<R | Stream<R> | Iterable<R> | AsyncIterable<R>>
 ): Stream<R> {
   // Step 1: If it's already a stream, return as-is
   if (isStreamLike<R>(value)) {
@@ -27,7 +27,7 @@ export function fromAny<R = any>(
   }
   
   // Step 2: Handle promises, arrays, iterables, and single values in one generator
-  return createStream("fromAny", async function* () {
+  const stream = createStream<R>("fromAny", async function* () {
     // Await promise if needed
     const resolved = isPromiseLike(value) ? await value : value;
     const candidate = resolved as any;
@@ -49,4 +49,36 @@ export function fromAny<R = any>(
       yield resolved as R;
     }
   });
+  if (isPromiseLike(value)) {
+    stream[Symbol.asyncIterator] = () => {
+      let closed = false;
+      let closing: Promise<IteratorResult<R>> | undefined;
+      const prepared = Promise.resolve(value).then(resolved => {
+        const iterable = resolved as AsyncIterable<R> | null;
+        return iterable?.[Symbol.asyncIterator]?.()
+          ?? fromAny<R>(resolved as R)[Symbol.asyncIterator]();
+      });
+      void prepared.catch(() => {});
+      return {
+        async next() {
+          if (closed) return DONE;
+          const iterator = await prepared;
+          if (closed) return DONE;
+          const result = await iterator.next();
+          return closed ? DONE : result;
+        },
+        return(value?: unknown) {
+          closed = true;
+          return closing ??= prepared.then(
+            async iterator => {
+              await iterator.return?.();
+              return { done: true, value };
+            },
+            () => ({ done: true, value })
+          );
+        }
+      };
+    };
+  }
+  return stream;
 }
