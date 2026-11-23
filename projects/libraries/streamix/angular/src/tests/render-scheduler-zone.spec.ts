@@ -5,6 +5,7 @@ import {
   type CancelRender,
   type RenderScheduler,
 } from '../lib/render-scheduler';
+import { iit } from '../../../src/tests/env.spec';
 
 class ManualScheduler implements RenderScheduler {
   callback?: () => void;
@@ -131,12 +132,15 @@ describe('outside-Angular renderer scheduling', () => {
     expect(runs).toBe(3);
   });
 
-  it('restores the default scheduler only while the released scheduler owns it', () => {
+  // Browser-only: the default frame scheduler needs `window`, and a failure
+  // while installing the spies must still uninstall the mock clock or every
+  // later async spec in the run inherits fake timers.
+  iit('restores the default scheduler only while the released scheduler owns it', () => {
     jasmine.clock().install();
-    const request = spyOn(window, 'requestAnimationFrame').and.returnValue(1);
-    const cancel = spyOn(window, 'cancelAnimationFrame');
 
     try {
+      const request = spyOn(window, 'requestAnimationFrame').and.returnValue(1);
+      const cancel = spyOn(window, 'cancelAnimationFrame');
       const manual = new ManualScheduler();
       const renderer = new RendererScheduler(manual);
       let flushes = 0;

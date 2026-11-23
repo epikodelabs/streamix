@@ -162,6 +162,7 @@ describe('virtual application delegate paths', () => {
       `);
       await write('vite.config.ts', `
         import { resolve } from 'node:path';
+        import { writeFileSync } from 'node:fs';
         const authored = ${JSON.stringify(source)};
         const entry = resolve(authored, 'server.ts');
         const external = resolve(authored, '../external.ts');
@@ -183,9 +184,21 @@ describe('virtual application delegate paths', () => {
               const normalize = path => path.replaceAll('\\\\', '/');
               const expectedEntry = normalize(resolve(config.root, 'server.ts'));
               const aliases = new Map(config.resolve.alias.map(({ find, replacement }) => [find, replacement]));
-              if (config.build.ssr !== expectedEntry || config.build.rolldownOptions.input.server !== expectedEntry ||
-                  aliases.get('@fixture-env') !== normalize(resolve(config.root, 'env.prod.ts')) ||
-                  normalize(aliases.get('@external')) !== normalize(external)) {
+              const actual = {
+                ssr: normalize(config.build.ssr),
+                input: normalize(config.build.rolldownOptions.input.server),
+                envAlias: normalize(aliases.get('@fixture-env')),
+                externalAlias: normalize(aliases.get('@external')),
+              };
+              const expected = {
+                ssr: expectedEntry,
+                input: expectedEntry,
+                envAlias: normalize(resolve(config.root, 'env.prod.ts')),
+                externalAlias: normalize(external),
+              };
+              if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+                writeFileSync(${JSON.stringify(join(process.cwd(), 'tmp', 'vite-config-debug.json'))},
+                  JSON.stringify({ expected, actual, root: config.root }, null, 2));
                 throw new Error('Expected virtual Vite paths and an untouched external alias');
               }
             },

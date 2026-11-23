@@ -1,4 +1,5 @@
 import { useAngularTestEnvironment } from './angular-test-environment';
+import { idescribe } from '../../../src/tests/env.spec';
 import { PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
@@ -21,7 +22,7 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
-describe('Angular devtools', () => {
+idescribe('Angular devtools', () => {
   useAngularTestEnvironment();
   afterEach(() => {
     ɵsetStreamixDevtoolsEnabled(true);

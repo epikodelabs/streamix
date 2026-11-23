@@ -1,8 +1,9 @@
 import { mountStreamixInspector } from '@epikodelabs/streamix/introspection';
 import { __streamixPipeline, __streamixBeginLifetime, __streamixDebug, __streamixDebugDispose, enableStreamixIntrospection } from '@epikodelabs/streamix/introspection';
 import { internalRuntime } from '../lib/runtime/runtime';
+import { idescribe } from './env.spec';
 
-describe('inspector trace history', () => {
+idescribe('inspector trace history', () => {
   let host: HTMLDivElement;
   let unmount: () => void;
   let pending: FrameRequestCallback | undefined;
