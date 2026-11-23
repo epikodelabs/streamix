@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.54
 
 - **Timing change** `timer(delay)` emits `0` once and completes. To repeat, pass a period with `timer(delay, period)`. `interval(period)` now waits one full period before emitting `0`.
 - Fixed cancellation in `delay`, `throttle`, `from`, and `merge`, including stalled upstream reads. `bufferCount` rejects non-positive and NaN sizes.
